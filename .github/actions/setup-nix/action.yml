@@ -1,0 +1,25 @@
+name: Set up Nix
+description: Installs Nix with flakes and, once the Cachix token exists, the kotodama Cachix cache.
+
+inputs:
+  cachix-auth-token:
+    description: CACHIX_AUTH_TOKEN; the cache is skipped while it is empty.
+    required: false
+    default: ""
+
+runs:
+  using: composite
+  steps:
+    - uses: cachix/install-nix-action@v31
+      with:
+        extra_nix_config: |
+          experimental-features = nix-command flakes
+          system-features = nixos-test benchmark big-parallel kvm
+
+    # Reads the cache everywhere; pushes build outputs only from pushes to main.
+    - if: inputs.cachix-auth-token != ''
+      uses: cachix/cachix-action@v16
+      with:
+        name: kotodama
+        authToken: ${{ inputs.cachix-auth-token }}
+        skipPush: ${{ github.event_name != 'push' || github.ref != 'refs/heads/main' }}

@@ -1,0 +1,57 @@
+#!/usr/bin/env bash
+# Starts headless sway with one fixed output and runs every e2e/*/test.sh against it.
+# Usage: e2e/run [--update]
+set -euo pipefail
+
+root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+
+export E2E_UPDATE=0
+if [ "${1:-}" = --update ]; then
+    E2E_UPDATE=1
+fi
+
+export E2E_OUT="$root/e2e/out"
+rm -rf "$E2E_OUT"
+mkdir -p "$E2E_OUT"
+
+XDG_RUNTIME_DIR=$(mktemp -d)
+chmod 700 "$XDG_RUNTIME_DIR"
+export XDG_RUNTIME_DIR
+export WLR_BACKENDS=headless WLR_RENDERER=pixman WLR_LIBINPUT_NO_DEVICES=1 WLR_HEADLESS_OUTPUTS=1
+unset WAYLAND_DISPLAY DISPLAY SWAYSOCK
+
+sway -c "$root/e2e/sway.conf" >"$E2E_OUT/sway.log" 2>&1 &
+sway_pid=$!
+trap 'kill "$sway_pid" 2>/dev/null || true; wait "$sway_pid" 2>/dev/null || true; rm -rf "$XDG_RUNTIME_DIR"' EXIT
+
+for _ in $(seq 100); do
+    WAYLAND_DISPLAY=$(find "$XDG_RUNTIME_DIR" -maxdepth 1 -type s -name 'wayland-*' -printf '%f\n' | head -n1)
+    SWAYSOCK=$(find "$XDG_RUNTIME_DIR" -maxdepth 1 -type s -name 'sway-ipc.*' | head -n1)
+    if [ -n "$WAYLAND_DISPLAY" ] && [ -n "$SWAYSOCK" ]; then
+        break
+    fi
+    if ! kill -0 "$sway_pid" 2>/dev/null; then
+        cat "$E2E_OUT/sway.log" >&2
+        echo "sway exited during startup" >&2
+        exit 1
+    fi
+    sleep 0.1
+done
+if [ -z "$WAYLAND_DISPLAY" ] || [ -z "$SWAYSOCK" ]; then
+    echo "sway did not start; see $E2E_OUT/sway.log" >&2
+    exit 1
+fi
+export WAYLAND_DISPLAY SWAYSOCK
+export QT_QPA_PLATFORM=wayland QT_QUICK_BACKEND=software
+
+failed=0
+for test in "$root"/e2e/*/test.sh; do
+    name=$(basename "$(dirname "$test")")
+    if (cd "$(dirname "$test")" && bash -euo pipefail -c 'source "$1/e2e/lib.sh"; source "$2"' _ "$root" "$test"); then
+        echo "ok   $name"
+    else
+        echo "FAIL $name"
+        failed=1
+    fi
+done
+exit "$failed"

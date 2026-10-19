@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+# Succeeds when some crate in the workspace has a bench target. `cargo bench
+# --bench '*'` fails when nothing matches, so CI skips benchmarks until one exists.
+set -euo pipefail
+
+if ! cargo metadata --no-deps --format-version 1 | grep -q '"kind":\["bench"\]'; then
+    echo "The Cargo workspace has no benchmarks yet; skipping cargo bench." >&2
+    exit 1
+fi
