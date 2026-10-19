@@ -41,8 +41,8 @@ def main():
         if isinstance(message, dict) and "results" in message:
             results = message["results"]["results"]
             break
-    for row in results:
-        print("%s\t%s\t%s" % (row["extension"], row["item"]["id"], row["item"]["title"]))
+    for result in results:
+        print("%s\t%s\t%s" % (result["extension"], result["item"]["id"], result["item"]["title"]))
     if not run:
         return
 

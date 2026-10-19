@@ -1,7 +1,7 @@
 [package]
 name = "kotodama-protocol"
 version.workspace = true
-description = "The messages, framing and Manifest schema that the Kotodama Daemon, Front ends and Extensions share"
+description = "The messages, framing and Manifest schema that the Kotodama Daemon, Front ends and Extensions share, and how they launch programs"
 edition.workspace = true
 license.workspace = true
 repository.workspace = true

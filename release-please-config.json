@@ -15,7 +15,7 @@
         {
           "type": "toml",
           "path": "Cargo.lock",
-          "jsonpath": "$.package[?(@.name == 'kotodama' || @.name == 'kotodama-apps' || @.name == 'kotodama-protocol' || @.name == 'kotodama-qml' || @.name == 'kotodamad')].version"
+          "jsonpath": "$.package[?(@.name.value == 'kotodama' || @.name.value == 'kotodama-apps' || @.name.value == 'kotodama-protocol' || @.name.value == 'kotodama-qml' || @.name.value == 'kotodamad')].version"
         }
       ]
     }

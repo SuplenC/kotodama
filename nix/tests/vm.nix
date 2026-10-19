@@ -1,7 +1,8 @@
 # A NixOS VM with Kotodama installed through the home-manager module, for a
 # user whose systemd user manager runs from boot. It checks that the socket
-# starts the Daemon, that home-manager's settings reach it, and that the
-# programs it starts outlive it, and that it reaches the session bus.
+# starts the Daemon, that home-manager's settings reach it, that it reaches
+# the session bus and finds apps wherever NixOS installs them, and that the
+# programs it starts outlive it.
 {
   pkgs,
   self,
@@ -23,6 +24,13 @@ pkgs.testers.runNixOSTest {
     environment.systemPackages = [
       pkgs.python3
       pkgs.dbus # dbus-monitor
+      # An app in the system profile, which the user manager's XDG_DATA_DIRS
+      # holds on NixOS.
+      (pkgs.makeDesktopItem {
+        name = "dozer";
+        desktopName = "Dozer";
+        exec = "sleep 1003";
+      })
     ];
 
     home-manager.useGlobalPkgs = true;
@@ -68,13 +76,14 @@ pkgs.testers.runNixOSTest {
   testScript = ''
     front_end = "python3 ${./front-end.py}"
 
+    def as_alice(command):
+        return f"su -l alice -c 'XDG_RUNTIME_DIR=/run/user/1000 {command}'"
+
     def user(command):
-        return machine.succeed(f"su -l alice -c 'XDG_RUNTIME_DIR=/run/user/1000 {command}'")
+        return machine.succeed(as_alice(command))
 
     def is_active(unit):
-        return machine.execute(
-            f"su -l alice -c 'XDG_RUNTIME_DIR=/run/user/1000 systemctl --user is-active {unit}'"
-        )[0] == 0
+        return machine.execute(as_alice(f"systemctl --user is-active {unit}"))[0] == 0
 
     def pgrep(program):
         # systemd-run starts the program by its full path.
@@ -98,15 +107,18 @@ pkgs.testers.runNixOSTest {
 
     with subtest("a setting written through the home-manager module reaches the Daemon"):
         machine.wait_until_succeeds(
-            f"su -l alice -c 'XDG_RUNTIME_DIR=/run/user/1000 {front_end} nap' | grep -P '^kotodama\tquicklink:nap\t'"
+            as_alice(f"{front_end} nap") + " | grep -P '^kotodama\tquicklink:nap\t'"
         )
 
     with subtest("the Daemon reaches the user's session bus for notifications"):
         machine.wait_until_succeeds("grep -q 'string \"VM job\"' /tmp/notifications")
 
-    with subtest("the Bundled extensions are found, and their apps run"):
+    with subtest("the Bundled extensions are found, with the user's apps and the system's"):
         machine.wait_until_succeeds(
-            f"su -l alice -c 'XDG_RUNTIME_DIR=/run/user/1000 {front_end} sleeper' | grep -P '^apps\tsleeper\tSleeper$'"
+            as_alice(f"{front_end} sleeper") + " | grep -P '^apps\tsleeper\tSleeper$'"
+        )
+        machine.wait_until_succeeds(
+            as_alice(f"{front_end} dozer") + " | grep -P '^apps\tdozer\tDozer$'"
         )
 
     with subtest("programs started from the menu get scopes of their own"):
