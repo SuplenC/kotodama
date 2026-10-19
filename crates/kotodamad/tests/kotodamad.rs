@@ -185,6 +185,7 @@ fn item(id: &str, title: &str) -> Item {
         subtitle: None,
         icon: None,
         keyword: None,
+        identity: None,
         keywords: vec![],
         actions: vec![Action {
             id: "open".into(),

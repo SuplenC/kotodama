@@ -32,6 +32,10 @@ _Avoid_: Entry, result (for the stored thing), record
 What sort of thing an Item is, such as `app`, `project` or `window`, which lets other Extensions offer Actions for it.
 _Avoid_: Type, category, class
 
+**Identity**:
+The name an Extension gives the thing an Item stands for, such as `app:firefox.desktop`, so the same thing offered by several Extensions shares one History.
+_Avoid_: Canonical id, dedup key, uid
+
 **Result**:
 An Item as it appears for the current query, ranked and highlighted.
 _Avoid_: Match, hit, row

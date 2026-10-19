@@ -130,6 +130,26 @@ fn an_item_without_an_action_is_rejected() {
 }
 
 #[test]
+fn an_item_may_name_the_thing_it_stands_for() {
+    let item = decode(
+        r#"{"id": "x", "kind": "url", "url": "https://example.org", "identity": "url:https://example.org",
+            "title": "X", "actions": [{"id": "open", "title": "Open"}]}"#,
+    )
+    .unwrap();
+    assert_eq!(item.identity.as_deref(), Some("url:https://example.org"));
+
+    let item = decode(&item_json(r#""kind": "url", "url": "https://example.org""#)).unwrap();
+    assert_eq!(item.identity, None, "an identity is optional");
+
+    let err = decode(
+        r#"{"id": "x", "kind": "url", "url": "https://example.org", "identity": "",
+            "title": "X", "actions": [{"id": "open", "title": "Open"}]}"#,
+    )
+    .unwrap_err();
+    assert!(err.contains("identity"), "{err}");
+}
+
+#[test]
 fn an_item_reference_carries_the_kind_fields_but_not_the_title() {
     let reference: ItemRef = WireFormat::Json
         .decode(br#"{"id": "kotodama", "kind": "project", "path": "/src/kotodama"}"#)

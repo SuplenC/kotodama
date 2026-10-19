@@ -18,6 +18,12 @@ pub struct Item {
     /// is already indexed replaces the old one.
     pub id: String,
     pub kind: ItemKind,
+    /// The thing the Item stands for, named the same by every Extension that
+    /// offers it, as `app:firefox.desktop` or `url:https://example.org`. Items
+    /// with the same identity share their History, whichever Extension owns
+    /// them: picking one counts for all. `None` keeps the Item's History its
+    /// own.
+    pub identity: Option<String>,
     pub title: String,
     pub subtitle: Option<String>,
     /// A freedesktop icon name or an absolute path.
@@ -300,6 +306,7 @@ struct ItemWire<'a> {
     path: Option<&'a Path>,
     address: Option<&'a str>,
     url: Option<&'a str>,
+    identity: Option<&'a str>,
     title: &'a str,
     subtitle: Option<&'a str>,
     icon: Option<&'a str>,
@@ -320,6 +327,8 @@ struct ItemOwned {
     address: Option<String>,
     #[serde(default)]
     url: Option<String>,
+    #[serde(default)]
+    identity: Option<String>,
     title: String,
     #[serde(default)]
     subtitle: Option<String>,
@@ -342,6 +351,7 @@ impl Serialize for Item {
             path: fields.path,
             address: fields.address,
             url: fields.url,
+            identity: self.identity.as_deref(),
             title: &self.title,
             subtitle: self.subtitle.as_deref(),
             icon: self.icon.as_deref(),
@@ -369,9 +379,16 @@ impl TryFrom<ItemOwned> for Item {
                 wire.id
             ));
         }
+        if wire.identity.as_deref() == Some("") {
+            return Err(format!(
+                "Item `{}` has an empty identity; leave it out instead",
+                wire.id
+            ));
+        }
         Ok(Item {
             id: wire.id,
             kind,
+            identity: wire.identity,
             title: wire.title,
             subtitle: wire.subtitle,
             icon: wire.icon,

@@ -1082,6 +1082,111 @@ fn frecency_and_learned_choices_apply_to_live_query_results() {
     );
 }
 
+/// The same URL, as `bookmarks` or `visited` offers it.
+fn url(id: &str, title: &str, url: &str) -> Item {
+    let mut item = item(id, title, ItemKind::Url { url: url.into() });
+    item.identity = Some(format!("url:{url}"));
+    item
+}
+
+/// Two Extensions that offer the same thing, and a Front end.
+fn bookmarks_and_visited() -> (Harness, Ext, Ext, FrontEnd) {
+    let mut h = Harness::new(vec![plain("apps"), plain("bookmarks"), plain("visited")]);
+    let apps = h.up(0);
+    let bookmarks = h.up(1);
+    let visited = h.up(2);
+    h.add(&apps, vec![app("Git")]);
+    h.add(
+        &bookmarks,
+        vec![
+            url("gh", "GitHub", "https://github.com"),
+            url("gitea", "Gitea", "https://gitea.com"),
+        ],
+    );
+    h.add(
+        &visited,
+        vec![
+            url("1", "github.com", "https://github.com"),
+            url("2", "GitLab", "https://gitlab.com"),
+        ],
+    );
+    let ui = h.front_end();
+    (h, bookmarks, visited, ui)
+}
+
+#[test]
+fn a_pick_through_one_extension_raises_the_same_thing_from_another() {
+    let (mut h, _bookmarks, _visited, ui) = bookmarks_and_visited();
+    pick(&mut h, &ui, "hub", "bookmarks", "gh");
+    let rows = h.query(&ui, "git");
+    assert_eq!(
+        titles(&rows)[..3],
+        ["Git", "GitHub", "github.com"],
+        "under the exact title, both rows of the picked thing, the one picked through first"
+    );
+
+    pick(&mut h, &ui, "hub", "visited", "1");
+    pick(&mut h, &ui, "hub", "visited", "1");
+    let rows = h.query(&ui, "git");
+    assert_eq!(titles(&rows)[..3], ["Git", "github.com", "GitHub"]);
+}
+
+#[test]
+fn a_learned_choice_follows_the_same_thing_to_another_extension() {
+    let (mut h, bookmarks, _visited, ui) = bookmarks_and_visited();
+    for _ in 0..3 {
+        pick(&mut h, &ui, "git", "bookmarks", "gh");
+    }
+    assert_eq!(first(&mut h, &ui, "git"), "GitHub");
+
+    // The bookmark goes; the page is still in the visited ones.
+    h.send(
+        &bookmarks,
+        FromExtension::RemoveItems {
+            ids: vec!["gh".into()],
+        },
+    );
+    assert_eq!(
+        first(&mut h, &ui, "git"),
+        "github.com",
+        "the Learned choice, picked over the exact title"
+    );
+}
+
+#[test]
+fn a_pick_of_a_live_query_result_raises_the_same_thing_indexed() {
+    let mut h = Harness::new(vec![plain("bookmarks"), web()]);
+    let bookmarks = h.up(0);
+    let web = h.up(1);
+    h.add(
+        &bookmarks,
+        vec![
+            url("rustup", "Rustup", "https://rustup.rs"),
+            url("rust", "Rust lang", "https://rust-lang.org"),
+        ],
+    );
+    let ui = h.front_end();
+    assert_eq!(titles(&h.query(&ui, "rust")), ["Rustup", "Rust lang"]);
+
+    h.query(&ui, "g rust");
+    h.advance(Duration::from_millis(100));
+    let (id, ..) = live_queries(&web)[0].clone();
+    let mut result = live("Rust lang", 0.9, false);
+    result.item = url("r1", "rust-lang.org", "https://rust-lang.org");
+    h.send(
+        &web,
+        FromExtension::LiveResults {
+            live_query: id,
+            results: vec![result],
+            done: true,
+        },
+    );
+    run(&mut h, &ui, "web", "r1", "web", "open");
+    ui.drain();
+
+    assert_eq!(titles(&h.query(&ui, "rust")), ["Rust lang", "Rustup"]);
+}
+
 #[test]
 fn the_history_is_saved_after_each_pick_and_a_new_daemon_ranks_by_it() {
     let mut h = Harness::new(vec![plain("apps")]);

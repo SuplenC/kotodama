@@ -37,6 +37,8 @@ pub struct Index {
     ids: Vec<HashMap<String, Slot>>,
     /// The Items that have a keyword, by it in lowercase.
     keywords: HashMap<String, Vec<Slot>>,
+    /// The Items that have an identity, by it.
+    identities: HashMap<String, Vec<Slot>>,
     /// Bumped on every change, so a search narrowed from an earlier one knows
     /// when it can't be trusted.
     version: u64,
@@ -89,6 +91,12 @@ impl Index {
         if let Some(keyword) = keyword {
             self.keywords.entry(keyword).or_default().push(slot);
         }
+        if let Some(identity) = self
+            .entry(slot)
+            .and_then(|entry| entry.item.identity.clone())
+        {
+            self.identities.entry(identity).or_default().push(slot);
+        }
     }
 
     pub fn remove(&mut self, extension: ExtensionId, id: &str) {
@@ -105,26 +113,28 @@ impl Index {
         self.free.push(slot);
     }
 
-    /// Forgets the keyword of the Item in `slot`.
+    /// Forgets the keyword and the identity of the Item in `slot`.
     fn unkey(&mut self, slot: Slot) {
-        let Some(keyword) = self
-            .entry(slot)
-            .and_then(|entry| entry.item.keyword.as_deref())
-        else {
+        let Some(item) = self.slots.get(slot as usize).and_then(Option::as_ref) else {
             return;
         };
-        let keyword = keyword.to_lowercase();
-        if let Some(slots) = self.keywords.get_mut(&keyword) {
-            slots.retain(|&other| other != slot);
-            if slots.is_empty() {
-                self.keywords.remove(&keyword);
-            }
+        let item = &item.item;
+        if let Some(keyword) = &item.keyword {
+            unlist(&mut self.keywords, &keyword.to_lowercase(), slot);
+        }
+        if let Some(identity) = &item.identity {
+            unlist(&mut self.identities, identity, slot);
         }
     }
 
     /// The Items whose keyword is `keyword`, given in lowercase.
     pub fn keyed(&self, keyword: &str) -> &[Slot] {
         self.keywords.get(keyword).map_or(&[], Vec::as_slice)
+    }
+
+    /// The Items, of any Extension, whose identity is `identity`.
+    pub fn identified(&self, identity: &str) -> &[Slot] {
+        self.identities.get(identity).map_or(&[], Vec::as_slice)
     }
 
     /// Removes every Item of one Extension. Returns whether there were any.
@@ -177,6 +187,17 @@ impl Index {
         match within {
             Some(slots) => slots.iter().copied().for_each(&mut score),
             None => (0..self.slots.len() as Slot).for_each(score),
+        }
+    }
+}
+
+/// Takes `slot` off the list kept under `name`, and the list off `lists` once
+/// it is empty.
+fn unlist(lists: &mut HashMap<String, Vec<Slot>>, name: &str, slot: Slot) {
+    if let Some(slots) = lists.get_mut(name) {
+        slots.retain(|&other| other != slot);
+        if slots.is_empty() {
+            lists.remove(name);
         }
     }
 }
