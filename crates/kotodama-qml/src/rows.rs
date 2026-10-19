@@ -11,9 +11,10 @@ use kotodama_protocol::{ActionRef, ResultRef, ShownResult};
 #[derive(Clone, Debug, PartialEq)]
 pub struct Row {
     pub result: ResultRef,
-    /// What Enter runs. Every Item has at least one Action, but a row is never
-    /// trusted to.
-    pub primary: Option<ActionRef>,
+    /// The Action panel: the Item's own Actions, the primary one (what Enter
+    /// runs) first, then
+    /// the Contributed actions, grouped by the Extension that offers them.
+    pub actions: Vec<RowAction>,
     pub title: String,
     pub subtitle: String,
     pub icon: String,
@@ -21,13 +22,39 @@ pub struct Row {
     pub highlights: Vec<u32>,
 }
 
+/// One entry of the Action panel.
+#[derive(Clone, Debug, PartialEq)]
+pub struct RowAction {
+    pub action: ActionRef,
+    pub title: String,
+    pub shortcut: Option<String>,
+    /// The Extension that offers a Contributed action; `None` for the Item's
+    /// own Actions.
+    pub group: Option<String>,
+}
+
 impl From<ShownResult> for Row {
     fn from(shown: ShownResult) -> Self {
         let mut item = shown.item;
-        let primary = item.actions.first().map(|action| ActionRef {
-            extension: shown.extension.clone(),
-            id: action.id.clone(),
+        let own = item.actions.into_iter().map(|action| RowAction {
+            action: ActionRef {
+                extension: shown.extension.clone(),
+                id: action.id,
+            },
+            title: action.title,
+            shortcut: action.shortcut,
+            group: None,
         });
+        let contributed = shown.contributed.into_iter().map(|offered| RowAction {
+            action: ActionRef {
+                extension: offered.extension.clone(),
+                id: offered.action.id,
+            },
+            title: offered.action.title,
+            shortcut: offered.action.shortcut,
+            group: Some(offered.extension),
+        });
+        let actions = own.chain(contributed).collect();
         let mut highlights = shown.highlights;
         highlights.sort_unstable();
         highlights.dedup();
@@ -36,7 +63,7 @@ impl From<ShownResult> for Row {
                 extension: shown.extension,
                 id: std::mem::take(&mut item.id),
             },
-            primary,
+            actions,
             title: item.title,
             subtitle: item.subtitle.unwrap_or_default(),
             icon: item.icon.unwrap_or_default(),
@@ -112,6 +139,8 @@ impl Replace {
 
 #[cfg(test)]
 mod tests {
+    use kotodama_protocol::{Item, ItemKind, OfferedAction};
+
     use super::*;
 
     fn row(title: &str, highlights: &[u32]) -> Row {
@@ -120,12 +149,76 @@ mod tests {
                 extension: "apps".into(),
                 id: "x".into(),
             },
-            primary: None,
+            actions: Vec::new(),
             title: title.into(),
             subtitle: String::new(),
             icon: String::new(),
             highlights: highlights.to_vec(),
         }
+    }
+
+    fn action(id: &str, title: &str) -> kotodama_protocol::Action {
+        kotodama_protocol::Action {
+            id: id.into(),
+            title: title.into(),
+            shortcut: None,
+            arguments: Vec::new(),
+        }
+    }
+
+    fn offered(extension: &str, id: &str, title: &str) -> OfferedAction {
+        OfferedAction {
+            extension: extension.into(),
+            action: action(id, title),
+        }
+    }
+
+    #[test]
+    fn the_action_panel_lists_the_items_own_actions_then_contributed_ones_under_their_extension() {
+        let shown = ShownResult {
+            extension: "projects".into(),
+            item: Item {
+                id: "kotodama".into(),
+                kind: ItemKind::Project {
+                    path: "/src/kotodama".into(),
+                },
+                title: "kotodama".into(),
+                subtitle: None,
+                icon: None,
+                keyword: None,
+                keywords: Vec::new(),
+                actions: vec![action("open", "Open"), action("term", "Open in terminal")],
+            },
+            contributed: vec![
+                offered("pinner", "pin", "Pin a version here"),
+                offered("pinner", "unpin", "Unpin"),
+                offered("git", "log", "Show log"),
+            ],
+            highlights: Vec::new(),
+        };
+        let row = Row::from(shown);
+        let panel: Vec<_> = row
+            .actions
+            .iter()
+            .map(|entry| {
+                (
+                    entry.group.as_deref(),
+                    entry.title.as_str(),
+                    entry.action.extension.as_str(),
+                    entry.action.id.as_str(),
+                )
+            })
+            .collect();
+        assert_eq!(
+            panel,
+            [
+                (None, "Open", "projects", "open"),
+                (None, "Open in terminal", "projects", "term"),
+                (Some("pinner"), "Pin a version here", "pinner", "pin"),
+                (Some("pinner"), "Unpin", "pinner", "unpin"),
+                (Some("git"), "Show log", "git", "log"),
+            ]
+        );
     }
 
     #[test]
