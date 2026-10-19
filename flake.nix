@@ -42,7 +42,6 @@
               libGL # QtGui links libGLX and libOpenGL
               pkg-config
               cmake
-              lld # cxx-qt links Qt with lld when it can, and with the deprecated gold otherwise
 
               # Front end and headless Wayland for e2e tests
               quickshell
