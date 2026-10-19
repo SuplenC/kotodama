@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+# Compares two criterion `--output-format bencher` outputs and fails when a
+# benchmark is slower than its baseline by more than the threshold.
+# Usage: bench-compare BASELINE CURRENT [THRESHOLD_PERCENT]
+set -euo pipefail
+
+baseline=$1 current=$2 threshold=${3:-50}
+
+if [ ! -f "$baseline" ]; then
+    echo "no baseline at $baseline; nothing to compare against"
+    exit 0
+fi
+
+# "test <name> ... bench: 1,234 ns/iter (+/- 5)" -> "<name><TAB>1234"
+parse() {
+    sed -nE 's|^test (.*) \.\.\. bench: +([0-9,]+) ns/iter.*|\1\t\2|p' "$1" | awk -F'\t' -v OFS='\t' '{ gsub(/,/, "", $2); print }'
+}
+
+awk -F'\t' -v threshold="$threshold" '
+    NR == FNR { base[$1] = $2; next }
+    {
+        if (!($1 in base)) {
+            printf "new        %s: %d ns/iter\n", $1, $2
+            next
+        }
+        if ($2 > base[$1] * (1 + threshold / 100)) {
+            printf "REGRESSION %s: %d -> %d ns/iter\n", $1, base[$1], $2
+            failed = 1
+        }
+    }
+    END { exit failed }
+' <(parse "$baseline") <(parse "$current")

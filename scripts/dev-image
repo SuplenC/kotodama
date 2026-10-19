@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+# Prints the dev container image for this checkout. The tag is git's hash of the
+# committed docker/ directory, so changing the image changes the tag and dev-env
+# fetches or builds the new one instead of reusing a stale image.
+set -euo pipefail
+
+root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+
+if [ -n "${KOTODAMA_DEV_IMAGE:-}" ]; then
+    echo "$KOTODAMA_DEV_IMAGE"
+else
+    echo "ghcr.io/suplenc/kotodama-dev:$(git -C "$root" rev-parse --short=12 HEAD:docker)"
+fi

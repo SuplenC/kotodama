@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+# Succeeds when the Cargo workspace has members. Cargo refuses to fmt, lint, test
+# or bench an empty workspace, so recipes skip those steps until a crate exists.
+set -euo pipefail
+
+if cargo metadata --no-deps --format-version 1 | grep -q '"workspace_members":\[\]'; then
+    echo "The Cargo workspace has no crates yet; skipping cargo." >&2
+    exit 1
+fi

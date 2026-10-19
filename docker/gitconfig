@@ -1,0 +1,3 @@
+# The bind-mounted repo is owned by the host user, not root.
+[safe]
+	directory = *

@@ -1,0 +1,116 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  # Refreshes the bench baseline weekly so GitHub doesn't evict the cache that holds it.
+  schedule:
+    - cron: "0 4 * * 1"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  test:
+    name: check, test, e2e (${{ matrix.runner }})
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-latest, ubuntu-24.04-arm]
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup-nix
+        with:
+          cachix-auth-token: ${{ secrets.CACHIX_AUTH_TOKEN }}
+      - run: nix develop --command just check
+      - run: nix develop --command just test
+      - run: nix develop --command just e2e
+      - if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: e2e-${{ matrix.runner }}
+          path: e2e/out
+          if-no-files-found: ignore
+
+  # Compares against the baseline saved by the last push to main. Shared runners are
+  # too noisy for absolute timings, so only the relative change is checked.
+  bench:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup-nix
+        with:
+          cachix-auth-token: ${{ secrets.CACHIX_AUTH_TOKEN }}
+      - uses: actions/cache/restore@v6
+        with:
+          path: bench-baseline.txt
+          key: bench-baseline-${{ github.sha }}
+          restore-keys: bench-baseline-
+      - name: Run benchmarks
+        run: |
+          touch bench-current.txt
+          if nix develop --command scripts/has-benches; then
+            nix develop --command just bench --bench '*' -- --output-format bencher | tee bench-output.txt
+            grep 'bench:' bench-output.txt > bench-current.txt || true
+          fi
+      - name: Compare with main
+        run: |
+          if [ ! -f bench-baseline.txt ]; then
+            echo "::warning::No bench baseline from main; benchmarks were not compared."
+          fi
+          scripts/bench-compare bench-baseline.txt bench-current.txt 50
+      - if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        run: cp bench-current.txt bench-baseline.txt
+      - if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        uses: actions/cache/save@v6
+        with:
+          path: bench-baseline.txt
+          key: bench-baseline-${{ github.sha }}
+
+  # Placeholder for the live Hyprland tests (#13): Hyprland needs a DRM device, so
+  # those run in a NixOS VM.
+  nixos-vm:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup-nix
+        with:
+          cachix-auth-token: ${{ secrets.CACHIX_AUTH_TOKEN }}
+      - run: nix build -L .#checks.x86_64-linux.nixos-vm
+
+  # The image only copies files onto nixos/nix, so both platforms build without emulation.
+  image:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v7
+      - id: image
+        run: echo "name=$(scripts/dev-image)" >> "$GITHUB_OUTPUT"
+      - uses: docker/setup-buildx-action@v4
+      - uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v7
+        with:
+          context: docker
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: |
+            ghcr.io/suplenc/kotodama-dev:latest
+            ${{ steps.image.outputs.name }}

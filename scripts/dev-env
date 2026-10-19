@@ -1,0 +1,45 @@
+#!/usr/bin/env bash
+# Runs a command in the dev environment, so every machine runs the same thing:
+# - already inside the dev shell: run it directly;
+# - Linux with Nix: run it in `nix develop`;
+# - anywhere else: run it in the dev container, with Docker or OrbStack.
+set -euo pipefail
+
+root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+
+if [ "$#" -eq 0 ]; then
+    set -- bash
+fi
+
+if [ -n "${IN_NIX_SHELL:-}" ]; then
+    exec "$@"
+fi
+
+if [ "$(uname -s)" = Linux ] && command -v nix >/dev/null 2>&1; then
+    exec nix --extra-experimental-features 'nix-command flakes' develop "$root" --command "$@"
+fi
+
+if ! command -v docker >/dev/null 2>&1; then
+    echo "dev-env: install Nix (Linux) or Docker/OrbStack to get the dev environment" >&2
+    exit 1
+fi
+
+image=$("$root/scripts/dev-image")
+if ! docker image inspect "$image" >/dev/null 2>&1; then
+    docker pull "$image" >&2 || docker build -t "$image" "$root/docker" >&2
+fi
+
+tty=(-i)
+if [ -t 0 ] && [ -t 1 ]; then
+    tty=(-it)
+fi
+
+# /nix and /cargo are named volumes: the Nix store, the cargo registry and the
+# Linux build output survive between runs and stay off the bind mount. --init
+# forwards signals and reaps the processes e2e tests start.
+exec docker run --rm --init "${tty[@]}" \
+    -v kotodama-nix:/nix \
+    -v kotodama-cargo:/cargo \
+    -v "$root:/work" \
+    -e CI \
+    "$image" "$@"
