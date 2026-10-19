@@ -26,8 +26,8 @@ These numbers are settings in the config's `[history]` table, which reloads with
 [history]
 picks_to_learn = 3      # picks of one Result for one query that make it the query's Learned choice
 picks_to_take_over = 2  # picks of another Result, since the choice was last picked, that replace it
-half_life_days = 14     # how long a pick takes to count half as much
-lift_threshold = 5.0    # the Frecency that lifts a Result one tier: about a week of daily use
+half_life_days = 14     # how long a pick takes to count half as much; above 0
+lift_threshold = 5.0    # the Frecency that lifts a Result one tier, about a week of daily use; above 0
 usage_log = false       # log queries and picks, to tune ranking from real use
 ```
 
@@ -38,7 +38,7 @@ A setting that doesn't parse is logged and keeps its default. With `usage_log = 
 {"at":1760870401,"kind":"pick","query":"fi","extension":"apps","id":"firefox","action":"open","row":1}
 ```
 
-`at` is seconds since the Unix epoch; a pick's `extension` and `id` name the Result, `action` the Action run, and `row` where the Result was in the list (from 0), or `null` if it wasn't in it. An empty query isn't logged. When the file would pass 4 MiB it becomes `usage.jsonl.1`, replacing the older one, so the log never takes more than 8 MiB. Turning it off keeps what was written; delete the files to forget it.
+`at` is seconds since the Unix epoch; a pick's `extension` and `id` name the Result, `action` the Action run, and `row` where the Result was in the list (from 0), or `null` if it wasn't in it. Emptying the search box isn't logged as a query, but a pick made with nothing typed is, with `"query":""`. When the file would pass 4 MiB it becomes `usage.jsonl.1`, replacing the older one, so the log never takes more than 8 MiB. Turning it off keeps what was written; delete the files to forget it.
 
 Aliases and Quicklinks live in the config directory and reload with it:
 

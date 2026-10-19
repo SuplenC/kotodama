@@ -1,4 +1,4 @@
-//! The usage log: the queries the user typed and the Results they picked, to
+//! The Usage log: the queries the user typed and the Results they picked, to
 //! tune ranking from real use. It is off unless the config turns it on
 //! (`[history] usage_log = true`), and it never leaves the machine.
 //!
@@ -12,8 +12,9 @@
 //!
 //! - `at`: seconds since the Unix epoch.
 //! - `kind`: `query` when the user typed, `pick` when they ran an Action.
-//! - `query`: what was typed, as the Front end sent it. An empty query isn't
-//!   logged.
+//! - `query`: what was typed, as the Front end sent it. Typing that empties
+//!   the search box isn't logged, but a pick made with nothing typed is, with
+//!   `"query":""`.
 //! - `extension` and `id`: the picked Result's Extension and Item id.
 //! - `action`: the id of the Action run.
 //! - `row`: where the Result was in the list, from 0, or `null` if it wasn't
@@ -27,14 +28,14 @@
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
-use std::sync::mpsc::{self, Sender};
+use std::sync::mpsc::{self, SyncSender};
 
 use serde::Serialize;
 
 use crate::host::spawn;
 
-/// How large `usage.jsonl` grows before it is rotated: 4 MiB, a few months
-/// of typical use.
+/// How large `usage.jsonl` grows before it is rotated: 4 MiB, tens of
+/// thousands of queries.
 pub const MAX_BYTES: u64 = 4 * 1024 * 1024;
 
 /// One line of the log.
@@ -86,25 +87,22 @@ impl Log {
         serde_json::to_writer(&mut self.line, entry)?;
         self.line.push(b'\n');
         let len = self.line.len() as u64;
-        // A file an earlier run left fuller than this is rotated too.
-        if self
-            .file
-            .as_ref()
-            .is_some_and(|(_, size)| *size > 0 && size + len > self.max)
-        {
-            self.file = None;
-            fs::rename(&self.path, rotated(&self.path))?;
-        }
-        let (file, size) = match &mut self.file {
+        let (mut file, mut size) = match self.file.take() {
             Some(open) => open,
             None => {
                 let file = open(&self.path)?;
                 let size = file.metadata()?.len();
-                self.file.insert((file, size))
+                (file, size)
             }
         };
+        // A file an earlier run left full is rotated too.
+        if size > 0 && size + len > self.max {
+            fs::rename(&self.path, rotated(&self.path))?;
+            (file, size) = (open(&self.path)?, 0);
+        }
         file.write_all(&self.line)?;
-        *size += len;
+        size += len;
+        self.file = Some((file, size));
         Ok(())
     }
 }
@@ -128,15 +126,19 @@ fn open(path: &Path) -> io::Result<File> {
     options.open(path)
 }
 
+/// How many entries may wait for a slow disk; past this, new ones are dropped
+/// rather than held in memory.
+const PENDING: usize = 1024;
+
 /// Writes the log on a thread of its own, so the Daemon never waits for the
-/// disk. The thread starts at the first entry and ends when this is dropped.
+/// disk. The thread ends when this is dropped.
 pub struct Writer {
-    entries: Sender<Entry>,
+    entries: SyncSender<Entry>,
 }
 
 impl Writer {
     pub fn new(path: PathBuf) -> Self {
-        let (entries, pending) = mpsc::channel::<Entry>();
+        let (entries, pending) = mpsc::sync_channel::<Entry>(PENDING);
         spawn("usage".into(), move || {
             let mut log = Log::new(path, MAX_BYTES);
             let mut failing = false;
@@ -154,9 +156,9 @@ impl Writer {
         Writer { entries }
     }
 
-    /// Never blocks.
+    /// Never blocks: an entry that finds the queue full is dropped.
     pub fn write(&self, entry: Entry) {
-        let _ = self.entries.send(entry);
+        let _ = self.entries.try_send(entry);
     }
 }
 
@@ -223,6 +225,23 @@ mod tests {
         for _ in 0..5 {
             log.write(&query(10, "fi")).unwrap();
         }
+        let older = dir.path().join("usage.jsonl.1");
+        assert_eq!(fs::metadata(&older).unwrap().len(), 2 * line);
+        assert_eq!(fs::metadata(&path).unwrap().len(), line);
+    }
+
+    #[test]
+    fn a_log_an_earlier_run_filled_is_rotated_at_the_first_entry() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("usage.jsonl");
+        let line = r#"{"at":10,"kind":"query","query":"fi"}"#.len() as u64 + 1;
+        let mut log = Log::new(path.clone(), 2 * line);
+        log.write(&query(10, "fi")).unwrap();
+        log.write(&query(10, "fi")).unwrap();
+
+        Log::new(path.clone(), 2 * line)
+            .write(&query(10, "fi"))
+            .unwrap();
         let older = dir.path().join("usage.jsonl.1");
         assert_eq!(fs::metadata(&older).unwrap().len(), 2 * line);
         assert_eq!(fs::metadata(&path).unwrap().len(), line);

@@ -692,6 +692,18 @@ fn a_setting_that_does_not_parse_keeps_its_default() {
     assert_eq!(w.first("fi"), "Firefox");
 }
 
+/// H4: a threshold of 0 would lift every Result, picked or not.
+#[test]
+fn a_lift_threshold_of_zero_keeps_the_default() {
+    let mut w = World::with(
+        vec![app("Files"), app("Firefox"), app("Fish"), app("Fi")],
+        "[history]\nlift_threshold = 0",
+    );
+    w.pick("firefox", "Firefox");
+    w.later(DAY);
+    assert_eq!(rows(&mut w, "fi"), ["Fi", "Firefox", "Fish", "Files"]);
+}
+
 /// H4
 #[test]
 fn the_settings_reload_with_the_config() {

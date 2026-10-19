@@ -1138,17 +1138,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
     }
 
     fn query(&mut self, id: FrontEndId, text: String, now: Instant) {
-        if !self.sessions.contains_key(&id) {
-            return;
-        }
-        if self.history.settings().usage_log && !text.is_empty() {
-            self.store.log(Entry {
-                at: self.wall(now),
-                used: Used::Query {
-                    query: text.clone(),
-                },
-            });
-        }
+        let logged = (self.history.settings().usage_log && !text.is_empty()).then(|| text.clone());
         let Some(session) = self.sessions.get_mut(&id) else {
             return;
         };
@@ -1189,6 +1179,12 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
                 live.prefix = prefix;
                 live.due = Some(now + debounce);
             }
+        }
+        if let Some(query) = logged {
+            self.store.log(Entry {
+                at: self.wall(now),
+                used: Used::Query { query },
+            });
         }
     }
 
@@ -1306,6 +1302,10 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             return;
         };
         let source = self.source_of(session, &result.extension, &result.id);
+        let row = session
+            .shown
+            .iter()
+            .position(|(shown, _)| Some(*shown) == source);
         if self.history.settings().usage_log {
             self.store.log(Entry {
                 at,
@@ -1314,10 +1314,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
                     extension: result.extension.clone(),
                     id: result.id.clone(),
                     action: action.id.clone(),
-                    row: session
-                        .shown
-                        .iter()
-                        .position(|(shown, _)| Some(*shown) == source),
+                    row,
                 },
             });
         }
@@ -1334,10 +1331,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
                 .unwrap_or((&result.extension, &result.id));
             // What ranked above it, nearest first: what it was picked over.
             // The same thing from another Extension wasn't.
-            let above: Vec<ResultKey> = session
-                .shown
-                .iter()
-                .position(|(shown, _)| Some(*shown) == source)
+            let above: Vec<ResultKey> = row
                 .map(|at| {
                     session.shown[..at]
                         .iter()
@@ -1378,12 +1372,20 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
     }
 
     /// Reads the History's settings from the config. Open sessions are ranked
-    /// again if they changed.
+    /// again if one that ranks changed.
     fn load_settings(&mut self) {
         let settings = Settings::from_config(&self.config);
-        if settings != *self.history.settings() {
+        let old = *self.history.settings();
+        if settings != old {
             self.history.set_settings(settings);
-            self.mark_late();
+            let usage_log = old.usage_log;
+            if (Settings {
+                usage_log,
+                ..settings
+            }) != old
+            {
+                self.mark_late();
+            }
         }
     }
 

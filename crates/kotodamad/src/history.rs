@@ -36,7 +36,7 @@ const MAX_QUERIES: usize = 1000;
 /// picks_to_take_over = 2  # picks of another Result, since the choice was last picked, that replace it
 /// half_life_days = 14     # how long a pick takes to count half as much
 /// lift_threshold = 5.0    # the Frecency that lifts a Result one Tier: about a week of daily use
-/// usage_log = false       # keep a log of queries and picks, to tune ranking from real use
+/// usage_log = false       # log queries and picks, to tune ranking from real use
 /// ```
 ///
 /// A setting that doesn't parse is logged and keeps its default.
@@ -56,7 +56,7 @@ pub struct Settings {
     /// daily whose title starts with the query beat an exact title, but not a
     /// few picks.
     pub lift_threshold: f64,
-    /// Whether queries and picks are logged (see [`crate::usage`]).
+    /// Whether queries and picks go in the Usage log (see [`crate::usage`]).
     pub usage_log: bool,
 }
 
@@ -93,8 +93,8 @@ impl Settings {
                     .ok_or("should be a number of days above 0")
                     .map(|days| settings.half_life_secs = days * DAY_SECS),
                 "lift_threshold" => number(value)
-                    .filter(|&frecency| frecency >= 0.0)
-                    .ok_or("should be a number, 0 or more")
+                    .filter(|&frecency| frecency > 0.0)
+                    .ok_or("should be a number above 0")
                     .map(|frecency| settings.lift_threshold = frecency),
                 "usage_log" => match value {
                     Value::Bool(on) => {
@@ -413,11 +413,11 @@ impl History {
     }
 }
 
-/// Where the Daemon keeps its History, and its usage log.
+/// Where the Daemon keeps its History, and its Usage log.
 pub trait Store {
     /// Called after every change. Must not block.
     fn save(&mut self, history: &History);
-    /// Adds an entry to the usage log. Called only while the config turns the
+    /// Adds an entry to the Usage log. Called only while the config turns the
     /// log on. Must not block.
     fn log(&mut self, entry: Entry);
 }
@@ -441,12 +441,12 @@ pub fn load(path: &Path) -> History {
 
 /// Writes the History to a file, replacing it whole, on a thread of its own.
 /// Saves that pile up while the disk is slow are written once, latest only.
-/// The usage log goes to a file of its own, on another thread, started only
+/// The Usage log goes to a file of its own, on another thread, started only
 /// once there is something to log.
 pub struct Disk {
     saves: Sender<Vec<u8>>,
     usage: PathBuf,
-    log: Option<usage::Writer>,
+    usage_log: Option<usage::Writer>,
 }
 
 impl Disk {
@@ -465,7 +465,7 @@ impl Disk {
         Disk {
             saves,
             usage,
-            log: None,
+            usage_log: None,
         }
     }
 }
@@ -481,7 +481,7 @@ impl Store for Disk {
     }
 
     fn log(&mut self, entry: Entry) {
-        self.log
+        self.usage_log
             .get_or_insert_with(|| usage::Writer::new(self.usage.clone()))
             .write(entry);
     }
