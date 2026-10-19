@@ -10,7 +10,7 @@ use image::{ImageFormat, ImageReader, Limits};
 pub const SENSITIVE: &str = "x-kde-passwordManagerHint";
 
 /// Text types, best first: UTF-8 ones before the X11 names that may not be.
-const TEXT: [&str; 5] = [
+pub const TEXT: [&str; 5] = [
     "text/plain;charset=utf-8",
     "UTF8_STRING",
     "text/plain",

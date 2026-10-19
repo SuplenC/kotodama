@@ -24,7 +24,7 @@ pub const HISTORY: &str = "history";
 /// The list View of every entry.
 pub const LIST_VIEW: &str = "history";
 /// The detail View of one entry.
-pub const DETAIL_VIEW: &str = "entry";
+pub const DETAIL_VIEW: &str = "clip";
 
 /// Actions, by id.
 pub const PASTE: &str = "paste";
@@ -91,9 +91,9 @@ pub fn history_item() -> Item {
     }
 }
 
-/// One entry as an Item. Its title is what a text says, or an image's size,
-/// and an image's icon is its thumbnail.
-pub fn entry_item(history: &History, entry: &Entry) -> Item {
+/// A history entry as an Item of kind `clipboard.clip`. Its title is what a
+/// text says, or an image's size, and an image's icon is its thumbnail.
+pub fn clip_item(history: &History, entry: &Entry) -> Item {
     let (title, subtitle, icon) = match &entry.content {
         Content::Text { preview, chars } => (
             preview.clone(),
@@ -112,7 +112,7 @@ pub fn entry_item(history: &History, entry: &Entry) -> Item {
     };
     Item {
         id: entry.id.to_string(),
-        kind: kind("entry"),
+        kind: kind("clip"),
         identity: None,
         title,
         subtitle: Some(subtitle),
@@ -123,8 +123,7 @@ pub fn entry_item(history: &History, entry: &Entry) -> Item {
             action(PASTE, "Paste"),
             action(COPY, "Copy to Clipboard"),
             action(SHOW, "Show Details"),
-            action(DELETE, "Delete Entry"),
-            action(CLEAR, "Clear Clipboard History"),
+            action(DELETE, "Delete from History"),
         ],
     }
 }
@@ -137,7 +136,7 @@ pub fn list_view(history: &History) -> View {
         content: ViewContent::List {
             items: history
                 .entries()
-                .map(|entry| entry_item(history, entry))
+                .map(|entry| clip_item(history, entry))
                 .collect(),
         },
     }
@@ -157,11 +156,11 @@ pub fn detail_view(history: &History, entry: &Entry, now: u64) -> View {
                 label: "Size".to_owned(),
                 value: count(*chars, "character"),
             });
+            // Only what shows is read, however much was copied.
             let text = history
-                .read(entry.id)
-                .map(|data| String::from_utf8_lossy(&data).into_owned())
+                .read_start(entry.id, DETAIL_CHARS * 4)
                 .unwrap_or_default();
-            code_block(&text, *chars)
+            code_block(&text, entry.size, *chars)
         }
         Content::Image {
             mime,
@@ -182,9 +181,13 @@ pub fn detail_view(history: &History, entry: &Entry, now: u64) -> View {
             )
         }
     };
+    let title = match entry.content {
+        Content::Text { .. } => "Copied Text",
+        Content::Image { .. } => "Copied Image",
+    };
     View {
         id: DETAIL_VIEW.to_owned(),
-        title: "Clipboard Entry".to_owned(),
+        title: title.to_owned(),
         content: ViewContent::Detail { markdown, metadata },
     }
 }
@@ -204,9 +207,10 @@ fn action(id: &str, title: &str) -> Action {
     }
 }
 
-/// The text in a fenced code block, so Markdown in it shows as typed: the
-/// fence is longer than any run of backticks inside. Long texts are cut.
-fn code_block(text: &str, chars: u64) -> String {
+/// The start of a text, `size` bytes and `chars` characters in all, in a
+/// fenced code block, so Markdown in it shows as typed: the fence is longer
+/// than any run of backticks inside. Long texts are cut.
+fn code_block(text: &str, size: u64, chars: u64) -> String {
     let mut shown: String = text
         .split_inclusive('\n')
         .take(DETAIL_LINES)
@@ -214,7 +218,7 @@ fn code_block(text: &str, chars: u64) -> String {
         .chars()
         .take(DETAIL_CHARS)
         .collect();
-    let cut = shown.len() < text.len();
+    let cut = (shown.len() as u64) < size;
     if shown.ends_with('\n') {
         shown.pop();
     }
@@ -298,14 +302,14 @@ mod tests {
 
     #[test]
     fn a_code_block_fence_outlasts_the_backticks_inside() {
-        assert_eq!(code_block("a ``` b", 7), "````\na ``` b\n````\n");
-        assert_eq!(code_block("plain\n", 6), "```\nplain\n```\n");
+        assert_eq!(code_block("a ``` b", 7, 7), "````\na ``` b\n````\n");
+        assert_eq!(code_block("plain\n", 6, 6), "```\nplain\n```\n");
     }
 
     #[test]
     fn a_long_text_is_cut_with_a_note() {
         let text = "line\n".repeat(100);
-        let block = code_block(&text, 500);
+        let block = code_block(&text, 500, 500);
         assert_eq!(block.matches("line").count(), DETAIL_LINES);
         assert!(
             block.ends_with("pasting gives all 500 characters."),

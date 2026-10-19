@@ -26,7 +26,8 @@ use kotodamad::history::{History as Picks, Store};
 use kotodamad::usage::Entry;
 
 const ENTRIES: usize = 1000;
-/// The Daemon's budget from query received to Results sent.
+/// The Daemon's budget from query received to Results sent: the README's
+/// "target is a p99 under 2 ms from query received to Results sent".
 const BUDGET: Duration = Duration::from_millis(2);
 const TYPED: &str = "cargo test";
 
@@ -128,7 +129,7 @@ fn items(dir: &Path) -> Vec<Item> {
         .chain(
             history
                 .entries()
-                .map(|entry| items::entry_item(&history, entry)),
+                .map(|entry| items::clip_item(&history, entry)),
         )
         .collect()
 }

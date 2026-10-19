@@ -112,9 +112,9 @@ impl Extension {
         }
     }
 
-    /// Runs `action` on the entry `id` and returns its outcome.
+    /// Runs `action` on the clip `id` and returns its outcome.
     fn run(&mut self, id: &str, action: &str) -> Outcome {
-        self.start_run(id, "clipboard.entry", action);
+        self.start_run(id, "clipboard.clip", action);
         self.outcome()
     }
 }
@@ -139,7 +139,7 @@ fn history_dir(state: &Path) -> PathBuf {
 }
 
 /// Records what was copied, `ago` seconds ago, as watching the clipboard
-/// would. Returns the entry's Item id.
+/// would. Returns the clip's Item id.
 fn copy(state: &Path, copied: Copied, ago: u64) -> String {
     let mut history = History::open(&history_dir(state));
     let recorded = history
@@ -163,10 +163,10 @@ fn titles(items: &[Item]) -> Vec<&str> {
     items.iter().map(|item| item.title.as_str()).collect()
 }
 
-fn entries(items: &[Item]) -> Vec<&Item> {
+fn clips(items: &[Item]) -> Vec<&Item> {
     items
         .iter()
-        .filter(|item| item.kind.name() == "clipboard.entry")
+        .filter(|item| item.kind.name() == "clipboard.clip")
         .collect()
 }
 
@@ -189,25 +189,24 @@ fn the_history_is_sent_as_items_after_a_restart() {
         ["Show Clipboard History", "Clear Clipboard History"]
     );
 
-    let entries = entries(&items);
+    let clips = clips(&items);
     assert_eq!(
-        titles(&entries.iter().copied().cloned().collect::<Vec<_>>()),
+        titles(&clips.iter().copied().cloned().collect::<Vec<_>>()),
         ["git push --force-with-lease", "cargo nextest run"]
     );
-    let entry = entries[0];
-    assert_eq!(entry.subtitle.as_deref(), Some("Text, 27 characters"));
+    let clip = clips[0];
+    assert_eq!(clip.subtitle.as_deref(), Some("Text, 27 characters"));
     assert_eq!(
-        entry
-            .actions
+        clip.actions
             .iter()
             .map(|action| action.id.as_str())
             .collect::<Vec<_>>(),
-        ["paste", "copy", "show", "delete", "clear"]
+        ["paste", "copy", "show", "delete"]
     );
 }
 
 #[test]
-fn the_primary_action_pastes_the_whole_entry() {
+fn the_primary_action_pastes_the_whole_clip() {
     let state = tempfile::tempdir().unwrap();
     let long = format!("first line\n{}", "y".repeat(300));
     let id = copy(state.path(), text(&long), 10);
@@ -243,12 +242,12 @@ fn an_image_shows_its_thumbnail_in_the_detail_view() {
     );
     let mut extension = Extension::start(state.path(), Table::new());
     let items = extension.added();
-    let entry = entries(&items)[0];
-    assert_eq!(entry.title, "Image, 800×400");
+    let clip = clips(&items)[0];
+    assert_eq!(clip.title, "Image, 800×400");
     // The thumbnail is the Item's icon too.
-    let thumbnail = PathBuf::from(entry.icon.clone().unwrap());
+    let thumbnail = PathBuf::from(clip.icon.clone().unwrap());
 
-    extension.start_run(&id, "clipboard.entry", "show");
+    extension.start_run(&id, "clipboard.clip", "show");
     let view = extension.pushed();
     assert_eq!(extension.outcome(), Outcome::KeepOpen);
     let ViewContent::Detail { markdown, metadata } = view.content else {
@@ -275,7 +274,7 @@ fn a_text_shows_whole_in_the_detail_view() {
     let mut extension = Extension::start(state.path(), Table::new());
     extension.added();
 
-    extension.start_run(&id, "clipboard.entry", "show");
+    extension.start_run(&id, "clipboard.clip", "show");
     let view = extension.pushed();
     let ViewContent::Detail { markdown, .. } = view.content else {
         panic!("expected a detail View, got {view:?}");
@@ -291,17 +290,14 @@ fn deleting_an_entry_removes_it_for_good() {
     let mut extension = Extension::start(state.path(), Table::new());
     extension.added();
 
-    extension.start_run(&gone, "clipboard.entry", "delete");
+    extension.start_run(&gone, "clipboard.clip", "delete");
     assert_eq!(extension.removed(), [gone]);
     assert_eq!(extension.outcome(), Outcome::KeepOpen);
     drop(extension);
 
     let extension = Extension::start(state.path(), Table::new());
     let items = extension.added();
-    let ids: Vec<&str> = entries(&items)
-        .iter()
-        .map(|item| item.id.as_str())
-        .collect();
+    let ids: Vec<&str> = clips(&items).iter().map(|item| item.id.as_str()).collect();
     assert_eq!(ids, [keep.as_str()]);
 }
 
@@ -350,7 +346,7 @@ fn the_history_item_lists_every_entry_newest_first() {
     assert_eq!(titles(&items), ["newer", "older"]);
 
     // Deleting from the list updates it.
-    extension.start_run(&newer, "clipboard.entry", "delete");
+    extension.start_run(&newer, "clipboard.clip", "delete");
     assert_eq!(extension.removed(), [newer]);
     match extension.recv() {
         FromExtension::UpdateView(View {
@@ -375,10 +371,43 @@ fn entries_past_the_configured_limits_expire_on_start() {
 
     let items = extension.added();
     assert_eq!(
-        titles(&entries(&items).into_iter().cloned().collect::<Vec<_>>()),
+        titles(&clips(&items).into_iter().cloned().collect::<Vec<_>>()),
         ["just now", "an hour old"]
     );
     assert_eq!(History::open(&history_dir(state.path())).len(), 2);
+}
+
+#[test]
+fn a_longer_age_in_the_config_keeps_what_the_default_would_expire() {
+    let state = tempfile::tempdir().unwrap();
+    copy(state.path(), text("eight days old"), 8 * DAY);
+    let mut config = Table::new();
+    config.insert("max_age_days".into(), Value::Integer(30));
+    let mut child = Command::new(env!("CARGO_BIN_EXE_kotodama-clipboard"))
+        .env("XDG_STATE_HOME", state.path())
+        .env_remove("WAYLAND_DISPLAY")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let (stdout, stdin) = (child.stdout.take().unwrap(), child.stdin.take().unwrap());
+    let mut channel = Channel::handshake(stdout, stdin, &Hello::new(&WireFormat::ALL)).unwrap();
+    // A while without its config, which it waits for before expiring
+    // anything by limits it doesn't know yet.
+    thread::sleep(Duration::from_millis(300));
+    channel.send(&ToExtension::Config(config)).unwrap();
+    let first = channel.recv::<FromExtension>().unwrap();
+    let _ = child.kill();
+    let _ = child.wait();
+    match first {
+        Some(FromExtension::AddItems { items }) => {
+            assert_eq!(
+                titles(&clips(&items).into_iter().cloned().collect::<Vec<_>>()),
+                ["eight days old"]
+            )
+        }
+        other => panic!("expected add_items, got {other:?}"),
+    }
 }
 
 #[test]
@@ -387,7 +416,7 @@ fn a_shorter_age_in_a_new_config_expires_entries_at_once() {
     let old = copy(state.path(), text("two days old"), 2 * DAY);
     copy(state.path(), text("just now"), 0);
     let mut extension = Extension::start(state.path(), Table::new());
-    assert_eq!(entries(&extension.added()).len(), 2);
+    assert_eq!(clips(&extension.added()).len(), 2);
 
     let mut config = Table::new();
     config.insert("max_age_days".into(), Value::Integer(1));
@@ -412,7 +441,7 @@ fn copying_without_a_clipboard_says_why() {
 fn an_entry_gone_since_it_was_shown_fails_gently() {
     let state: TempDir = tempfile::tempdir().unwrap();
     let mut extension = Extension::start(state.path(), Table::new());
-    assert!(entries(&extension.added()).is_empty());
+    assert!(clips(&extension.added()).is_empty());
     match extension.run("42", "paste") {
         Outcome::Failed { message } => assert!(message.contains("no longer"), "{message}"),
         other => panic!("expected a failure, got {other:?}"),

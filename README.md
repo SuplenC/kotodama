@@ -156,7 +156,7 @@ Its `manifest.toml` runs `./kotodama-apps`, so a package installs the binary nex
 
 What a password manager copies is never read: an offer carrying the `x-kde-passwordManagerHint` type, which password managers add to mark a copy sensitive, is skipped whole. Entries go after 7 days, or once there are more than 1000, oldest first.
 
-Each entry is an Item of kind `clipboard.entry`, found by the first 60 characters of its text, or titled with an image's size and shown with its thumbnail. Its primary Action, "Paste", pastes it into the window the menu was opened from; "Copy to Clipboard", "Show Details" (the whole text, or the thumbnail, in a detail View), "Delete Entry" and "Clear Clipboard History" follow. The "Clipboard History" Item lists every entry, newest first, and its second Action clears them all, on disk too.
+Each clip is an Item of kind `clipboard.clip`, found by the first 60 characters of its text, or titled with an image's size and shown with its thumbnail. Its primary Action, "Paste", pastes it into the window the menu was opened from; "Copy to Clipboard", "Show Details" (the text, or the thumbnail, in a detail View) and "Delete from History" follow. The "Clipboard History" Item lists every clip, newest first, and its second Action, "Clear Clipboard History", clears them all, on disk too.
 
 ```toml
 [extensions.clipboard]

@@ -289,3 +289,16 @@ fn a_broken_index_starts_an_empty_history_and_drops_the_data() {
             .all(|file| !file.contains("/data/"))
     );
 }
+
+#[test]
+fn reading_the_start_of_a_text_never_splits_a_character() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut history = History::open(dir.path());
+    let id = history
+        .record(text("aéé"), NOW, &Limits::default())
+        .unwrap()
+        .id;
+    // "a" is one byte and each "é" two, so four bytes end inside the second.
+    assert_eq!(history.read_start(id, 4).unwrap(), "aé");
+    assert_eq!(history.read_start(id, 100).unwrap(), "aéé");
+}

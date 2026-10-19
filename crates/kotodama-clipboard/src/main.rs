@@ -1,6 +1,6 @@
 //! The clipboard history Bundled extension: everything copied, kept on disk
 //! so it survives a restart, and offered as Indexed items of kind
-//! `clipboard.entry` that paste it back. A `Clipboard History` Item lists
+//! `clipboard.clip` that paste it back. A `Clipboard History` Item lists
 //! them all, newest first, and clears them. What a password manager marks
 //! sensitive is never kept. See `items.rs` for the config table.
 
@@ -11,7 +11,7 @@ use std::sync::mpsc::{self, RecvTimeoutError};
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use kotodama_clipboard::copied::Copied;
+use kotodama_clipboard::copied::{self, Copied};
 use kotodama_clipboard::history::{Content, History, Limits};
 use kotodama_clipboard::items::{self, CLEAR, COPY, DELETE, DETAIL_VIEW, HISTORY, LIST_VIEW};
 use kotodama_clipboard::wayland::{Change, Clipboard};
@@ -20,14 +20,7 @@ use kotodama_protocol::{
     WireFormat,
 };
 
-/// The text types a copy back to the clipboard offers.
-const TEXT_TYPES: [&str; 5] = [
-    "text/plain;charset=utf-8",
-    "text/plain",
-    "UTF8_STRING",
-    "STRING",
-    "TEXT",
-];
+const GONE: &str = "That clip is no longer in the clipboard history";
 
 enum Event {
     Message(ToExtension),
@@ -188,7 +181,7 @@ impl Extension {
                         .chain(
                             self.history
                                 .entries()
-                                .map(|entry| items::entry_item(&self.history, entry)),
+                                .map(|entry| items::clip_item(&self.history, entry)),
                         )
                         .collect();
                     self.send(&FromExtension::AddItems { items })
@@ -233,7 +226,7 @@ impl Extension {
             self.removed(recorded.removed)?;
         }
         if let Some(entry) = self.history.get(recorded.id) {
-            let item = items::entry_item(&self.history, entry);
+            let item = items::clip_item(&self.history, entry);
             self.send(&FromExtension::AddItems { items: vec![item] })?;
         }
         self.update_list()
@@ -245,7 +238,11 @@ impl Extension {
     }
 
     /// How long until the next entry turns too old.
+    /// `None` until the config is in: the user's limits aren't known yet.
     fn next_expiry(&self) -> Option<Duration> {
+        if !self.configured {
+            return None;
+        }
         let at = self.history.next_expiry(&self.limits)?;
         Some(Duration::from_secs(at.saturating_sub(now())))
     }
@@ -267,7 +264,7 @@ impl Extension {
             .parse::<u64>()
             .ok()
             .and_then(|id| self.history.get(id))
-            .ok_or("That entry is no longer in the clipboard history")?;
+            .ok_or(GONE)?;
         let entry_id = entry.id;
         match action {
             items::PASTE => Ok(Outcome::Paste(self.paste(entry_id)?)),
@@ -278,7 +275,7 @@ impl Extension {
                     .ok_or("Can't reach the clipboard: Kotodama isn't watching it")?;
                 let (mimes, data) = match self.paste(entry_id)? {
                     Paste::Text(text) => (
-                        TEXT_TYPES.iter().map(|&mime| mime.to_owned()).collect(),
+                        copied::TEXT.iter().map(|&mime| mime.to_owned()).collect(),
                         text.into_bytes(),
                     ),
                     Paste::Image { mime, data } => (vec![mime], data.0),
@@ -298,20 +295,17 @@ impl Extension {
                 Ok(Outcome::KeepOpen)
             }
             CLEAR => self.clear(),
-            _ => Err(format!("A clipboard entry has no Action `{action}`")),
+            _ => Err(format!("A clip has no Action `{action}`")),
         }
     }
 
     /// What to paste for an entry, read from disk.
     fn paste(&self, id: u64) -> Result<Paste, String> {
-        let entry = self
-            .history
-            .get(id)
-            .ok_or("That entry is no longer in the clipboard history")?;
+        let entry = self.history.get(id).ok_or(GONE)?;
         let data = self
             .history
             .read(id)
-            .map_err(|err| format!("Couldn't read the entry: {err}"))?;
+            .map_err(|err| format!("Couldn't read the clip: {err}"))?;
         Ok(match &entry.content {
             Content::Text { .. } => Paste::Text(
                 String::from_utf8(data)

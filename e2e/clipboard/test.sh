@@ -87,8 +87,8 @@ press() {
 mark=$(log_lines quickshell.log)
 "$target/debug/kotodama" open --query "image 320"
 wait_for_log quickshell.log "focused: true" "$mark"
-press -M ctrl -k k -m ctrl "actions: Paste, Copy to Clipboard, Show Details, Delete Entry, Clear Clipboard History"
-press -k Down -k Down -k Return "view: detail Clipboard Entry"
+press -M ctrl -k k -m ctrl "actions: Paste, Copy to Clipboard, Show Details, Delete from History"
+press -k Down -k Down -k Return "view: detail Copied Image"
 expect_screen detail.png
 press -k Escape "view: search"
 press -k Escape "visible: false"

@@ -14,7 +14,7 @@
 //! runs the same on a made-up clock in tests.
 
 use std::fs::{self, DirBuilder, File, OpenOptions};
-use std::io::{self, Write};
+use std::io::{self, Read, Write};
 use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt};
 use std::path::{Path, PathBuf};
 
@@ -210,7 +210,11 @@ impl History {
             }
         };
         let removed = self.drop_expired(now, limits);
-        self.save()?;
+        // What was copied is kept on disk and in memory either way, so the
+        // Extension still shows it; a stale index only loses it on restart.
+        if let Err(err) = self.save() {
+            eprintln!("kotodama-clipboard: couldn't save the history index: {err}");
+        }
         Ok(Recorded { id, removed })
     }
 
@@ -263,6 +267,25 @@ impl History {
     /// What was copied, byte for byte.
     pub fn read(&self, id: u64) -> io::Result<Vec<u8>> {
         fs::read(self.data_path(id))
+    }
+
+    /// At most the first `max` bytes of a text entry, cut at a character.
+    pub fn read_start(&self, id: u64, max: usize) -> io::Result<String> {
+        let mut data = Vec::with_capacity(max);
+        File::open(self.data_path(id))?
+            .take(max as u64)
+            .read_to_end(&mut data)?;
+        Ok(match String::from_utf8(data) {
+            Ok(text) => text,
+            // A character the cut split in two is left out.
+            Err(err) if err.utf8_error().error_len().is_none() => {
+                let valid = err.utf8_error().valid_up_to();
+                let mut data = err.into_bytes();
+                data.truncate(valid);
+                String::from_utf8(data).unwrap_or_default()
+            }
+            Err(err) => String::from_utf8_lossy(err.as_bytes()).into_owned(),
+        })
     }
 
     /// Where an image entry's thumbnail is, a PNG.
