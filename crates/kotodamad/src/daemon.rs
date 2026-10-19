@@ -18,13 +18,14 @@ use kotodama_protocol::{
     ToExtension, ToFrontEnd,
 };
 use nucleo_matcher::pattern::{CaseMatching, Normalization, Pattern};
-use nucleo_matcher::{Config, Matcher, Utf32Str, Utf32String};
+use nucleo_matcher::{Config, Matcher, Utf32Str};
 
 use crate::config::extension_table;
 use crate::discovery::Found;
-use crate::history::{History, Picks, Store, query_key};
-use crate::index::{Haystack, Index, Slot};
+use crate::history::{History, Picks, ResultKey, Store, query_key};
+use crate::index::{Index, Slot};
 use crate::keywords::{self, Keywords};
+use crate::rank::{self, Haystack, Matched, Tier, Tiers};
 
 /// The name the Daemon's own Results go by: Quicklinks and the Action that
 /// clears the History. No Extension may take it.
@@ -116,9 +117,10 @@ pub const MAX_LIVE_RESULTS: usize = 500;
 /// How long an Extension or Front end may take to say hello before it counts as
 /// hung.
 pub const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(5);
-/// The most a Result's Frecency can add to its score, as a share of a perfect
-/// match's. The boost approaches it as picks pile up: one pick gives half of it.
-const FRECENCY_WEIGHT: f64 = 0.5;
+/// A Result whose Frecency reaches this, about a week of daily use, ranks one
+/// tier above how well it matches: something used daily whose title starts
+/// with the query can beat an exact title, but a few picks can't.
+const LIFT_AT: f64 = 5.0;
 
 enum State {
     /// Started; waiting for the handshake until `deadline`.
@@ -231,33 +233,65 @@ enum Source {
     Own(u32),
 }
 
-/// Where a Result ranks before its score is looked at, lowest first.
+/// Where a Result ranks before how well it matches is looked at, lowest
+/// first.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
-enum Priority {
+enum Class {
     #[default]
-    Score,
+    Rest,
     /// The query's Learned choice.
     Learned,
-    /// What the query names by an Alias or a Quicklink's keyword.
-    Keyword,
+    /// What the query names: by an Alias, or by an exact match the Learned
+    /// choice wasn't picked over.
+    Named,
 }
 
 #[derive(Clone, Copy)]
 struct Candidate {
     source: Source,
-    score: u32,
     answer: bool,
-    priority: Priority,
+    class: Class,
+    /// How well it matches, as [`Tier::coarse`] gives it, after Frecency
+    /// lifted it.
+    tier: u8,
+    frecency: f64,
+    /// How well it matches, to break a tie: initials beat a word start.
+    fine: Tier,
+    /// Named by an Alias rather than by its own title or keyword, which wins
+    /// a tie.
+    by_alias: bool,
+    /// nucleo's score.
+    score: u32,
     /// The title's length in characters: a shorter title wins a tie.
     len: u32,
 }
 
 impl Candidate {
+    fn new(source: Source, tier: Tier, score: u32, len: u32) -> Self {
+        Candidate {
+            source,
+            answer: false,
+            class: Class::Rest,
+            tier: tier.coarse(),
+            frecency: 0.0,
+            fine: tier,
+            by_alias: false,
+            score,
+            len,
+        }
+    }
+
+    /// Answers first, then by class, how well it matches, Frecency, and
+    /// nucleo's score.
     fn rank(&self, other: &Candidate) -> std::cmp::Ordering {
         other
             .answer
             .cmp(&self.answer)
-            .then(other.priority.cmp(&self.priority))
+            .then(other.class.cmp(&self.class))
+            .then(other.tier.cmp(&self.tier))
+            .then(other.frecency.total_cmp(&self.frecency))
+            .then(other.fine.cmp(&self.fine))
+            .then(self.by_alias.cmp(&other.by_alias))
             .then(other.score.cmp(&self.score))
             .then(self.len.cmp(&other.len))
             .then(self.source.cmp(&other.source))
@@ -294,6 +328,8 @@ struct Session {
     query: String,
     /// The query as Learned choices and Aliases are kept under.
     key: String,
+    /// The query as tiers are worked out from.
+    folded: rank::Query,
     pattern: Pattern,
     /// What a perfect match of the query scores, which Live query scores are
     /// scaled to.
@@ -307,10 +343,15 @@ struct Session {
     narrowed: Vec<Slot>,
     narrowed_query: String,
     narrowed_version: u64,
+    /// Whether `narrowed_query` searched subtitles.
+    narrowed_subtitles: bool,
     /// By Extension.
     live: Vec<Live>,
     /// The Results last sent, in order, and whether each is an answer.
     shown: Vec<(Source, bool)>,
+    /// The Result an Alias named, and the Alias: picking it counts for the
+    /// Alias alone.
+    via_alias: Option<(Source, String)>,
     update: Update,
 }
 
@@ -324,7 +365,10 @@ impl Session {
 
     fn can_narrow(&self, version: u64) -> bool {
         const SYNTAX: &[char] = &['^', '$', '!', '\'', '\\'];
+        // Subtitles are searched from a few letters on, so the matches of a
+        // query too short for them may lack some of this one's.
         !self.narrowed_query.is_empty()
+            && self.narrowed_subtitles == self.folded.searches_subtitles()
             && self.narrowed_version == version
             && self.query.starts_with(&self.narrowed_query)
             && !self.query.contains(SYNTAX)
@@ -374,9 +418,19 @@ fn clear_history() -> Item {
     }
 }
 
-/// How much a Frecency adds to a score, where `max_score` is a perfect match's.
-fn boost(max_score: u32, frecency: f64) -> u32 {
-    (f64::from(max_score) * FRECENCY_WEIGHT * frecency / (frecency + 1.0)).round() as u32
+/// A Result the query names by a keyword.
+struct Keyword {
+    source: Source,
+    /// Named by an Alias, which always goes first, rather than by a keyword of
+    /// its own.
+    alias: bool,
+    /// The Alias's own Frecency, which ranks it instead of its Result's.
+    frecency: Option<f64>,
+}
+
+/// The id an Alias's picks are kept under, for the Extension [`OWN`].
+fn alias_id(keyword: &str) -> String {
+    format!("alias:{keyword}")
 }
 
 /// What was typed after `keyword`, if the query starts with it. `keyword` is
@@ -428,7 +482,8 @@ pub struct Daemon<L, D, S> {
     /// versions in `frecent_versions`.
     frecent: Vec<(Slot, Picks)>,
     frecent_versions: Option<(u64, u64)>,
-    scored: Vec<(Slot, u32)>,
+    scored: Vec<(Slot, u32, Matched)>,
+    tiers: Tiers,
     highlights: Vec<u32>,
 }
 
@@ -475,6 +530,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             frecent: Vec::new(),
             frecent_versions: None,
             scored: Vec::new(),
+            tiers: Tiers::default(),
             highlights: Vec::new(),
         };
         daemon.load_keywords();
@@ -892,14 +948,17 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             hung: Cell::new(false),
             query: String::new(),
             key: String::new(),
+            folded: rank::Query::default(),
             pattern: Pattern::default(),
             max_score: 0,
             rows: DEFAULT_ROWS,
             narrowed: Vec::new(),
             narrowed_query: String::new(),
             narrowed_version: 0,
+            narrowed_subtitles: false,
             live: self.extensions.iter().map(|_| Live::default()).collect(),
             shown: Vec::new(),
+            via_alias: None,
             update: Update::None,
         };
         session.send(ToFrontEnd::Status {
@@ -1043,7 +1102,13 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
         let Some(session) = self.sessions.get_mut(&id) else {
             return;
         };
-        session.pattern = Pattern::parse(&text, CaseMatching::Smart, Normalization::Smart);
+        // Folded like the haystacks, so neither case nor accents matter.
+        session.pattern = Pattern::parse(
+            &rank::fold_text(&text),
+            CaseMatching::Ignore,
+            Normalization::Never,
+        );
+        session.folded = rank::Query::new(&text);
         session.max_score = session
             .pattern
             .atoms
@@ -1127,8 +1192,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             arguments,
         });
         self.invocations.insert(invocation, (front_end, target));
-        let query = session.key.clone();
-        self.picked(&result.extension, &result.id, &query, now);
+        self.picked(front_end, result, now);
         Ok(())
     }
 
@@ -1160,9 +1224,8 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
                     None => after_keyword(&session.query, &quicklink.keyword).unwrap_or(""),
                 };
                 self.desktop.launch(quicklink.command(query));
-                let query = session.key.clone();
                 session.send(ToFrontEnd::Close);
-                self.picked(OWN, &result.id, &query, now);
+                self.picked(front_end, result, now);
             }
             OwnAction::ClearHistory => {
                 session.send(ToFrontEnd::Close);
@@ -1173,10 +1236,39 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
         Ok(())
     }
 
-    /// Records that the user picked a Result while `query` was typed.
-    fn picked(&mut self, extension: &str, id: &str, query: &str, now: Instant) {
+    /// Records that the user picked a Result in a Front end's session. A
+    /// Result an Alias named counts for the Alias alone.
+    fn picked(&mut self, front_end: FrontEndId, result: &ResultRef, now: Instant) {
         let at = self.wall(now);
-        self.history.pick(extension, id, query, at);
+        let Some(session) = self.sessions.get(&front_end) else {
+            return;
+        };
+        let source = self.source_of(session, &result.extension, &result.id);
+        if let Some((_, alias)) = session
+            .via_alias
+            .as_ref()
+            .filter(|(named, _)| Some(*named) == source)
+        {
+            self.history.touch(OWN, &alias_id(alias), at);
+        } else {
+            // What ranked above it, nearest first: what it was picked over.
+            let above: Vec<ResultKey> = session
+                .shown
+                .iter()
+                .position(|(shown, _)| Some(*shown) == source)
+                .map(|at| {
+                    session.shown[..at]
+                        .iter()
+                        .rev()
+                        .filter_map(|&(shown, _)| self.item(session, shown))
+                        .map(|(extension, item)| (extension.to_owned(), item.id.clone()))
+                        .collect()
+                })
+                .unwrap_or_default();
+            let query = session.key.clone();
+            self.history
+                .pick(&result.extension, &result.id, &query, &above, at);
+        }
         self.store.save(&self.history);
     }
 
@@ -1333,55 +1425,68 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             self.index.search(
                 &session.pattern,
                 &mut self.matcher,
+                session.folded.filter(),
                 within,
                 &mut self.scored,
             );
             session.narrowed.clear();
             session
                 .narrowed
-                .extend(self.scored.iter().map(|&(slot, _)| slot));
+                .extend(self.scored.iter().map(|&(slot, ..)| slot));
             session.narrowed_query.clone_from(&session.query);
             session.narrowed_version = self.index.version();
-            candidates.extend(self.scored.iter().map(|&(slot, score)| {
-                Candidate {
-                    source: Source::Indexed(slot),
-                    score,
-                    answer: false,
-                    priority: Priority::Score,
-                    len: self
-                        .index
-                        .entry(slot)
-                        .map_or(0, |entry| entry.haystack.title.len() as u32),
+            session.narrowed_subtitles = session.folded.searches_subtitles();
+            for &(slot, score, matched) in &self.scored {
+                if let Some(entry) = self.index.entry(slot)
+                    && let Some(tier) =
+                        self.tiers
+                            .item(&entry.haystack, &entry.item, &session.folded, matched)
+                {
+                    let len = entry.haystack.title.len() as u32;
+                    candidates.push(Candidate::new(Source::Indexed(slot), tier, score, len));
                 }
-            }));
+            }
         }
         // Up to here the candidates are in slot order.
         let indexed = candidates.len();
         for (ext, live) in session.live.iter().enumerate() {
+            if live.results.is_empty() {
+                continue;
+            }
+            // Matched against what the Extension was asked, without its
+            // routing prefix. Its own idea of what matches stands, at worst as
+            // letters scattered.
+            let asked = rank::Query::new(&live.query);
             for (n, result) in live.results.iter().enumerate() {
-                candidates.push(Candidate {
-                    source: Source::Live(ExtensionId(ext), n as u32),
-                    score: (result.score.get() * session.max_score as f32).round() as u32,
-                    answer: result.answer,
-                    priority: Priority::Score,
-                    len: result.item.title.chars().count() as u32,
-                });
+                let haystack = Haystack::new(&result.item);
+                let tier = self
+                    .tiers
+                    .item(&haystack, &result.item, &asked, Matched::ALL)
+                    .unwrap_or(Tier::Scattered);
+                let score = (result.score.get() * session.max_score as f32).round() as u32;
+                let len = result.item.title.chars().count() as u32;
+                let mut candidate =
+                    Candidate::new(Source::Live(ExtensionId(ext), n as u32), tier, score, len);
+                candidate.answer = result.answer;
+                candidates.push(candidate);
             }
         }
         if !session.query.is_empty() {
             for (n, own) in self.own.iter().enumerate() {
-                if let Some(score) = own.haystack.score(&session.pattern, &mut self.matcher) {
-                    candidates.push(Candidate {
-                        source: Source::Own(n as u32),
-                        score,
-                        answer: false,
-                        priority: Priority::Score,
-                        len: own.haystack.title.len() as u32,
-                    });
+                let filter = session.folded.filter();
+                if let Some((score, matched)) =
+                    own.haystack
+                        .score(&session.pattern, &mut self.matcher, filter)
+                    && let Some(tier) =
+                        self.tiers
+                            .item(&own.haystack, &own.item, &session.folded, matched)
+                {
+                    let len = own.haystack.title.len() as u32;
+                    candidates.push(Candidate::new(Source::Own(n as u32), tier, score, len));
                 }
             }
         }
-        let primary = self.learn(&session, &mut candidates, indexed, now);
+        let primary = self.learn(&mut session, &mut candidates, indexed, now);
 
         let mut answers: Vec<Candidate> = Vec::new();
         candidates.retain(|candidate| {
@@ -1429,18 +1534,21 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
         self.sessions.insert(id, session);
     }
 
-    /// Applies what the Daemon learned from the user to the candidates:
-    /// Frecency adds to scores, and the Learned choice, an Alias's Result and
-    /// a typed Quicklink keyword go first. The candidates before `indexed`
-    /// must be the Indexed items, in slot order. Returns the Action an Alias
-    /// makes primary, with the Result it is for.
+    /// Applies what the Daemon learned from the user, and the user's
+    /// keywords, to the candidates. Frecency breaks ties within a tier and,
+    /// from [`LIFT_AT`], lifts a Result a tier. What the query names by an
+    /// Alias goes first, with exact matches the Learned choice wasn't picked
+    /// over, then the Learned choice. The candidates before
+    /// `indexed` must be the Indexed items, in slot order. Returns the Action
+    /// an Alias makes primary, with the Result it is for.
     fn learn(
         &mut self,
-        session: &Session,
+        session: &mut Session,
         candidates: &mut Vec<Candidate>,
         indexed: usize,
         now: Instant,
     ) -> Option<(Source, String)> {
+        session.via_alias = None;
         if session.key.is_empty() {
             return None;
         }
@@ -1448,56 +1556,143 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
         if !self.history.is_empty() {
             self.cache_frecent();
             for &(slot, picks) in &self.frecent {
-                let frecency = picks.frecency(at);
-                if frecency > 0.0
-                    && let Ok(n) = candidates[..indexed]
-                        .binary_search_by_key(&Source::Indexed(slot), |c| c.source)
+                if let Ok(n) =
+                    candidates[..indexed].binary_search_by_key(&Source::Indexed(slot), |c| c.source)
                 {
-                    candidates[n].score += boost(session.max_score, frecency);
+                    candidates[n].frecency = picks.frecency(at);
                 }
             }
             for candidate in &mut candidates[indexed..] {
                 if let Some((extension, item)) = self.item(session, candidate.source) {
-                    let frecency = self.history.frecency(extension, &item.id, at);
-                    candidate.score += boost(session.max_score, frecency);
+                    candidate.frecency = self.history.frecency(extension, &item.id, at);
                 }
             }
-            if let Some((extension, id)) = self.history.learned(&session.key)
-                && let Some(source) = self.source_of(session, extension, id)
-                && let Some(candidate) = candidates.iter_mut().find(|c| c.source == source)
-            {
-                candidate.priority = Priority::Learned;
+            for candidate in candidates.iter_mut() {
+                if candidate.frecency >= LIFT_AT {
+                    candidate.tier = rank::lift(candidate.tier);
+                }
             }
         }
 
-        let mut named = Vec::new();
+        // What the query names: an Alias, typed alone or before an Argument,
+        // goes first. A Quicklink's keyword or an Item's own keyword counts as
+        // an exact match, which a Learned choice can beat.
+        let first = session.key.split(' ').next().unwrap_or_default();
+        let mut named: Vec<Keyword> = Vec::new();
         let mut primary = None;
-        if let Some(alias) = self.keywords.aliases.get(&session.key)
+        let alias = self
+            .keywords
+            .aliases
+            .get_key_value(session.key.as_str())
+            .or_else(|| self.keywords.aliases.get_key_value(first));
+        if let Some((keyword, alias)) = alias
             && let Some(source) = self.source_of(session, &alias.extension, &alias.item)
         {
-            named.push(source);
+            named.push(Keyword {
+                source,
+                alias: true,
+                frecency: Some(self.history.frecency(OWN, &alias_id(keyword), at)),
+            });
             primary = alias.action.clone().map(|action| (source, action));
+            session.via_alias = Some((source, keyword.clone()));
         }
-        if let Some(n) = self.keywords.quicklinks.iter().position(|quicklink| {
-            after_keyword(&session.key, &quicklink.keyword)
-                .is_some_and(|rest| rest.is_empty() || quicklink.takes_query())
-        }) {
-            named.push(Source::Own(n as u32));
+        if let Some(n) = self
+            .keywords
+            .quicklinks
+            .iter()
+            .position(|quicklink| quicklink.keyword == first)
+        {
+            named.push(Keyword {
+                source: Source::Own(n as u32),
+                alias: false,
+                frecency: None,
+            });
         }
-        for source in named {
-            match candidates.iter_mut().find(|c| c.source == source) {
-                Some(candidate) => candidate.priority = Priority::Keyword,
+        for &slot in self.index.keyed(first) {
+            named.push(Keyword {
+                source: Source::Indexed(slot),
+                alias: false,
+                frecency: None,
+            });
+        }
+        for Keyword {
+            source,
+            alias,
+            frecency,
+        } in named
+        {
+            let at_n = match candidates.iter().position(|c| c.source == source) {
+                Some(n) => n,
                 None => {
-                    if let Some((_, item)) = self.item(session, source) {
-                        candidates.push(Candidate {
-                            source,
-                            score: session.max_score,
-                            answer: false,
-                            priority: Priority::Keyword,
-                            len: item.title.chars().count() as u32,
-                        });
-                    }
+                    let Some((extension, item)) = self.item(session, source) else {
+                        continue;
+                    };
+                    let mut candidate = Candidate::new(
+                        source,
+                        Tier::Exact,
+                        session.max_score,
+                        item.title.chars().count() as u32,
+                    );
+                    candidate.frecency = self.history.frecency(extension, &item.id, at);
+                    candidates.push(candidate);
+                    candidates.len() - 1
                 }
+            };
+            let candidate = &mut candidates[at_n];
+            if alias {
+                candidate.class = Class::Named;
+                candidate.by_alias = true;
+            }
+            candidate.tier = Tier::Exact.coarse();
+            candidate.fine = Tier::Exact;
+            if let Some(frecency) = frecency {
+                candidate.frecency = frecency;
+            }
+        }
+
+        // The strongest Learned choice that applies and is among the
+        // candidates.
+        let choices = self.history.learned(&session.key, at);
+        let mut passed_over = None;
+        for choice in &choices {
+            if let Some(source) = self.source_of(session, choice.extension, choice.id)
+                && let Some(candidate) = candidates.iter_mut().find(|c| c.source == source)
+            {
+                if candidate.class == Class::Rest {
+                    // One that matches exactly, or is used enough to rank as
+                    // if it did, goes with the exact matches.
+                    candidate.class = if candidate.tier == Tier::Exact.coarse() {
+                        Class::Named
+                    } else {
+                        Class::Learned
+                    };
+                }
+                passed_over = Some(choice.passed_over);
+                break;
+            }
+        }
+        // Exact matches go first, unless the Learned choice was picked over
+        // them. With a Learned choice, only a true exact match does: one that
+        // Frecency lifted to the tier doesn't.
+        for candidate in candidates.iter_mut() {
+            if candidate.class != Class::Rest || candidate.tier != Tier::Exact.coarse() {
+                continue;
+            }
+            let named = match passed_over {
+                None => true,
+                Some(passed_over) => {
+                    candidate.fine == Tier::Exact
+                        && !self
+                            .item(session, candidate.source)
+                            .is_some_and(|(extension, item)| {
+                                passed_over
+                                    .iter()
+                                    .any(|(e, id)| e == extension && *id == item.id)
+                            })
+                }
+            };
+            if named {
+                candidate.class = Class::Named;
             }
         }
         primary
@@ -1580,7 +1775,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             }
             Source::Live(ext, n) => {
                 let item = &session.live[ext.0].results.get(n as usize)?.item;
-                live_title = Utf32String::from(item.title.as_str());
+                live_title = rank::folded(&item.title);
                 (Some(ext), item, live_title.slice(..))
             }
             Source::Own(n) => {
@@ -1600,6 +1795,18 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             self.highlights.clear();
         }
         let mut item = item.clone();
+        if let Source::Own(n) = source
+            && let Some(OwnAction::Quicklink(quicklink)) =
+                self.own.get(n as usize).map(|own| own.does)
+        {
+            let quicklink = &self.keywords.quicklinks[quicklink];
+            if quicklink.takes_query()
+                && let Some(query) = after_keyword(&session.query, &quicklink.keyword)
+                && !query.is_empty()
+            {
+                item.title = format!("{} for “{query}”", item.title);
+            }
+        }
         if let Some(at) = primary.and_then(|id| item.actions.iter().position(|a| a.id == id)) {
             item.actions[..=at].rotate_right(1);
         }

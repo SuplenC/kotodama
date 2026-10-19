@@ -14,13 +14,18 @@ use serde::{Deserialize, Serialize};
 
 use crate::host::spawn;
 
-/// How long a pick takes to count half as much.
+/// How long a pick takes to count half as much. A pick never counts for
+/// nothing: it only gets weaker.
 pub const HALF_LIFE_SECS: f64 = 14.0 * 24.0 * 60.0 * 60.0;
-/// A Result whose Frecency has decayed below this is forgotten.
-const FORGOTTEN: f64 = 0.1;
 /// How many picks of one Result for one query make it that query's Learned
 /// choice.
 pub const LEARN_AFTER: u8 = 3;
+/// How many picks of another Result, since the user last picked the Learned
+/// choice, replace it.
+pub const TAKE_OVER_AFTER: u8 = 2;
+/// How many of the Results ranked above a Learned choice when it was picked
+/// are remembered as passed over.
+const PASSED_OVER: usize = 8;
 /// How many Results per query are counted towards becoming its Learned choice.
 const CONTENDERS: usize = 4;
 /// The most Results and queries kept; past these the least recent go.
@@ -56,18 +61,41 @@ impl Picks {
     /// The Frecency at time `at`: every pick counts 1 when made, and half as
     /// much every [`HALF_LIFE_SECS`] after.
     pub fn frecency(&self, at: u64) -> f64 {
-        let elapsed = at.saturating_sub(self.at) as f64;
-        let score = self.score * 0.5f64.powf(elapsed / HALF_LIFE_SECS);
-        if score < FORGOTTEN { 0.0 } else { score }
+        decay(self.score, self.at, at)
     }
+}
+
+/// `score` as of `then`, decayed to `at`.
+fn decay(score: f64, then: u64, at: u64) -> f64 {
+    let elapsed = at.saturating_sub(then) as f64;
+    score * 0.5f64.powf(elapsed / HALF_LIFE_SECS)
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 struct Learned {
     choice: Option<ResultKey>,
-    /// Picks of other Results since the choice was made, most recent first.
+    /// The decayed number of picks of the choice, as of `at`.
+    #[serde(default)]
+    strength: f64,
+    /// The Results ranked above the choice when it was picked, most recent
+    /// first. The choice ranks above these even when they match exactly.
+    #[serde(default)]
+    passed_over: Vec<ResultKey>,
+    /// Picks of other Results since the choice was last picked, most recent
+    /// first.
     contenders: Vec<(ResultKey, u8)>,
     at: u64,
+}
+
+/// A Learned choice that applies to a query.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Choice<'a> {
+    pub extension: &'a str,
+    pub id: &'a str,
+    /// How many picks it was learned from, decayed.
+    pub strength: f64,
+    /// What it was picked over.
+    pub passed_over: &'a [ResultKey],
 }
 
 /// The form of a query that Learned choices are kept under: trimmed,
@@ -92,10 +120,67 @@ impl History {
         self.picks.is_empty() && self.learned.is_empty()
     }
 
-    /// Records that the user picked a Result while `query` was typed. A Result
-    /// picked [`LEARN_AFTER`] times for one query becomes its Learned choice,
-    /// and another picked as often since replaces it.
-    pub fn pick(&mut self, extension: &str, id: &str, query: &str, at: u64) {
+    /// Records that the user picked a Result while `query` was typed, with
+    /// `above` the Results ranked above it, nearest first. A Result picked
+    /// [`LEARN_AFTER`] times for one query becomes its Learned choice, and
+    /// one picked [`TAKE_OVER_AFTER`] times since the choice was last picked
+    /// replaces it.
+    pub fn pick(&mut self, extension: &str, id: &str, query: &str, above: &[ResultKey], at: u64) {
+        self.bump(extension, id, at);
+
+        let key = query_key(query);
+        if !key.is_empty() {
+            let learned = self.learned.entry(key).or_insert_with(|| Learned {
+                choice: None,
+                strength: 0.0,
+                passed_over: Vec::new(),
+                contenders: Vec::new(),
+                at,
+            });
+            let picked = |key: &ResultKey| key.0 == extension && key.1 == id;
+            if learned.choice.as_ref().is_some_and(picked) {
+                learned.strength = decay(learned.strength, learned.at, at) + 1.0;
+                learned.contenders.clear();
+                for key in above.iter().rev() {
+                    learned.passed_over.retain(|old| old != key);
+                    learned.passed_over.insert(0, key.clone());
+                }
+                learned.passed_over.truncate(PASSED_OVER);
+            } else {
+                let count = match learned.contenders.iter().position(|(key, _)| picked(key)) {
+                    Some(n) => learned.contenders.remove(n).1 + 1,
+                    None => 1,
+                };
+                let needed = if learned.choice.is_some() {
+                    TAKE_OVER_AFTER
+                } else {
+                    LEARN_AFTER
+                };
+                if count >= needed {
+                    learned.choice = Some((extension.to_owned(), id.to_owned()));
+                    learned.strength = f64::from(count);
+                    learned.passed_over = above.iter().take(PASSED_OVER).cloned().collect();
+                    learned.contenders.clear();
+                } else {
+                    learned.strength = decay(learned.strength, learned.at, at);
+                    learned.contenders.truncate(CONTENDERS - 1);
+                    learned
+                        .contenders
+                        .insert(0, ((extension.to_owned(), id.to_owned()), count));
+                }
+            }
+            learned.at = at;
+        }
+        self.trim();
+    }
+
+    /// Records a pick for Frecency alone, with nothing learned for the query.
+    pub fn touch(&mut self, extension: &str, id: &str, at: u64) {
+        self.bump(extension, id, at);
+        self.trim();
+    }
+
+    fn bump(&mut self, extension: &str, id: &str, at: u64) {
         self.version += 1;
         let picks = self
             .picks
@@ -107,33 +192,6 @@ impl History {
             score: picks.frecency(at) + 1.0,
             at,
         };
-
-        let key = query_key(query);
-        if !key.is_empty() {
-            let learned = self.learned.entry(key).or_insert_with(|| Learned {
-                choice: None,
-                contenders: Vec::new(),
-                at,
-            });
-            learned.at = at;
-            let picked = |key: &ResultKey| key.0 == extension && key.1 == id;
-            if !learned.choice.as_ref().is_some_and(picked) {
-                let count = match learned.contenders.iter().position(|(key, _)| picked(key)) {
-                    Some(n) => learned.contenders.remove(n).1 + 1,
-                    None => 1,
-                };
-                if count >= LEARN_AFTER {
-                    learned.choice = Some((extension.to_owned(), id.to_owned()));
-                    learned.contenders.clear();
-                } else {
-                    learned.contenders.truncate(CONTENDERS - 1);
-                    learned
-                        .contenders
-                        .insert(0, ((extension.to_owned(), id.to_owned()), count));
-                }
-            }
-        }
-        self.trim(at);
     }
 
     /// One Result's Frecency at time `at`; 0 if it was never picked.
@@ -144,7 +202,7 @@ impl History {
             .map_or(0.0, |picks| picks.frecency(at))
     }
 
-    /// Every Result ever picked and not yet forgotten.
+    /// Every Result picked and kept.
     pub fn picked(&self) -> impl Iterator<Item = (&str, &str, Picks)> {
         self.picks.iter().flat_map(|(extension, ids)| {
             ids.iter()
@@ -152,10 +210,35 @@ impl History {
         })
     }
 
-    /// The Learned choice for a query given as [`query_key`] gives it.
-    pub fn learned(&self, key: &str) -> Option<(&str, &str)> {
-        let (extension, id) = self.learned.get(key)?.choice.as_ref()?;
-        Some((extension, id))
+    /// The Learned choices that apply to a query, given as [`query_key`]
+    /// gives it: those learned for it, for a query it starts with, or for one
+    /// that starts with it. The strongest come first, and of two as strong,
+    /// the one learned for the longer query.
+    pub fn learned(&self, key: &str, at: u64) -> Vec<Choice<'_>> {
+        let mut choices: Vec<(usize, Choice)> = self
+            .learned
+            .iter()
+            .filter(|(learned_for, _)| {
+                !key.is_empty()
+                    && (learned_for.starts_with(key) || key.starts_with(learned_for.as_str()))
+            })
+            .filter_map(|(learned_for, learned)| {
+                let (extension, id) = learned.choice.as_ref()?;
+                Some((
+                    learned_for.len(),
+                    Choice {
+                        extension,
+                        id,
+                        strength: decay(learned.strength, learned.at, at),
+                        passed_over: &learned.passed_over,
+                    },
+                ))
+            })
+            .collect();
+        choices.sort_by(|(a_len, a), (b_len, b)| {
+            b.strength.total_cmp(&a.strength).then(b_len.cmp(a_len))
+        });
+        choices.into_iter().map(|(_, choice)| choice).collect()
     }
 
     /// Forgets everything.
@@ -165,16 +248,11 @@ impl History {
         self.learned.clear();
     }
 
-    /// Forgets Results that have decayed away, then the least recent Results
-    /// and queries past the caps.
-    fn trim(&mut self, at: u64) {
-        for ids in self.picks.values_mut() {
-            ids.retain(|_, picks| picks.frecency(at) > 0.0);
-        }
-        self.picks.retain(|_, ids| !ids.is_empty());
-
+    /// Forgets the weakest Results and the least recent queries past the caps.
+    fn trim(&mut self) {
         let results: usize = self.picks.values().map(HashMap::len).sum();
         if results > MAX_RESULTS {
+            let at = self.picked().map(|(.., p)| p.at).max().unwrap_or(0);
             let mut scores: Vec<f64> = self.picked().map(|(.., p)| p.frecency(at)).collect();
             let cut = results - MAX_RESULTS;
             scores.select_nth_unstable_by(cut, f64::total_cmp);
@@ -182,6 +260,7 @@ impl History {
             for ids in self.picks.values_mut() {
                 ids.retain(|_, picks| picks.frecency(at) >= floor);
             }
+            self.picks.retain(|_, ids| !ids.is_empty());
         }
         if self.learned.len() > MAX_QUERIES {
             let mut times: Vec<u64> = self.learned.values().map(|l| l.at).collect();

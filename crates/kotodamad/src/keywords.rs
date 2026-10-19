@@ -103,7 +103,8 @@ impl Quicklink {
                     vec![Argument {
                         name: "query".into(),
                         placeholder: None,
-                        optional: false,
+                        // The keyword alone opens it with an empty query.
+                        optional: true,
                     }]
                 } else {
                     Vec::new()

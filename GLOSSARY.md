@@ -73,8 +73,12 @@ The score that combines how often and how recently the user picked a Result.
 _Avoid_: Popularity, history score
 
 **Learned choice**:
-A Result the user repeatedly picked for a given query, which that query then ranks first.
+A Result the user repeatedly picked for a given query, which that query, and the queries that extend it or that it extends, then rank first, over the Results it was picked over.
 _Avoid_: Pin, favorite
+
+**Tier**:
+How well a Result matches a query, ranked before anything else: exact, initials or word start, inside a word, or letters scattered.
+_Avoid_: Match quality, bucket
 
 **Alias**:
 A user-defined keyword that stands for an Item or an Action.
