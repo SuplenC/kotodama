@@ -5,8 +5,10 @@ pub mod config;
 pub mod daemon;
 pub mod desktop;
 pub mod discovery;
+pub mod history;
 mod host;
 mod index;
+pub mod keywords;
 mod link;
 pub mod paths;
 mod server;
@@ -58,8 +60,10 @@ pub fn run(paths: &Paths) -> Result<(), String> {
     let mut daemon = Daemon::new(
         found,
         config,
+        history::load(&paths.history),
         host::Processes::new(events_tx),
         desktop::Wayland::new(),
+        history::Disk::new(paths.history.clone()),
         Instant::now(),
     );
     loop {

@@ -8,8 +8,10 @@
 //! until something else takes it.
 
 use std::fmt::Write as _;
+use std::process::{Command, Stdio};
 
 use crate::daemon::{Desktop, Output};
+use crate::host::spawn;
 
 /// The keymap a virtual keyboard uploads to type some text: one key per
 /// distinct character, so the keymap stays small.
@@ -68,6 +70,26 @@ fn keysym(c: char) -> String {
 #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 const CONTROL: u32 = 1 << 2;
 
+/// Starts `command` with no stdio of its own, and reaps it on a thread when it
+/// exits.
+fn launch(command: Vec<String>) {
+    let Some((program, args)) = command.split_first() else {
+        return;
+    };
+    match Command::new(program)
+        .args(args)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+    {
+        Ok(mut child) => spawn(format!("launch-{program}"), move || {
+            let _ = child.wait();
+        }),
+        Err(err) => log::error!("couldn't start {program}: {err}"),
+    }
+}
+
 /// Types and pastes on the Wayland display in `WAYLAND_DISPLAY`.
 #[derive(Default)]
 pub struct Wayland {
@@ -83,6 +105,10 @@ impl Wayland {
 
 #[cfg(target_os = "linux")]
 impl Desktop for Wayland {
+    fn launch(&mut self, command: Vec<String>) {
+        launch(command);
+    }
+
     fn output(&mut self, output: Output) {
         if self.worker.is_none() {
             self.worker = linux::Worker::start()
@@ -99,6 +125,10 @@ impl Desktop for Wayland {
 
 #[cfg(not(target_os = "linux"))]
 impl Desktop for Wayland {
+    fn launch(&mut self, command: Vec<String>) {
+        launch(command);
+    }
+
     fn output(&mut self, _output: Output) {
         log::error!("typing and pasting need Wayland, which only Linux has");
     }
