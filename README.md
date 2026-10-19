@@ -14,6 +14,35 @@ Status: early. The protocol and the Daemon work; the Quickshell Front end is nex
 
 `kotodamad` serves Front ends on `$XDG_RUNTIME_DIR/kotodama.sock`. It finds Extensions in `$XDG_DATA_DIRS/kotodama/extensions/*/manifest.toml` and `~/.config/kotodama/extensions/*/manifest.toml`, starts each one, and restarts it with backoff when it stops or hangs. Extensions installed, changed or removed while it runs are picked up without a restart. Its config is every top-level `*.toml` in `$XDG_CONFIG_DIRS/kotodama/`, then `~/.config/kotodama/`, merged in order and reloaded when a file changes. `KOTODAMA_LOG=debug` logs more.
 
+### Ranking that learns
+
+Every Action the user runs is recorded in `$XDG_STATE_HOME/kotodama/history.json` (by default `~/.local/state/kotodama/`). A picked Result gets a Frecency boost, which halves every 14 days. When the user picks the same Result 3 times in a row for one query, it becomes that query's Learned choice and ranks first; 3 picks in a row of another Result replace it. Both apply to Indexed items and Live query results. The "Clear history" Result empties the history.
+
+Aliases and Quicklinks live in the config directory and reload with it:
+
+```toml
+[aliases]
+ff = { extension = "apps", item = "firefox" }
+# An Alias for one of the Item's own Actions makes that Action primary.
+code = { extension = "projects", item = "kotodama", action = "open-editor" }
+
+[quicklinks.gh]
+title = "GitHub"
+url = "https://github.com"
+
+# `{query}` is what's typed after the keyword, percent-encoded in a URL.
+[quicklinks.yt]
+title = "Search YouTube"
+url = "https://www.youtube.com/results?search_query={query}"
+
+[quicklinks.logs]
+command = ["foot", "journalctl", "--user", "-fu", "{query}"]
+```
+
+Typing an Alias puts its Result first. Typing a Quicklink's keyword, followed by a query if its template takes one, puts the Quicklink first. A URL opens with `xdg-open`, and a command runs without a shell. The Daemon's own Results, the Quicklinks and "Clear history", belong to the reserved Extension name `kotodama`.
+
+### Trying it
+
 To try it from a terminal, run the Daemon, then the bare example Front end:
 
 ```sh
