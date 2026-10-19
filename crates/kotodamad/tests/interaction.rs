@@ -369,6 +369,28 @@ fn a_finished_job_sends_a_desktop_notification_and_is_no_longer_shown() {
 }
 
 #[test]
+fn a_job_whose_extension_stops_fails_and_says_so() {
+    let mut h = Harness::new(vec![plain("tools")]);
+    let tools = h.up(0);
+    let ui = h.front_end();
+    h.send(
+        &tools,
+        FromExtension::JobProgress(job(JobState::Running, 0.5, "Downloading")),
+    );
+
+    h.down(&tools);
+    let failed = jobs_shown(&ui)
+        .pop()
+        .map(|(extension, job)| (extension, job.state));
+    assert_eq!(failed, Some(("tools".to_owned(), JobState::Failed)));
+    assert_eq!(
+        *h.outputs.2.borrow(),
+        [("Installing Go".to_owned(), "tools stopped".to_owned())]
+    );
+    assert_eq!(jobs_shown(&reopened(&mut h)), []);
+}
+
+#[test]
 fn each_argument_takes_a_word_and_the_last_takes_the_rest() {
     let mut h = Harness::new(vec![plain("tools")]);
     let tools = h.up(0);
@@ -423,4 +445,30 @@ fn arguments_the_front_end_gives_win_over_the_typed_ones() {
         arguments_run(&tools),
         [strings(&[("signal", "15"), ("process", "firefox")])]
     );
+}
+
+#[test]
+fn an_empty_argument_from_the_front_end_is_taken_from_the_query() {
+    let mut h = Harness::new(vec![plain("tools")]);
+    let tools = h.up(0);
+    h.add(&tools, vec![go(vec![argument("version", false)])]);
+    let ui = h.front_end();
+    tools.drain();
+
+    h.query(&ui, "go 1.23");
+    h.front_end_sends(
+        &ui,
+        FromFrontEnd::RunAction {
+            result: ResultRef {
+                extension: "tools".into(),
+                id: "go".into(),
+            },
+            action: ActionRef {
+                extension: "tools".into(),
+                id: "open".into(),
+            },
+            arguments: strings(&[("version", "")]),
+        },
+    );
+    assert_eq!(arguments_run(&tools), [strings(&[("version", "1.23")])]);
 }

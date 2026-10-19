@@ -474,6 +474,15 @@ fn after_keyword<'q>(query: &'q str, keyword: &str) -> Option<&'q str> {
         .then(|| rest.trim())
 }
 
+/// What running an Action does when a required Argument is missing.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Missing {
+    /// Asks for it in a form, and runs the Action once it is submitted.
+    AskInForm,
+    /// Fails, as when the form was already submitted without it.
+    Fail,
+}
+
 /// An Action waiting on the form that asks for its missing Arguments.
 struct ArgumentForm {
     /// The Front end the form is shown in.
@@ -757,13 +766,49 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
 
     /// Drops everything one run of an Extension left behind: its Items, Live
     /// results and jobs, and the Actions it was running, which fail.
+    /// Shows every Front end how a job is doing. A running job is kept, so a
+    /// menu opened later shows it; a finished one is announced on the desktop,
+    /// then forgotten.
+    fn job_progress(&mut self, id: ExtensionId, name: &str, job: Job) {
+        self.broadcast(|| ToFrontEnd::JobProgress {
+            extension: name.to_owned(),
+            job: job.clone(),
+        });
+        if job.state == JobState::Running {
+            self.jobs.insert((id, job.id.clone()), job);
+        } else {
+            self.jobs.remove(&(id, job.id.clone()));
+            let body = job.message.unwrap_or_else(|| {
+                match job.state {
+                    JobState::Failed => "Failed",
+                    _ => "Done",
+                }
+                .to_owned()
+            });
+            self.desktop.notify(job.title, body);
+        }
+    }
+
     fn forget_run(&mut self, id: ExtensionId) {
         let name = self.extensions[id.0].name().to_owned();
         if self.index.clear(id) {
             self.mark_late();
         }
         self.live_queries.retain(|_, (_, ext)| *ext != id);
-        self.jobs.retain(|(ext, _), _| *ext != id);
+        // Its running jobs won't finish now.
+        let stopped: Vec<String> = self
+            .jobs
+            .keys()
+            .filter(|(ext, _)| *ext == id)
+            .map(|(_, job)| job.clone())
+            .collect();
+        for job in stopped {
+            if let Some(mut job) = self.jobs.remove(&(id, job)) {
+                job.state = JobState::Failed;
+                job.message = Some(format!("{name} stopped"));
+                self.job_progress(id, &name, job);
+            }
+        }
         // Its Views can't be answered any more.
         let views: Vec<String> = self
             .views
@@ -870,27 +915,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
                     view: view.clone(),
                 });
             }
-            FromExtension::JobProgress(job) => {
-                self.broadcast(|| ToFrontEnd::JobProgress {
-                    extension: name.clone(),
-                    job: job.clone(),
-                });
-                // Kept while it runs, so a menu opened later shows it. A
-                // finished one is announced, then forgotten.
-                if job.state == JobState::Running {
-                    self.jobs.insert((id, job.id.clone()), job);
-                } else {
-                    self.jobs.remove(&(id, job.id.clone()));
-                    let body = job.message.unwrap_or_else(|| {
-                        match job.state {
-                            JobState::Failed => "Failed",
-                            _ => "Done",
-                        }
-                        .to_owned()
-                    });
-                    self.desktop.notify(job.title, body);
-                }
-            }
+            FromExtension::JobProgress(job) => self.job_progress(id, &name, job),
             FromExtension::RequestActionCatalog => {
                 let ext = &mut self.extensions[id.0];
                 if !ext.found.manifest.action_catalog {
@@ -1103,7 +1128,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
                 let run = if result.extension == OWN {
                     self.run_own(id, &result, &action, arguments, now)
                 } else {
-                    self.run_action(id, &result, &action, arguments, true, now)
+                    self.run_action(id, &result, &action, arguments, Missing::AskInForm, now)
                 };
                 self.failed(id, run);
             }
@@ -1120,13 +1145,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             }
             FromFrontEnd::ViewPopped { extension, view } => {
                 if extension == OWN {
-                    if self
-                        .argument_forms
-                        .get(&view)
-                        .is_some_and(|form| form.front_end == id)
-                    {
-                        self.argument_forms.remove(&view);
-                    }
+                    self.take_argument_form(id, &view);
                 } else if let Some(ext) = self.extension_named(&extension) {
                     self.views.remove(&(ext, view.clone()));
                     self.extensions[ext.0].send(ToExtension::ViewPopped { view });
@@ -1153,14 +1172,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
     /// The user filled in the form that asked for an Action's Arguments: the
     /// form goes, and the Action runs.
     fn submit_arguments(&mut self, front_end: FrontEndId, view: &str, values: Table, now: Instant) {
-        if self
-            .argument_forms
-            .get(view)
-            .is_none_or(|form| form.front_end != front_end)
-        {
-            return;
-        }
-        let Some(form) = self.argument_forms.remove(view) else {
+        let Some(form) = self.take_argument_form(front_end, view) else {
             return;
         };
         if let Some(session) = self.sessions.get(&front_end) {
@@ -1171,8 +1183,28 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
         }
         let mut arguments = form.arguments;
         arguments.extend(arguments::submitted(values));
-        let run = self.run_action(front_end, &form.result, &form.action, arguments, false, now);
+        let run = self.run_action(
+            front_end,
+            &form.result,
+            &form.action,
+            arguments,
+            Missing::Fail,
+            now,
+        );
         self.failed(front_end, run);
+    }
+
+    /// Removes the argument form `view`, if `front_end` is the one showing it.
+    fn take_argument_form(&mut self, front_end: FrontEndId, view: &str) -> Option<ArgumentForm> {
+        if self
+            .argument_forms
+            .get(view)
+            .is_some_and(|form| form.front_end == front_end)
+        {
+            self.argument_forms.remove(view)
+        } else {
+            None
+        }
     }
 
     fn extension_named(&self, name: &str) -> Option<ExtensionId> {
@@ -1302,7 +1334,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
         result: &ResultRef,
         action: &ActionRef,
         mut arguments: BTreeMap<String, String>,
-        ask: bool,
+        missing: Missing,
         now: Instant,
     ) -> Result<(), String> {
         let gone = || "that Result is gone".to_owned();
@@ -1352,9 +1384,9 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
         {
             arguments::fill(&wanted.arguments, typed, &mut arguments);
         }
-        if let Some(missing) = arguments::missing(&wanted.arguments, &arguments) {
-            if !ask {
-                return Err(format!("`{}` needs {}", wanted.title, missing.name));
+        if let Some(absent) = arguments::missing(&wanted.arguments, &arguments) {
+            if missing == Missing::Fail {
+                return Err(format!("`{}` needs {}", wanted.title, absent.name));
             }
             let id = format!("arguments-{}", self.next_id);
             self.next_id += 1;

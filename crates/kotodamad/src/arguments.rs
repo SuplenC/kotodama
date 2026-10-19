@@ -5,13 +5,14 @@ use std::collections::BTreeMap;
 
 use kotodama_protocol::{Argument, FormField, FormInput, Table, Value, View, ViewContent};
 
-/// Fills the Arguments `wanted` that `given` lacks from `typed`, the text after
-/// the keyword: one word each, in order, except the last, which takes the rest.
+/// Fills the Arguments `wanted` that `given` lacks, or has empty, from
+/// `typed`, the text after the keyword: one word each, in order, except the
+/// last, which takes the rest.
 pub fn fill(wanted: &[Argument], typed: &str, given: &mut BTreeMap<String, String>) {
     let mut rest = typed.trim();
     let missing: Vec<&Argument> = wanted
         .iter()
-        .filter(|argument| !given.contains_key(&argument.name))
+        .filter(|argument| given.get(&argument.name).is_none_or(String::is_empty))
         .collect();
     for (n, argument) in missing.iter().enumerate() {
         if rest.is_empty() {
