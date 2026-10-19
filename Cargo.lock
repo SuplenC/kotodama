@@ -532,6 +532,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "kotodama-apps"
+version = "0.1.0"
+dependencies = [
+ "kotodama-protocol",
+ "libc",
+ "notify",
+ "tempfile",
+]
+
+[[package]]
 name = "kotodama-protocol"
 version = "0.1.0"
 dependencies = [

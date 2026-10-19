@@ -1,0 +1,595 @@
+//! Drives the apps Extension the way the Daemon does: over its stdio, with its
+//! XDG data directories pointed at a temporary directory.
+
+use std::collections::BTreeMap;
+use std::fs;
+use std::path::{Path, PathBuf};
+use std::process::{Child, ChildStdin, Command, Stdio};
+use std::sync::mpsc::{self, Receiver};
+use std::thread;
+use std::time::Duration;
+
+use kotodama_protocol::*;
+use tempfile::TempDir;
+
+/// Long enough for a change on disk to be noticed and settle.
+const WAIT: Duration = Duration::from_secs(5);
+
+struct Apps {
+    dir: TempDir,
+    child: Child,
+    /// `None` once the test has hung up.
+    writer: Option<ChannelWriter<ChildStdin>>,
+    received: Receiver<FromExtension>,
+}
+
+impl Apps {
+    /// Starts the Extension on `dir`, as from [`data_dirs`], and does the
+    /// handshake.
+    fn start(dir: TempDir) -> Self {
+        let mut child = Command::new(env!("CARGO_BIN_EXE_kotodama-apps"))
+            .env("XDG_DATA_HOME", dir.path().join("home"))
+            .env("XDG_DATA_DIRS", dir.path().join("system"))
+            .env("XDG_CURRENT_DESKTOP", "Hyprland")
+            .env("LANG", "pl_PL.UTF-8")
+            .env_remove("LC_ALL")
+            .env_remove("LC_MESSAGES")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .spawn()
+            .unwrap();
+        let (stdout, stdin) = (child.stdout.take().unwrap(), child.stdin.take().unwrap());
+        let channel = Channel::handshake(stdout, stdin, &Hello::new(&WireFormat::ALL)).unwrap();
+        let (mut reader, writer) = channel.split();
+        let (sender, received) = mpsc::channel();
+        thread::spawn(move || {
+            while let Ok(Some(message)) = reader.recv::<FromExtension>() {
+                if sender.send(message).is_err() {
+                    break;
+                }
+            }
+        });
+        Apps {
+            dir,
+            child,
+            writer: Some(writer),
+            received,
+        }
+    }
+
+    /// Starts the Extension and sends it `config`.
+    fn configured(dir: TempDir, config: Table) -> Self {
+        let mut apps = Apps::start(dir);
+        apps.send(ToExtension::Config(config));
+        apps
+    }
+
+    fn path(&self) -> &Path {
+        self.dir.path()
+    }
+
+    fn send(&mut self, message: ToExtension) {
+        self.writer.as_mut().unwrap().send(&message).unwrap();
+    }
+
+    fn recv(&self) -> FromExtension {
+        self.received
+            .recv_timeout(WAIT)
+            .expect("the Extension sent nothing")
+    }
+
+    /// The Items of the next message, which must be `add_items`.
+    fn added(&self) -> Vec<Item> {
+        match self.recv() {
+            FromExtension::AddItems { items } => items,
+            other => panic!("expected add_items, got {other:?}"),
+        }
+    }
+
+    /// The ids of the next message, which must be `remove_items`.
+    fn removed(&self) -> Vec<String> {
+        match self.recv() {
+            FromExtension::RemoveItems { ids } => ids,
+            other => panic!("expected remove_items, got {other:?}"),
+        }
+    }
+
+    fn quiet(&self) {
+        if let Ok(message) = self.received.recv_timeout(Duration::from_millis(600)) {
+            panic!("expected nothing, got {message:?}");
+        }
+    }
+
+    /// Runs `action` on the app `id` and returns the outcome.
+    fn run(&mut self, id: &str, action: &str) -> Outcome {
+        self.send(ToExtension::RunAction {
+            invocation: 7,
+            action: action.into(),
+            item: ItemRef {
+                id: id.into(),
+                kind: ItemKind::App {
+                    desktop_id: format!("{id}.desktop"),
+                },
+            },
+            arguments: BTreeMap::new(),
+        });
+        match self.recv() {
+            FromExtension::ActionDone {
+                invocation: 7,
+                outcome,
+            } => outcome,
+            other => panic!("expected action_done, got {other:?}"),
+        }
+    }
+}
+
+/// A data directory for the user and one for the system, both empty.
+fn data_dirs() -> TempDir {
+    let dir = tempfile::tempdir().unwrap();
+    fs::create_dir_all(dir.path().join("home/applications")).unwrap();
+    fs::create_dir_all(dir.path().join("system/applications")).unwrap();
+    dir
+}
+
+impl Drop for Apps {
+    fn drop(&mut self) {
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+    }
+}
+
+/// Writes a `.desktop` file under `<dir>/<data>/applications/`.
+fn install(dir: &Path, data: &str, file: &str, text: &str) -> PathBuf {
+    let path = dir.join(data).join("applications").join(file);
+    fs::create_dir_all(path.parent().unwrap()).unwrap();
+    fs::write(&path, text).unwrap();
+    path
+}
+
+fn app(name: &str, exec: &str) -> String {
+    format!("[Desktop Entry]\nType=Application\nName={name}\nExec={exec}\n")
+}
+
+fn titles(items: &[Item]) -> Vec<&str> {
+    let mut titles: Vec<&str> = items.iter().map(|item| item.title.as_str()).collect();
+    titles.sort();
+    titles
+}
+
+fn find<'a>(items: &'a [Item], id: &str) -> &'a Item {
+    items
+        .iter()
+        .find(|item| item.id == id)
+        .unwrap_or_else(|| panic!("no Item `{id}` in {items:?}"))
+}
+
+fn strings(values: &[&str]) -> Value {
+    Value::Array(values.iter().map(|s| Value::String((*s).into())).collect())
+}
+
+#[test]
+fn each_desktop_file_becomes_an_app_item() {
+    let dir = data_dirs();
+    install(
+        dir.path(),
+        "system",
+        "firefox.desktop",
+        "[Desktop Entry]\nType=Application\nName=Firefox\nGenericName=Web Browser\n\
+         Icon=firefox\nExec=firefox %u\n",
+    );
+    let apps = Apps::configured(dir, Table::new());
+
+    let items = apps.added();
+    assert_eq!(items.len(), 1);
+    let firefox = &items[0];
+    assert_eq!(firefox.id, "firefox");
+    assert_eq!(
+        firefox.kind,
+        ItemKind::App {
+            desktop_id: "firefox.desktop".into()
+        }
+    );
+    assert_eq!(firefox.title, "Firefox");
+    assert_eq!(firefox.subtitle.as_deref(), Some("Web Browser"));
+    assert_eq!(firefox.icon.as_deref(), Some("firefox"));
+    assert_eq!(firefox.actions[0].id, "open");
+}
+
+#[test]
+fn keywords_generic_names_and_ids_make_an_app_findable() {
+    let dir = data_dirs();
+    install(
+        dir.path(),
+        "system",
+        "org.gnome.Nautilus.desktop",
+        "[Desktop Entry]\nType=Application\nName=Files\nName[pl]=Pliki\n\
+         GenericName=File Manager\nComment=Access and organize files\n\
+         Keywords=folder;explorer;\nKeywords[pl]=katalog;\nExec=nautilus --new-window\n",
+    );
+    let apps = Apps::configured(dir, Table::new());
+
+    let items = apps.added();
+    let files = find(&items, "org.gnome.Nautilus");
+    // The Extension runs in Polish.
+    assert_eq!(files.title, "Pliki");
+    assert_eq!(
+        files.keywords,
+        ["katalog", "File Manager", "org.gnome.Nautilus"]
+    );
+}
+
+#[test]
+fn an_app_without_a_generic_name_shows_its_comment() {
+    let dir = data_dirs();
+    install(
+        dir.path(),
+        "system",
+        "btop.desktop",
+        "[Desktop Entry]\nType=Application\nName=btop++\nComment=Resource monitor\nExec=btop\n",
+    );
+    let apps = Apps::configured(dir, Table::new());
+    assert_eq!(
+        apps.added()[0].subtitle.as_deref(),
+        Some("Resource monitor")
+    );
+}
+
+#[test]
+fn desktop_actions_are_extra_actions_after_open() {
+    let dir = data_dirs();
+    install(
+        dir.path(),
+        "system",
+        "firefox.desktop",
+        "[Desktop Entry]\nType=Application\nName=Firefox\nExec=firefox %u\n\
+         Actions=new-window;new-private-window;\n\
+         [Desktop Action new-window]\nName=New Window\nExec=firefox --new-window %u\n\
+         [Desktop Action new-private-window]\nName=New Private Window\n\
+         Name[pl]=Nowe okno prywatne\nExec=firefox --private-window %u\n",
+    );
+    let apps = Apps::configured(dir, Table::new());
+
+    let items = apps.added();
+    let actions: Vec<(&str, &str)> = items[0]
+        .actions
+        .iter()
+        .map(|action| (action.id.as_str(), action.title.as_str()))
+        .collect();
+    assert_eq!(
+        actions,
+        [
+            ("open", "Open"),
+            ("desktop-action:new-window", "New Window"),
+            ("desktop-action:new-private-window", "Nowe okno prywatne"),
+        ]
+    );
+}
+
+#[test]
+fn entries_that_ask_not_to_be_shown_are_left_out() {
+    let dir = data_dirs();
+    let system = |file: &str, text: &str| {
+        install(dir.path(), "system", file, text);
+    };
+    system("shown.desktop", &app("Shown", "shown"));
+    system(
+        "nodisplay.desktop",
+        "[Desktop Entry]\nType=Application\nName=NoDisplay\nExec=x\nNoDisplay=true\n",
+    );
+    system(
+        "hidden.desktop",
+        "[Desktop Entry]\nType=Application\nName=Hidden\nExec=x\nHidden=true\n",
+    );
+    system(
+        "gnome-only.desktop",
+        "[Desktop Entry]\nType=Application\nName=GNOME only\nExec=x\nOnlyShowIn=GNOME;\n",
+    );
+    system(
+        "hyprland-only.desktop",
+        "[Desktop Entry]\nType=Application\nName=Hyprland only\nExec=x\nOnlyShowIn=GNOME;Hyprland;\n",
+    );
+    system(
+        "not-hyprland.desktop",
+        "[Desktop Entry]\nType=Application\nName=Not Hyprland\nExec=x\nNotShowIn=Hyprland;\n",
+    );
+    system(
+        "uninstalled.desktop",
+        "[Desktop Entry]\nType=Application\nName=Uninstalled\nExec=x\nTryExec=/nonexistent/x\n",
+    );
+    system(
+        "installed.desktop",
+        "[Desktop Entry]\nType=Application\nName=Installed\nExec=sh\nTryExec=sh\n",
+    );
+    system(
+        "link.desktop",
+        "[Desktop Entry]\nType=Link\nName=Link\nURL=https://example.com\n",
+    );
+    system("not-an-app.txt", &app("Not a desktop file", "x"));
+    let apps = Apps::configured(dir, Table::new());
+
+    assert_eq!(
+        titles(&apps.added()),
+        ["Hyprland only", "Installed", "Shown"]
+    );
+}
+
+#[test]
+fn the_users_entry_replaces_or_hides_the_systems() {
+    let dir = data_dirs();
+    install(dir.path(), "system", "editor.desktop", &app("Editor", "ed"));
+    install(
+        dir.path(),
+        "home",
+        "editor.desktop",
+        &app("My Editor", "ed"),
+    );
+    install(dir.path(), "system", "game.desktop", &app("Game", "game"));
+    install(
+        dir.path(),
+        "home",
+        "game.desktop",
+        "[Desktop Entry]\nType=Application\nName=Game\nExec=game\nHidden=true\n",
+    );
+    let apps = Apps::configured(dir, Table::new());
+
+    assert_eq!(titles(&apps.added()), ["My Editor"]);
+}
+
+#[test]
+fn an_entry_in_a_subdirectory_has_the_subdirectory_in_its_id() {
+    let dir = data_dirs();
+    install(
+        dir.path(),
+        "system",
+        "kde/konsole.desktop",
+        &app("Konsole", "konsole"),
+    );
+    let apps = Apps::configured(dir, Table::new());
+
+    let items = apps.added();
+    assert_eq!(items[0].id, "kde-konsole");
+    assert_eq!(
+        items[0].kind,
+        ItemKind::App {
+            desktop_id: "kde-konsole.desktop".into()
+        }
+    );
+}
+
+#[test]
+fn installing_an_app_adds_it_without_a_restart() {
+    let dir = data_dirs();
+    install(dir.path(), "system", "old.desktop", &app("Old", "old"));
+    let apps = Apps::configured(dir, Table::new());
+    assert_eq!(titles(&apps.added()), ["Old"]);
+
+    install(apps.path(), "system", "new.desktop", &app("New", "new"));
+    assert_eq!(titles(&apps.added()), ["New"]);
+    apps.quiet();
+}
+
+#[test]
+fn removing_an_app_removes_it_without_a_restart() {
+    let dir = data_dirs();
+    let path = install(dir.path(), "system", "gone.desktop", &app("Gone", "gone"));
+    install(dir.path(), "system", "kept.desktop", &app("Kept", "kept"));
+    let apps = Apps::configured(dir, Table::new());
+    assert_eq!(apps.added().len(), 2);
+
+    fs::remove_file(path).unwrap();
+    assert_eq!(apps.removed(), ["gone"]);
+    apps.quiet();
+}
+
+#[test]
+fn an_updated_app_replaces_its_item() {
+    let dir = data_dirs();
+    let path = install(dir.path(), "system", "app.desktop", &app("Before", "app"));
+    let apps = Apps::configured(dir, Table::new());
+    assert_eq!(titles(&apps.added()), ["Before"]);
+
+    fs::write(path, app("After", "app")).unwrap();
+    assert_eq!(titles(&apps.added()), ["After"]);
+}
+
+#[test]
+fn apps_in_an_applications_directory_created_later_are_found() {
+    let dir = data_dirs();
+    fs::remove_dir(dir.path().join("home/applications")).unwrap();
+    let apps = Apps::configured(dir, Table::new());
+    apps.quiet();
+
+    install(apps.path(), "home", "late.desktop", &app("Late", "late"));
+    assert_eq!(titles(&apps.added()), ["Late"]);
+}
+
+#[test]
+fn config_hides_and_renames_apps_by_desktop_id() {
+    let dir = data_dirs();
+    install(
+        dir.path(),
+        "system",
+        "nvim.desktop",
+        &app("Neovim wrapper", "nvim"),
+    );
+    install(
+        dir.path(),
+        "system",
+        "qt5ct.desktop",
+        &app("Qt5 Settings", "qt5ct"),
+    );
+    install(
+        dir.path(),
+        "system",
+        "qt6ct.desktop",
+        &app("Qt6 Settings", "qt6ct"),
+    );
+    install(
+        dir.path(),
+        "system",
+        "firefox.desktop",
+        &app("Firefox", "firefox"),
+    );
+    let apps = Apps::configured(
+        dir,
+        Table::from([
+            ("hidden".into(), strings(&["qt5ct", "qt6ct.desktop"])),
+            (
+                "names".into(),
+                Value::Table(Table::from([(
+                    "nvim".into(),
+                    Value::String("Neovim".into()),
+                )])),
+            ),
+        ]),
+    );
+
+    let items = apps.added();
+    assert_eq!(titles(&items), ["Firefox", "Neovim"]);
+    // Still found by its own name.
+    assert!(
+        find(&items, "nvim")
+            .keywords
+            .contains(&"Neovim wrapper".to_owned())
+    );
+}
+
+#[test]
+fn a_config_change_sends_only_what_it_changed() {
+    let dir = data_dirs();
+    install(dir.path(), "system", "a.desktop", &app("A", "a"));
+    install(dir.path(), "system", "b.desktop", &app("B", "b"));
+    install(dir.path(), "system", "c.desktop", &app("C", "c"));
+    let mut apps = Apps::configured(dir, Table::new());
+    assert_eq!(apps.added().len(), 3);
+
+    apps.send(ToExtension::Config(Table::from([
+        ("hidden".into(), strings(&["a"])),
+        (
+            "names".into(),
+            Value::Table(Table::from([("b".into(), Value::String("Bee".into()))])),
+        ),
+    ])));
+    assert_eq!(apps.removed(), ["a"]);
+    assert_eq!(titles(&apps.added()), ["Bee"]);
+    apps.quiet();
+}
+
+/// Waits for a file an app writes, and returns what it wrote.
+fn wait_for(path: &Path) -> String {
+    for _ in 0..100 {
+        if let Ok(text) = fs::read_to_string(path)
+            && text.ends_with('\n')
+        {
+            return text;
+        }
+        thread::sleep(Duration::from_millis(50));
+    }
+    panic!("{} was never written", path.display());
+}
+
+#[test]
+fn open_starts_the_app_in_its_directory() {
+    let dir = data_dirs();
+    let work = dir.path().join("work");
+    fs::create_dir(&work).unwrap();
+    install(
+        dir.path(),
+        "system",
+        "pwd.desktop",
+        &format!(
+            "[Desktop Entry]\nType=Application\nName=Pwd\nExec=sh -c \"pwd > ran\" %U\nPath={}\n",
+            work.display()
+        ),
+    );
+    let mut apps = Apps::configured(dir, Table::new());
+    apps.added();
+
+    assert_eq!(apps.run("pwd", "open"), Outcome::Close);
+    assert_eq!(
+        wait_for(&work.join("ran")).trim_end(),
+        work.canonicalize().unwrap().to_str().unwrap()
+    );
+}
+
+#[test]
+fn terminal_apps_start_in_the_configured_terminal() {
+    let dir = data_dirs();
+    install(
+        dir.path(),
+        "system",
+        "htop.desktop",
+        "[Desktop Entry]\nType=Application\nName=htop\nExec=htop -d 10\nTerminal=true\n",
+    );
+    let out = dir.path().join("terminal");
+    // A "terminal" that writes down what it was asked to run.
+    let script = format!("printf '%s\\n' \"$@\" > {}", out.display());
+    let terminal = ["sh", "-c", script.as_str(), "terminal"];
+    let mut apps = Apps::configured(dir, Table::from([("terminal".into(), strings(&terminal))]));
+    apps.added();
+
+    assert_eq!(apps.run("htop", "open"), Outcome::Close);
+    assert_eq!(wait_for(&out), "htop\n-d\n10\n");
+}
+
+#[test]
+fn a_desktop_action_runs_its_own_command() {
+    let dir = data_dirs();
+    let out = dir.path().join("which");
+    install(
+        dir.path(),
+        "system",
+        "app.desktop",
+        &format!(
+            "[Desktop Entry]\nType=Application\nName=App\nExec=sh -c \"echo main > {out}\"\n\
+             Actions=other;\n[Desktop Action other]\nName=Other\nExec=sh -c \"echo other > {out}\"\n",
+            out = out.display()
+        ),
+    );
+    let mut apps = Apps::configured(dir, Table::new());
+    apps.added();
+
+    assert_eq!(apps.run("app", "desktop-action:other"), Outcome::Close);
+    assert_eq!(wait_for(&out), "other\n");
+}
+
+#[test]
+fn an_action_on_a_missing_app_or_program_fails_with_a_message() {
+    let dir = data_dirs();
+    install(
+        dir.path(),
+        "system",
+        "broken.desktop",
+        &app("Broken", "/nonexistent/program"),
+    );
+    let mut apps = Apps::configured(dir, Table::new());
+    apps.added();
+
+    for (id, action) in [
+        ("broken", "open"),
+        ("broken", "desktop-action:nope"),
+        ("gone", "open"),
+    ] {
+        assert!(
+            matches!(apps.run(id, action), Outcome::Failed { .. }),
+            "{id} {action}"
+        );
+    }
+}
+
+#[test]
+fn the_manifest_names_the_extension_apps() {
+    let manifest = Manifest::from_toml(
+        &fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("manifest.toml")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(manifest.name, "apps");
+    assert!(manifest.live_query.is_none());
+}
+
+#[test]
+fn the_extension_exits_when_the_daemon_hangs_up() {
+    let mut apps = Apps::start(data_dirs());
+    apps.writer = None;
+    assert!(apps.child.wait().unwrap().success());
+}

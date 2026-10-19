@@ -1,0 +1,6 @@
+# The apps Bundled extension. A package installs this directory as
+# `$XDG_DATA_DIRS/kotodama/extensions/apps/`, with the `kotodama-apps` binary
+# next to this file (or `command` rewritten to its absolute path).
+name = "apps"
+description = "Desktop applications, from the .desktop files in the XDG data directories"
+command = ["./kotodama-apps"]
