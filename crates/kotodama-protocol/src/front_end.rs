@@ -46,7 +46,7 @@ pub enum ToFrontEnd {
     /// The whole ranked list for the current query, best first. It replaces the
     /// previous list.
     Results {
-        results: Vec<ResultRow>,
+        results: Vec<ShownResult>,
     },
     /// The Extensions that are down. Their Results are gone until they come back.
     Status {
@@ -79,22 +79,23 @@ pub enum ToFrontEnd {
 
 /// One Result as the Front end shows it.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct ResultRow {
+pub struct ShownResult {
     /// The Extension that owns the Item.
     pub extension: String,
     pub item: Item,
     /// Other Extensions' Actions for this Item's kind, grouped by Extension. The
     /// Action panel lists them after the Item's own Actions, so none is ever the
     /// primary Action. A shortcut that clashes with the owner's is dropped.
-    pub contributed: Vec<ExtensionAction>,
+    pub contributed: Vec<OfferedAction>,
     /// The positions, in characters, of the title's characters that matched the
     /// query.
     pub highlights: Vec<u32>,
 }
 
-/// An Action together with the Extension that runs it.
+/// A Contributed action as a Result offers it: the Action and the Extension
+/// that runs it.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ExtensionAction {
+pub struct OfferedAction {
     pub extension: String,
     pub action: Action,
 }

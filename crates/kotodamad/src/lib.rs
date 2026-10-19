@@ -18,6 +18,13 @@ use paths::Paths;
 
 /// Runs the Daemon until it fails to start.
 pub fn run(paths: &Paths) -> Result<(), String> {
+    // The user's directory is created so it can be watched from the start: a
+    // directory that appears later would go unwatched until a restart.
+    if let Some(user) = paths.config_dirs.last()
+        && let Err(err) = std::fs::create_dir_all(user)
+    {
+        log::warn!("{}: {err}", user.display());
+    }
     let config = config::load(&paths.config_dirs).unwrap_or_else(|err| {
         log::error!("starting with an empty config: {err}");
         Default::default()
@@ -46,7 +53,6 @@ pub fn run(paths: &Paths) -> Result<(), String> {
         config,
         host::Processes::new(events_tx),
         desktop::Wayland::new(),
-        Instant::now(),
     );
     loop {
         let event = match daemon.next_deadline() {

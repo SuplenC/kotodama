@@ -28,7 +28,7 @@ mod view;
 mod wire;
 
 pub use channel::{Channel, ChannelReader, ChannelWriter};
-pub use front_end::{ActionRef, ExtensionAction, FromFrontEnd, ResultRef, ResultRow, ToFrontEnd};
+pub use front_end::{ActionRef, FromFrontEnd, OfferedAction, ResultRef, ShownResult, ToFrontEnd};
 pub use handshake::{Hello, PROTOCOL_VERSION};
 pub use item::{
     Action, Argument, Item, ItemKind, ItemRef, KindName, NamespacedKind, SHARED_KINDS,

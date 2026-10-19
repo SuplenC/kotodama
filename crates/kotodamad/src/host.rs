@@ -1,5 +1,5 @@
 //! Runs Extension processes. Each gets a thread that reads its stdout and one
-//! that writes its stdin, so the core only ever touches channels and a stuck or
+//! that writes its stdin, so the Daemon's state machine only ever touches channels and a stuck or
 //! dead Extension can't stall it.
 
 use std::io;

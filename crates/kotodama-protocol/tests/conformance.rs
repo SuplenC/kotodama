@@ -326,10 +326,10 @@ const FROM_EXTENSION_VARIANTS: usize = 9;
 fn to_front_end_messages() -> Vec<ToFrontEnd> {
     vec![
         ToFrontEnd::Results {
-            results: vec![ResultRow {
+            results: vec![ShownResult {
                 extension: "projects".into(),
                 item: items()[2].clone(),
-                contributed: vec![ExtensionAction {
+                contributed: vec![OfferedAction {
                     extension: "kubaos".into(),
                     action: action("pin-version"),
                 }],

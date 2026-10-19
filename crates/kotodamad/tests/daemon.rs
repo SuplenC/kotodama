@@ -1,4 +1,4 @@
-//! The Daemon's core, driven through its events: Extensions and Front ends are
+//! The Daemon's state machine, driven through its events: Extensions and Front ends are
 //! channels here, and starting a process or typing is recorded instead of done.
 
 use std::cell::RefCell;
@@ -110,7 +110,7 @@ impl Harness {
         let now = Instant::now();
         let launches = Launches::default();
         let outputs = Outputs::default();
-        let daemon = Daemon::new(extensions, config, launches.clone(), outputs.clone(), now);
+        let daemon = Daemon::new(extensions, config, launches.clone(), outputs.clone());
         Harness {
             daemon,
             now,
@@ -189,7 +189,7 @@ impl Harness {
         });
     }
 
-    fn query(&mut self, front_end: &FrontEnd, text: &str) -> Vec<ResultRow> {
+    fn query(&mut self, front_end: &FrontEnd, text: &str) -> Vec<ShownResult> {
         self.front_end_sends(front_end, FromFrontEnd::Query { text: text.into() });
         front_end.results().expect("a query is always answered")
     }
@@ -207,7 +207,7 @@ impl FrontEnd {
     }
 
     /// The latest Results sent, if any were.
-    fn results(&self) -> Option<Vec<ResultRow>> {
+    fn results(&self) -> Option<Vec<ShownResult>> {
         self.drain()
             .into_iter()
             .rev()
@@ -218,7 +218,7 @@ impl FrontEnd {
     }
 }
 
-fn titles(rows: &[ResultRow]) -> Vec<&str> {
+fn titles(rows: &[ShownResult]) -> Vec<&str> {
     rows.iter().map(|row| row.item.title.as_str()).collect()
 }
 
@@ -820,4 +820,81 @@ fn typing_goes_ahead_when_a_front_end_never_answers() {
     assert_eq!(*h.outputs.0.borrow(), []);
     h.advance(Duration::from_millis(1));
     assert_eq!(*h.outputs.0.borrow(), [Output::Type("hello".into())]);
+}
+
+#[test]
+fn a_new_item_taking_a_removed_visible_items_place_in_the_index_is_still_late() {
+    let mut h = Harness::new(vec![plain("apps")]);
+    let apps = h.up(0);
+    h.add(&apps, vec![app("Fire one"), app("Fire two")]);
+    let ui = h.front_end();
+    h.front_end_sends(&ui, FromFrontEnd::Viewport { rows: 1 });
+    assert_eq!(titles(&h.query(&ui, "fire"))[0], "Fire one");
+
+    h.send(
+        &apps,
+        FromExtension::RemoveItems {
+            ids: vec!["fire-one".into()],
+        },
+    );
+    h.add(&apps, vec![app("Fire newcomer")]);
+    assert_eq!(
+        titles(&ui.results().unwrap()),
+        ["Fire two", "Fire newcomer"]
+    );
+}
+
+#[test]
+fn a_bigger_viewport_protects_the_rows_it_shows_at_once() {
+    let mut h = Harness::new(vec![plain("apps"), web()]);
+    let apps = h.up(0);
+    let web = h.up(1);
+    h.add(&apps, vec![app("g rust a"), app("g rust bb")]);
+    let ui = h.front_end();
+    h.front_end_sends(&ui, FromFrontEnd::Viewport { rows: 1 });
+    assert_eq!(titles(&h.query(&ui, "g rust")), ["g rust a", "g rust bb"]);
+
+    h.front_end_sends(&ui, FromFrontEnd::Viewport { rows: 2 });
+    h.advance(Duration::from_millis(100));
+    let (id, ..) = live_queries(&web)[0].clone();
+    h.send(
+        &web,
+        FromExtension::LiveResults {
+            live_query: id,
+            results: vec![live("perfect", 1.0, false)],
+            done: true,
+        },
+    );
+    assert_eq!(
+        titles(&ui.results().unwrap()),
+        ["g rust a", "g rust bb", "perfect"]
+    );
+}
+
+#[test]
+fn a_stopped_extensions_jobs_are_not_shown_to_new_front_ends() {
+    let mut h = Harness::new(vec![plain("installer")]);
+    let installer = h.up(0);
+    h.send(
+        &installer,
+        FromExtension::JobProgress(Job {
+            id: "install".into(),
+            title: "Installing".into(),
+            state: JobState::Running,
+            progress: None,
+            message: None,
+        }),
+    );
+    h.down(&installer);
+
+    let (tx, rx) = mpsc::channel();
+    h.event(Event::FrontEndUp {
+        front_end: FrontEndId(99),
+        sender: tx,
+    });
+    let jobs: Vec<_> = rx
+        .try_iter()
+        .filter(|m| matches!(m, ToFrontEnd::JobProgress { .. }))
+        .collect();
+    assert_eq!(jobs, []);
 }

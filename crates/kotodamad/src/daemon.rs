@@ -1,18 +1,18 @@
-//! The Daemon's core: a state machine fed one [`Event`] at a time by the main
+//! The Daemon's state machine, fed one [`Event`] at a time by the main
 //! loop. It owns the index, the Front ends' sessions and the Extensions' state,
 //! and never blocks: everything it sends goes into a channel that another
 //! thread drains, so a stuck or dead Extension can't stall it.
 //!
 //! Starting processes and typing into windows are behind [`Launcher`] and
-//! [`Desktop`], so the core runs the same in tests as in `kotodamad`.
+//! [`Desktop`], so it runs the same in tests as in `kotodamad`.
 
 use std::collections::{BTreeMap, HashMap};
 use std::sync::mpsc::Sender;
 use std::time::{Duration, Instant};
 
 use kotodama_protocol::{
-    Action, ActionRef, CatalogEntry, Clipboard, ExtensionAction, FromExtension, FromFrontEnd, Item,
-    Job, KindName, LiveResult, Outcome, ResultRef, ResultRow, Table, ToExtension, ToFrontEnd,
+    Action, ActionRef, CatalogEntry, Clipboard, FromExtension, FromFrontEnd, Item, Job, KindName,
+    LiveResult, OfferedAction, Outcome, ResultRef, ShownResult, Table, ToExtension, ToFrontEnd,
 };
 use nucleo_matcher::pattern::{CaseMatching, Normalization, Pattern};
 use nucleo_matcher::{Config, Matcher, Utf32Str, Utf32String};
@@ -231,8 +231,8 @@ struct Session {
     narrowed_version: u64,
     /// By Extension.
     live: Vec<Live>,
-    /// The Results in the rows on screen, answers left out.
-    visible: Vec<Source>,
+    /// The Results last sent, in order, and whether each is an answer.
+    shown: Vec<(Source, bool)>,
     update: Update,
 }
 
@@ -276,13 +276,13 @@ pub struct Daemon<L, D> {
     pending_output: Option<PendingOutput>,
     launcher: L,
     desktop: D,
-    matches: Vec<(Slot, u32)>,
+    scored: Vec<(Slot, u32)>,
     highlights: Vec<u32>,
 }
 
 impl<L: Launcher, D: Desktop> Daemon<L, D> {
     /// Starts every Extension.
-    pub fn new(found: Vec<Found>, config: Table, launcher: L, desktop: D, _now: Instant) -> Self {
+    pub fn new(found: Vec<Found>, config: Table, launcher: L, desktop: D) -> Self {
         let mut daemon = Daemon {
             index: Index::new(found.len()),
             extensions: found
@@ -310,7 +310,7 @@ impl<L: Launcher, D: Desktop> Daemon<L, D> {
             pending_output: None,
             launcher,
             desktop,
-            matches: Vec::new(),
+            scored: Vec::new(),
             highlights: Vec::new(),
         };
         for id in 0..daemon.extensions.len() {
@@ -442,6 +442,7 @@ impl<L: Launcher, D: Desktop> Daemon<L, D> {
             self.mark_late();
         }
         self.live_queries.retain(|_, (_, ext)| *ext != id);
+        self.jobs.retain(|(ext, _), _| *ext != id);
         for session in self.sessions.values_mut() {
             let live = &mut session.live[id.0];
             if !live.results.is_empty() {
@@ -674,7 +675,7 @@ impl<L: Launcher, D: Desktop> Daemon<L, D> {
             narrowed_query: String::new(),
             narrowed_version: 0,
             live: self.extensions.iter().map(|_| Live::default()).collect(),
-            visible: Vec::new(),
+            shown: Vec::new(),
             update: Update::None,
         };
         self.sessions.insert(id, session);
@@ -919,7 +920,7 @@ impl<L: Launcher, D: Desktop> Daemon<L, D> {
 
         let mut candidates = Vec::new();
         if !session.query.is_empty() {
-            self.matches.clear();
+            self.scored.clear();
             let within = session
                 .can_narrow(self.index.version())
                 .then_some(session.narrowed.as_slice());
@@ -927,15 +928,15 @@ impl<L: Launcher, D: Desktop> Daemon<L, D> {
                 &session.pattern,
                 &mut self.matcher,
                 within,
-                &mut self.matches,
+                &mut self.scored,
             );
             session.narrowed.clear();
             session
                 .narrowed
-                .extend(self.matches.iter().map(|&(slot, _)| slot));
+                .extend(self.scored.iter().map(|&(slot, _)| slot));
             session.narrowed_query.clone_from(&session.query);
             session.narrowed_version = self.index.version();
-            candidates.extend(self.matches.iter().map(|&(slot, score)| {
+            candidates.extend(self.scored.iter().map(|&(slot, score)| {
                 Candidate {
                     source: Source::Indexed(slot),
                     score,
@@ -969,7 +970,8 @@ impl<L: Launcher, D: Desktop> Daemon<L, D> {
 
         let mut kept: Vec<Candidate> = Vec::new();
         if !fresh {
-            for source in &session.visible {
+            let visible = session.shown.iter().take(session.rows);
+            for (source, _) in visible.filter(|(_, answer)| !answer) {
                 if let Some(at) = candidates.iter().position(|c| c.source == *source) {
                     kept.push(candidates.swap_remove(at));
                 }
@@ -984,11 +986,9 @@ impl<L: Launcher, D: Desktop> Daemon<L, D> {
         candidates.sort_unstable_by(Candidate::rank);
 
         let ranked: Vec<Candidate> = answers.into_iter().chain(kept).chain(candidates).collect();
-        session.visible = ranked
+        session.shown = ranked
             .iter()
-            .take(session.rows)
-            .filter(|candidate| !candidate.answer)
-            .map(|candidate| candidate.source)
+            .map(|candidate| (candidate.source, candidate.answer))
             .collect();
 
         let results = ranked
@@ -999,7 +999,7 @@ impl<L: Launcher, D: Desktop> Daemon<L, D> {
         self.sessions.insert(id, session);
     }
 
-    fn row(&mut self, session: &Session, source: Source) -> Option<ResultRow> {
+    fn row(&mut self, session: &Session, source: Source) -> Option<ShownResult> {
         let (owner, item, title) = match source {
             Source::Indexed(slot) => {
                 let entry = self.index.entry(slot)?;
@@ -1026,7 +1026,7 @@ impl<L: Launcher, D: Desktop> Daemon<L, D> {
         } else {
             self.highlights.clear();
         }
-        Some(ResultRow {
+        Some(ShownResult {
             extension: self.extensions[owner.0].name().to_owned(),
             item: item.clone(),
             contributed: self.contributed_for(owner, item),
@@ -1037,7 +1037,7 @@ impl<L: Launcher, D: Desktop> Daemon<L, D> {
     /// Other running Extensions' Actions for `item`'s kind, in Extension order.
     /// When a shortcut clashes, the owner's binding wins, then the earlier
     /// Extension's.
-    fn contributed_for(&self, owner: ExtensionId, item: &Item) -> Vec<ExtensionAction> {
+    fn contributed_for(&self, owner: ExtensionId, item: &Item) -> Vec<OfferedAction> {
         let Some(offered) = self.contributed.get(item.kind.name()) else {
             return Vec::new();
         };
@@ -1058,7 +1058,7 @@ impl<L: Launcher, D: Desktop> Daemon<L, D> {
                         taken.push(shortcut);
                     }
                 }
-                ExtensionAction {
+                OfferedAction {
                     extension: self.extensions[ext.0].name().to_owned(),
                     action,
                 }

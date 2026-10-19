@@ -35,7 +35,7 @@ impl Setup {
         let manifest = Manifest::from_toml("name = \"apps\"\ncommand = [\"x\"]").unwrap();
         let found = Found::new(manifest, PathBuf::from("/")).unwrap();
         let now = Instant::now();
-        let mut daemon = Daemon::new(vec![found], Table::new(), Nothing, Nothing, now);
+        let mut daemon = Daemon::new(vec![found], Table::new(), Nothing, Nothing);
         let (sender, _extension) = mpsc::channel();
         daemon.handle(
             Event::ExtensionUp {
