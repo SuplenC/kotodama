@@ -1,7 +1,7 @@
 //! The wall clock the History's times come from: seconds since the Unix epoch,
-//! and the time of day where the user is, which Frecency learns by. The
-//! Daemon reads it once, at start, and follows it with the monotonic clock,
-//! so tests can set it.
+//! and the time of day where the user is, which Frecency learns by.
+
+use std::time::{Duration, SystemTime};
 
 /// Seconds in a day.
 pub const DAY_SECS: u64 = 24 * 60 * 60;
@@ -9,35 +9,40 @@ pub const DAY_SECS: u64 = 24 * 60 * 60;
 /// The wall clock.
 #[derive(Clone, Copy, Debug)]
 pub struct Clock {
-    /// Seconds since the Unix epoch at the `now` the Daemon started with.
-    pub epoch: u64,
+    /// The time when the Daemon started, for a clock that follows the
+    /// Daemon's own. `None` reads the system's, which also counts the time
+    /// the machine spends suspended.
+    start: Option<u64>,
     /// How far the user's local time is ahead of UTC at a time, in seconds.
-    pub utc_offset: fn(u64) -> i64,
+    utc_offset: fn(u64) -> i64,
 }
 
 impl Clock {
     /// The system's clock and time zone.
     pub fn system() -> Self {
-        let epoch = std::time::SystemTime::now()
-            .duration_since(std::time::SystemTime::UNIX_EPOCH)
-            .map_or(0, |since| since.as_secs());
         Clock {
-            epoch,
+            start: None,
             utc_offset: local_utc_offset,
         }
     }
 
-    /// A clock that starts at `epoch` in UTC.
-    pub fn utc(epoch: u64) -> Self {
+    /// A clock in UTC that reads `start` when the Daemon starts and then
+    /// follows the time the Daemon is given, as tests set it.
+    pub fn starting_at(start: u64) -> Self {
         Clock {
-            epoch,
+            start: Some(start),
             utc_offset: |_| 0,
         }
     }
 
-    /// When it is `elapsed` seconds after the Daemon started.
-    pub fn when(&self, elapsed: u64) -> When {
-        let at = self.epoch + elapsed;
+    /// When it is, `since_start` after the Daemon started.
+    pub fn when(&self, since_start: Duration) -> When {
+        let at = match self.start {
+            Some(start) => start + since_start.as_secs(),
+            None => SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .map_or(0, |since| since.as_secs()),
+        };
         let local = at as i64 + (self.utc_offset)(at);
         When {
             at,
@@ -79,14 +84,28 @@ mod tests {
     #[test]
     fn the_time_of_day_is_local() {
         let clock = Clock {
-            epoch: 23 * 3600,
+            start: Some(23 * 3600),
             utc_offset: |_| 2 * 3600,
         };
-        assert_eq!(clock.when(0).time_of_day, 3600);
+        assert_eq!(clock.when(Duration::ZERO).time_of_day, 3600);
         let clock = Clock {
-            epoch: 3600,
+            start: Some(3600),
             utc_offset: |_| -2 * 3600,
         };
-        assert_eq!(clock.when(60).time_of_day, 23 * 3600 + 60);
+        assert_eq!(
+            clock.when(Duration::from_secs(60)).time_of_day,
+            23 * 3600 + 60
+        );
+    }
+
+    #[test]
+    fn the_system_clock_is_read_each_time() {
+        let clock = Clock::system();
+        let now = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        let at = clock.when(Duration::ZERO).at;
+        assert!(at.abs_diff(now) <= 1, "{at} {now}");
     }
 }

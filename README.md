@@ -41,7 +41,7 @@ A setting that doesn't parse is logged and keeps its default. With `usage_log = 
 
 `at` is seconds since the Unix epoch; a pick's `extension` and `id` name the Result, `action` the Action run, and `row` where the Result was in the list (from 0), or `null` if it wasn't in it. Emptying the search box isn't logged as a query, but a pick made with nothing typed is, with `"query":""`. When the file would pass 4 MiB it becomes `usage.jsonl.1`, replacing the older one, so the log never takes more than 8 MiB. Turning it off keeps what was written; delete the files to forget it.
 
-With nothing typed, the menu shows the 3 Results most used at this time of day, by their picks within a few hours of now, then by all their picks; an Alias's picks count for the Result it names. A fixed menu follows them, set in the config:
+With nothing typed, the menu shows the 3 Results most used at this time of day, by their picks within a few hours of now, then by all their picks. An Alias's picks count for the Result it names, and a thing that several Extensions offer shows once, as the Result picked through most. A fixed menu follows them, set in the config:
 
 ```toml
 [empty_query]

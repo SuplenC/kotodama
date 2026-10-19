@@ -181,7 +181,7 @@ impl Harness {
             saved.clone(),
             now,
         );
-        daemon.set_clock(Clock::utc(START));
+        daemon.set_clock(Clock::starting_at(START));
         Harness {
             daemon,
             started: now,

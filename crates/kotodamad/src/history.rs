@@ -172,11 +172,12 @@ pub struct History {
 }
 
 /// How many parts the day is cut into, for learning when a Result is picked.
-const HOURS: usize = 6;
-/// How long each part is.
-const HOURS_SECS: f64 = DAY / HOURS as f64;
-/// What [`Picks::hours`] adds up to.
-const SHARES: f64 = u8::MAX as f64;
+const PARTS: usize = 8;
+/// How long each part of the day is.
+const PART_SECS: f64 = DAY / PARTS as f64;
+/// What a Result's shares of its picks across the day add up to. Fine enough
+/// that one more pick still moves them at hundreds of picks a day.
+const SHARES: f64 = 10_000.0;
 
 /// How often, how recently and at what times of day one Result was picked.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
@@ -184,26 +185,61 @@ pub struct Picks {
     /// The decayed number of picks, as of `at`.
     score: f64,
     at: u64,
-    /// How the picks fall across the day: in [`HOURS`] parts from midnight,
+    /// How the picks fall across the day: in [`PARTS`] parts from midnight,
     /// each as its share of `score`, out of [`SHARES`]. All zero when it isn't
     /// known, for picks kept before it was.
     #[serde(default, skip_serializing_if = "unknown")]
-    hours: [u8; HOURS],
+    parts: [u16; PARTS],
 }
 
-fn unknown(hours: &[u8; HOURS]) -> bool {
-    hours.iter().all(|&share| share == 0)
+fn unknown(parts: &[u16; PARTS]) -> bool {
+    parts.iter().all(|&share| share == 0)
 }
 
 /// The two parts of the day a time of day falls between, and how near it is
 /// to the middle of each, from 0 to 1. A pick counts towards both and a time
 /// reads both, so a habit doesn't stop at a part's end.
 fn parts(time_of_day: u32) -> [(usize, f64); 2] {
-    let x = f64::from(time_of_day) / HOURS_SECS - 0.5;
+    let x = f64::from(time_of_day) / PART_SECS - 0.5;
     let before = x.floor();
     let after = x - before;
-    let first = (before as i64).rem_euclid(HOURS as i64) as usize;
-    [(first, 1.0 - after), ((first + 1) % HOURS, after)]
+    let first = (before as i64).rem_euclid(PARTS as i64) as usize;
+    [(first, 1.0 - after), ((first + 1) % PARTS, after)]
+}
+
+/// How much a Result was picked, as the empty query ranks it.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct Habit {
+    /// The decayed number of picks made near this time of day.
+    pub near_now: f64,
+    /// The decayed number of all picks.
+    pub overall: f64,
+}
+
+impl Habit {
+    /// What two ways to one Result add up to.
+    pub fn and(self, other: Habit) -> Habit {
+        Habit {
+            near_now: self.near_now + other.near_now,
+            overall: self.overall + other.overall,
+        }
+    }
+
+    /// The more used of the two, for each count.
+    pub fn max(self, other: Habit) -> Habit {
+        Habit {
+            near_now: self.near_now.max(other.near_now),
+            overall: self.overall.max(other.overall),
+        }
+    }
+
+    /// Most used near now first, then most used overall.
+    pub fn rank(&self, other: &Habit) -> std::cmp::Ordering {
+        other
+            .near_now
+            .total_cmp(&self.near_now)
+            .then(other.overall.total_cmp(&self.overall))
+    }
 }
 
 impl Picks {
@@ -211,7 +247,7 @@ impl Picks {
         Picks {
             score: 0.0,
             at,
-            hours: [0; HOURS],
+            parts: [0; PARTS],
         }
     }
 
@@ -228,24 +264,26 @@ impl Picks {
         count * (1.0 - settings.time_of_day * (1.0 - self.usual(when.time_of_day)))
     }
 
-    /// The decayed number of picks made near the time of day of `when`,
-    /// and of all picks, as the empty query ranks by.
-    pub fn used(&self, when: When, half_life: f64) -> (f64, f64) {
-        let count = self.count(when.at, half_life);
-        (count * self.usual(when.time_of_day), count)
+    /// How much it was picked as of `when`, near that time of day and overall.
+    pub fn habit(&self, when: When, half_life: f64) -> Habit {
+        let overall = self.count(when.at, half_life);
+        Habit {
+            near_now: overall * self.usual(when.time_of_day),
+            overall,
+        }
     }
 
     /// How usual a time of day is for picking it: 1 at the times it is picked
     /// most, or when that isn't known, down to 0 at times it never is.
     fn usual(&self, time_of_day: u32) -> f64 {
-        let most = self.hours.iter().copied().max().unwrap_or(0);
+        let most = self.parts.iter().copied().max().unwrap_or(0);
         if most == 0 {
             return 1.0;
         }
         let parts = parts(time_of_day);
         let read: f64 = parts
             .iter()
-            .map(|&(part, near)| near * f64::from(self.hours[part]))
+            .map(|&(part, near)| near * f64::from(self.parts[part]))
             .sum();
         // So picks read at the time of day they were made read in full.
         let whole: f64 = parts.iter().map(|&(_, near)| near * near).sum();
@@ -255,21 +293,21 @@ impl Picks {
     /// Adds a pick made at `when`.
     fn add(&mut self, when: When, half_life: f64) {
         let before = self.count(when.at, half_life);
-        let total: f64 = self.hours.iter().copied().map(f64::from).sum();
+        let total: f64 = self.parts.iter().copied().map(f64::from).sum();
         // Picks made at times of day that aren't known count as spread evenly.
-        let mut hours = self.hours.map(|share| {
+        let mut counts = self.parts.map(|share| {
             if total > 0.0 {
                 before * f64::from(share) / total
             } else {
-                before / HOURS as f64
+                before / PARTS as f64
             }
         });
         for (part, near) in parts(when.time_of_day) {
-            hours[part] += near;
+            counts[part] += near;
         }
         self.score = before + 1.0;
         self.at = when.at;
-        self.hours = hours.map(|count| (count / self.score * SHARES).round() as u8);
+        self.parts = counts.map(|count| (count / self.score * SHARES).round() as u16);
     }
 }
 
@@ -614,7 +652,7 @@ mod tests {
     }
 
     #[test]
-    fn a_result_takes_a_few_dozen_bytes_however_often_it_is_picked() {
+    fn a_result_takes_about_a_hundred_bytes_however_often_it_is_picked() {
         let mut history = History::default();
         for day in 0..100 {
             for hour in 0..24 {
@@ -624,7 +662,7 @@ mod tests {
         let json = serde_json::to_string(&history).unwrap();
         let entry = json.find("\"firefox\"").map(|at| &json[at..]).unwrap();
         let entry = &entry[..=entry.find('}').unwrap()];
-        assert!(entry.len() < 90, "{entry}");
+        assert!(entry.len() <= 110, "{entry}");
     }
 
     #[test]
@@ -645,8 +683,38 @@ mod tests {
         }
         assert_eq!(counts(&history, "mail", when(5, 7 * HOUR)), 1.0);
         let near = counts(&history, "mail", when(5, 9 * HOUR));
-        assert!(near > 0.8 && near < 1.0, "two hours later: {near}");
+        assert!(near > 0.8, "two hours later: {near}");
         assert_eq!(counts(&history, "mail", when(5, 19 * HOUR)), 0.5, "away");
+    }
+
+    #[test]
+    fn habits_four_hours_apart_each_count_most_at_their_own_time() {
+        let mut history = History::default();
+        for day in 0..5 {
+            history.touch("apps", "mail", when(day, 8 * HOUR));
+            history.touch("apps", "news", when(day, 12 * HOUR));
+        }
+        assert!(counts(&history, "news", when(5, 8 * HOUR)) < 0.7);
+        assert!(counts(&history, "mail", when(5, 12 * HOUR)) < 0.7);
+    }
+
+    #[test]
+    fn a_result_picked_hundreds_of_times_a_day_still_learns_a_new_time_of_day() {
+        let mut history = History::default();
+        for day in 0..60 {
+            for minute in 0..300 {
+                history.touch("apps", "mail", when(day, 8 * HOUR + minute));
+            }
+        }
+        let before = counts(&history, "mail", when(60, 20 * HOUR));
+        for day in 60..74 {
+            for minute in 0..300 {
+                history.touch("apps", "mail", when(day, 20 * HOUR + minute));
+            }
+        }
+        let after = counts(&history, "mail", when(74, 20 * HOUR));
+        assert_eq!(before, 0.5, "never picked in the evening");
+        assert!(after > 0.9, "picked as much in the evening lately: {after}");
     }
 
     /// How much an app's picks count at `when`, of their decayed number.
