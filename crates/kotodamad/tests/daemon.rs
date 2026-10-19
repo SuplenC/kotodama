@@ -467,3 +467,357 @@ fn an_item_added_while_typing_is_found_by_the_next_keystroke() {
     ui.drain();
     assert_eq!(titles(&h.query(&ui, "fire")), ["Firefox", "Fire Alarm"]);
 }
+
+fn pinner() -> Found {
+    manifest(
+        "name = \"pinner\"\ncommand = [\"x\"]\naction_catalog = true\n\
+         [[contributed_actions]]\nkind = \"project\"\nid = \"pin\"\ntitle = \"Pin a version here\"\nshortcut = \"ctrl+p\"",
+    )
+}
+
+fn projects() -> Found {
+    manifest(
+        "name = \"projects\"\ncommand = [\"x\"]\n\
+         [[contributed_actions]]\nkind = \"project\"\nid = \"own-contribution\"\ntitle = \"Never shown on own Items\"",
+    )
+}
+
+fn runs(ext: &Ext) -> Vec<(u64, String, ItemRef)> {
+    ext.drain()
+        .into_iter()
+        .filter_map(|message| match message {
+            ToExtension::RunAction {
+                invocation,
+                action,
+                item,
+                ..
+            } => Some((invocation, action, item)),
+            _ => None,
+        })
+        .collect()
+}
+
+fn run(h: &mut Harness, ui: &FrontEnd, owner: &str, id: &str, by: &str, action: &str) {
+    h.from_front_end(
+        ui,
+        FromFrontEnd::RunAction {
+            result: ResultRef {
+                extension: owner.into(),
+                id: id.into(),
+            },
+            action: ActionRef {
+                extension: by.into(),
+                id: action.into(),
+            },
+            arguments: BTreeMap::new(),
+        },
+    );
+}
+
+#[test]
+fn contributed_actions_follow_the_owners_actions_and_are_never_primary() {
+    let mut h = Harness::new(vec![pinner(), projects()]);
+    h.up(0);
+    let projects = h.up(1);
+    h.add(&projects, vec![project("kotodama")]);
+    let ui = h.front_end();
+
+    let row = &h.query(&ui, "kotodama")[0];
+    assert_eq!(
+        row.item.actions[0].id, "open",
+        "the owner's Action stays primary"
+    );
+    let contributed: Vec<_> = row
+        .contributed
+        .iter()
+        .map(|c| (c.extension.as_str(), c.action.id.as_str()))
+        .collect();
+    assert_eq!(contributed, [("pinner", "pin")]);
+}
+
+#[test]
+fn when_shortcuts_clash_the_owners_binding_wins() {
+    let mut h = Harness::new(vec![pinner(), projects()]);
+    h.up(0);
+    let projects = h.up(1);
+    let mut item = project("kotodama");
+    item.actions[0].shortcut = Some("ctrl+p".into());
+    h.add(&projects, vec![item]);
+    let ui = h.front_end();
+
+    let row = &h.query(&ui, "kotodama")[0];
+    assert_eq!(row.item.actions[0].shortcut.as_deref(), Some("ctrl+p"));
+    assert_eq!(row.contributed[0].action.shortcut, None);
+}
+
+#[test]
+fn a_contributed_action_reaches_the_contributing_extension_with_the_item() {
+    let mut h = Harness::new(vec![pinner(), projects()]);
+    let pinner = h.up(0);
+    let projects = h.up(1);
+    h.add(&projects, vec![project("kotodama")]);
+    let ui = h.front_end();
+    h.query(&ui, "kotodama");
+    pinner.drain();
+    projects.drain();
+
+    run(&mut h, &ui, "projects", "kotodama", "pinner", "pin");
+    let sent = runs(&pinner);
+    assert_eq!(sent.len(), 1);
+    assert_eq!(sent[0].1, "pin");
+    assert_eq!(sent[0].2, project("kotodama").to_ref());
+    assert_eq!(runs(&projects), []);
+
+    // The contributor's answer closes the menu that ran it.
+    h.send(
+        &pinner,
+        FromExtension::ActionDone {
+            invocation: sent[0].0,
+            outcome: Outcome::Close,
+        },
+    );
+    assert!(ui.drain().contains(&ToFrontEnd::Close));
+}
+
+#[test]
+fn an_action_the_result_does_not_offer_is_refused() {
+    let mut h = Harness::new(vec![pinner(), projects()]);
+    let pinner = h.up(0);
+    let projects = h.up(1);
+    h.add(&projects, vec![project("kotodama"), app("Firefox")]);
+    let ui = h.front_end();
+    h.query(&ui, "f");
+    pinner.drain();
+
+    // `pin` is for projects, not apps.
+    run(&mut h, &ui, "projects", "firefox", "pinner", "pin");
+    assert_eq!(runs(&pinner), []);
+    assert!(
+        ui.drain()
+            .iter()
+            .any(|m| matches!(m, ToFrontEnd::ActionFailed { .. }))
+    );
+}
+
+fn catalogs(ext: &Ext) -> Vec<Vec<CatalogEntry>> {
+    ext.drain()
+        .into_iter()
+        .filter_map(|message| match message {
+            ToExtension::ActionCatalog { entries } => Some(entries),
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn the_action_catalog_lists_actions_by_kind_without_items_and_follows_extensions() {
+    let mut h = Harness::new(vec![plain("apps"), pinner(), projects()]);
+    let apps = h.up(0);
+    let pinner = h.up(1);
+    h.add(&apps, vec![app("Firefox"), app("Files")]);
+    h.send(&pinner, FromExtension::RequestActionCatalog);
+
+    let summary = |entries: &[CatalogEntry]| {
+        entries
+            .iter()
+            .map(|e| format!("{}:{}:{}", e.extension, e.kind, e.action.id))
+            .collect::<Vec<_>>()
+    };
+    let first = catalogs(&pinner);
+    assert_eq!(first.len(), 1);
+    assert_eq!(summary(&first[0]), ["apps:app:open", "pinner:project:pin"]);
+
+    let projects = h.up(2);
+    let updated = catalogs(&pinner);
+    assert_eq!(
+        summary(updated.last().unwrap()),
+        [
+            "apps:app:open",
+            "pinner:project:pin",
+            "projects:project:own-contribution"
+        ]
+    );
+
+    h.down(&projects);
+    assert_eq!(
+        summary(catalogs(&pinner).last().unwrap()),
+        ["apps:app:open", "pinner:project:pin"]
+    );
+}
+
+#[test]
+fn an_extension_whose_manifest_does_not_ask_never_receives_the_catalog() {
+    let mut h = Harness::new(vec![plain("apps"), pinner()]);
+    let apps = h.up(0);
+    let pinner = h.up(1);
+    h.send(&apps, FromExtension::RequestActionCatalog);
+    h.send(&pinner, FromExtension::RequestActionCatalog);
+    h.add(&apps, vec![app("Firefox")]);
+
+    assert_eq!(catalogs(&apps), Vec::<Vec<CatalogEntry>>::new());
+    assert!(!catalogs(&pinner).is_empty());
+}
+
+fn statuses(ui: &FrontEnd) -> Vec<Vec<String>> {
+    ui.drain()
+        .into_iter()
+        .filter_map(|message| match message {
+            ToFrontEnd::Status { down } => Some(down),
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn a_stopped_extensions_results_disappear_and_a_marker_shows_it_is_down() {
+    let mut h = Harness::new(vec![plain("apps")]);
+    let apps = h.up(0);
+    h.add(&apps, vec![app("Firefox")]);
+    let ui = h.front_end();
+    h.query(&ui, "fire");
+
+    h.down(&apps);
+    let messages = ui.drain();
+    assert!(messages.contains(&ToFrontEnd::Results { results: vec![] }));
+    assert!(messages.contains(&ToFrontEnd::Status {
+        down: vec!["apps".into()]
+    }));
+}
+
+#[test]
+fn a_stopped_extension_is_restarted_with_growing_backoff_and_marked_up_again() {
+    let mut h = Harness::new(vec![plain("apps")]);
+    let ui = h.front_end();
+    let launches = |h: &Harness| h.launches.0.borrow().len();
+
+    let first = h.up(0);
+    h.down(&first);
+    h.advance(Duration::from_millis(99));
+    assert_eq!(launches(&h), 1);
+    h.advance(Duration::from_millis(1));
+    assert_eq!(launches(&h), 2, "restarted after 100 ms");
+
+    let second = h.up(0);
+    h.down(&second);
+    h.advance(Duration::from_millis(199));
+    assert_eq!(launches(&h), 2);
+    h.advance(Duration::from_millis(1));
+    assert_eq!(launches(&h), 3, "then after 200 ms");
+
+    statuses(&ui);
+    h.up(0);
+    // Back up: the marker goes once the handshake is done.
+    let ui2 = h.front_end();
+    h.query(&ui2, "x");
+    assert_eq!(statuses(&ui), [Vec::<String>::new()]);
+}
+
+#[test]
+fn messages_from_a_previous_run_of_an_extension_are_ignored() {
+    let mut h = Harness::new(vec![plain("apps")]);
+    let old = h.up(0);
+    h.down(&old);
+    h.advance(Duration::from_secs(1));
+    let _new = h.up(0);
+    let ui = h.front_end();
+
+    h.add(&old, vec![app("Ghost")]);
+    assert_eq!(h.query(&ui, "ghost"), []);
+}
+
+#[test]
+fn a_config_change_reaches_only_the_extensions_whose_table_changed() {
+    let table = |toml: &str| -> Table {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("a.toml"), toml).unwrap();
+        kotodamad::config::load(&[dir.path().to_owned()]).unwrap()
+    };
+    let mut h = Harness::with_config(
+        vec![plain("apps"), plain("web")],
+        table("[extensions.apps]\nterminal = \"foot\""),
+    );
+    let apps = h.up(0);
+    let web = h.up(1);
+    let configs = |ext: &Ext| -> Vec<Table> {
+        ext.drain()
+            .into_iter()
+            .filter_map(|m| match m {
+                ToExtension::Config(table) => Some(table),
+                _ => None,
+            })
+            .collect()
+    };
+    assert_eq!(
+        configs(&apps),
+        [BTreeMap::from([(
+            "terminal".into(),
+            Value::String("foot".into())
+        )])],
+        "the first message after the handshake"
+    );
+    assert_eq!(configs(&web), [Table::new()]);
+
+    h.event(Event::Config(table(
+        "[extensions.apps]\nterminal = \"kitty\"\n[other]\nx = 1",
+    )));
+    assert_eq!(
+        configs(&apps),
+        [BTreeMap::from([(
+            "terminal".into(),
+            Value::String("kitty".into())
+        )])]
+    );
+    assert_eq!(configs(&web), []);
+}
+
+fn typer() -> Found {
+    plain("typer")
+}
+
+fn type_text(h: &mut Harness, ui: &FrontEnd, typer: &Ext, text: &str) {
+    h.add(typer, vec![app("Snippet")]);
+    h.query(ui, "snippet");
+    typer.drain();
+    run(h, ui, "typer", "snippet", "typer", "open");
+    let (invocation, ..) = runs(typer)[0].clone();
+    h.send(
+        typer,
+        FromExtension::ActionDone {
+            invocation,
+            outcome: Outcome::Type { text: text.into() },
+        },
+    );
+}
+
+#[test]
+fn typing_waits_until_every_front_end_has_closed() {
+    let mut h = Harness::new(vec![typer()]);
+    let typer = h.up(0);
+    let ui = h.front_end();
+    let other = h.front_end();
+
+    type_text(&mut h, &ui, &typer, "hello");
+    assert!(ui.drain().contains(&ToFrontEnd::Close));
+    assert!(other.drain().contains(&ToFrontEnd::Close));
+    assert_eq!(*h.outputs.0.borrow(), []);
+
+    h.from_front_end(&ui, FromFrontEnd::Closed);
+    assert_eq!(*h.outputs.0.borrow(), []);
+    h.event(Event::FrontEndDown {
+        front_end: other.id,
+    });
+    assert_eq!(*h.outputs.0.borrow(), [Output::Type("hello".into())]);
+}
+
+#[test]
+fn typing_goes_ahead_when_a_front_end_never_answers() {
+    let mut h = Harness::new(vec![typer()]);
+    let typer = h.up(0);
+    let ui = h.front_end();
+
+    type_text(&mut h, &ui, &typer, "hello");
+    h.advance(Duration::from_millis(499));
+    assert_eq!(*h.outputs.0.borrow(), []);
+    h.advance(Duration::from_millis(1));
+    assert_eq!(*h.outputs.0.borrow(), [Output::Type("hello".into())]);
+}

@@ -134,6 +134,15 @@ impl Extension {
         }
     }
 
+    /// Stopped, or restarting after it stopped: its Results are gone.
+    fn is_down(&self) -> bool {
+        match self.state {
+            State::Down { .. } => true,
+            State::Starting => self.generation > 1,
+            State::Up { .. } => false,
+        }
+    }
+
     fn debounce(&self) -> Option<Duration> {
         let live = self.found.manifest.live_query.as_ref()?;
         Some(Duration::from_millis(live.debounce_ms.into()))
@@ -865,7 +874,7 @@ impl<L: Launcher, D: Desktop> Daemon<L, D> {
         let down: Vec<String> = self
             .extensions
             .iter()
-            .filter(|ext| matches!(ext.state, State::Down { .. }))
+            .filter(|ext| ext.is_down())
             .map(|ext| ext.name().to_owned())
             .collect();
         if down != self.down {
