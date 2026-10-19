@@ -314,3 +314,22 @@ fn an_extension_that_never_says_hello_is_killed_restarted_and_dies_with_the_daem
         (!alive()).then_some(())
     });
 }
+
+#[test]
+fn a_front_end_that_never_says_hello_is_disconnected() {
+    use std::io::Read;
+
+    let daemon = Daemon::start(Daemon::home());
+    let socket = daemon.root.path().join("runtime/kotodama.sock");
+    let mut silent = wait_for("the socket", || UnixStream::connect(&socket).ok());
+    silent.set_read_timeout(Some(TIMEOUT)).unwrap();
+
+    // The Daemon's hello, then the end of the stream once it gives up on ours.
+    let mut received = Vec::new();
+    silent.read_to_end(&mut received).unwrap();
+    assert!(String::from_utf8_lossy(&received).contains("\"version\""));
+
+    // The Daemon still serves everyone else.
+    let mut ui = daemon.connect();
+    assert_eq!(ui.titles("anything"), Vec::<String>::new());
+}

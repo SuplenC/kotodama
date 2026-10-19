@@ -1,14 +1,16 @@
 //! The Unix socket Front ends connect to.
 
 use std::io;
+use std::net::Shutdown;
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::Path;
-use std::sync::mpsc::{self, Sender};
+use std::sync::mpsc::Sender;
 
-use kotodama_protocol::{Channel, Error, FromFrontEnd, Hello, ToFrontEnd, WireFormat};
+use kotodama_protocol::{Channel, Error, FromFrontEnd, Hello, WireFormat};
 
-use crate::daemon::{Event, FrontEndId};
+use crate::daemon::{Event, FrontEndId, HANDSHAKE_TIMEOUT};
 use crate::host::spawn;
+use crate::link::pump;
 
 /// Binds the socket. A socket file left by a Daemon that died is replaced; one
 /// that a running Daemon answers on is an error.
@@ -48,33 +50,33 @@ pub fn serve(listener: UnixListener, events: Sender<Event>) {
 }
 
 fn connection(id: FrontEndId, stream: UnixStream, events: &Sender<Event>) -> Result<(), Error> {
-    let (mut reader, mut writer) =
-        Channel::handshake(stream.try_clone()?, stream, &Hello::new(&WireFormat::ALL))?.split();
-
-    let (sender, outbox) = mpsc::channel::<ToFrontEnd>();
-    spawn(format!("front-end-{}-w", id.0), move || {
-        for message in outbox {
-            if writer.send(&message).is_err() {
-                break;
-            }
-        }
-    });
-    let _ = events.send(Event::FrontEndUp {
-        front_end: id,
-        sender,
-    });
-
-    loop {
-        match reader.recv::<FromFrontEnd>() {
-            Ok(Some(message)) => {
-                let _ = events.send(Event::FromFrontEnd {
-                    front_end: id,
-                    message,
-                });
-            }
-            Ok(None) => return Ok(()),
-            Err(err @ Error::Decode { .. }) => log::warn!("front end {}: {err}", id.0),
-            Err(err) => return Err(err),
-        }
-    }
+    // A Front end that connects and never says hello mustn't hold a thread.
+    stream.set_read_timeout(Some(HANDSHAKE_TIMEOUT))?;
+    let channel = Channel::handshake(
+        stream.try_clone()?,
+        stream.try_clone()?,
+        &Hello::new(&WireFormat::ALL),
+    )?;
+    stream.set_read_timeout(None)?;
+    pump(
+        &format!("front-end-{}", id.0),
+        channel,
+        |sender| {
+            let _ = events.send(Event::FrontEndUp {
+                front_end: id,
+                sender,
+                // Unblocks both threads, so a Front end that stopped reading
+                // can be dropped.
+                disconnect: Box::new(move || {
+                    let _ = stream.shutdown(Shutdown::Both);
+                }),
+            });
+        },
+        |message: FromFrontEnd| {
+            let _ = events.send(Event::FromFrontEnd {
+                front_end: id,
+                message,
+            });
+        },
+    )
 }

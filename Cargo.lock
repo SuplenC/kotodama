@@ -333,6 +333,7 @@ dependencies = [
  "nucleo-matcher",
  "regex",
  "rustix",
+ "serde",
  "serde_json",
  "tempfile",
  "toml",

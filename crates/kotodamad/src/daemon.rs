@@ -8,7 +8,7 @@
 
 use std::cell::Cell;
 use std::collections::{BTreeMap, HashMap};
-use std::sync::mpsc::{Sender, SyncSender, TrySendError};
+use std::sync::mpsc::{SyncSender, TrySendError};
 use std::time::{Duration, Instant};
 
 use kotodama_protocol::{
@@ -69,7 +69,10 @@ pub enum Event {
     },
     FrontEndUp {
         front_end: FrontEndId,
-        sender: Sender<ToFrontEnd>,
+        /// Bounded: a Front end that leaves it full has stopped reading.
+        sender: SyncSender<ToFrontEnd>,
+        /// Cuts the connection off.
+        disconnect: Box<dyn FnOnce() + Send>,
     },
     FromFrontEnd {
         front_end: FrontEndId,
@@ -93,7 +96,10 @@ const FIRST_RETRY: Duration = Duration::from_millis(100);
 const MAX_RETRY: Duration = Duration::from_secs(30);
 /// An Extension that ran this long before it stopped starts its backoff over.
 const STABLE: Duration = Duration::from_secs(10);
-/// How long an Extension may take to say hello before it counts as hung.
+/// How many results one Live query may contribute; the rest are dropped.
+pub const MAX_LIVE_RESULTS: usize = 500;
+/// How long an Extension or Front end may take to say hello before it counts as
+/// hung.
 pub const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(5);
 
 enum State {
@@ -232,7 +238,10 @@ enum Update {
 
 /// One Front end's search.
 struct Session {
-    sender: Sender<ToFrontEnd>,
+    sender: SyncSender<ToFrontEnd>,
+    disconnect: Option<Box<dyn FnOnce() + Send>>,
+    /// Left its channel full: it has stopped reading.
+    hung: Cell<bool>,
     query: String,
     pattern: Pattern,
     /// What a perfect match of the query scores, which Live query scores are
@@ -255,8 +264,11 @@ struct Session {
 }
 
 impl Session {
+    /// Never blocks; see [`Extension::send`].
     fn send(&self, message: ToFrontEnd) {
-        let _ = self.sender.send(message);
+        if let Err(TrySendError::Full(_)) = self.sender.try_send(message) {
+            self.hung.set(true);
+        }
     }
 
     fn can_narrow(&self, version: u64) -> bool {
@@ -370,7 +382,11 @@ impl<L: Launcher, D: Desktop> Daemon<L, D> {
                     self.extension_down(extension, now);
                 }
             }
-            Event::FrontEndUp { front_end, sender } => self.front_end_up(front_end, sender),
+            Event::FrontEndUp {
+                front_end,
+                sender,
+                disconnect,
+            } => self.front_end_up(front_end, sender, disconnect),
             Event::FromFrontEnd { front_end, message } => {
                 self.front_end_message(front_end, message, now)
             }
@@ -634,8 +650,15 @@ impl<L: Launcher, D: Desktop> Daemon<L, D> {
             return;
         };
         let live = &mut session.live[id.0];
+        let room = MAX_LIVE_RESULTS.saturating_sub(live.results.len());
+        if results.len() > room {
+            log::warn!(
+                "{}: dropping Live results past {MAX_LIVE_RESULTS} for one query",
+                self.extensions[id.0].name()
+            );
+        }
         live.results
-            .extend(results.into_iter().map(|result| LiveResult {
+            .extend(results.into_iter().take(room).map(|result| LiveResult {
                 answer: result.answer && answers,
                 ..result
             }));
@@ -709,18 +732,16 @@ impl<L: Launcher, D: Desktop> Daemon<L, D> {
         }
     }
 
-    fn front_end_up(&mut self, id: FrontEndId, sender: Sender<ToFrontEnd>) {
-        let _ = sender.send(ToFrontEnd::Status {
-            down: self.down.clone(),
-        });
-        for ((ext, _), job) in &self.jobs {
-            let _ = sender.send(ToFrontEnd::JobProgress {
-                extension: self.extensions[ext.0].name().to_owned(),
-                job: job.clone(),
-            });
-        }
+    fn front_end_up(
+        &mut self,
+        id: FrontEndId,
+        sender: SyncSender<ToFrontEnd>,
+        disconnect: Box<dyn FnOnce() + Send>,
+    ) {
         let session = Session {
             sender,
+            disconnect: Some(disconnect),
+            hung: Cell::new(false),
             query: String::new(),
             pattern: Pattern::default(),
             max_score: 0,
@@ -732,6 +753,15 @@ impl<L: Launcher, D: Desktop> Daemon<L, D> {
             shown: Vec::new(),
             update: Update::None,
         };
+        session.send(ToFrontEnd::Status {
+            down: self.down.clone(),
+        });
+        for ((ext, _), job) in &self.jobs {
+            session.send(ToFrontEnd::JobProgress {
+                extension: self.extensions[ext.0].name().to_owned(),
+                job: job.clone(),
+            });
+        }
         self.sessions.insert(id, session);
     }
 
@@ -925,6 +955,24 @@ impl<L: Launcher, D: Desktop> Daemon<L, D> {
             } else {
                 self.catalog = None;
             }
+        }
+
+        let hung: Vec<FrontEndId> = self
+            .sessions
+            .iter()
+            .filter(|(_, session)| session.hung.get())
+            .map(|(&id, _)| id)
+            .collect();
+        for id in hung {
+            log::warn!("front end {} stopped reading; disconnecting it", id.0);
+            if let Some(disconnect) = self
+                .sessions
+                .get_mut(&id)
+                .and_then(|session| session.disconnect.take())
+            {
+                disconnect();
+            }
+            self.front_end_down(id);
         }
 
         for (id, ext) in self.extensions.iter_mut().enumerate() {

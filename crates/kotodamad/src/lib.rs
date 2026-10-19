@@ -7,6 +7,7 @@ pub mod desktop;
 pub mod discovery;
 mod host;
 mod index;
+mod link;
 pub mod paths;
 mod server;
 

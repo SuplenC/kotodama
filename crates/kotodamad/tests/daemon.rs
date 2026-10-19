@@ -5,12 +5,15 @@ use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::rc::Rc;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver};
 use std::time::{Duration, Instant};
 
 use kotodama_protocol::*;
 use kotodamad::daemon::{
-    Daemon, Desktop, Event, ExtensionId, FrontEndId, HANDSHAKE_TIMEOUT, Launcher, Output,
+    Daemon, Desktop, Event, ExtensionId, FrontEndId, HANDSHAKE_TIMEOUT, Launcher, MAX_LIVE_RESULTS,
+    Output,
 };
 use kotodamad::discovery::Found;
 
@@ -60,6 +63,8 @@ struct Ext {
 struct FrontEnd {
     id: FrontEndId,
     rx: Receiver<ToFrontEnd>,
+    /// Set once the Daemon cuts this Front end off.
+    closed: Arc<AtomicBool>,
 }
 
 fn manifest(toml: &str) -> Found {
@@ -187,14 +192,22 @@ impl Harness {
     }
 
     fn front_end(&mut self) -> FrontEnd {
+        self.front_end_with_room(OUTBOX)
+    }
+
+    /// A Front end with room for only `room` messages it hasn't read.
+    fn front_end_with_room(&mut self, room: usize) -> FrontEnd {
         let id = FrontEndId(self.next_front_end);
         self.next_front_end += 1;
-        let (tx, rx) = mpsc::channel();
+        let (tx, rx) = mpsc::sync_channel(room);
+        let closed = Arc::new(AtomicBool::new(false));
+        let flag = Arc::clone(&closed);
         self.event(Event::FrontEndUp {
             front_end: id,
             sender: tx,
+            disconnect: Box::new(move || flag.store(true, Ordering::SeqCst)),
         });
-        let front_end = FrontEnd { id, rx };
+        let front_end = FrontEnd { id, rx, closed };
         front_end.drain();
         front_end
     }
@@ -904,10 +917,11 @@ fn a_stopped_extensions_jobs_are_not_shown_to_new_front_ends() {
     );
     h.down(&installer);
 
-    let (tx, rx) = mpsc::channel();
+    let (tx, rx) = mpsc::sync_channel(OUTBOX);
     h.event(Event::FrontEndUp {
         front_end: FrontEndId(99),
         sender: tx,
+        disconnect: Box::new(|| {}),
     });
     let jobs: Vec<_> = rx
         .try_iter()
@@ -1004,4 +1018,53 @@ fn rows_scrolled_past_are_protected_like_the_ones_on_screen() {
         titles(&ui.results().unwrap()),
         ["g rust a", "g rust bb", "perfect", "g rust ccc"]
     );
+}
+
+#[test]
+fn a_front_end_that_stops_reading_is_cut_off_and_the_others_carry_on() {
+    let mut h = Harness::new(vec![plain("apps")]);
+    let apps = h.up(0);
+    h.add(&apps, vec![app("Firefox")]);
+    let stuck = h.front_end_with_room(2);
+    let ui = h.front_end();
+
+    for text in ["f", "fi", "fir"] {
+        h.front_end_sends(&stuck, FromFrontEnd::Query { text: text.into() });
+    }
+    assert!(stuck.closed.load(Ordering::SeqCst));
+    assert_eq!(titles(&h.query(&ui, "fire")), ["Firefox"]);
+    assert!(!ui.closed.load(Ordering::SeqCst));
+}
+
+#[test]
+fn live_results_for_one_query_are_capped() {
+    let mut h = Harness::new(vec![calculator()]);
+    let calc = h.up(0);
+    let ui = h.front_end();
+    h.query(&ui, "1");
+    let (id, ..) = live_queries(&calc)[0].clone();
+
+    for batch in 0..3 {
+        let results = (0..MAX_LIVE_RESULTS / 2)
+            .map(|n| {
+                live(
+                    &format!("{batch}-{n}"),
+                    if batch == 2 { 1.0 } else { 0.5 },
+                    false,
+                )
+            })
+            .collect();
+        h.send(
+            &calc,
+            FromExtension::LiveResults {
+                live_query: id,
+                results,
+                done: false,
+            },
+        );
+    }
+    // Only the first MAX_LIVE_RESULTS are kept, so the third batch never shows,
+    // though it scores best.
+    let rows = ui.results().unwrap();
+    assert!(rows.iter().all(|row| !row.item.title.starts_with("2-")));
 }
