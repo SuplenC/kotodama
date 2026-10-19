@@ -50,6 +50,8 @@
               grim
               imagemagick
               wtype
+              # A session bus, for the fake notification service
+              dbus
 
               # The shell example Extension
               jq
