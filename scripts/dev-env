@@ -35,8 +35,9 @@ if [ -t 0 ] && [ -t 1 ]; then
 fi
 
 # /nix and /cargo are named volumes: the Nix store, the cargo registry and the
-# Linux build output survive between runs and stay off the bind mount.
-exec docker run --rm "${tty[@]}" \
+# Linux build output survive between runs and stay off the bind mount. --init
+# forwards signals and reaps the processes e2e tests start.
+exec docker run --rm --init "${tty[@]}" \
     -v kotodama-nix:/nix \
     -v kotodama-cargo:/cargo \
     -v "$root:/work" \

@@ -3,6 +3,9 @@
 # Keep /nix in a named volume so the store survives between runs.
 FROM nixos/nix:2.35.3
 
+LABEL org.opencontainers.image.source=https://github.com/SuplenC/kotodama \
+      org.opencontainers.image.description="Kotodama dev environment: enters the flake's dev shell"
+
 COPY nix.conf /etc/nix/nix.conf
 COPY entrypoint.sh /usr/local/bin/kotodama-dev
 COPY gitconfig /root/.gitconfig

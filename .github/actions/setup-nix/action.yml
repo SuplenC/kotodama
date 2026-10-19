@@ -10,6 +10,7 @@ inputs:
 runs:
   using: composite
   steps:
+    # Also makes /dev/kvm usable, for the NixOS VM tests.
     - uses: cachix/install-nix-action@v31
       with:
         extra_nix_config: |
@@ -18,7 +19,7 @@ runs:
 
     # Reads the cache everywhere; pushes build outputs only from pushes to main.
     - if: inputs.cachix-auth-token != ''
-      uses: cachix/cachix-action@v16
+      uses: cachix/cachix-action@v17
       with:
         name: kotodama
         authToken: ${{ inputs.cachix-auth-token }}

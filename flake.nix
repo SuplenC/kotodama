@@ -15,40 +15,52 @@
     in
     {
       # The only toolchain definition in the repo. Docker, CI and `just` all enter this shell.
-      devShells = forAllSystems (pkgs: {
-        default = pkgs.mkShell {
-          packages = with pkgs; [
-            # Rust
-            cargo
-            rustc
-            clippy
-            rustfmt
-            rust-analyzer
+      devShells = forAllSystems (
+        pkgs:
+        let
+          # One Qt prefix with every module, so qmake (and so cxx-qt-build) finds them all.
+          qt = pkgs.qt6.env "kotodama-qt-${pkgs.qt6.qtbase.version}" (
+            with pkgs.qt6;
+            [
+              qtdeclarative
+              qtwayland
+            ]
+          );
+        in
+        {
+          default = pkgs.mkShell {
+            packages = with pkgs; [
+              # Rust
+              cargo
+              rustc
+              clippy
+              rustfmt
+              rust-analyzer
 
-            # Qt 6 and what cxx-qt needs to build against it
-            qt6.qtbase
-            qt6.qtdeclarative
-            qt6.qtwayland
-            pkg-config
-            cmake
+              # Qt 6 and what cxx-qt needs to build against it
+              qt
+              libGL # QtGui links libGLX and libOpenGL
+              pkg-config
+              cmake
 
-            # Front end and headless Wayland for e2e tests
-            quickshell
-            sway-unwrapped
-            grim
-            imagemagick
+              # Front end and headless Wayland for e2e tests
+              quickshell
+              sway-unwrapped
+              grim
+              imagemagick
 
-            just
-            nixfmt
-            shellcheck
-            actionlint
-          ];
+              just
+              nixfmt
+              shellcheck
+              actionlint
+            ];
 
-          # cxx-qt-build finds Qt through qmake.
-          QMAKE = "${pkgs.qt6.qtbase}/bin/qmake";
-          RUST_SRC_PATH = "${pkgs.rustPlatform.rustLibSrc}";
-        };
-      });
+            # cxx-qt-build finds Qt through qmake.
+            QMAKE = "${qt}/bin/qmake";
+            RUST_SRC_PATH = "${pkgs.rustPlatform.rustLibSrc}";
+          };
+        }
+      );
 
       formatter = forAllSystems (pkgs: pkgs.nixfmt);
 
