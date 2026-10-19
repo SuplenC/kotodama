@@ -16,57 +16,75 @@ const F1: i32 = 0x0100_0030;
 /// without Ctrl, Alt or Super never matches, since the key alone types into the
 /// search.
 pub fn matches(shortcut: &str, key: i32, modifiers: i32) -> bool {
-    let shortcut = shortcut.to_ascii_lowercase();
+    // Checked on every key pressed with a modifier, so nothing is allocated.
     let mut parts = shortcut.split('+').map(str::trim).rev();
     let Some(keys) = parts.next().and_then(key_codes) else {
         return false;
     };
     let mut wanted = 0;
     for part in parts {
-        wanted |= match part {
-            "ctrl" | "control" => CONTROL,
-            "shift" => SHIFT,
-            "alt" => ALT,
-            "super" | "meta" | "cmd" => META,
-            _ => return false,
+        let Some(modifier) = named(&MODIFIER_NAMES, part) else {
+            return false;
         };
+        wanted |= modifier;
     }
     wanted & (CONTROL | ALT | META) != 0 && wanted == modifiers & MODIFIERS && keys.contains(&key)
 }
 
+const MODIFIER_NAMES: [(&str, i32); 7] = [
+    ("ctrl", CONTROL),
+    ("control", CONTROL),
+    ("shift", SHIFT),
+    ("alt", ALT),
+    ("super", META),
+    ("meta", META),
+    ("cmd", META),
+];
+
+// Each with the two codes it may arrive as; most keys have one, given twice.
+const KEY_NAMES: [(&str, [i32; 2]); 15] = [
+    ("enter", [0x0100_0004, 0x0100_0005]),
+    ("return", [0x0100_0004, 0x0100_0005]),
+    ("tab", [0x0100_0001; 2]),
+    ("backspace", [0x0100_0003; 2]),
+    ("delete", [0x0100_0007; 2]),
+    ("del", [0x0100_0007; 2]),
+    ("space", [0x20; 2]),
+    ("home", [0x0100_0010; 2]),
+    ("end", [0x0100_0011; 2]),
+    ("left", [0x0100_0012; 2]),
+    ("up", [0x0100_0013; 2]),
+    ("right", [0x0100_0014; 2]),
+    ("down", [0x0100_0015; 2]),
+    ("pageup", [0x0100_0016; 2]),
+    ("pagedown", [0x0100_0017; 2]),
+];
+
+/// The value `names` gives `name`, ignoring case.
+fn named<T: Copy>(names: &[(&str, T)], name: &str) -> Option<T> {
+    names
+        .iter()
+        .find(|(known, _)| name.eq_ignore_ascii_case(known))
+        .map(|&(_, value)| value)
+}
+
 /// The Qt::Key codes a key name may arrive as, or `None` if it names no key.
 /// A one-character name is a key Qt names by its uppercase character.
-fn key_codes(name: &str) -> Option<Vec<i32>> {
-    let codes = match name {
-        "enter" | "return" => vec![0x0100_0004, 0x0100_0005],
-        "tab" => vec![0x0100_0001],
-        "backspace" => vec![0x0100_0003],
-        "delete" | "del" => vec![0x0100_0007],
-        "space" => vec![0x20],
-        "home" => vec![0x0100_0010],
-        "end" => vec![0x0100_0011],
-        "left" => vec![0x0100_0012],
-        "up" => vec![0x0100_0013],
-        "right" => vec![0x0100_0014],
-        "down" => vec![0x0100_0015],
-        "pageup" => vec![0x0100_0016],
-        "pagedown" => vec![0x0100_0017],
-        _ => {
-            if let Some(n) = name
-                .strip_prefix('f')
-                .and_then(|n| n.parse::<i32>().ok())
-                .filter(|n| (1..=12).contains(n))
-            {
-                return Some(vec![F1 + n - 1]);
-            }
-            let mut chars = name.chars();
-            match (chars.next(), chars.next()) {
-                (Some(c), None) if c.is_ascii_graphic() => vec![c.to_ascii_uppercase() as i32],
-                _ => return None,
-            }
-        }
-    };
-    Some(codes)
+fn key_codes(name: &str) -> Option<[i32; 2]> {
+    if let Some(codes) = named(&KEY_NAMES, name) {
+        return Some(codes);
+    }
+    if let Some(n) = name
+        .strip_prefix(['f', 'F'])
+        .and_then(|n| n.parse::<i32>().ok())
+        .filter(|n| (1..=12).contains(n))
+    {
+        return Some([F1 + n - 1; 2]);
+    }
+    match name.as_bytes() {
+        [c] if c.is_ascii_graphic() => Some([i32::from(c.to_ascii_uppercase()); 2]),
+        _ => None,
+    }
 }
 
 #[cfg(test)]

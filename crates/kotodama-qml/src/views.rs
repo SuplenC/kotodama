@@ -45,6 +45,12 @@ impl Open {
         self.extension == extension && self.view.id == id
     }
 
+    /// Whether this is a progress View following `extension`'s job `job`.
+    pub fn follows(&self, extension: &str, job: &str) -> bool {
+        self.extension == extension
+            && matches!(&self.view.content, ViewContent::Progress { job: followed } if followed == job)
+    }
+
     fn popped(&self) -> FromFrontEnd {
         FromFrontEnd::ViewPopped {
             extension: self.extension.clone(),
@@ -210,11 +216,7 @@ impl Views {
     fn forget_finished(&mut self) {
         let stack = &self.stack;
         self.jobs.retain(|(by, job)| {
-            job.state == JobState::Running
-                || stack.iter().any(|open| {
-                    open.extension == *by
-                        && matches!(&open.view.content, ViewContent::Progress { job: followed } if *followed == job.id)
-                })
+            job.state == JobState::Running || stack.iter().any(|open| open.follows(by, &job.id))
         });
     }
 }

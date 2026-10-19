@@ -77,7 +77,8 @@ PanelWindow {
         if (actions.length > 0) {
             actionList.row = list.currentIndex;
             actionList.current = 0;
-            menu.actions = actions;            actionPanel.forceActiveFocus();
+            menu.actions = actions;
+            actionPanel.forceActiveFocus();
         }
     }
 

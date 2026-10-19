@@ -5,16 +5,16 @@
 use std::fmt::Write;
 use std::ops::Range;
 
-use kotodama_protocol::{ActionRef, ResultRef, ShownResult};
+use kotodama_protocol::{Action, ActionRef, OfferedAction, ResultRef, ShownResult};
 
 /// One row of the list model.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Row {
     pub result: ResultRef,
-    /// The Action panel: the Item's own Actions, the primary one (what Enter
-    /// runs) first, then
-    /// the Contributed actions, grouped by the Extension that offers them.
-    pub actions: Vec<RowAction>,
+    /// The Item's own Actions, the primary one (what Enter runs) first.
+    own: Vec<Action>,
+    /// Other Extensions' Actions for the Item, grouped by Extension.
+    contributed: Vec<OfferedAction>,
     pub title: String,
     pub subtitle: String,
     pub icon: String,
@@ -23,47 +23,27 @@ pub struct Row {
 }
 
 /// One entry of the Action panel.
-#[derive(Clone, Debug, PartialEq)]
-pub struct RowAction {
-    pub action: ActionRef,
-    pub title: String,
-    pub shortcut: Option<String>,
+#[derive(Debug, PartialEq)]
+pub struct PanelEntry<'a> {
+    pub action: &'a Action,
     /// The Extension that offers a Contributed action; `None` for the Item's
     /// own Actions.
-    pub group: Option<String>,
+    pub group: Option<&'a str>,
 }
 
 impl From<ShownResult> for Row {
     fn from(shown: ShownResult) -> Self {
-        let mut item = shown.item;
-        let own = item.actions.into_iter().map(|action| RowAction {
-            action: ActionRef {
-                extension: shown.extension.clone(),
-                id: action.id,
-            },
-            title: action.title,
-            shortcut: action.shortcut,
-            group: None,
-        });
-        let contributed = shown.contributed.into_iter().map(|offered| RowAction {
-            action: ActionRef {
-                extension: offered.extension.clone(),
-                id: offered.action.id,
-            },
-            title: offered.action.title,
-            shortcut: offered.action.shortcut,
-            group: Some(offered.extension),
-        });
-        let actions = own.chain(contributed).collect();
+        let item = shown.item;
         let mut highlights = shown.highlights;
         highlights.sort_unstable();
         highlights.dedup();
         Row {
             result: ResultRef {
                 extension: shown.extension,
-                id: std::mem::take(&mut item.id),
+                id: item.id,
             },
-            actions,
+            own: item.actions,
+            contributed: shown.contributed,
             title: item.title,
             subtitle: item.subtitle.unwrap_or_default(),
             icon: item.icon.unwrap_or_default(),
@@ -73,6 +53,37 @@ impl From<ShownResult> for Row {
 }
 
 impl Row {
+    /// The Action panel: the Item's own Actions, then the Contributed ones.
+    /// Built when asked for, since most rows are never opened.
+    pub fn actions(&self) -> impl Iterator<Item = PanelEntry<'_>> {
+        let own = self.own.iter().map(|action| PanelEntry {
+            action,
+            group: None,
+        });
+        let contributed = self.contributed.iter().map(|offered| PanelEntry {
+            action: &offered.action,
+            group: Some(offered.extension.as_str()),
+        });
+        own.chain(contributed)
+    }
+
+    /// What runs the `n`th entry of the Action panel.
+    pub fn action(&self, n: usize) -> Option<ActionRef> {
+        match self.own.get(n) {
+            Some(own) => Some(ActionRef {
+                extension: self.result.extension.clone(),
+                id: own.id.clone(),
+            }),
+            None => self
+                .contributed
+                .get(n - self.own.len())
+                .map(|offered| ActionRef {
+                    extension: offered.extension.clone(),
+                    id: offered.action.id.clone(),
+                }),
+        }
+    }
+
     /// The title as Qt's StyledText, with each run of matched characters set
     /// in `color` (any color QML accepts, such as `#89b4fa`).
     pub fn markup(&self, color: &str) -> String {
@@ -149,7 +160,8 @@ mod tests {
                 extension: "apps".into(),
                 id: "x".into(),
             },
-            actions: Vec::new(),
+            own: Vec::new(),
+            contributed: Vec::new(),
             title: title.into(),
             subtitle: String::new(),
             icon: String::new(),
@@ -198,27 +210,29 @@ mod tests {
         };
         let row = Row::from(shown);
         let panel: Vec<_> = row
-            .actions
-            .iter()
-            .map(|entry| {
-                (
-                    entry.group.as_deref(),
-                    entry.title.as_str(),
-                    entry.action.extension.as_str(),
-                    entry.action.id.as_str(),
-                )
+            .actions()
+            .enumerate()
+            .map(|(n, entry)| {
+                let runs = row.action(n).unwrap();
+                let runs = format!("{}/{}", runs.extension, runs.id);
+                (entry.group, entry.action.title.as_str(), runs)
             })
             .collect();
         assert_eq!(
             panel,
             [
-                (None, "Open", "projects", "open"),
-                (None, "Open in terminal", "projects", "term"),
-                (Some("pinner"), "Pin a version here", "pinner", "pin"),
-                (Some("pinner"), "Unpin", "pinner", "unpin"),
-                (Some("git"), "Show log", "git", "log"),
+                (None, "Open", "projects/open".to_owned()),
+                (None, "Open in terminal", "projects/term".to_owned()),
+                (
+                    Some("pinner"),
+                    "Pin a version here",
+                    "pinner/pin".to_owned()
+                ),
+                (Some("pinner"), "Unpin", "pinner/unpin".to_owned()),
+                (Some("git"), "Show log", "git/log".to_owned()),
             ]
         );
+        assert_eq!(row.action(5), None);
     }
 
     #[test]

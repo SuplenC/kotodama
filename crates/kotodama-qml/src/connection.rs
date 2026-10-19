@@ -27,13 +27,29 @@ pub enum Update {
     Rows(Vec<Row>),
     Down(Vec<String>),
     Close,
-    Open { query: String, view: Option<String> },
+    Open {
+        query: String,
+        view: Option<String>,
+    },
     Toggle,
     ActionFailed(String),
-    PushView { extension: String, view: View },
-    ReplaceView { extension: String, view: View },
-    PopView { extension: String, view: String },
-    JobProgress { extension: String, job: Job },
+    PushView {
+        extension: String,
+        view: View,
+    },
+    /// The protocol's `UpdateView`: the open View with the same id changes.
+    ReplaceView {
+        extension: String,
+        view: View,
+    },
+    PopView {
+        extension: String,
+        view: String,
+    },
+    JobProgress {
+        extension: String,
+        job: Job,
+    },
     Disconnected,
 }
 

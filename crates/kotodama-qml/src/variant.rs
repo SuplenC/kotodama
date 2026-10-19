@@ -149,13 +149,13 @@ pub fn view(views: &Views) -> Map {
 /// order. `group` is the Extension offering a Contributed action, empty for
 /// the Item's own.
 pub fn actions(row: &Row) -> List {
-    list(row.actions.iter().map(|entry| {
+    list(row.actions().map(|entry| {
         map([
-            ("title", text(&entry.title)),
-            ("group", text(entry.group.as_deref().unwrap_or_default())),
+            ("title", text(&entry.action.title)),
+            ("group", text(entry.group.unwrap_or_default())),
             (
                 "shortcut",
-                text(entry.shortcut.as_deref().unwrap_or_default()),
+                text(entry.action.shortcut.as_deref().unwrap_or_default()),
             ),
         ])
     }))

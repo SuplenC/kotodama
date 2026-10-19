@@ -332,12 +332,12 @@ impl KotodamaSearch {
         let Some(row) = self.row(row) else {
             return false;
         };
-        let Some(entry) = usize::try_from(n).ok().and_then(|n| row.actions.get(n)) else {
+        let Some(action) = usize::try_from(n).ok().and_then(|n| row.action(n)) else {
             return false;
         };
         let message = FromFrontEnd::RunAction {
             result: row.result.clone(),
-            action: entry.action.clone(),
+            action,
             arguments: Default::default(),
         };
         self.as_mut().rust_mut().send(&message)
@@ -345,8 +345,9 @@ impl KotodamaSearch {
 
     fn run_shortcut(self: Pin<&mut Self>, row: i32, key: i32, modifiers: i32) -> bool {
         let Some(n) = self.row(row).and_then(|found| {
-            found.actions.iter().position(|entry| {
+            found.actions().position(|entry| {
                 entry
+                    .action
                     .shortcut
                     .as_deref()
                     .is_some_and(|bound| shortcut::matches(bound, key, modifiers))
@@ -513,11 +514,10 @@ impl KotodamaSearch {
                 self.as_mut().show_view();
             }
             Update::JobProgress { extension, job } => {
-                let followed = matches!(
-                    self.views.top(),
-                    Some(open) if open.extension == extension
-                        && matches!(&open.view.content, ViewContent::Progress { job: id } if *id == job.id)
-                );
+                let followed = self
+                    .views
+                    .top()
+                    .is_some_and(|open| open.follows(&extension, &job.id));
                 self.as_mut().rust_mut().views.progress(extension, job);
                 if followed {
                     let view = variant::view(&self.views);
