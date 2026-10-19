@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+# Builds the Kotodama QML module and lays it out the way a QML import path
+# expects, then prints the import path to give Quickshell as QML_IMPORT_PATH:
+#   <path>/Kotodama/{qmldir,plugin.qmltypes,libKotodama.so}
+# Usage: scripts/qml-module [--release]
+set -euo pipefail
+
+root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+
+profile=debug
+args=()
+if [ "${1:-}" = --release ]; then
+    profile=release
+    args=(--release)
+fi
+
+cargo build --quiet --manifest-path "$root/Cargo.toml" -p kotodama-qml "${args[@]}"
+target=$(cargo metadata --format-version 1 --no-deps --manifest-path "$root/Cargo.toml" | jq -r .target_directory)
+
+# cxx-qt-build exports the qmldir and type info; the qmldir names the plugin
+# `Kotodama`, which Qt loads from libKotodama.so beside it.
+imports="$target/qml/$profile"
+module="$imports/Kotodama"
+mkdir -p "$module"
+cp "$target/cxxqt/qml_modules/Kotodama/qmldir" "$target/cxxqt/qml_modules/Kotodama/plugin.qmltypes" "$module/"
+cp "$target/$profile/libkotodama_qml.so" "$module/libKotodama.so"
+echo "$imports"

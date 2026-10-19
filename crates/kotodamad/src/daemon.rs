@@ -936,6 +936,13 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
         }
     }
 
+    /// Sends to every Front end but the one that asked.
+    fn broadcast_from(&self, from: FrontEndId, message: impl Fn() -> ToFrontEnd) {
+        for (_, session) in self.sessions.iter().filter(|&(&id, _)| id != from) {
+            session.send(message());
+        }
+    }
+
     fn front_end_up(
         &mut self,
         id: FrontEndId,
@@ -1025,6 +1032,11 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
                 }
             }
             FromFrontEnd::Closed => self.closed(Some(id)),
+            FromFrontEnd::Open { query, view } => self.broadcast_from(id, || ToFrontEnd::Open {
+                query: query.clone(),
+                view: view.clone(),
+            }),
+            FromFrontEnd::Toggle => self.broadcast_from(id, || ToFrontEnd::Toggle),
         }
     }
 

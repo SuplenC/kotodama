@@ -36,6 +36,7 @@
               clippy
               rustfmt
               rust-analyzer
+              cargo-nextest
 
               # Qt 6 and what cxx-qt needs to build against it
               qt
@@ -48,6 +49,7 @@
               sway-unwrapped
               grim
               imagemagick
+              wtype
 
               # The shell example Extension
               jq
@@ -60,6 +62,27 @@
 
             # cxx-qt-build finds Qt through qmake.
             QMAKE = "${qt}/bin/qmake";
+            # Fortify needs optimisation, so it only warns on every C++ file of a debug build.
+            hardeningDisable = [ "fortify" ];
+            # One font, rendered the same on every machine. makeFontsConf would also
+            # read the host's /etc/fonts and /usr/share/fonts, which differ between
+            # the dev container and a CI runner.
+            FONTCONFIG_FILE = pkgs.writeText "kotodama-fonts.conf" ''
+              <?xml version="1.0"?>
+              <!DOCTYPE fontconfig SYSTEM "urn:fontconfig:fonts.dtd">
+              <fontconfig>
+                <dir>${pkgs.dejavu_fonts}/share/fonts</dir>
+                <cachedir prefix="xdg">fontconfig</cachedir>
+                <match target="font">
+                  <edit name="antialias" mode="assign"><bool>true</bool></edit>
+                  <edit name="hinting" mode="assign"><bool>true</bool></edit>
+                  <edit name="hintstyle" mode="assign"><const>hintslight</const></edit>
+                  <edit name="rgba" mode="assign"><const>none</const></edit>
+                  <edit name="lcdfilter" mode="assign"><const>lcdnone</const></edit>
+                  <edit name="embeddedbitmap" mode="assign"><bool>false</bool></edit>
+                </match>
+              </fontconfig>
+            '';
             RUST_SRC_PATH = "${pkgs.rustPlatform.rustLibSrc}";
           };
         }

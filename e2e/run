@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Starts headless sway with one fixed output and runs every e2e/*/test.sh against it.
-# Usage: e2e/run [--update]
+# Starts headless sway with one fixed output and runs every e2e/*/test.sh against
+# it, or only the named ones.
+# Usage: e2e/run [--update] [test...]
 set -euo pipefail
 
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
@@ -8,6 +9,13 @@ root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 export E2E_UPDATE=0
 if [ "${1:-}" = --update ]; then
     E2E_UPDATE=1
+    shift
+fi
+tests=("$@")
+if [ "${#tests[@]}" -eq 0 ]; then
+    for test in "$root"/e2e/*/test.sh; do
+        tests+=("$(basename "$(dirname "$test")")")
+    done
 fi
 
 export E2E_OUT="$root/e2e/out"
@@ -45,9 +53,11 @@ export WAYLAND_DISPLAY SWAYSOCK
 export QT_QPA_PLATFORM=wayland QT_QUICK_BACKEND=software
 
 failed=0
-for test in "$root"/e2e/*/test.sh; do
-    name=$(basename "$(dirname "$test")")
-    if (cd "$(dirname "$test")" && bash -euo pipefail -c 'source "$1/e2e/lib.sh"; source "$2"' _ "$root" "$test"); then
+for name in "${tests[@]}"; do
+    test="$root/e2e/$name/test.sh"
+    # Each test's logs and screenshots go in a directory of their own.
+    mkdir -p "$E2E_OUT/$name"
+    if (export E2E_OUT="$E2E_OUT/$name" && cd "$(dirname "$test")" && bash -euo pipefail -c 'source "$1/e2e/lib.sh"; source "$2"' _ "$root" "$test"); then
         echo "ok   $name"
     else
         echo "FAIL $name"

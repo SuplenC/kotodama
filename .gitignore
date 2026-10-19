@@ -1,3 +1,5 @@
 /target
 /e2e/out
 /result*
+# cxx-qt-build writes it for qmlls, with paths from the machine that built it.
+/crates/kotodama-qml/.qmlls.ini

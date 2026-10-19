@@ -16,9 +16,7 @@ pub struct Paths {
 
 impl Paths {
     pub fn from_env() -> Result<Self, String> {
-        let runtime = env::var_os("XDG_RUNTIME_DIR")
-            .filter(|dir| !dir.is_empty())
-            .ok_or("XDG_RUNTIME_DIR isn't set")?;
+        let socket = kotodama_protocol::socket_path().ok_or("XDG_RUNTIME_DIR isn't set")?;
         let config_home = match env::var_os("XDG_CONFIG_HOME").filter(|dir| !dir.is_empty()) {
             Some(dir) => PathBuf::from(dir),
             None => PathBuf::from(env::var_os("HOME").ok_or("HOME isn't set")?).join(".config"),
@@ -41,7 +39,7 @@ impl Paths {
         extension_dirs.push(user.join("extensions"));
 
         Ok(Paths {
-            socket: PathBuf::from(runtime).join("kotodama.sock"),
+            socket,
             config_dirs,
             extension_dirs,
             history: state_home.join("kotodama/history.json"),
