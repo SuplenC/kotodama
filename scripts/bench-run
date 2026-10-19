@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+# Runs every benchmark of the checkout in DIR, in that checkout's dev shell, and
+# writes its bencher-format result lines to OUT, which stays empty when the
+# checkout has no benchmarks yet.
+# Usage: bench-run DIR OUT
+set -euo pipefail
+
+dir=$1
+out=$(realpath -m "$2")
+: >"$out"
+cd "$dir"
+if nix develop --command scripts/has-benches; then
+    nix develop --command just bench --bench '*' -- --output-format bencher | tee "$out.log"
+    grep 'bench:' "$out.log" >"$out" || true
+fi

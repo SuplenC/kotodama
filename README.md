@@ -34,7 +34,7 @@ cargo run -p kotodamad --example front-end -- --run firefox  # run the top one
 | Ryzen AI 9 HX 370 (target) | to be measured | to be measured | to be measured | to be measured |
 | Apple M-series, dev container (arm64 Linux VM) | 309 µs | 42 µs | 0.38 ms | 13.3 MiB |
 
-The target is a p99 under 2 ms from query received to Results sent. CI fails when resident memory grows more than 10% over the baseline from `main`.
+The target is a p99 under 2 ms from query received to Results sent. CI fails when a change makes resident memory more than 10% higher than its base commit does.
 
 ## Development
 
@@ -72,7 +72,7 @@ Hyprland can't run here: it needs a DRM device. Its live tests run in a NixOS VM
 
 ### CI
 
-GitHub Actions runs `check`, `test` and `e2e` on x86_64 and arm64, plus the NixOS VM job on x86_64. The bench job (x86_64 only) compares each benchmark with the baseline saved by the last push to `main` and fails when one is more than 50% slower or the Daemon's resident memory is more than 10% higher, and warns when there is no baseline to compare against. A weekly scheduled run keeps that baseline from being evicted. Shared runners are too noisy for absolute timings, so CI never checks them.
+GitHub Actions runs `check`, `test` and `e2e` on x86_64 and arm64, plus the NixOS VM job on x86_64. The bench job (x86_64 only) runs the benchmarks of the base commit and of the change on the same runner, one after the other, and fails when one is more than 50% slower or the Daemon's resident memory is more than 10% higher. Shared runners differ too much for absolute timings, or a baseline saved by another run, to mean anything, so CI only compares the two runs it made itself.
 
 On pushes to `main`, CI publishes:
 
