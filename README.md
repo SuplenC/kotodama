@@ -41,7 +41,10 @@ The flake builds Kotodama once and splits it into outputs, each also a package o
 
 The module installs the package and enables `kotodamad.socket`. On NixOS without home-manager, add the package to `systemd.packages` and `environment.systemPackages`, and set `systemd.user.sockets.kotodamad.wantedBy = [ "sockets.target" ]`.
 
-The Daemon starts the first time something connects to its socket, whether a `kotodama toggle` or the Quickshell Front end, and stays running after that. While it is stopped, systemd holds new connections and starts it again. It runs with the environment of the systemd user manager, so the compositor must pass on `WAYLAND_DISPLAY` (and anything else the apps it starts need) before the menu is first used. uwsm does this; in a plain Hyprland session, add `exec-once = dbus-update-activation-environment --systemd --all`.
+The Daemon starts the first time something connects to its socket, whether a `kotodama toggle` or the Quickshell Front end, and stays running after that. While it is stopped, systemd holds new connections and starts it again. It runs with the environment of the systemd user manager, not the compositor's:
+
+- **Desktop notifications** (a job finishing) go over the session bus at `DBUS_SESSION_BUS_ADDRESS`, or `$XDG_RUNTIME_DIR/bus` when that isn't set. That is where systemd's per-user bus lives, so this works with no setup.
+- **Typing and pasting** need `WAYLAND_DISPLAY`, and the apps it starts need the rest of the graphical session's environment. The compositor must hand these to the user manager before the menu is first used, since the Daemon reads its environment once, when it starts. uwsm does this. In a plain Hyprland session, add `exec-once = dbus-update-activation-environment --systemd --all` (or `systemctl --user import-environment WAYLAND_DISPLAY XDG_CURRENT_DESKTOP`). If the Daemon started before that, run `systemctl --user restart kotodamad`.
 
 The Nix package's `kotodamad` puts its Bundled extensions first on its own `XDG_DATA_DIRS`, followed by the inherited directories (or `/usr/local/share:/usr/share` when there are none). The rest of the session's `XDG_DATA_DIRS` is left alone.
 

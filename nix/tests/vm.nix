@@ -1,7 +1,7 @@
 # A NixOS VM with Kotodama installed through the home-manager module, for a
 # user whose systemd user manager runs from boot. It checks that the socket
 # starts the Daemon, that home-manager's settings reach it, and that the
-# programs it starts outlive it.
+# programs it starts outlive it, and that it reaches the session bus.
 {
   pkgs,
   self,
@@ -20,7 +20,10 @@ pkgs.testers.runNixOSTest {
       # The user manager starts at boot, with no login.
       linger = true;
     };
-    environment.systemPackages = [ pkgs.python3 ];
+    environment.systemPackages = [
+      pkgs.python3
+      pkgs.dbus # dbus-monitor
+    ];
 
     home-manager.useGlobalPkgs = true;
     home-manager.users.alice = {
@@ -43,6 +46,21 @@ pkgs.testers.runNixOSTest {
         Type=Application
         Name=Sleeper
         Exec=sleep 1002
+      '';
+      # An Extension that reports a finished job as soon as it starts, so the
+      # Daemon sends a desktop notification over the session bus.
+      xdg.configFile."kotodama/extensions/vm-job/manifest.toml".text = ''
+        name = "vm-job"
+        command = ["${pkgs.writeShellScript "vm-job" ''
+          export LC_ALL=C
+          send() { printf '%d\n%s' "''${#1}" "$1"; }
+          read_frame() { IFS= read -r len && IFS= read -r -N "$len" frame; }
+          send '{"version":1,"formats":["json"]}'
+          read_frame # the Daemon's hello
+          read_frame # the config
+          send '{"job_progress":{"id":"vm","title":"VM job","state":"succeeded"}}'
+          while read_frame; do :; done
+        ''}"]
       '';
     };
   };
@@ -69,6 +87,9 @@ pkgs.testers.runNixOSTest {
     machine.wait_for_unit("multi-user.target")
     machine.wait_for_unit("home-manager-alice.service")
     machine.wait_for_unit("kotodamad.socket", "alice")
+    # Records the calls to the notification service on alice's session bus.
+    user("nohup dbus-monitor --session interface=org.freedesktop.Notifications >/tmp/notifications 2>&1 &")
+    machine.wait_until_succeeds("test -s /tmp/notifications")
 
     with subtest("the first kotodama toggle starts the Daemon through the socket"):
         assert not is_active("kotodamad.service"), "the Daemon started before anything connected"
@@ -79,6 +100,9 @@ pkgs.testers.runNixOSTest {
         machine.wait_until_succeeds(
             f"su -l alice -c 'XDG_RUNTIME_DIR=/run/user/1000 {front_end} nap' | grep -P '^kotodama\tquicklink:nap\t'"
         )
+
+    with subtest("the Daemon reaches the user's session bus for notifications"):
+        machine.wait_until_succeeds("grep -q 'string \"VM job\"' /tmp/notifications")
 
     with subtest("the Bundled extensions are found, and their apps run"):
         machine.wait_until_succeeds(
