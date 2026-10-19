@@ -16,7 +16,7 @@ Status: early. The protocol and the Daemon work; the Quickshell Front end is nex
 
 ### Ranking that learns
 
-Every Action the user runs is recorded in `$XDG_STATE_HOME/kotodama/history.json` (by default `~/.local/state/kotodama/`). A picked Result gets a Frecency boost, which halves every 14 days. When the user picks the same Result 3 times in a row for one query, it becomes that query's Learned choice and ranks first; 3 picks in a row of another Result replace it. Both apply to Indexed items and Live query results. The "Clear history" Result empties the history.
+Every Action the user runs is recorded in `$XDG_STATE_HOME/kotodama/history.json` (by default `~/.local/state/kotodama/`). A picked Result gets a Frecency boost, which halves every 14 days. When the user picks the same Result 3 times for one query, it becomes that query's Learned choice and ranks first; 3 picks of another Result since then replace it. Both apply to Indexed items and Live query results. The "Clear history" Result empties the history.
 
 Aliases and Quicklinks live in the config directory and reload with it:
 

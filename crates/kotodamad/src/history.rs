@@ -18,9 +18,11 @@ use crate::host::spawn;
 pub const HALF_LIFE_SECS: f64 = 14.0 * 24.0 * 60.0 * 60.0;
 /// A Result whose Frecency has decayed below this is forgotten.
 const FORGOTTEN: f64 = 0.1;
-/// How many picks in a row of one Result for one query make it that query's
-/// Learned choice.
+/// How many picks of one Result for one query make it that query's Learned
+/// choice.
 pub const LEARN_AFTER: u8 = 3;
+/// How many Results per query are counted towards becoming its Learned choice.
+const CONTENDERS: usize = 4;
 /// The most Results and queries kept; past these the least recent go.
 const MAX_RESULTS: usize = 2000;
 const MAX_QUERIES: usize = 1000;
@@ -63,9 +65,8 @@ impl Picks {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 struct Learned {
     choice: Option<ResultKey>,
-    /// The Result picked last for this query, and how many times in a row.
-    streak: ResultKey,
-    count: u8,
+    /// Picks of other Results since the choice was made, most recent first.
+    contenders: Vec<(ResultKey, u8)>,
     at: u64,
 }
 
@@ -91,9 +92,9 @@ impl History {
         self.picks.is_empty() && self.learned.is_empty()
     }
 
-    /// Records that the user picked a Result while `query` was typed. The
-    /// same Result picked [`LEARN_AFTER`] times in a row for one query becomes
-    /// its Learned choice, replacing any earlier one.
+    /// Records that the user picked a Result while `query` was typed. A Result
+    /// picked [`LEARN_AFTER`] times for one query becomes its Learned choice,
+    /// and another picked as often since replaces it.
     pub fn pick(&mut self, extension: &str, id: &str, query: &str, at: u64) {
         self.version += 1;
         let picks = self
@@ -109,22 +110,27 @@ impl History {
 
         let key = query_key(query);
         if !key.is_empty() {
-            let result = (extension.to_owned(), id.to_owned());
             let learned = self.learned.entry(key).or_insert_with(|| Learned {
                 choice: None,
-                streak: result.clone(),
-                count: 0,
+                contenders: Vec::new(),
                 at,
             });
-            if learned.streak == result {
-                learned.count = learned.count.saturating_add(1);
-            } else {
-                learned.streak = result;
-                learned.count = 1;
-            }
             learned.at = at;
-            if learned.count >= LEARN_AFTER {
-                learned.choice = Some(learned.streak.clone());
+            let picked = |key: &ResultKey| key.0 == extension && key.1 == id;
+            if !learned.choice.as_ref().is_some_and(picked) {
+                let count = match learned.contenders.iter().position(|(key, _)| picked(key)) {
+                    Some(n) => learned.contenders.remove(n).1 + 1,
+                    None => 1,
+                };
+                if count >= LEARN_AFTER {
+                    learned.choice = Some((extension.to_owned(), id.to_owned()));
+                    learned.contenders.clear();
+                } else {
+                    learned.contenders.truncate(CONTENDERS - 1);
+                    learned
+                        .contenders
+                        .insert(0, ((extension.to_owned(), id.to_owned()), count));
+                }
             }
         }
         self.trim(at);

@@ -1460,3 +1460,39 @@ fn quicklinks_follow_config_reloads() {
     )));
     assert_eq!(first(&mut h, &ui, "gh"), "GitHub");
 }
+
+#[test]
+fn picks_of_a_result_count_towards_a_learned_choice_even_when_others_come_between() {
+    let mut h = Harness::new(vec![plain("apps")]);
+    let apps = h.up(0);
+    h.add(&apps, launcher_apps());
+    let ui = h.front_end();
+    for _ in 0..5 {
+        pick(&mut h, &ui, "files", "apps", "files");
+    }
+    pick(&mut h, &ui, "fi", "apps", "firefox");
+    pick(&mut h, &ui, "fi", "apps", "fish");
+    pick(&mut h, &ui, "fi", "apps", "firefox");
+    pick(&mut h, &ui, "fi", "apps", "files");
+    assert_eq!(first(&mut h, &ui, "fi"), "Files");
+    pick(&mut h, &ui, "fi", "apps", "firefox");
+    assert_eq!(first(&mut h, &ui, "fi"), "Firefox");
+}
+
+#[test]
+fn a_reload_never_leaves_a_row_showing_another_quicklink() {
+    let mut h = Harness::with_config(
+        vec![],
+        config("[quicklinks.gh]\ntitle = \"GitHub\"\nurl = \"https://github.com\""),
+    );
+    let ui = h.front_end();
+    assert_eq!(first(&mut h, &ui, "gh"), "GitHub");
+
+    // "aa" sorts first, so it takes the place "gh" had among the Daemon's own
+    // Items.
+    h.event(Event::Config(config(
+        "[quicklinks.aa]\ntitle = \"GitHub issues\"\nurl = \"https://github.com/issues\"\n\
+         [quicklinks.gh]\ntitle = \"GitHub\"\nurl = \"https://github.com\"",
+    )));
+    assert_eq!(titles(&ui.results().unwrap())[0], "GitHub");
+}

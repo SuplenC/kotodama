@@ -331,17 +331,26 @@ impl Session {
     }
 }
 
-/// One of the Daemon's own Items: a Quicklink, or the clear-history Action.
+/// One of the Daemon's own Items.
 struct Own {
     item: Item,
     haystack: Haystack,
+    does: OwnAction,
+}
+
+#[derive(Clone, Copy)]
+enum OwnAction {
+    /// Opens the `n`th Quicklink.
+    Quicklink(usize),
+    ClearHistory,
 }
 
 impl Own {
-    fn new(item: Item) -> Self {
+    fn new(item: Item, does: OwnAction) -> Self {
         Own {
             haystack: Haystack::new(&item),
             item,
+            does,
         }
     }
 }
@@ -375,7 +384,10 @@ fn boost(max_score: u32, frecency: f64) -> u32 {
 fn after_keyword<'q>(query: &'q str, keyword: &str) -> Option<&'q str> {
     let query = query.trim_start();
     let (word, rest) = query.split_once(char::is_whitespace).unwrap_or((query, ""));
-    (word.to_lowercase() == keyword).then(|| rest.trim())
+    word.chars()
+        .flat_map(char::to_lowercase)
+        .eq(keyword.chars())
+        .then(|| rest.trim())
 }
 
 struct PendingOutput {
@@ -410,7 +422,7 @@ pub struct Daemon<L, D, S> {
     epoch: u64,
     started: Instant,
     keywords: Keywords,
-    /// One per Quicklink, in the same order, then the clear-history Item.
+    /// One per Quicklink, then the clear-history Item.
     own: Vec<Own>,
     /// The picked Indexed items, by slot, as of the index and History
     /// versions in `frecent_versions`.
@@ -1140,8 +1152,9 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
         if action.extension != OWN || !item.actions.iter().any(|own| own.id == action.id) {
             return Err(format!("`{}` has no Action `{}`", item.title, action.id));
         }
-        match self.keywords.quicklinks.get(n) {
-            Some(quicklink) => {
+        match self.own[n].does {
+            OwnAction::Quicklink(quicklink) => {
+                let quicklink = &self.keywords.quicklinks[quicklink];
                 let query = match arguments.get("query") {
                     Some(query) => query.as_str(),
                     None => after_keyword(&session.query, &quicklink.keyword).unwrap_or(""),
@@ -1151,7 +1164,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
                 session.send(ToFrontEnd::Close);
                 self.picked(OWN, &result.id, &query, now);
             }
-            None => {
+            OwnAction::ClearHistory => {
                 session.send(ToFrontEnd::Close);
                 self.history.clear();
                 self.store.save(&self.history);
@@ -1192,10 +1205,18 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
         self.own = keywords
             .quicklinks
             .iter()
-            .map(|quicklink| Own::new(quicklink.item()))
-            .chain([Own::new(clear_history())])
+            .enumerate()
+            .map(|(n, quicklink)| Own::new(quicklink.item(), OwnAction::Quicklink(n)))
+            .chain([Own::new(clear_history(), OwnAction::ClearHistory)])
             .collect();
         self.keywords = keywords;
+        // The own Items' positions changed, so rows showing them can't be
+        // kept where they are.
+        for session in self.sessions.values_mut() {
+            session
+                .shown
+                .retain(|(source, _)| !matches!(source, Source::Own(_)));
+        }
         self.mark_late();
     }
 

@@ -158,11 +158,7 @@ fn alias(value: &Value) -> Result<Alias, String> {
     let Value::Table(table) = value else {
         return Err("should be a table with `extension` and `item`".into());
     };
-    let string = |key: &str| match table.get(key) {
-        Some(Value::String(value)) => Ok(Some(value.clone())),
-        None => Ok(None),
-        Some(_) => Err(format!("`{key}` should be a string")),
-    };
+    let string = |key: &str| string(table, key);
     Ok(Alias {
         extension: string("extension")?.ok_or("needs `extension`")?,
         item: string("item")?.ok_or("needs `item`")?,
@@ -177,11 +173,7 @@ fn quicklink(keyword: &str, value: &Value) -> Result<Quicklink, String> {
     let Value::Table(table) = value else {
         return Err("should be a table with `url` or `command`".into());
     };
-    let string = |key: &str| match table.get(key) {
-        Some(Value::String(value)) => Ok(Some(value.clone())),
-        None => Ok(None),
-        Some(_) => Err(format!("`{key}` should be a string")),
-    };
+    let string = |key: &str| string(table, key);
     let target = match (string("url")?, table.get("command")) {
         (Some(url), None) => Target::Url(url),
         (None, Some(Value::Array(args))) if !args.is_empty() => Target::Command(
@@ -202,6 +194,15 @@ fn quicklink(keyword: &str, value: &Value) -> Result<Quicklink, String> {
         icon: string("icon")?,
         target,
     })
+}
+
+/// An optional string in a config table.
+fn string(table: &Table, key: &str) -> Result<Option<String>, String> {
+    match table.get(key) {
+        Some(Value::String(value)) => Ok(Some(value.clone())),
+        None => Ok(None),
+        Some(_) => Err(format!("`{key}` should be a string")),
+    }
 }
 
 /// Percent-encodes everything but RFC 3986's unreserved characters, so any

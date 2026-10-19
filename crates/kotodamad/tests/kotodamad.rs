@@ -400,7 +400,7 @@ fn the_history_survives_a_restart_and_the_clear_action_empties_it() {
     wait_for("the third pick on disk", || {
         fs::read_to_string(&history)
             .ok()
-            .filter(|text| text.contains("\"count\":3"))
+            .filter(|text| text.contains(r#""choice":["bookmarks","kotodama"]"#))
     });
 
     drop(ui);
