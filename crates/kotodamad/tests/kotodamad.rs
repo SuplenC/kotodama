@@ -46,17 +46,15 @@ impl Daemon {
     }
 
     fn start(root: TempDir) -> Self {
-        let path = |dir: &str| root.path().join(dir);
-        let child = Command::new(env!("CARGO_BIN_EXE_kotodamad"))
-            .env("XDG_RUNTIME_DIR", path("runtime"))
-            .env("XDG_CONFIG_HOME", path("config"))
-            .env("XDG_CONFIG_DIRS", path("etc"))
-            .env("XDG_DATA_DIRS", path("share"))
-            .env("HOME", root.path())
-            .env_remove("WAYLAND_DISPLAY")
-            .spawn()
-            .unwrap();
+        let child = spawn(root.path());
         Daemon { child, root }
+    }
+
+    /// Kills the Daemon and starts a new one on the same home.
+    fn restart(&mut self) {
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+        self.child = spawn(self.root.path());
     }
 
     fn extension_dir(&self, name: &str) -> PathBuf {
@@ -75,6 +73,19 @@ impl Daemon {
         .unwrap();
         Client { channel }
     }
+}
+
+fn spawn(root: &Path) -> Child {
+    Command::new(env!("CARGO_BIN_EXE_kotodamad"))
+        .env("XDG_RUNTIME_DIR", root.join("runtime"))
+        .env("XDG_CONFIG_HOME", root.join("config"))
+        .env("XDG_CONFIG_DIRS", root.join("etc"))
+        .env("XDG_DATA_DIRS", root.join("share"))
+        .env("XDG_STATE_HOME", root.join("state"))
+        .env("HOME", root)
+        .env_remove("WAYLAND_DISPLAY")
+        .spawn()
+        .unwrap()
 }
 
 fn extension_dir(root: &TempDir, name: &str) -> PathBuf {
@@ -139,6 +150,21 @@ impl Client {
             }
             _ => None,
         })
+    }
+
+    fn run(&mut self, extension: &str, id: &str, action: &str) {
+        self.send(FromFrontEnd::RunAction {
+            result: ResultRef {
+                extension: extension.into(),
+                id: id.into(),
+            },
+            action: ActionRef {
+                extension: extension.into(),
+                id: action.into(),
+            },
+            arguments: Default::default(),
+        });
+        self.until(|message| (message == ToFrontEnd::Close).then_some(()));
     }
 
     /// Queries until the Results are `want`.
@@ -351,4 +377,82 @@ fn an_extension_installed_or_removed_while_the_daemon_runs_is_picked_up() {
 
     fs::remove_dir_all(daemon.extension_dir("bookmarks")).unwrap();
     ui.wait_for_titles("kotodama", &[]);
+}
+
+#[test]
+fn the_history_survives_a_restart_and_the_clear_action_empties_it() {
+    let root = Daemon::home();
+    install(
+        &root,
+        "bookmarks",
+        "",
+        &[item("kotlin", "Kotlin"), item("kotodama", "Kotodama")],
+    );
+    let mut daemon = Daemon::start(root);
+    let mut ui = daemon.connect();
+    ui.wait_for_titles("kot", &["Kotlin", "Kotodama"]);
+    for _ in 0..3 {
+        ui.titles("kot");
+        ui.run("bookmarks", "kotodama", "open");
+    }
+    assert_eq!(ui.titles("kot"), ["Kotodama", "Kotlin"]);
+    let history = daemon.root.path().join("state/kotodama/history.json");
+    wait_for("the third pick on disk", || {
+        fs::read_to_string(&history)
+            .ok()
+            .filter(|text| text.contains(r#""choice":["bookmarks","kotodama"]"#))
+    });
+
+    drop(ui);
+    daemon.restart();
+    let mut ui = daemon.connect();
+    ui.wait_for_titles("kot", &["Kotodama", "Kotlin"]);
+
+    ui.titles("clear history");
+    ui.run("kotodama", "clear-history", "run");
+    assert_eq!(ui.titles("kot"), ["Kotlin", "Kotodama"]);
+    wait_for("the empty history on disk", || {
+        fs::read_to_string(&history)
+            .ok()
+            .filter(|text| !text.contains("kotodama"))
+    });
+}
+
+#[test]
+fn aliases_and_quicklinks_follow_the_config_directory_without_a_restart() {
+    let root = Daemon::home();
+    install(
+        &root,
+        "bookmarks",
+        "",
+        &[item("kotlin", "Kotlin"), item("kotodama", "Kotodama")],
+    );
+    let config = root.path().join("config/kotodama/keywords.toml");
+    fs::write(
+        &config,
+        "[aliases]\nk = { extension = \"bookmarks\", item = \"kotlin\" }\n",
+    )
+    .unwrap();
+    let daemon = Daemon::start(root);
+    let mut ui = daemon.connect();
+    wait_for("the Alias", || {
+        ui.titles("k")
+            .first()
+            .is_some_and(|title| title == "Kotlin")
+            .then_some(())
+    });
+
+    fs::write(
+        &config,
+        "[aliases]\nk = { extension = \"bookmarks\", item = \"kotodama\" }\n\
+         [quicklinks.gh]\ntitle = \"GitHub\"\nurl = \"https://github.com\"\n",
+    )
+    .unwrap();
+    wait_for("the changed Alias", || {
+        ui.titles("k")
+            .first()
+            .is_some_and(|title| title == "Kotodama")
+            .then_some(())
+    });
+    ui.wait_for_titles("gh", &["GitHub"]);
 }

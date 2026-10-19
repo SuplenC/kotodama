@@ -11,7 +11,7 @@ use kotodama_protocol::Manifest;
 use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use regex::Regex;
 
-use crate::daemon::Event;
+use crate::daemon::{Event, OWN};
 use crate::host::spawn;
 
 /// How long the Extension directories must stay still before they are read
@@ -28,8 +28,12 @@ pub struct Found {
 }
 
 impl Found {
-    /// Refuses a Manifest whose Live query trigger doesn't compile.
+    /// Refuses a Manifest whose Live query trigger doesn't compile, or that
+    /// takes the name the Daemon's own Results go by.
     pub fn new(manifest: Manifest, dir: PathBuf) -> Result<Self, String> {
+        if manifest.name == OWN {
+            return Err(format!("the name `{OWN}` is reserved for the Daemon"));
+        }
         let triggers = manifest
             .live_query
             .iter()

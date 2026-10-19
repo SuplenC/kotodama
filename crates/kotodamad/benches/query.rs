@@ -11,6 +11,7 @@ use criterion::{Criterion, criterion_group, criterion_main};
 use kotodama_protocol::{FromExtension, FromFrontEnd, Manifest, Table, ToFrontEnd, WireFormat};
 use kotodamad::daemon::{Daemon, Desktop, Event, ExtensionId, FrontEndId, Launcher, Output};
 use kotodamad::discovery::Found;
+use kotodamad::history::{History, Store};
 
 mod corpus;
 
@@ -23,10 +24,15 @@ impl Launcher for Nothing {
 
 impl Desktop for Nothing {
     fn output(&mut self, _: Output) {}
+    fn launch(&mut self, _: Vec<String>) {}
+}
+
+impl Store for Nothing {
+    fn save(&mut self, _: &History) {}
 }
 
 struct Setup {
-    daemon: Daemon<Nothing, Nothing>,
+    daemon: Daemon<Nothing, Nothing, Nothing>,
     results: Receiver<ToFrontEnd>,
     buf: Vec<u8>,
 }
@@ -36,7 +42,15 @@ impl Setup {
         let manifest = Manifest::from_toml("name = \"apps\"\ncommand = [\"x\"]").unwrap();
         let found = Found::new(manifest, PathBuf::from("/")).unwrap();
         let now = Instant::now();
-        let mut daemon = Daemon::new(vec![found], Table::new(), Nothing, Nothing, now);
+        let mut daemon = Daemon::new(
+            vec![found],
+            Table::new(),
+            History::default(),
+            Nothing,
+            Nothing,
+            Nothing,
+            now,
+        );
         let (sender, _extension) = mpsc::sync_channel(64);
         daemon.handle(
             Event::ExtensionUp {

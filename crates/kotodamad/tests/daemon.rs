@@ -16,6 +16,7 @@ use kotodamad::daemon::{
     Output,
 };
 use kotodamad::discovery::Found;
+use kotodamad::history::{History, Store};
 
 #[derive(Clone, Default)]
 struct Launches(
@@ -36,20 +37,36 @@ impl Launcher for Launches {
 /// How many messages a test Extension's channel holds before it counts as full.
 const OUTBOX: usize = 64;
 
+/// What the Daemon typed or pasted, and the programs it started.
 #[derive(Clone, Default)]
-struct Outputs(Rc<RefCell<Vec<Output>>>);
+struct Outputs(Rc<RefCell<Vec<Output>>>, Rc<RefCell<Vec<Vec<String>>>>);
 
 impl Desktop for Outputs {
     fn output(&mut self, output: Output) {
         self.0.borrow_mut().push(output);
     }
+
+    fn launch(&mut self, command: Vec<String>) {
+        self.1.borrow_mut().push(command);
+    }
+}
+
+/// The History as last saved.
+#[derive(Clone, Default)]
+struct Saved(Rc<RefCell<Option<History>>>);
+
+impl Store for Saved {
+    fn save(&mut self, history: &History) {
+        *self.0.borrow_mut() = Some(history.clone());
+    }
 }
 
 struct Harness {
-    daemon: Daemon<Launches, Outputs>,
+    daemon: Daemon<Launches, Outputs, Saved>,
     now: Instant,
     launches: Launches,
     outputs: Outputs,
+    saved: Saved,
     next_front_end: u64,
 }
 
@@ -124,15 +141,29 @@ impl Harness {
     }
 
     fn with_config(extensions: Vec<Found>, config: Table) -> Self {
+        Self::with_history(extensions, config, History::default())
+    }
+
+    fn with_history(extensions: Vec<Found>, config: Table, history: History) -> Self {
         let now = Instant::now();
         let launches = Launches::default();
         let outputs = Outputs::default();
-        let daemon = Daemon::new(extensions, config, launches.clone(), outputs.clone(), now);
+        let saved = Saved::default();
+        let daemon = Daemon::new(
+            extensions,
+            config,
+            history,
+            launches.clone(),
+            outputs.clone(),
+            saved.clone(),
+            now,
+        );
         Harness {
             daemon,
             now,
             launches,
             outputs,
+            saved,
             next_front_end: 0,
         }
     }
@@ -1131,4 +1162,337 @@ fn an_unchanged_extension_list_changes_nothing() {
     h.event(Event::Extensions(vec![plain("apps")]));
     assert_eq!(stops(&h), []);
     assert_eq!(h.launches.0.borrow().len(), 1);
+}
+
+fn launcher_apps() -> Vec<Item> {
+    vec![app("Files"), app("Firefox"), app("Fish")]
+}
+
+/// Picks a Result of `owner` by running its primary Action with `query` typed.
+fn pick(h: &mut Harness, ui: &FrontEnd, query: &str, owner: &str, id: &str) {
+    h.query(ui, query);
+    run(h, ui, owner, id, owner, "open");
+    ui.drain();
+}
+
+fn first(h: &mut Harness, ui: &FrontEnd, query: &str) -> String {
+    h.query(ui, query)[0].item.title.clone()
+}
+
+#[test]
+fn three_picks_of_a_result_for_a_query_make_it_that_querys_learned_choice() {
+    let mut h = Harness::new(vec![plain("apps")]);
+    let apps = h.up(0);
+    h.add(&apps, launcher_apps());
+    let ui = h.front_end();
+    // Files is picked the most, so Frecency alone keeps it first for "fi".
+    for _ in 0..5 {
+        pick(&mut h, &ui, "files", "apps", "files");
+    }
+    assert_eq!(first(&mut h, &ui, "fi"), "Files");
+
+    pick(&mut h, &ui, "fi", "apps", "firefox");
+    pick(&mut h, &ui, "fi", "apps", "firefox");
+    assert_eq!(first(&mut h, &ui, "fi"), "Files", "two picks teach nothing");
+
+    pick(&mut h, &ui, "fi", "apps", "firefox");
+    assert_eq!(first(&mut h, &ui, "fi"), "Firefox");
+    assert_eq!(
+        first(&mut h, &ui, " fi "),
+        "Firefox",
+        "spacing doesn't matter"
+    );
+    assert_eq!(first(&mut h, &ui, "fir"), "Firefox", "only Firefox matches");
+    assert_eq!(
+        first(&mut h, &ui, "f"),
+        "Files",
+        "another query learned nothing"
+    );
+}
+
+#[test]
+fn three_picks_of_another_result_replace_a_learned_choice() {
+    let mut h = Harness::new(vec![plain("apps")]);
+    let apps = h.up(0);
+    h.add(&apps, launcher_apps());
+    let ui = h.front_end();
+    for _ in 0..5 {
+        pick(&mut h, &ui, "files", "apps", "files");
+    }
+    for _ in 0..3 {
+        pick(&mut h, &ui, "fi", "apps", "firefox");
+    }
+    assert_eq!(first(&mut h, &ui, "fi"), "Firefox");
+
+    pick(&mut h, &ui, "fi", "apps", "fish");
+    pick(&mut h, &ui, "fi", "apps", "fish");
+    assert_eq!(first(&mut h, &ui, "fi"), "Firefox");
+    pick(&mut h, &ui, "fi", "apps", "fish");
+    // Fish and Firefox were picked as often, and Files more, so only a
+    // Learned choice puts Fish first.
+    assert_eq!(first(&mut h, &ui, "fi"), "Fish");
+}
+
+#[test]
+fn frecency_lifts_a_picked_result_and_decays_over_time() {
+    let mut h = Harness::new(vec![plain("apps")]);
+    let apps = h.up(0);
+    h.add(&apps, launcher_apps());
+    let ui = h.front_end();
+    assert_eq!(
+        first(&mut h, &ui, "fi"),
+        "Fish",
+        "the shortest title wins a tie"
+    );
+
+    pick(&mut h, &ui, "firefox", "apps", "firefox");
+    assert_eq!(first(&mut h, &ui, "fi"), "Firefox");
+
+    h.advance(Duration::from_secs(7 * 24 * 60 * 60));
+    assert_eq!(first(&mut h, &ui, "fi"), "Firefox", "a week later");
+    h.advance(Duration::from_secs(60 * 24 * 60 * 60));
+    assert_eq!(first(&mut h, &ui, "fi"), "Fish", "two months later");
+}
+
+#[test]
+fn frecency_and_learned_choices_apply_to_live_query_results() {
+    let mut h = Harness::new(vec![web()]);
+    let web = h.up(0);
+    let ui = h.front_end();
+    let search = |h: &mut Harness| -> Vec<String> {
+        h.query(&ui, "g rust");
+        h.advance(Duration::from_millis(100));
+        let (id, ..) = live_queries(&web)[0].clone();
+        h.send(
+            &web,
+            FromExtension::LiveResults {
+                live_query: id,
+                results: vec![
+                    live("Rust book", 0.9, false),
+                    live("Rust lang", 0.5, false),
+                    live("Rustup", 0.4, false),
+                ],
+                done: true,
+            },
+        );
+        titles(&ui.results().unwrap())
+            .into_iter()
+            .map(str::to_owned)
+            .collect()
+    };
+    assert_eq!(search(&mut h), ["Rust book", "Rust lang", "Rustup"]);
+    run(&mut h, &ui, "web", "Rustup", "web", "open");
+    assert_eq!(
+        search(&mut h),
+        ["Rust book", "Rustup", "Rust lang"],
+        "Frecency lifts it"
+    );
+    run(&mut h, &ui, "web", "Rustup", "web", "open");
+    assert_eq!(search(&mut h)[0], "Rust book");
+    run(&mut h, &ui, "web", "Rustup", "web", "open");
+    assert_eq!(search(&mut h)[0], "Rustup", "the Learned choice");
+}
+
+#[test]
+fn the_history_is_saved_after_each_pick_and_a_new_daemon_ranks_by_it() {
+    let mut h = Harness::new(vec![plain("apps")]);
+    let apps = h.up(0);
+    h.add(&apps, launcher_apps());
+    let ui = h.front_end();
+    for _ in 0..3 {
+        pick(&mut h, &ui, "fi", "apps", "files");
+    }
+    let saved = h.saved.0.borrow().clone().expect("saved after a pick");
+
+    let mut h = Harness::with_history(vec![plain("apps")], Table::new(), saved);
+    let apps = h.up(0);
+    h.add(&apps, launcher_apps());
+    let ui = h.front_end();
+    assert_eq!(first(&mut h, &ui, "fi"), "Files");
+}
+
+#[test]
+fn the_clear_history_action_forgets_every_pick() {
+    let mut h = Harness::new(vec![plain("apps")]);
+    let apps = h.up(0);
+    h.add(&apps, launcher_apps());
+    let ui = h.front_end();
+    for _ in 0..3 {
+        pick(&mut h, &ui, "fi", "apps", "firefox");
+    }
+    assert_eq!(first(&mut h, &ui, "fi"), "Firefox");
+
+    let row = h.query(&ui, "clear history")[0].clone();
+    assert_eq!(
+        (row.extension.as_str(), row.item.id.as_str()),
+        ("kotodama", "clear-history")
+    );
+    run(&mut h, &ui, "kotodama", "clear-history", "kotodama", "run");
+    assert!(ui.drain().contains(&ToFrontEnd::Close));
+    assert!(h.saved.0.borrow().as_ref().unwrap().is_empty());
+    assert_eq!(first(&mut h, &ui, "fi"), "Fish");
+}
+
+#[test]
+fn no_extension_may_take_the_daemons_own_name() {
+    let manifest = Manifest::from_toml("name = \"kotodama\"\ncommand = [\"x\"]").unwrap();
+    assert!(Found::new(manifest, PathBuf::from("/ext")).is_err());
+}
+
+fn config(toml: &str) -> Table {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("a.toml"), toml).unwrap();
+    kotodamad::config::load(&[dir.path().to_owned()]).unwrap()
+}
+
+#[test]
+fn an_alias_puts_its_result_first_and_follows_config_reloads() {
+    let mut h = Harness::with_config(
+        vec![plain("apps")],
+        config("[aliases]\nweb = { extension = \"apps\", item = \"firefox\" }"),
+    );
+    let apps = h.up(0);
+    h.add(&apps, launcher_apps());
+    let ui = h.front_end();
+    assert_eq!(
+        first(&mut h, &ui, "web"),
+        "Firefox",
+        "even though it doesn't match"
+    );
+    assert_eq!(first(&mut h, &ui, "WEB"), "Firefox");
+
+    h.event(Event::Config(config(
+        "[aliases]\nweb = { extension = \"apps\", item = \"files\" }",
+    )));
+    assert_eq!(first(&mut h, &ui, "web"), "Files");
+
+    h.event(Event::Config(Table::new()));
+    assert_eq!(h.query(&ui, "web"), []);
+}
+
+#[test]
+fn an_alias_for_an_action_makes_it_primary() {
+    let mut h = Harness::with_config(
+        vec![plain("apps")],
+        config(
+            "[aliases]\npriv = { extension = \"apps\", item = \"firefox\", action = \"private\" }",
+        ),
+    );
+    let apps = h.up(0);
+    let mut firefox = app("Firefox");
+    firefox.actions.push(action("private"));
+    h.add(&apps, vec![firefox]);
+    let ui = h.front_end();
+
+    let row = &h.query(&ui, "priv")[0];
+    let actions: Vec<&str> = row.item.actions.iter().map(|a| a.id.as_str()).collect();
+    assert_eq!(actions, ["private", "open"]);
+    let row = &h.query(&ui, "firefox")[0];
+    assert_eq!(row.item.actions[0].id, "open", "only the Alias changes it");
+}
+
+#[test]
+fn a_quicklink_keyword_takes_the_rest_of_the_query_into_its_template() {
+    let mut h = Harness::with_config(
+        vec![plain("apps")],
+        config(
+            "[quicklinks.yt]\ntitle = \"Search YouTube\"\n\
+             url = \"https://www.youtube.com/results?search_query={query}\"\n\
+             [quicklinks.logs]\ncommand = [\"journalctl\", \"-u\", \"{query}\"]\n\
+             [quicklinks.gh]\nurl = \"https://github.com\"",
+        ),
+    );
+    let apps = h.up(0);
+    h.add(&apps, vec![app("Yt cats and dogs player")]);
+    let ui = h.front_end();
+
+    let rows = h.query(&ui, "yt cats & dogs/ü");
+    assert_eq!(
+        (rows[0].extension.as_str(), rows[0].item.title.as_str()),
+        ("kotodama", "Search YouTube")
+    );
+    run(&mut h, &ui, "kotodama", "quicklink:yt", "kotodama", "open");
+    assert!(ui.drain().contains(&ToFrontEnd::Close));
+
+    h.query(&ui, "logs kotodamad.service");
+    run(
+        &mut h,
+        &ui,
+        "kotodama",
+        "quicklink:logs",
+        "kotodama",
+        "open",
+    );
+
+    h.query(&ui, "gh");
+    run(&mut h, &ui, "kotodama", "quicklink:gh", "kotodama", "open");
+    assert_eq!(
+        *h.outputs.1.borrow(),
+        [
+            vec![
+                "xdg-open".to_owned(),
+                "https://www.youtube.com/results?search_query=cats%20%26%20dogs%2F%C3%BC".into()
+            ],
+            vec!["journalctl".into(), "-u".into(), "kotodamad.service".into()],
+            vec!["xdg-open".into(), "https://github.com".into()],
+        ]
+    );
+    assert_eq!(
+        titles(&h.query(&ui, "gh extra")),
+        Vec::<&str>::new(),
+        "a Quicklink without a query takes no more words"
+    );
+}
+
+#[test]
+fn quicklinks_follow_config_reloads() {
+    let mut h = Harness::new(vec![]);
+    let ui = h.front_end();
+    assert_eq!(h.query(&ui, "gh"), []);
+
+    h.event(Event::Config(config(
+        "[quicklinks.gh]\nurl = \"https://github.com\"",
+    )));
+    assert_eq!(first(&mut h, &ui, "gh"), "gh", "titled by its keyword");
+
+    h.event(Event::Config(config(
+        "[quicklinks.gh]\ntitle = \"GitHub\"\nurl = \"https://github.com\"",
+    )));
+    assert_eq!(first(&mut h, &ui, "gh"), "GitHub");
+}
+
+#[test]
+fn picks_of_a_result_count_towards_a_learned_choice_even_when_others_come_between() {
+    let mut h = Harness::new(vec![plain("apps")]);
+    let apps = h.up(0);
+    h.add(&apps, launcher_apps());
+    let ui = h.front_end();
+    for _ in 0..5 {
+        pick(&mut h, &ui, "files", "apps", "files");
+    }
+    pick(&mut h, &ui, "fi", "apps", "firefox");
+    pick(&mut h, &ui, "fi", "apps", "fish");
+    pick(&mut h, &ui, "fi", "apps", "firefox");
+    pick(&mut h, &ui, "fi", "apps", "files");
+    assert_eq!(first(&mut h, &ui, "fi"), "Files");
+    pick(&mut h, &ui, "fi", "apps", "firefox");
+    assert_eq!(first(&mut h, &ui, "fi"), "Firefox");
+}
+
+#[test]
+fn a_reload_never_leaves_a_row_showing_another_quicklink() {
+    let mut h = Harness::with_config(
+        vec![],
+        config("[quicklinks.gh]\ntitle = \"GitHub\"\nurl = \"https://github.com\""),
+    );
+    let ui = h.front_end();
+    assert_eq!(first(&mut h, &ui, "gh"), "GitHub");
+
+    // "aa" sorts first, so it takes the place "gh" had among the Daemon's own
+    // Items.
+    h.event(Event::Config(config(
+        "[quicklinks.aa]\ntitle = \"GitHub issues\"\nurl = \"https://github.com/issues\"\n\
+         [quicklinks.gh]\ntitle = \"GitHub\"\nurl = \"https://github.com\"",
+    )));
+    assert_eq!(titles(&ui.results().unwrap())[0], "GitHub");
 }

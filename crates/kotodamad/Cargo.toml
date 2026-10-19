@@ -12,7 +12,8 @@ log = "0.4.34"
 notify = "8"
 nucleo-matcher = "0.3.1"
 regex = "1.13.1"
-serde = "1.0.229"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
 toml = { version = "1.1.8", default-features = false, features = ["parse", "serde", "std"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
@@ -24,7 +25,6 @@ wayland-protocols-wlr = { version = "0.3.12", features = ["client"] }
 
 [dev-dependencies]
 criterion = { version = "0.8.2", default-features = false, features = ["cargo_bench_support"] }
-serde_json = "1.0.154"
 tempfile = "3.27.0"
 
 [[bench]]

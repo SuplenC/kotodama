@@ -10,6 +10,8 @@ pub struct Paths {
     pub config_dirs: Vec<PathBuf>,
     /// Least important first: the packages', then the user's.
     pub extension_dirs: Vec<PathBuf>,
+    /// `$XDG_STATE_HOME/kotodama/history.json`.
+    pub history: PathBuf,
 }
 
 impl Paths {
@@ -22,6 +24,12 @@ impl Paths {
             None => PathBuf::from(env::var_os("HOME").ok_or("HOME isn't set")?).join(".config"),
         };
         let user = config_home.join("kotodama");
+        let state_home = match env::var_os("XDG_STATE_HOME").filter(|dir| !dir.is_empty()) {
+            Some(dir) => PathBuf::from(dir),
+            None => {
+                PathBuf::from(env::var_os("HOME").ok_or("HOME isn't set")?).join(".local/state")
+            }
+        };
 
         let mut config_dirs = search_path("XDG_CONFIG_DIRS", "/etc/xdg");
         config_dirs.push(user.clone());
@@ -36,6 +44,7 @@ impl Paths {
             socket: PathBuf::from(runtime).join("kotodama.sock"),
             config_dirs,
             extension_dirs,
+            history: state_home.join("kotodama/history.json"),
         })
     }
 }

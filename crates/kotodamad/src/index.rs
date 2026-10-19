@@ -15,14 +15,18 @@ pub type Slot = u32;
 pub struct Entry {
     pub extension: ExtensionId,
     pub item: Item,
-    /// The title in the form nucleo searches, converted once on the way in.
+    pub haystack: Haystack,
+}
+
+/// What nucleo searches in an Item, converted once on the way in.
+pub struct Haystack {
     pub title: Utf32String,
     /// The keyword and keywords, joined by spaces; empty if there are none.
     words: Utf32String,
 }
 
-impl Entry {
-    fn new(extension: ExtensionId, item: Item) -> Self {
+impl Haystack {
+    pub fn new(item: &Item) -> Self {
         let mut words = String::new();
         for word in item.keyword.iter().chain(&item.keywords) {
             if !words.is_empty() {
@@ -30,11 +34,9 @@ impl Entry {
             }
             words.push_str(word);
         }
-        Entry {
-            extension,
+        Haystack {
             title: Utf32String::from(item.title.as_str()),
             words: Utf32String::from(words),
-            item,
         }
     }
 
@@ -47,6 +49,16 @@ impl Entry {
         }
         let words = pattern.score(self.words.slice(..), matcher);
         title.max(words)
+    }
+}
+
+impl Entry {
+    fn new(extension: ExtensionId, item: Item) -> Self {
+        Entry {
+            extension,
+            haystack: Haystack::new(&item),
+            item,
+        }
     }
 }
 
@@ -140,7 +152,7 @@ impl Index {
 
     /// Scores every Item against `pattern`, or only the slots in `within` when
     /// the caller knows nothing else can match. Appends `(slot, score)` for
-    /// each match to `out`.
+    /// each match to `out`, in slot order if `within` is.
     pub fn search(
         &self,
         pattern: &Pattern,
@@ -150,7 +162,7 @@ impl Index {
     ) {
         let mut score = |slot: Slot| {
             if let Some(entry) = self.entry(slot)
-                && let Some(score) = entry.score(pattern, matcher)
+                && let Some(score) = entry.haystack.score(pattern, matcher)
             {
                 out.push((slot, score));
             }
