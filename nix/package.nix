@@ -59,11 +59,13 @@ rustPlatform.buildRustPackage {
     mv $out/lib/libkotodama_qml.so $module/libKotodama.so
     rmdir $out/lib
 
-    # The apps Extension's manifest runs `./kotodama-apps`, beside it.
-    apps=$extensions/share/kotodama/extensions/apps
-    mkdir -p $apps
-    cp crates/kotodama-apps/manifest.toml $apps/
-    mv $out/bin/kotodama-apps $apps/
+    # Each Bundled extension's manifest runs its binary, beside it.
+    for name in apps clipboard; do
+      dir=$extensions/share/kotodama/extensions/$name
+      mkdir -p $dir
+      cp crates/kotodama-$name/manifest.toml $dir/
+      mv $out/bin/kotodama-$name $dir/
+    done
 
     # The Daemon finds the Bundled extensions on XDG_DATA_DIRS. They go first,
     # before the caller's directories or, when it has none, the default ones,

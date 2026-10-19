@@ -1,0 +1,29 @@
+[package]
+name = "kotodama-clipboard"
+version = "0.1.0"
+description = "The clipboard history Bundled extension: what was copied, kept on disk, as Indexed items"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+image = { version = "0.25.10", default-features = false, features = ["png", "jpeg"] }
+kotodama-protocol = { path = "../kotodama-protocol" }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+libc = "0.2"
+rustix = { version = "1.1.5", features = ["event", "pipe"] }
+wayland-client = "0.31.15"
+wayland-protocols = { version = "0.32.13", features = ["client", "staging"] }
+wayland-protocols-wlr = { version = "0.3.12", features = ["client"] }
+
+[dev-dependencies]
+criterion = { version = "0.8.2", default-features = false, features = ["cargo_bench_support"] }
+kotodamad = { path = "../kotodamad" }
+tempfile = "3.27.0"
+
+[[bench]]
+name = "search"
+harness = false

@@ -1,0 +1,7 @@
+# The clipboard history Bundled extension. A package installs this directory
+# as `$XDG_DATA_DIRS/kotodama/extensions/clipboard/`, with the
+# `kotodama-clipboard` binary next to this file (or `command` rewritten to its
+# absolute path).
+name = "clipboard"
+description = "Everything copied, kept for a week, to paste again; never what a password manager copies"
+command = ["./kotodama-clipboard"]

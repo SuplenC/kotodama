@@ -163,6 +163,26 @@ names = { nvim = "Neovim" }
 
 Its `manifest.toml` runs `./kotodama-apps`, so a package installs the binary next to it in `$XDG_DATA_DIRS/kotodama/extensions/apps/`.
 
+### Clipboard history
+
+`kotodama-clipboard` (`crates/kotodama-clipboard`) watches the Wayland clipboard through ext-data-control, or wlr-data-control on a compositor that has only that, and keeps what is copied in `$XDG_STATE_HOME/kotodama/clipboard/`, readable only by the user, so it survives a restart. It keeps text, and PNG and JPEG images with a 256-pixel thumbnail; when an offer has both, it keeps the text.
+
+What a password manager copies is never read: an offer carrying the `x-kde-passwordManagerHint` type, which password managers add to mark a copy sensitive, is skipped whole. Entries go after 7 days, or once there are more than 1000, oldest first.
+
+Each clip is an Item of kind `clipboard.clip`, found by the first 60 characters of its text, or titled with an image's size and shown with its thumbnail. Its primary Action, "Paste", pastes it into the window the menu was opened from; "Copy to Clipboard", "Show Details" (the text, or the thumbnail, in a detail View) and "Delete from History" follow. The "Clipboard History" Item lists every clip, newest first, and its second Action, "Clear Clipboard History", clears them all, on disk too.
+
+```toml
+[extensions.clipboard]
+# Past this many entries, the oldest go.
+max_entries = 1000
+# Entries older than this many days go.
+max_age_days = 7
+```
+
+Only an index of the entries (a short preview of each text, the size of each image) stays in memory: about 5 MiB resident with 1000 entries. What was copied is read from disk when it is pasted or shown. Searching 1000 entries takes about 0.1 ms in the Daemon (`benches/search.rs`, which fails above the 2 ms budget).
+
+Its `manifest.toml` runs `./kotodama-clipboard`, so a package installs the binary next to it in `$XDG_DATA_DIRS/kotodama/extensions/clipboard/`.
+
 ## The Quickshell Front end
 
 The `Kotodama` QML module is a Rust plugin (`crates/kotodama-qml`) that Quickshell imports. It connects to the Daemon, reconnects whenever the Daemon restarts, and gives QML two types:
