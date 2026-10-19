@@ -124,15 +124,6 @@ impl Views {
         Some(open.popped())
     }
 
-    /// Pops every View, as when the menu closes: what to tell the Daemon, top
-    /// View first.
-    pub fn clear(&mut self) -> Vec<FromFrontEnd> {
-        let popped = self.stack.iter().rev().map(Open::popped).collect();
-        self.stack.clear();
-        self.forget_finished();
-        popped
-    }
-
     /// Sets the value of the top form's `field`th field. False if there is no
     /// such field or the value doesn't suit it: a string for a text field or
     /// one of a select's option values, a boolean for a checkbox.
@@ -336,15 +327,6 @@ mod tests {
         views.push("git".into(), detail("b"));
         views.push("git".into(), detail("a"));
         assert_eq!(ids(&views), ["b", "a"]);
-    }
-
-    #[test]
-    fn closing_the_menu_pops_every_view_top_first() {
-        let mut views = Views::default();
-        views.push("git".into(), detail("a"));
-        views.push("kotodama".into(), detail("b"));
-        assert_eq!(views.clear(), [popped("kotodama", "b"), popped("git", "a")]);
-        assert_eq!(views.depth(), 0);
     }
 
     #[test]

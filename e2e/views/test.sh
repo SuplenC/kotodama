@@ -1,8 +1,9 @@
 # shellcheck shell=bash
 # The shell example's Timer, from the keyboard alone: an Argument typed after
 # its keyword, the form the Daemon opens for a missing one, the Action panel,
-# the Extension's own form, a progress View that updates, a job that runs on
-# after the menu closes, and the desktop notification when it is done.
+# the Extension's own form, a progress View that updates, Esc cancelling a job
+# that takes it as "cancel", the same job running on after the menu closes,
+# and the desktop notification when it is done.
 root=$(cd ../.. && pwd)
 target=$(cargo metadata --format-version 1 --no-deps --manifest-path "$root/Cargo.toml" | jq -r .target_directory)
 cargo build --quiet --manifest-path "$root/Cargo.toml" -p kotodamad -p kotodama --bin kotodamad --bin kotodama
@@ -77,8 +78,12 @@ wtype -s 200 -k BackSpace -k BackSpace
 press -k Return "view: form Start timer"
 press 2 -k Return "view: progress 2 second timer running"
 
-# Ctrl+K lists the timer's own Actions, then the one extras contributes.
+# Esc leaves the progress View, which the timer takes as "cancel".
+mark=$(log_lines quickshell.log)
 press -k Escape "view: search"
+wait_for_log quickshell.log "notification: 2 second timer: Cancelled" "$mark"
+
+# Ctrl+K lists the timer's own Actions, then the one extras contributes.
 press -M ctrl -k k -m ctrl "actions: Start timer, Start a labelled timer, extras/Share timer"
 # The second runs from the panel, and pushes the Extension's own form. Tab
 # moves to the seconds, filled in with 3, which become 5.
@@ -87,17 +92,20 @@ mark=$(log_lines quickshell.log)
 press Tea -k Tab -k BackSpace 5 -k Return "view: progress Tea running 0%"
 wait_for_log quickshell.log "view: progress Tea running 20%" "$mark"
 
-# Closing the menu leaves the timer running; opening it again lists it.
-press -k Escape "view: search"
-press -k Escape "focused: false"
+# Closing the menu isn't Esc: the timer isn't told, so it runs on, and the
+# menu opens again on its progress View.
+mark=$(log_lines quickshell.log)
+"$kotodama" toggle
+wait_for_log quickshell.log "focused: false" "$mark"
 mark=$(log_lines quickshell.log)
 open --query timer
+wait_for_log quickshell.log "opened on: progress Tea" "$mark"
 wait_for_log quickshell.log "opened with job: Tea" "$mark"
 
+# It ends, and the Daemon tells the desktop.
+wait_for_log quickshell.log "notification: Tea: Time is up" "$mark"
+
 # An Action's key binding runs it: Ctrl+L, the labelled timer.
+press -k Escape "view: search"
 press -M ctrl -k l -m ctrl "view: form Labelled timer"
 press -k Escape "view: search"
-
-# The timer ends while the menu shows the search, and the Daemon tells the
-# desktop.
-wait_for_log quickshell.log "notification: Tea: Time is up" "$mark"

@@ -21,6 +21,8 @@ ShellRoot {
         onFocusedChanged: console.log("focused: " + focused)
         onVisibleChanged: {
             if (visible) {
+                const view = menu.search.view;
+                console.log("opened on: " + (view.kind ?? "search") + " " + (view.title ?? ""));
                 for (const job of menu.search.jobs)
                     console.log("opened with job: " + job.title);
             }

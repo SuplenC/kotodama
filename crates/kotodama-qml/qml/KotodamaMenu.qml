@@ -51,12 +51,11 @@ PanelWindow {
         menu.focusView();
     }
 
-    // Closing pops every View; the jobs they followed keep running, and the
-    // search lists them when the menu opens again.
+    // Closing pops no View: Extensions aren't told the user left one, so their
+    // jobs keep running, and the menu opens again where it was. Only Esc pops.
     function hide() {
         menu.actions = [];
         visible = false;
-        search.popAll();
     }
 
     // Gives keys to the top View: the search box, the first field of a form,

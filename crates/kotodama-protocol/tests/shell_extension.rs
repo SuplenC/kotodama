@@ -272,6 +272,25 @@ fn the_shell_examples_timer_shows_a_progress_view_and_reports_until_done() {
 }
 
 #[test]
+fn the_shell_examples_timer_is_cancelled_when_the_user_leaves_its_view() {
+    let (mut extension, timer) = timer();
+    run(&mut extension, &timer, 0, &[("seconds", "30")]);
+    assert!(matches!(extension.recv(), FromExtension::ActionDone { .. }));
+    let FromExtension::PushView(view) = extension.recv() else {
+        panic!("expected push_view")
+    };
+    let ViewContent::Progress { job } = view.content else {
+        panic!("expected a progress View")
+    };
+
+    extension.send(ToExtension::ViewPopped { view: view.id });
+    assert_eq!(
+        follow(&mut extension, &job, "30 second timer"),
+        [(JobState::Running, Some(0.0)), (JobState::Failed, None)]
+    );
+}
+
+#[test]
 fn the_shell_examples_timer_refuses_what_is_not_a_number_of_seconds() {
     let (mut extension, timer) = timer();
     run(&mut extension, &timer, 0, &[("seconds", "soon")]);

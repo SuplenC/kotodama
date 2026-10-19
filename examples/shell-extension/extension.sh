@@ -59,9 +59,12 @@ progress() {
 }
 
 # Starts a timer: a progress View to follow it, and a background process that
-# reports on it each second. Closing the menu pops the View; the timer runs on,
-# and the Daemon sends a desktop notification when it is done.
+# reports on it each second. Closing the menu leaves the View open, so the
+# timer runs on, and the Daemon sends a desktop notification when it is done.
+# Esc on the View cancels it (see view_popped below).
 timers=0
+# The background process and title of each timer, by job id.
+declare -A timer_pids=() timer_titles=()
 start_timer() {
     local title=$1 seconds=$((10#$2)) id
     timers=$((timers + 1))
@@ -71,12 +74,24 @@ start_timer() {
     progress "$id" "$title" 0 "$seconds"
     (
         for ((elapsed = 1; elapsed < seconds; elapsed++)); do
-            sleep 1
+            sleep 1 >/dev/null 2>&1 # so a cancelled timer leaves nothing holding our output
             progress "$id" "$title" "$elapsed" "$seconds"
         done
-        sleep 1
+        sleep 1 >/dev/null 2>&1
         progress "$id" "$title" "$seconds" "$seconds"
     ) </dev/null &
+    timer_pids[$id]=$!
+    timer_titles[$id]=$title
+}
+
+# Cancels timer $1 if it is still counting: the user left its View.
+cancel_timer() {
+    local id=$1 pid=${timer_pids[$1]:-}
+    if [ -n "$pid" ] && kill "$pid" 2>/dev/null; then
+        send "$(jq -cn --arg id "$id" --arg title "${timer_titles[$id]}" \
+            '{job_progress: {id: $id, title: $title, state: "failed", message: "Cancelled"}}')"
+    fi
+    unset "timer_pids[$id]" "timer_titles[$id]"
 }
 
 # Whether $1 is a whole number of seconds a timer can count.
@@ -171,9 +186,16 @@ while read_frame; do
             fi
         fi
         ;;
+    view_popped)
+        # The user pressed Esc on one of our Views. Closing the menu never
+        # sends this, so a timer whose View it was can safely stop.
+        view=$(jq -r '.view_popped.view' <<<"$frame")
+        if [[ $view == timer-[0-9]* ]]; then
+            cancel_timer "$view"
+        fi
+        ;;
     *)
-        # Ignore what we don't handle, so newer Daemons can send more. That
-        # includes view_popped: a timer runs on when its View goes.
+        # Ignore what we don't handle, so newer Daemons can send more.
         ;;
     esac
 done

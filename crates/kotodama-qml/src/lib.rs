@@ -106,15 +106,12 @@ pub mod qobject {
         fn run_shortcut(self: Pin<&mut KotodamaSearch>, row: i32, key: i32, modifiers: i32)
         -> bool;
 
-        /// Pops the top View, as Esc does. False if there is none.
+        /// Pops the top View, as Esc does, and tells its Extension the user
+        /// left it. False if there is none. Closing the menu pops nothing:
+        /// it opens again where it was.
         #[qinvokable]
         #[cxx_name = "popView"]
         fn pop_view(self: Pin<&mut KotodamaSearch>) -> bool;
-
-        /// Pops every View, as when the menu closes.
-        #[qinvokable]
-        #[cxx_name = "popAll"]
-        fn pop_all(self: Pin<&mut KotodamaSearch>);
 
         /// Sets the text of the top form's `field`th field, or the value of
         /// the option chosen in a select.
@@ -365,18 +362,6 @@ impl KotodamaSearch {
         self.as_mut().rust_mut().send(&popped);
         self.as_mut().show_view();
         true
-    }
-
-    fn pop_all(mut self: Pin<&mut Self>) {
-        if self.views.depth() == 0 {
-            return;
-        }
-        let popped = self.as_mut().rust_mut().views.clear();
-        let mut this = self.as_mut().rust_mut();
-        for message in &popped {
-            this.send(message);
-        }
-        self.as_mut().show_view();
     }
 
     fn set_text(mut self: Pin<&mut Self>, field: i32, text: QString) -> bool {

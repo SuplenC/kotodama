@@ -46,7 +46,9 @@ pub enum ToExtension {
     },
     /// The user submitted a form View: field values by field id.
     SubmitForm { view: String, values: Table },
-    /// The user popped one of this Extension's Views.
+    /// The user left one of this Extension's Views, as with Esc. Closing the
+    /// menu doesn't send this: the View is still open, and shows again when
+    /// the menu does, so an Extension may take this as "cancel".
     ViewPopped { view: String },
     /// The whole Action catalog, sent after
     /// [`FromExtension::RequestActionCatalog`] and again whenever it changes.

@@ -35,7 +35,9 @@ pub enum FromFrontEnd {
         view: String,
         values: Table,
     },
-    /// The user popped a View.
+    /// The user left a View, as with Esc. Never sent for closing the menu,
+    /// which keeps its Views open, since an Extension may take this as
+    /// "cancel".
     ViewPopped { extension: String, view: String },
     /// Answers [`ToFrontEnd::Close`]: the window is gone and focus is back on the
     /// window the user came from, so the Daemon may type or paste into it.

@@ -7,7 +7,7 @@ It does four things:
 - turns the bookmarks in its config table into `url` Items;
 - opens a bookmark when you pick it;
 - offers **Paste path** on every `project` Item, whichever Extension added it;
-- adds a **Timer**. Type `timer 5` and press Enter to count down five seconds in a progress View. Press Enter on plain `timer` and the Daemon asks for the seconds in a form. Its second Action, **Start a labelled timer** (Ctrl+L, or pick it from the Ctrl+K Action panel), asks for a label too, in the Extension's own form. Closing the menu leaves the timer running, and a desktop notification says when it's done.
+- adds a **Timer**. Type `timer 5` and press Enter to count down five seconds in a progress View. Press Enter on plain `timer` and the Daemon asks for the seconds in a form. Its second Action, **Start a labelled timer** (Ctrl+L, or pick it from the Ctrl+K Action panel), asks for a label too, in the Extension's own form. Esc on its progress View cancels it. Closing the menu leaves it running, and a desktop notification says when it's done.
 
 ## Installing it
 
@@ -52,7 +52,7 @@ Adding an Item whose id you already sent replaces it. `remove_items` takes the i
 
 **Arguments and shortcuts.** An Action can list `arguments`, each with a `name`, an optional `placeholder`, and `optional: true` if it may be left out. With an Item `keyword`, the user types them after it: `timer 5` gives `{"seconds": "5"}`. Each Argument takes one word, and the last takes the rest. The Daemon asks for a required one that wasn't typed in a form of its own, so `run_action` always has them. A `shortcut` such as `"ctrl+l"` runs the Action from the menu; it needs Ctrl, Alt or Super, since a bare key types into the search.
 
-**Views.** `push_view` puts a View on top of the menu: a `list` of Items, a `form`, a Markdown `detail`, or a `progress` View that follows a job. `update_view` replaces it, and `pop_view` takes it away. Esc pops one too, and closing the menu pops them all; either way you get `view_popped`. Submitting a form sends you `submit_form` with its values. Answer an Action that pushed a View with `"keep_open"`.
+**Views.** `push_view` puts a View on top of the menu: a `list` of Items, a `form`, a Markdown `detail`, or a `progress` View that follows a job. `update_view` replaces it, and `pop_view` takes it away. When the user leaves one with Esc, you get `view_popped`; treat it as "cancel" if that suits you. Closing the menu pops nothing and sends nothing: your Views are still there when it opens again. Submitting a form sends you `submit_form` with its values. Answer an Action that pushed a View with `"keep_open"`.
 
 **Jobs.** Report long work with `job_progress`: an `id`, a `title`, a `state` (`running`, `succeeded` or `failed`), and optionally a `progress` from 0 to 1 and a `message`. A job runs on when the menu closes. The menu lists running jobs when it opens again, and when one finishes, the Daemon sends a desktop notification with its title and message.
 
