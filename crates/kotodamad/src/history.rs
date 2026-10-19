@@ -33,18 +33,18 @@ const MAX_RESULTS: usize = 2000;
 const MAX_QUERIES: usize = 1000;
 
 /// A Result, by the name of the Extension that owns its Item and the Item's id,
-/// or, for an Item with an identity, by [`IDENTITY`] and the identity.
+/// or, for an Item with an Identity, by [`IDENTITIES`] and the Identity.
 pub type ResultKey = (String, String);
 
-/// What the History keeps Items with an identity under, in place of an
+/// What the History keeps Items with an Identity under, in place of an
 /// Extension's name, so the same thing from several Extensions shares one
 /// History. No Extension can be named this.
-pub const IDENTITY: &str = "*";
+pub const IDENTITIES: &str = "*";
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct History {
-    /// By Extension name, then Item id; or by [`IDENTITY`], then identity.
-    /// An Item with an identity is kept both ways: its identity's picks rank
+    /// By Extension name, then Item id; or by [`IDENTITIES`], then Identity.
+    /// An Item with an Identity is kept both ways: its Identity's picks rank
     /// it, and its own put it ahead of the same thing from another Extension.
     #[serde(default)]
     picks: HashMap<String, HashMap<String, Picks>>,

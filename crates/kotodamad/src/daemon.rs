@@ -22,7 +22,7 @@ use nucleo_matcher::{Config, Matcher, Utf32Str};
 
 use crate::config::extension_table;
 use crate::discovery::Found;
-use crate::history::{History, IDENTITY, Picks, ResultKey, Store, query_key};
+use crate::history::{History, IDENTITIES, Picks, ResultKey, Store, query_key};
 use crate::index::{Index, Slot};
 use crate::keywords::{self, Keywords};
 use crate::rank::{self, Haystack, Matched, Tier, Tiers};
@@ -255,11 +255,12 @@ struct Candidate {
     /// How well it matches, as [`Tier::coarse`] gives it, after Frecency
     /// lifted it.
     tier: u8,
-    /// Its Frecency, shared with every Result of the same identity.
+    /// Its Frecency, shared with every Result of the same Identity.
     frecency: f64,
-    /// The Frecency of picks of this Result itself, so of the rows of one
-    /// identity, the one the user picks through comes first.
-    own: f64,
+    /// The Frecency of picks of this Result itself, rather than of its
+    /// Identity: of the Results of one Identity, the one picked through most
+    /// goes first (see [`Daemon::lead_with_direct_picks`]).
+    direct: f64,
     /// How well it matches, to break a tie: initials beat a word start.
     fine: Tier,
     /// Named by an Alias rather than by its own title or keyword, which wins
@@ -279,7 +280,7 @@ impl Candidate {
             class: Class::Rest,
             tier: tier.coarse(),
             frecency: 0.0,
-            own: 0.0,
+            direct: 0.0,
             fine: tier,
             by_alias: false,
             score,
@@ -287,8 +288,8 @@ impl Candidate {
         }
     }
 
-    /// Answers first, then by class, how well it matches, Frecency (shared,
-    /// then its own), and nucleo's score.
+    /// Answers first, then by class, how well it matches, Frecency, and
+    /// nucleo's score.
     fn rank(&self, other: &Candidate) -> std::cmp::Ordering {
         other
             .answer
@@ -296,7 +297,6 @@ impl Candidate {
             .then(other.class.cmp(&self.class))
             .then(other.tier.cmp(&self.tier))
             .then(other.frecency.total_cmp(&self.frecency))
-            .then(other.own.total_cmp(&self.own))
             .then(other.fine.cmp(&self.fine))
             .then(self.by_alias.cmp(&other.by_alias))
             .then(other.score.cmp(&self.score))
@@ -441,12 +441,12 @@ fn alias_id(keyword: &str) -> String {
     format!("alias:{keyword}")
 }
 
-/// What the History keeps a Result under: its identity, which every
-/// Extension's Result of that identity shares, or else the name of the
+/// What the History keeps a Result under: its Identity, which every
+/// Extension's Result of that Identity shares, or else the name of the
 /// Extension that owns it and its id.
 fn history_key<'a>(extension: &'a str, item: &'a Item) -> (&'a str, &'a str) {
     match &item.identity {
-        Some(identity) => (IDENTITY, identity),
+        Some(identity) => (IDENTITIES, identity),
         None => (extension, &item.id),
     }
 }
@@ -454,11 +454,11 @@ fn history_key<'a>(extension: &'a str, item: &'a Item) -> (&'a str, &'a str) {
 /// What a pick the History kept counts for, for one Indexed item.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Counts {
-    /// Its identity's: the Frecency it ranks by.
+    /// Its Identity's: the Frecency it ranks by.
     Shared,
-    /// The Item's own, which only orders the rows of one identity.
-    Own,
-    /// An Item without an identity's: both.
+    /// Picks of the Item itself, which only order the Results of one Identity.
+    Direct,
+    /// An Item without an Identity's: both.
     Both,
 }
 
@@ -1298,13 +1298,10 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
         {
             self.history.touch(OWN, &alias_id(alias), at);
         } else {
-            let identity = source
+            let key = source
                 .and_then(|source| self.item(session, source))
-                .and_then(|(_, item)| item.identity.clone());
-            let key = match &identity {
-                Some(identity) => (IDENTITY, identity.as_str()),
-                None => (result.extension.as_str(), result.id.as_str()),
-            };
+                .map(|(extension, item)| history_key(extension, item))
+                .unwrap_or((&result.extension, &result.id));
             // What ranked above it, nearest first: what it was picked over.
             // The same thing from another Extension wasn't.
             let above: Vec<ResultKey> = session
@@ -1322,11 +1319,12 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
                         .collect()
                 })
                 .unwrap_or_default();
+            let (extension, id) = (key.0.to_owned(), key.1.to_owned());
             let query = session.key.clone();
-            self.history.pick(key.0, key.1, &query, &above, at);
-            if identity.is_some() {
-                // The row itself, so it goes ahead of the same thing from
-                // other Extensions.
+            self.history.pick(&extension, &id, &query, &above, at);
+            if extension == IDENTITIES {
+                // The Result itself too, so it goes ahead of the same thing
+                // from other Extensions.
                 self.history.touch(&result.extension, &result.id, at);
             }
         }
@@ -1574,6 +1572,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
         }
         candidates.truncate(room);
         candidates.sort_unstable_by(Candidate::rank);
+        self.lead_with_direct_picks(&session, &mut candidates);
 
         let ranked: Vec<Candidate> = answers.into_iter().chain(kept).chain(candidates).collect();
         session.shown = ranked
@@ -1621,17 +1620,17 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
                     candidates[..indexed].binary_search_by_key(&Source::Indexed(slot), |c| c.source)
                 {
                     let frecency = picks.frecency(at);
-                    if counts != Counts::Own {
+                    if counts != Counts::Direct {
                         candidates[n].frecency = frecency;
                     }
                     if counts != Counts::Shared {
-                        candidates[n].own = frecency;
+                        candidates[n].direct = frecency;
                     }
                 }
             }
             for candidate in &mut candidates[indexed..] {
                 if let Some((extension, item)) = self.item(session, candidate.source) {
-                    (candidate.frecency, candidate.own) = self.frecency(extension, item, at);
+                    (candidate.frecency, candidate.direct) = self.frecency(extension, item, at);
                 }
             }
             for candidate in candidates.iter_mut() {
@@ -1700,7 +1699,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
                         session.max_score,
                         item.title.chars().count() as u32,
                     );
-                    (candidate.frecency, candidate.own) = self.frecency(extension, item, at);
+                    (candidate.frecency, candidate.direct) = self.frecency(extension, item, at);
                     candidates.push(candidate);
                     candidates.len() - 1
                 }
@@ -1718,7 +1717,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
         }
 
         // The strongest Learned choice that applies and is among the
-        // candidates: every row of it, when several Extensions offer it.
+        // candidates: every Result of it, when several Extensions offer it.
         let choices = self.history.learned(&session.key, at);
         let mut passed_over = None;
         for choice in &choices {
@@ -1776,7 +1775,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
         let mut frecent = std::mem::take(&mut self.frecent);
         frecent.clear();
         for (extension, id, picks) in self.history.picked() {
-            if extension == IDENTITY {
+            if extension == IDENTITIES {
                 let slots = self.index.identified(id);
                 frecent.extend(slots.iter().map(|&slot| (slot, picks, Counts::Shared)));
             } else if let Some(ext) = self.extension_named(extension)
@@ -1787,7 +1786,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
                     .entry(slot)
                     .is_some_and(|entry| entry.item.identity.is_some());
                 let counts = if identified {
-                    Counts::Own
+                    Counts::Direct
                 } else {
                     Counts::Both
                 };
@@ -1821,10 +1820,10 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
     }
 
     /// Where the Results the History keeps under `extension` and `id` come
-    /// from in this session: every one of the identity's, for [`IDENTITY`],
+    /// from in this session: every one of the Identity's, for [`IDENTITIES`],
     /// or else the one [`source_of`](Self::source_of) finds.
     fn sources_of(&self, session: &Session, extension: &str, id: &str) -> Vec<Source> {
-        if extension != IDENTITY {
+        if extension != IDENTITIES {
             return self.source_of(session, extension, id).into_iter().collect();
         }
         let indexed = self
@@ -1843,12 +1842,48 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
         indexed.chain(live).collect()
     }
 
-    /// A Result's Frecency, shared with every Result of its identity, and
-    /// that of its own picks.
+    /// Reorders the Results of each Identity among the places they ranked
+    /// in, so the one the user picked through most takes the best of them:
+    /// the thing ranks by its best Result, and leads with the user's way to
+    /// it. Everything else stays put.
+    fn lead_with_direct_picks(&self, session: &Session, ranked: &mut [Candidate]) {
+        if !ranked.iter().any(|candidate| candidate.direct > 0.0) {
+            return;
+        }
+        let identity = |candidate: &Candidate| {
+            self.item(session, candidate.source)
+                .and_then(|(_, item)| item.identity.as_deref())
+        };
+        let mut done: Vec<&str> = Vec::new();
+        for first in 0..ranked.len() {
+            let Some(id) = identity(&ranked[first]) else {
+                continue;
+            };
+            if done.contains(&id) {
+                continue;
+            }
+            done.push(id);
+            let places: Vec<usize> = (first..ranked.len())
+                .filter(|&n| identity(&ranked[n]) == Some(id))
+                .collect();
+            if places.len() < 2 {
+                continue;
+            }
+            let mut group: Vec<Candidate> = places.iter().map(|&n| ranked[n]).collect();
+            // Stable, so equal direct picks keep their ranked order.
+            group.sort_by(|a, b| b.direct.total_cmp(&a.direct));
+            for (&n, candidate) in places.iter().zip(group) {
+                ranked[n] = candidate;
+            }
+        }
+    }
+
+    /// A Result's Frecency, shared with every Result of its Identity, and
+    /// that of picks of the Result itself.
     fn frecency(&self, extension: &str, item: &Item, at: u64) -> (f64, f64) {
         let own = self.history.frecency(extension, &item.id, at);
         match &item.identity {
-            Some(identity) => (self.history.frecency(IDENTITY, identity, at), own),
+            Some(identity) => (self.history.frecency(IDENTITIES, identity, at), own),
             None => (own, own),
         }
     }

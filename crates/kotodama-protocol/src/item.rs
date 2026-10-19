@@ -20,7 +20,7 @@ pub struct Item {
     pub kind: ItemKind,
     /// The thing the Item stands for, named the same by every Extension that
     /// offers it, as `app:firefox.desktop` or `url:https://example.org`. Items
-    /// with the same identity share their History, whichever Extension owns
+    /// with the same Identity share their History, whichever Extension owns
     /// them: picking one counts for all. `None` keeps the Item's History its
     /// own.
     pub identity: Option<String>,

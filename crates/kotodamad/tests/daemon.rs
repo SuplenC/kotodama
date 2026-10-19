@@ -1122,13 +1122,25 @@ fn a_pick_through_one_extension_raises_the_same_thing_from_another() {
     assert_eq!(
         titles(&rows)[..3],
         ["Git", "GitHub", "github.com"],
-        "under the exact title, both rows of the picked thing, the one picked through first"
+        "under the exact title, both Results of the picked thing, the one picked through first"
     );
 
     pick(&mut h, &ui, "hub", "visited", "1");
     pick(&mut h, &ui, "hub", "visited", "1");
     let rows = h.query(&ui, "git");
     assert_eq!(titles(&rows)[..3], ["Git", "github.com", "GitHub"]);
+}
+
+#[test]
+fn the_result_picked_through_leads_even_when_the_other_matches_better() {
+    let (mut h, _bookmarks, _visited, ui) = bookmarks_and_visited();
+    assert_eq!(titles(&h.query(&ui, "github")), ["GitHub", "github.com"]);
+    pick(&mut h, &ui, "hub", "visited", "1");
+    assert_eq!(
+        titles(&h.query(&ui, "github")),
+        ["github.com", "GitHub"],
+        "the thing ranks by its exact title, and leads with the way the user goes to it"
+    );
 }
 
 #[test]
