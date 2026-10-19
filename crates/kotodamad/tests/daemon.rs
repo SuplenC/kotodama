@@ -748,6 +748,35 @@ fn an_extension_that_stops_reading_is_stopped_instead_of_queueing_without_end() 
 }
 
 #[test]
+fn running_an_action_on_an_extension_that_stopped_reading_fails_without_blocking_queries() {
+    let mut h = Harness::new(vec![plain("apps")]);
+    // Room for the config only, which it never reads.
+    let apps = h.up_with_room(0, 1);
+    h.add(&apps, vec![app("Firefox"), app("Files")]);
+    let ui = h.front_end();
+    h.query(&ui, "fire");
+
+    let failed = |ui: &FrontEnd| {
+        ui.drain()
+            .iter()
+            .filter(|m| matches!(m, ToFrontEnd::ActionFailed { .. }))
+            .count()
+    };
+    run(&mut h, &ui, "apps", "firefox", "apps", "open");
+    assert_eq!(failed(&ui), 1);
+    assert_eq!(stops(&h), [(ExtensionId(0), 1)]);
+
+    // The Daemon goes on answering while the Extension is stopped.
+    assert_eq!(titles(&h.query(&ui, "files")), ["Files"]);
+
+    // The stop lands: the Action doesn't fail twice, and it is restarted.
+    h.down(&apps);
+    assert_eq!(failed(&ui), 0);
+    h.advance(Duration::from_millis(100));
+    assert_eq!(h.launches.0.borrow().len(), 2);
+}
+
+#[test]
 fn a_restarted_extension_gets_the_live_query_already_typed() {
     let mut h = Harness::new(vec![calculator()]);
     let calc = h.up(0);
