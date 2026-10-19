@@ -37,7 +37,7 @@ const RETRY: Duration = Duration::from_secs(10 * 60);
 enum Event {
     Message(ToExtension),
     /// A fetch of the exchange rates finished.
-    Fetched(Result<std::collections::HashMap<String, f64>, String>),
+    Fetched(Result<rates::Table, String>),
     /// The Daemon hung up, or its messages can't be read any more.
     Hangup,
 }
@@ -150,7 +150,7 @@ impl Settings {
 }
 
 fn warn(message: &str) {
-    eprintln!("kotodama-calculator: [extensions.calculator] {message}; using the default");
+    eprintln!("kotodama-calculator: config: {message}");
 }
 
 /// Where the exchange rates stand.
@@ -271,12 +271,10 @@ impl Extension {
     /// A query converted currency: loads the cached rates the first time, and
     /// fetches them if they are missing or more than a day old.
     fn want_rates(&mut self) {
-        let Some(cache) = cache_path() else {
-            return;
-        };
+        let cache = cache_path();
         if !self.exchange.read_cache {
             self.exchange.read_cache = true;
-            if let Some((rates, fetched)) = rates::load(&cache) {
+            if let Some((rates, fetched)) = cache.as_deref().and_then(rates::load) {
                 self.rates.set(rates);
                 self.exchange.fetched = Some(fetched);
             }
@@ -299,7 +297,7 @@ impl Extension {
             .name("rates".into())
             .stack_size(256 * 1024)
             .spawn(move || {
-                let _ = events.send(Event::Fetched(rates::fetch(CURL, &url, &cache)));
+                let _ = events.send(Event::Fetched(rates::fetch(CURL, &url, cache.as_deref())));
             });
         if spawned.is_err() {
             self.exchange.fetching = false;
@@ -308,7 +306,7 @@ impl Extension {
 
     fn fetched(
         &mut self,
-        fetched: Result<std::collections::HashMap<String, f64>, String>,
+        fetched: Result<rates::Table, String>,
     ) -> Result<(), kotodama_protocol::Error> {
         self.exchange.fetching = false;
         match fetched {
@@ -339,8 +337,8 @@ impl Extension {
             },
         };
         match action {
-            COPY => Ok(answer.result),
-            COPY_EXPRESSION => Ok(format!("{} = {}", answer.expression, answer.result)),
+            COPY => Ok(answer.value),
+            COPY_EXPRESSION => Ok(format!("{} = {}", answer.expression, answer.value)),
             _ => Err(format!("the calculator has no Action `{action}`")),
         }
     }

@@ -12,7 +12,7 @@ const BUDGET: Duration = Duration::from_millis(50);
 const MAX_RESULT: usize = 100;
 
 pub enum Outcome {
-    Result(String),
+    Value(String),
     NeedsRates,
     Nothing,
 }
@@ -58,7 +58,7 @@ impl Math {
         {
             return Outcome::Nothing;
         }
-        Outcome::Result(shown.to_owned())
+        Outcome::Value(shown.to_owned())
     }
 }
 

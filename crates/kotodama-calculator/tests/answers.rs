@@ -26,7 +26,7 @@ fn routed(query: &str) -> Option<String> {
 
 fn result(evaluation: Evaluation) -> Option<String> {
     match evaluation {
-        Evaluation::Answer(answer) => Some(answer.result),
+        Evaluation::Answer(answer) => Some(answer.value),
         Evaluation::NeedsRates | Evaluation::Nothing => None,
     }
 }

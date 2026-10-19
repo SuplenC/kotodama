@@ -32,7 +32,7 @@ pub struct Answer {
     /// The query, trimmed.
     pub expression: String,
     /// What the query comes to, as it is shown and copied: `84`, `3.1068559612 mi`.
-    pub result: String,
+    pub value: String,
 }
 
 /// Evaluates queries. One lives as long as the Extension.
@@ -56,17 +56,17 @@ impl Calculator {
         if query.is_empty() {
             return Evaluation::Nothing;
         }
-        let answer = |result: String| {
+        let answer = |value: String| {
             Evaluation::Answer(Answer {
                 expression: query.to_owned(),
-                result,
+                value,
             })
         };
-        if let Some(result) = dates::evaluate(query, now) {
-            return answer(result);
+        if let Some(value) = dates::evaluate(query, now) {
+            return answer(value);
         }
         match self.math.evaluate(query, routed) {
-            math::Outcome::Result(result) => answer(result),
+            math::Outcome::Value(value) => answer(value),
             math::Outcome::NeedsRates => Evaluation::NeedsRates,
             math::Outcome::Nothing => Evaluation::Nothing,
         }
@@ -89,7 +89,7 @@ impl Answer {
                     NamespacedKind::new("calculator.answer").expect("a valid kind"),
                 ),
                 identity: None,
-                title: self.result.clone(),
+                title: self.value.clone(),
                 subtitle: Some(self.expression.clone()),
                 icon: Some("accessories-calculator".into()),
                 keyword: None,

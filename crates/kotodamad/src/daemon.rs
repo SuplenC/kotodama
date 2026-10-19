@@ -1066,8 +1066,11 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             }
             Outcome::Type { text } => self.output(Output::Type(text), now),
             Outcome::Paste(clipboard) => self.output(Output::Paste(clipboard), now),
-            // Nothing goes into a window, so there is no waiting for the menu to close.
+            // Nothing goes into a window, so there is no waiting for the menu
+            // to close. A paste still waiting goes first, so it can't take the
+            // clipboard back afterwards.
             Outcome::Copy(clipboard) => {
+                self.deliver_output();
                 self.broadcast(|| ToFrontEnd::Close);
                 self.desktop.output(Output::Copy(clipboard));
             }
