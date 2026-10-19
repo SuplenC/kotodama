@@ -39,11 +39,21 @@ fi
 # checkout (a git worktree, say) builds into its own target directory there, so
 # parallel checkouts don't wait on one cargo lock or rebuild each other's output.
 # --init forwards signals and reaps the processes e2e tests start.
+# In a git worktree, .git is a file that names the main repository's git
+# directory by its host path, and that directory names the worktree by its host
+# path. Mount both at those paths so git and Nix flakes work inside the
+# container.
+git_dir=()
+common=$(git -C "$root" rev-parse --path-format=absolute --git-common-dir 2>/dev/null || true)
+if [ -n "$common" ] && [ "$common" != "$root/.git" ]; then
+    git_dir=(-v "$common:$common" -v "$root:$root")
+fi
 target=/cargo/target-$(printf '%s' "$root" | cksum | cut -d' ' -f1)
 exec docker run --rm --init "${tty[@]}" \
     -v kotodama-nix:/nix \
     -v kotodama-cargo:/cargo \
     -v "$root:/work" \
+    ${git_dir[@]+"${git_dir[@]}"} \
     -e CI \
     -e CARGO_TARGET_DIR="$target" \
     "$image" "$@"
