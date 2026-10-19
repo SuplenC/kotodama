@@ -8,7 +8,7 @@ Kotodama is a command menu for Wayland desktops. You type, and it finds and does
 - **A Quickshell QML module** written in Rust (cxx-qt) gives QML a native result model. QML only draws the results.
 - **Extensions** are separate processes in any language. They speak a protocol whose wire format is negotiated (JSON, MessagePack or postcard), so a crashing Extension never takes down the menu.
 
-Status: early. The protocol, the Daemon, the Quickshell Front end and the apps and calculator Bundled extensions work; Views, the Action panel and the other Bundled extensions are next. See `docs/adr/0001-architecture.md` and the issues.
+Status: early. The protocol, the Daemon, the Quickshell Front end and the apps, clipboard history and calculator Bundled extensions work; Views, the Action panel and the other Bundled extensions are next. See `docs/adr/0001-architecture.md` and the issues.
 
 ## Installing
 

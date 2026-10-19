@@ -65,18 +65,12 @@ rustPlatform.buildRustPackage {
     rmdir $out/lib
 
     # Each Bundled extension's manifest runs its binary, beside it.
-    for name in apps clipboard; do
+    for name in apps calculator clipboard; do
       dir=$extensions/share/kotodama/extensions/$name
       mkdir -p $dir
       cp crates/kotodama-$name/manifest.toml $dir/
       mv $out/bin/kotodama-$name $dir/
     done
-
-    # The same for the calculator.
-    calculator=$extensions/share/kotodama/extensions/calculator
-    mkdir -p $calculator
-    cp crates/kotodama-calculator/manifest.toml $calculator/
-    mv $out/bin/kotodama-calculator $calculator/
 
     # The Daemon finds the Bundled extensions on XDG_DATA_DIRS. They go first,
     # before the caller's directories or, when it has none, the default ones,
