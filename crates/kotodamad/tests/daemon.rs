@@ -1068,3 +1068,67 @@ fn live_results_for_one_query_are_capped() {
     let rows = ui.results().unwrap();
     assert!(rows.iter().all(|row| !row.item.title.starts_with("2-")));
 }
+
+#[test]
+fn an_extension_installed_while_running_is_started_and_searched() {
+    let mut h = Harness::new(vec![plain("apps")]);
+    h.up(0);
+    let ui = h.front_end();
+
+    h.event(Event::Extensions(vec![plain("apps"), plain("bookmarks")]));
+    assert_eq!(h.launches.0.borrow().last(), Some(&(ExtensionId(1), 1)));
+    let bookmarks = h.up(1);
+    h.add(&bookmarks, vec![app("Kotodama")]);
+    assert_eq!(titles(&h.query(&ui, "koto")), ["Kotodama"]);
+}
+
+#[test]
+fn an_extension_removed_while_running_is_stopped_and_never_marked_down_or_restarted() {
+    let mut h = Harness::new(vec![plain("apps"), plain("bookmarks")]);
+    let apps = h.up(0);
+    let bookmarks = h.up(1);
+    h.add(&apps, vec![app("Firefox")]);
+    h.add(&bookmarks, vec![app("Fire Brigade")]);
+    let ui = h.front_end();
+    assert_eq!(h.query(&ui, "fire").len(), 2);
+
+    h.event(Event::Extensions(vec![plain("apps")]));
+    assert_eq!(stops(&h), [(ExtensionId(1), bookmarks.generation)]);
+    assert_eq!(titles(&ui.results().unwrap()), ["Firefox"]);
+
+    // Its process ending and later messages change nothing.
+    h.down(&bookmarks);
+    h.add(&bookmarks, vec![app("Fire Ghost")]);
+    h.advance(Duration::from_secs(60));
+    assert_eq!(h.launches.0.borrow().len(), 2);
+    assert!(statuses(&ui).iter().all(|down| down.is_empty()));
+    assert_eq!(titles(&h.query(&ui, "fire")), ["Firefox"]);
+}
+
+#[test]
+fn a_changed_manifest_restarts_the_extension_at_once_with_the_new_one() {
+    let mut h = Harness::new(vec![plain("projects"), plain("pinner")]);
+    let projects = h.up(0);
+    let old = h.up(1);
+    h.add(&projects, vec![project("kotodama")]);
+    let ui = h.front_end();
+    assert_eq!(h.query(&ui, "kotodama")[0].contributed, []);
+
+    h.event(Event::Extensions(vec![plain("projects"), pinner()]));
+    assert_eq!(stops(&h), [(ExtensionId(1), old.generation)]);
+    let (ext, generation) = *h.launches.0.borrow().last().unwrap();
+    assert_eq!(ext, ExtensionId(1));
+    assert!(generation > old.generation, "a new run, started at once");
+    h.up(1);
+    let row = &h.query(&ui, "kotodama")[0];
+    assert_eq!(row.contributed[0].action.id, "pin");
+}
+
+#[test]
+fn an_unchanged_extension_list_changes_nothing() {
+    let mut h = Harness::new(vec![plain("apps")]);
+    h.up(0);
+    h.event(Event::Extensions(vec![plain("apps")]));
+    assert_eq!(stops(&h), []);
+    assert_eq!(h.launches.0.borrow().len(), 1);
+}

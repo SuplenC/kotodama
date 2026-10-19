@@ -333,3 +333,22 @@ fn a_front_end_that_never_says_hello_is_disconnected() {
     let mut ui = daemon.connect();
     assert_eq!(ui.titles("anything"), Vec::<String>::new());
 }
+
+#[test]
+fn an_extension_installed_or_removed_while_the_daemon_runs_is_picked_up() {
+    let root = Daemon::home();
+    let daemon = Daemon::start(root);
+    let mut ui = daemon.connect();
+    assert_eq!(ui.titles("kotodama"), Vec::<String>::new());
+
+    install(
+        &daemon.root,
+        "bookmarks",
+        "",
+        &[item("kotodama", "Kotodama")],
+    );
+    ui.wait_for_titles("kotodama", &["Kotodama"]);
+
+    fs::remove_dir_all(daemon.extension_dir("bookmarks")).unwrap();
+    ui.wait_for_titles("kotodama", &[]);
+}

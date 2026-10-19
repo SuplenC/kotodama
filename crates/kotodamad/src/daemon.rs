@@ -83,6 +83,8 @@ pub enum Event {
     },
     /// The config directory was reloaded.
     Config(Table),
+    /// The Extension directories changed: these are all the Extensions now.
+    Extensions(Vec<Found>),
 }
 
 /// How many Results a Front end gets for one query.
@@ -114,6 +116,9 @@ enum State {
     Down {
         retry_at: Instant,
     },
+    /// Uninstalled. The slot stays so ExtensionIds keep their meaning, and is
+    /// reused if an Extension of the same name comes back.
+    Removed,
 }
 
 struct Extension {
@@ -133,6 +138,19 @@ struct Extension {
 }
 
 impl Extension {
+    fn new(found: Found, now: Instant) -> Self {
+        Extension {
+            found,
+            generation: 0,
+            state: State::Down { retry_at: now },
+            failures: 0,
+            config: None,
+            catalog: false,
+            hung: Cell::new(false),
+            stopping: false,
+        }
+    }
+
     fn name(&self) -> &str {
         &self.found.manifest.name
     }
@@ -161,7 +179,7 @@ impl Extension {
         match self.state {
             State::Down { .. } => true,
             State::Starting { .. } => self.generation > 1,
-            State::Up { .. } => false,
+            State::Up { .. } | State::Removed => false,
         }
     }
 
@@ -317,16 +335,7 @@ impl<L: Launcher, D: Desktop> Daemon<L, D> {
             index: Index::new(found.len()),
             extensions: found
                 .into_iter()
-                .map(|found| Extension {
-                    found,
-                    generation: 0,
-                    state: State::Down { retry_at: now },
-                    failures: 0,
-                    config: None,
-                    catalog: false,
-                    hung: Cell::new(false),
-                    stopping: false,
-                })
+                .map(|found| Extension::new(found, now))
                 .collect(),
             matcher: Matcher::new(Config::DEFAULT),
             sessions: BTreeMap::new(),
@@ -392,6 +401,7 @@ impl<L: Launcher, D: Desktop> Daemon<L, D> {
             }
             Event::FrontEndDown { front_end } => self.front_end_down(front_end),
             Event::Config(config) => self.set_config(config),
+            Event::Extensions(found) => self.set_extensions(found, now),
         }
         self.flush(now);
     }
@@ -506,8 +516,13 @@ impl<L: Launcher, D: Desktop> Daemon<L, D> {
             retry_at: now + delay,
         };
         log::warn!("extension {} stopped; restarting in {delay:?}", ext.name());
-        let name = ext.name().to_owned();
+        self.forget_run(id);
+    }
 
+    /// Drops everything one run of an Extension left behind: its Items, Live
+    /// results and jobs, and the Actions it was running, which fail.
+    fn forget_run(&mut self, id: ExtensionId) {
+        let name = self.extensions[id.0].name().to_owned();
         if self.index.clear(id) {
             self.mark_late();
         }
@@ -818,8 +833,71 @@ impl<L: Launcher, D: Desktop> Daemon<L, D> {
     fn extension_named(&self, name: &str) -> Option<ExtensionId> {
         self.extensions
             .iter()
-            .position(|ext| ext.name() == name)
+            .position(|ext| ext.name() == name && !matches!(ext.state, State::Removed))
             .map(ExtensionId)
+    }
+
+    /// Brings the running Extensions in line with what is installed: new ones
+    /// start, removed ones stop for good, and one whose Manifest changed
+    /// restarts at once with the new Manifest.
+    fn set_extensions(&mut self, found: Vec<Found>, now: Instant) {
+        for id in 0..self.extensions.len() {
+            let ext = &self.extensions[id];
+            if !matches!(ext.state, State::Removed)
+                && !found.iter().any(|f| f.manifest.name == ext.name())
+            {
+                log::info!("extension {} was removed", ext.name());
+                self.retire(ExtensionId(id));
+            }
+        }
+        for found in found {
+            match self
+                .extensions
+                .iter()
+                .position(|ext| ext.name() == found.manifest.name)
+            {
+                Some(id) => {
+                    let ext = &mut self.extensions[id];
+                    let removed = matches!(ext.state, State::Removed);
+                    if !removed
+                        && ext.found.manifest == found.manifest
+                        && ext.found.dir == found.dir
+                    {
+                        continue;
+                    }
+                    log::info!("extension {} changed; restarting it", found.manifest.name);
+                    ext.found = found;
+                    ext.failures = 0;
+                    if !removed {
+                        self.retire(ExtensionId(id));
+                    }
+                    self.start(ExtensionId(id), now);
+                }
+                None => {
+                    log::info!("extension {} was installed", found.manifest.name);
+                    let id = ExtensionId(self.extensions.len());
+                    self.extensions.push(Extension::new(found, now));
+                    self.index.add_extension();
+                    for session in self.sessions.values_mut() {
+                        session.live.push(Live::default());
+                    }
+                    self.start(id, now);
+                }
+            }
+        }
+    }
+
+    /// Ends the current run of an Extension, leaving it removed until started
+    /// again: stops its process and forgets what it left behind. Moving on to the next generation means nothing
+    /// from the old run, its ExtensionDown included, is heard any more.
+    fn retire(&mut self, id: ExtensionId) {
+        let ext = &mut self.extensions[id.0];
+        if matches!(ext.state, State::Starting { .. } | State::Up { .. }) {
+            self.launcher.stop(id, ext.generation);
+        }
+        ext.generation += 1;
+        ext.state = State::Removed;
+        self.forget_run(id);
     }
 
     fn query(&mut self, id: FrontEndId, text: String, now: Instant) {

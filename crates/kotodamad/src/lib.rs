@@ -19,12 +19,15 @@ use paths::Paths;
 
 /// Runs the Daemon until it fails to start.
 pub fn run(paths: &Paths) -> Result<(), String> {
-    // The user's directory is created so it can be watched from the start: a
-    // directory that appears later would go unwatched until a restart.
-    if let Some(user) = paths.config_dirs.last()
-        && let Err(err) = std::fs::create_dir_all(user)
+    // The user's directories are created so they can be watched from the
+    // start: a directory that appears later would go unwatched until a restart.
+    for dir in [paths.config_dirs.last(), paths.extension_dirs.last()]
+        .into_iter()
+        .flatten()
     {
-        log::warn!("{}: {err}", user.display());
+        if let Err(err) = std::fs::create_dir_all(dir) {
+            log::warn!("{}: {err}", dir.display());
+        }
     }
     let config = config::load(&paths.config_dirs).unwrap_or_else(|err| {
         log::error!("starting with an empty config: {err}");
@@ -46,6 +49,9 @@ pub fn run(paths: &Paths) -> Result<(), String> {
     let (events_tx, events) = mpsc::channel();
     let _watcher = config::watch(paths.config_dirs.clone(), events_tx.clone())
         .map_err(|err| log::error!("not watching the config directory: {err}"))
+        .ok();
+    let _extension_watcher = discovery::watch(paths.extension_dirs.clone(), events_tx.clone())
+        .map_err(|err| log::error!("not watching the Extension directories: {err}"))
         .ok();
     server::serve(listener, events_tx.clone());
 

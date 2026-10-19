@@ -3,9 +3,20 @@
 
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::mpsc::{self, RecvTimeoutError, Sender};
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use kotodama_protocol::Manifest;
+use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use regex::Regex;
+
+use crate::daemon::Event;
+use crate::host::spawn;
+
+/// How long the Extension directories must stay still before they are read
+/// again, so a package install that writes many files is read once, whole.
+const SETTLE: Duration = Duration::from_millis(200);
 
 /// An Extension found on disk, with its Live query triggers compiled.
 #[derive(Clone, Debug)]
@@ -76,4 +87,73 @@ fn load(dir: &Path, manifest_path: &Path) -> Result<Found, String> {
     let text = fs::read_to_string(manifest_path).map_err(|err| err.to_string())?;
     let manifest = Manifest::from_toml(&text).map_err(|err| err.to_string())?;
     Found::new(manifest, dir.to_owned())
+}
+
+/// Watches the Extension directories and sends [`Event::Extensions`] after each
+/// change: an Extension directory added, removed or renamed, or a
+/// `manifest.toml` written. Files an Extension writes in its own directory
+/// are ignored. Watching stops when the watcher is dropped.
+pub fn watch(
+    dirs: Vec<PathBuf>,
+    events: Sender<Event>,
+) -> notify::Result<Arc<Mutex<RecommendedWatcher>>> {
+    let (changed, changes) = mpsc::channel::<()>();
+    let filter = dirs.clone();
+    let watcher = Arc::new(Mutex::new(notify::recommended_watcher(
+        move |event: notify::Result<notify::Event>| {
+            if let Ok(event) = event
+                && event.paths.iter().any(|path| is_relevant(&filter, path))
+            {
+                let _ = changed.send(());
+            }
+        },
+    )?));
+    watch_all(&watcher, &dirs);
+
+    let watching = Arc::clone(&watcher);
+    spawn("extensions".into(), move || {
+        while changes.recv().is_ok() {
+            loop {
+                match changes.recv_timeout(SETTLE) {
+                    Ok(()) => continue,
+                    Err(RecvTimeoutError::Timeout) => break,
+                    Err(RecvTimeoutError::Disconnected) => return,
+                }
+            }
+            // New Extension directories need watching for their Manifests.
+            watch_all(&watching, &dirs);
+            let _ = events.send(Event::Extensions(discover(&dirs)));
+        }
+    });
+    Ok(watcher)
+}
+
+/// Watches each Extension directory and each Extension in it, without
+/// recursing: deeper changes are an Extension's own business.
+fn watch_all(watcher: &Mutex<RecommendedWatcher>, dirs: &[PathBuf]) {
+    let mut watcher = watcher.lock().unwrap_or_else(|poison| poison.into_inner());
+    for dir in dirs {
+        if let Err(err) = watcher.watch(dir, RecursiveMode::NonRecursive) {
+            log::debug!("not watching {}: {err}", dir.display());
+            continue;
+        }
+        for entry in fs::read_dir(dir).into_iter().flatten().flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                let _ = watcher.watch(&path, RecursiveMode::NonRecursive);
+            }
+        }
+    }
+}
+
+/// An Extension directory itself, or a Manifest in one.
+fn is_relevant(dirs: &[PathBuf], path: &Path) -> bool {
+    let Some(parent) = path.parent() else {
+        return false;
+    };
+    dirs.iter().any(|dir| dir == parent)
+        || (path.file_name().is_some_and(|name| name == "manifest.toml")
+            && parent
+                .parent()
+                .is_some_and(|grandparent| dirs.iter().any(|dir| dir == grandparent)))
 }

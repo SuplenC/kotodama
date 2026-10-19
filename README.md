@@ -12,7 +12,7 @@ Status: early. The protocol and the Daemon work; the Quickshell Front end is nex
 
 ## The Daemon
 
-`kotodamad` serves Front ends on `$XDG_RUNTIME_DIR/kotodama.sock`. It finds Extensions in `$XDG_DATA_DIRS/kotodama/extensions/*/manifest.toml` and `~/.config/kotodama/extensions/*/manifest.toml`, starts each one, and restarts it with backoff when it stops. Its config is every top-level `*.toml` in `$XDG_CONFIG_DIRS/kotodama/`, then `~/.config/kotodama/`, merged in order and reloaded when a file changes. `KOTODAMA_LOG=debug` logs more.
+`kotodamad` serves Front ends on `$XDG_RUNTIME_DIR/kotodama.sock`. It finds Extensions in `$XDG_DATA_DIRS/kotodama/extensions/*/manifest.toml` and `~/.config/kotodama/extensions/*/manifest.toml`, starts each one, and restarts it with backoff when it stops or hangs. Extensions installed, changed or removed while it runs are picked up without a restart. Its config is every top-level `*.toml` in `$XDG_CONFIG_DIRS/kotodama/`, then `~/.config/kotodama/`, merged in order and reloaded when a file changes. `KOTODAMA_LOG=debug` logs more.
 
 To try it from a terminal, run the Daemon, then the bare example Front end:
 
@@ -32,7 +32,7 @@ cargo run -p kotodamad --example front-end -- --run firefox  # run the top one
 | Machine | First keystroke | Next keystroke | Socket round trip p99 | Resident memory |
 | --- | --- | --- | --- | --- |
 | Ryzen AI 9 HX 370 (target) | to be measured | to be measured | to be measured | to be measured |
-| Apple M-series, dev container (arm64 Linux VM) | 250 µs | 36 µs | 0.38 ms | 12.9 MiB |
+| Apple M-series, dev container (arm64 Linux VM) | 309 µs | 42 µs | 0.38 ms | 13.3 MiB |
 
 The target is a p99 under 2 ms from query received to Results sent. CI fails when resident memory grows more than 10% over the baseline from `main`.
 

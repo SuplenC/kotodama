@@ -69,6 +69,11 @@ impl Index {
         }
     }
 
+    /// Makes room for one more Extension's Items.
+    pub fn add_extension(&mut self) {
+        self.ids.push(HashMap::new());
+    }
+
     pub fn version(&self) -> u64 {
         self.version
     }

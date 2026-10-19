@@ -56,11 +56,12 @@ impl Setup {
             },
             now,
         );
-        let (sender, results) = mpsc::channel();
+        let (sender, results) = mpsc::sync_channel(64);
         daemon.handle(
             Event::FrontEndUp {
                 front_end: FrontEndId(0),
                 sender,
+                disconnect: Box::new(|| {}),
             },
             now,
         );
