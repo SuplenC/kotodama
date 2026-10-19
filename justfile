@@ -19,7 +19,7 @@ shell:
 check:
     @{{ dev }} just _check
 
-# Run the tests; arguments go to `cargo test`
+# Run the tests; arguments go to `cargo nextest run`
 test *args:
     @{{ dev }} just _test "$@"
 
@@ -47,7 +47,9 @@ _check:
 [private]
 _test *args:
     for test in scripts/tests/*.sh; do "$test"; done
-    if scripts/has-crates; then cargo test --workspace "$@"; fi
+    # nextest runs each test in its own process, all in parallel; it skips doc tests.
+    if scripts/has-crates; then cargo nextest run --workspace --no-tests=pass ${CI:+--profile ci} "$@"; fi
+    if scripts/has-crates; then cargo test --workspace --doc; fi
 
 [private]
 _bench *args:

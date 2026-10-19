@@ -1,0 +1,10 @@
+# cargo-nextest: `just test` runs it, and CI with `--profile ci`.
+
+[profile.default]
+# A test that runs this long is reported as slow, and one that runs four times
+# as long is stopped: the tests that start real processes can hang.
+slow-timeout = { period = "15s", terminate-after = 4 }
+
+[profile.ci]
+# Report every failure in one run rather than stop at the first.
+fail-fast = false

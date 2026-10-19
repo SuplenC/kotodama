@@ -129,7 +129,7 @@ The first run fetches the toolchain (Rust, Qt 6, Quickshell, sway) into the `kot
 | --- | --- |
 | `just shell` | Opens a shell in the dev environment |
 | `just check` | Checks formatting and runs the lints (rustfmt, clippy, nixfmt, shellcheck, actionlint) |
-| `just test` | Runs the tests; extra arguments go to `cargo test` |
+| `just test` | Runs the tests; extra arguments go to `cargo nextest run` |
 | `just bench` | Runs the benchmarks; extra arguments go to `cargo bench` |
 | `just e2e` | Runs the e2e tests against headless sway, or only those named (`just e2e menu`); `just e2e --update menu` rewrites a test's reference image |
 | `just image` | Rebuilds the dev container image locally, e.g. after editing `docker/` without committing |

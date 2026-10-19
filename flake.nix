@@ -36,6 +36,7 @@
               clippy
               rustfmt
               rust-analyzer
+              cargo-nextest
 
               # Qt 6 and what cxx-qt needs to build against it
               qt
