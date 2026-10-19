@@ -14,12 +14,13 @@ use std::time::{Duration, Instant, SystemTime};
 
 use kotodama_protocol::{
     Action, ActionRef, CatalogEntry, Clipboard, FromExtension, FromFrontEnd, Item, ItemKind, Job,
-    KindName, LiveResult, NamespacedKind, OfferedAction, Outcome, ResultRef, ShownResult, Table,
-    ToExtension, ToFrontEnd,
+    JobState, KindName, LiveResult, NamespacedKind, OfferedAction, Outcome, ResultRef, ShownResult,
+    Table, ToExtension, ToFrontEnd, View, ViewContent,
 };
 use nucleo_matcher::pattern::{CaseMatching, Normalization, Pattern};
 use nucleo_matcher::{Config, Matcher, Utf32Str};
 
+use crate::arguments;
 use crate::config::extension_table;
 use crate::discovery::Found;
 use crate::history::{History, IDENTITIES, Picks, ResultKey, Settings, Store, query_key};
@@ -51,12 +52,15 @@ pub trait Launcher {
     fn stop(&mut self, extension: ExtensionId, generation: u64);
 }
 
-/// Types or pastes into the focused window, and starts programs for the user.
+/// Types or pastes into the focused window, starts programs for the user, and
+/// shows desktop notifications.
 pub trait Desktop {
     fn output(&mut self, output: Output);
     /// Starts a program and its arguments, detached from the Daemon, as a
     /// Quicklink asks.
     fn launch(&mut self, command: Vec<String>);
+    /// Shows a desktop notification, as when a job finishes.
+    fn notify(&mut self, summary: String, body: String);
 }
 
 /// What an Action asked the Daemon to put into the window the user came from.
@@ -470,6 +474,16 @@ fn after_keyword<'q>(query: &'q str, keyword: &str) -> Option<&'q str> {
         .then(|| rest.trim())
 }
 
+/// An Action waiting on the form that asks for its missing Arguments.
+struct ArgumentForm {
+    /// The Front end the form is shown in.
+    front_end: FrontEndId,
+    result: ResultRef,
+    action: ActionRef,
+    /// The Arguments already given or typed.
+    arguments: BTreeMap<String, String>,
+}
+
 struct PendingOutput {
     output: Output,
     /// The Front ends that haven't answered Close yet.
@@ -484,6 +498,8 @@ pub struct Daemon<L, D, S> {
     sessions: BTreeMap<FrontEndId, Session>,
     live_queries: HashMap<u64, (FrontEndId, ExtensionId)>,
     invocations: HashMap<u64, (FrontEndId, ExtensionId)>,
+    /// By the id of the form's View.
+    argument_forms: HashMap<String, ArgumentForm>,
     next_id: u64,
     config: Table,
     /// Running Extensions' Contributed actions by Item kind, in Extension order.
@@ -493,6 +509,8 @@ pub struct Daemon<L, D, S> {
     catalog_dirty: bool,
     down: Vec<String>,
     jobs: BTreeMap<(ExtensionId, String), Job>,
+    /// The Views each Extension has open, with a list View's Items.
+    views: BTreeMap<(ExtensionId, String), Vec<Item>>,
     pending_output: Option<PendingOutput>,
     launcher: L,
     desktop: D,
@@ -537,6 +555,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             sessions: BTreeMap::new(),
             live_queries: HashMap::new(),
             invocations: HashMap::new(),
+            argument_forms: HashMap::new(),
             next_id: 1,
             config,
             contributed: HashMap::new(),
@@ -544,6 +563,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             catalog_dirty: false,
             down: Vec::new(),
             jobs: BTreeMap::new(),
+            views: BTreeMap::new(),
             pending_output: None,
             launcher,
             desktop,
@@ -744,6 +764,20 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
         }
         self.live_queries.retain(|_, (_, ext)| *ext != id);
         self.jobs.retain(|(ext, _), _| *ext != id);
+        // Its Views can't be answered any more.
+        let views: Vec<String> = self
+            .views
+            .keys()
+            .filter(|(ext, _)| *ext == id)
+            .map(|(_, view)| view.clone())
+            .collect();
+        for view in views {
+            self.views.remove(&(id, view.clone()));
+            self.broadcast(|| ToFrontEnd::PopView {
+                extension: name.clone(),
+                view: view.clone(),
+            });
+        }
         for session in self.sessions.values_mut() {
             let live = &mut session.live[id.0];
             if !live.results.is_empty() {
@@ -815,24 +849,47 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
                 invocation,
                 outcome,
             } => self.action_done(id, invocation, outcome, now),
-            FromExtension::PushView(view) => self.broadcast(|| ToFrontEnd::PushView {
-                extension: name.clone(),
-                view: view.clone(),
-            }),
-            FromExtension::UpdateView(view) => self.broadcast(|| ToFrontEnd::UpdateView {
-                extension: name.clone(),
-                view: view.clone(),
-            }),
-            FromExtension::PopView { view } => self.broadcast(|| ToFrontEnd::PopView {
-                extension: name.clone(),
-                view: view.clone(),
-            }),
+            FromExtension::PushView(view) => {
+                self.open_view(id, &view);
+                self.broadcast(|| ToFrontEnd::PushView {
+                    extension: name.clone(),
+                    view: view.clone(),
+                });
+            }
+            FromExtension::UpdateView(view) => {
+                self.open_view(id, &view);
+                self.broadcast(|| ToFrontEnd::UpdateView {
+                    extension: name.clone(),
+                    view: view.clone(),
+                });
+            }
+            FromExtension::PopView { view } => {
+                self.views.remove(&(id, view.clone()));
+                self.broadcast(|| ToFrontEnd::PopView {
+                    extension: name.clone(),
+                    view: view.clone(),
+                });
+            }
             FromExtension::JobProgress(job) => {
-                self.jobs.insert((id, job.id.clone()), job.clone());
                 self.broadcast(|| ToFrontEnd::JobProgress {
                     extension: name.clone(),
                     job: job.clone(),
                 });
+                // Kept while it runs, so a menu opened later shows it. A
+                // finished one is announced, then forgotten.
+                if job.state == JobState::Running {
+                    self.jobs.insert((id, job.id.clone()), job);
+                } else {
+                    self.jobs.remove(&(id, job.id.clone()));
+                    let body = job.message.unwrap_or_else(|| {
+                        match job.state {
+                            JobState::Failed => "Failed",
+                            _ => "Done",
+                        }
+                        .to_owned()
+                    });
+                    self.desktop.notify(job.title, body);
+                }
             }
             FromExtension::RequestActionCatalog => {
                 let ext = &mut self.extensions[id.0];
@@ -848,6 +905,15 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
                 self.catalog = Some(catalog);
             }
         }
+    }
+
+    /// Keeps a list View's Items, so their Actions can run.
+    fn open_view(&mut self, id: ExtensionId, view: &View) {
+        let items = match &view.content {
+            ViewContent::List { items } => items.clone(),
+            _ => Vec::new(),
+        };
+        self.views.insert((id, view.id.clone()), items);
     }
 
     fn items_changed(&mut self) {
@@ -1016,6 +1082,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
                 }
             }
         }
+        self.argument_forms.retain(|_, form| form.front_end != id);
         self.closed(Some(id));
     }
 
@@ -1036,25 +1103,32 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
                 let run = if result.extension == OWN {
                     self.run_own(id, &result, &action, arguments, now)
                 } else {
-                    self.run_action(id, &result, &action, arguments, now)
+                    self.run_action(id, &result, &action, arguments, true, now)
                 };
-                if let Err(message) = run
-                    && let Some(session) = self.sessions.get(&id)
-                {
-                    session.send(ToFrontEnd::ActionFailed { message });
-                }
+                self.failed(id, run);
             }
             FromFrontEnd::SubmitForm {
                 extension,
                 view,
                 values,
             } => {
-                if let Some(ext) = self.extension_named(&extension) {
+                if extension == OWN {
+                    self.submit_arguments(id, &view, values, now);
+                } else if let Some(ext) = self.extension_named(&extension) {
                     self.extensions[ext.0].send(ToExtension::SubmitForm { view, values });
                 }
             }
             FromFrontEnd::ViewPopped { extension, view } => {
-                if let Some(ext) = self.extension_named(&extension) {
+                if extension == OWN {
+                    if self
+                        .argument_forms
+                        .get(&view)
+                        .is_some_and(|form| form.front_end == id)
+                    {
+                        self.argument_forms.remove(&view);
+                    }
+                } else if let Some(ext) = self.extension_named(&extension) {
+                    self.views.remove(&(ext, view.clone()));
                     self.extensions[ext.0].send(ToExtension::ViewPopped { view });
                 }
             }
@@ -1065,6 +1139,40 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             }),
             FromFrontEnd::Toggle => self.broadcast_from(id, || ToFrontEnd::Toggle),
         }
+    }
+
+    /// Tells the Front end why an Action it asked for didn't run.
+    fn failed(&self, front_end: FrontEndId, run: Result<(), String>) {
+        if let Err(message) = run
+            && let Some(session) = self.sessions.get(&front_end)
+        {
+            session.send(ToFrontEnd::ActionFailed { message });
+        }
+    }
+
+    /// The user filled in the form that asked for an Action's Arguments: the
+    /// form goes, and the Action runs.
+    fn submit_arguments(&mut self, front_end: FrontEndId, view: &str, values: Table, now: Instant) {
+        if self
+            .argument_forms
+            .get(view)
+            .is_none_or(|form| form.front_end != front_end)
+        {
+            return;
+        }
+        let Some(form) = self.argument_forms.remove(view) else {
+            return;
+        };
+        if let Some(session) = self.sessions.get(&front_end) {
+            session.send(ToFrontEnd::PopView {
+                extension: OWN.to_owned(),
+                view: view.to_owned(),
+            });
+        }
+        let mut arguments = form.arguments;
+        arguments.extend(arguments::submitted(values));
+        let run = self.run_action(front_end, &form.result, &form.action, arguments, false, now);
+        self.failed(front_end, run);
     }
 
     fn extension_named(&self, name: &str) -> Option<ExtensionId> {
@@ -1193,13 +1301,14 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
         front_end: FrontEndId,
         result: &ResultRef,
         action: &ActionRef,
-        arguments: BTreeMap<String, String>,
+        mut arguments: BTreeMap<String, String>,
+        ask: bool,
         now: Instant,
     ) -> Result<(), String> {
         let gone = || "that Result is gone".to_owned();
         let owner = self.extension_named(&result.extension).ok_or_else(gone)?;
         let session = self.sessions.get(&front_end).ok_or_else(gone)?;
-        let item = match self.index.find(owner, &result.id) {
+        let searched = match self.index.find(owner, &result.id) {
             Some(slot) => self.index.entry(slot).map(|entry| &entry.item),
             None => session.live[owner.0]
                 .results
@@ -1207,23 +1316,63 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
                 .rev()
                 .find(|live| live.item.id == result.id)
                 .map(|live| &live.item),
-        }
-        .ok_or_else(gone)?;
+        };
+        // Or an Item of one of the owner's list Views.
+        let in_view = || {
+            self.views
+                .iter()
+                .filter(|((ext, _), _)| *ext == owner)
+                .flat_map(|(_, items)| items)
+                .find(|item| item.id == result.id)
+        };
+        let item = searched.or_else(in_view).ok_or_else(gone)?;
 
-        let target = if action.extension == result.extension
-            && item.actions.iter().any(|own| own.id == action.id)
-        {
-            Some(owner)
-        } else {
-            self.extension_named(&action.extension).filter(|&ext| {
-                ext != owner
-                    && self.contributed.get(item.kind.name()).is_some_and(|list| {
-                        list.iter()
-                            .any(|(by, offered)| *by == ext && offered.id == action.id)
-                    })
-            })
+        let own = (action.extension == result.extension)
+            .then(|| item.actions.iter().find(|own| own.id == action.id))
+            .flatten();
+        let (target, wanted) = match own {
+            Some(own) => Some((owner, own)),
+            None => self
+                .extension_named(&action.extension)
+                .filter(|&ext| ext != owner)
+                .and_then(|ext| {
+                    self.contributed
+                        .get(item.kind.name())?
+                        .iter()
+                        .find(|(by, offered)| *by == ext && offered.id == action.id)
+                        .map(|(_, offered)| (ext, offered))
+                }),
         }
         .ok_or_else(|| format!("`{}` has no Action `{}`", item.title, action.id))?;
+
+        // Arguments are typed in the search, after the Item's keyword.
+        if searched.is_some()
+            && let Some(keyword) = &item.keyword
+            && let Some(typed) = after_keyword(&session.query, &keyword.to_lowercase())
+        {
+            arguments::fill(&wanted.arguments, typed, &mut arguments);
+        }
+        if let Some(missing) = arguments::missing(&wanted.arguments, &arguments) {
+            if !ask {
+                return Err(format!("`{}` needs {}", wanted.title, missing.name));
+            }
+            let id = format!("arguments-{}", self.next_id);
+            self.next_id += 1;
+            session.send(ToFrontEnd::PushView {
+                extension: OWN.to_owned(),
+                view: arguments::form(id.clone(), &wanted.title, &wanted.arguments, &arguments),
+            });
+            self.argument_forms.insert(
+                id,
+                ArgumentForm {
+                    front_end,
+                    result: result.clone(),
+                    action: action.clone(),
+                    arguments,
+                },
+            );
+            return Ok(());
+        }
 
         let ext = &self.extensions[target.0];
         if ext.sender().is_none() {

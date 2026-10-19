@@ -26,6 +26,7 @@ impl Launcher for Nothing {
 impl Desktop for Nothing {
     fn output(&mut self, _: Output) {}
     fn launch(&mut self, _: Vec<String>) {}
+    fn notify(&mut self, _: String, _: String) {}
 }
 
 impl Store for Nothing {

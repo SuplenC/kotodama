@@ -38,11 +38,13 @@ impl Launcher for Launches {
 /// How many messages a test Extension's channel holds before it counts as full.
 pub const OUTBOX: usize = 64;
 
-/// What the Daemon typed or pasted, and the programs it started.
+/// What the Daemon typed or pasted, the programs it started, and the desktop
+/// notifications it sent, as summary and body.
 #[derive(Clone, Default)]
 pub struct Outputs(
     pub Rc<RefCell<Vec<Output>>>,
     pub Rc<RefCell<Vec<Vec<String>>>>,
+    pub Rc<RefCell<Vec<(String, String)>>>,
 );
 
 impl Desktop for Outputs {
@@ -52,6 +54,10 @@ impl Desktop for Outputs {
 
     fn launch(&mut self, command: Vec<String>) {
         self.1.borrow_mut().push(command);
+    }
+
+    fn notify(&mut self, summary: String, body: String) {
+        self.2.borrow_mut().push((summary, body));
     }
 }
 
