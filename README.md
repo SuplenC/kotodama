@@ -46,7 +46,7 @@ Hyprland can't run here: it needs a DRM device. Its live tests run in a NixOS VM
 
 ### CI
 
-GitHub Actions runs `check`, `test` and `e2e` on x86_64 and arm64, plus the NixOS VM job on x86_64. The bench job (x86_64 only) compares each benchmark with the baseline saved by the last push to `main` and fails when one is more than 50% slower. Shared runners are too noisy for absolute timings, so CI never checks them.
+GitHub Actions runs `check`, `test` and `e2e` on x86_64 and arm64, plus the NixOS VM job on x86_64. The bench job (x86_64 only) compares each benchmark with the baseline saved by the last push to `main` and fails when one is more than 50% slower, and warns when there is no baseline to compare against. A weekly scheduled run keeps that baseline from being evicted. Shared runners are too noisy for absolute timings, so CI never checks them.
 
 On pushes to `main`, CI publishes:
 

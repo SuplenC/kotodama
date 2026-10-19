@@ -38,7 +38,7 @@ image:
 [private]
 _check:
     nixfmt --check flake.nix
-    shellcheck scripts/dev-env scripts/has-crates scripts/has-benches scripts/bench-compare scripts/tests/*.sh docker/entrypoint.sh e2e/run e2e/lib.sh e2e/*/test.sh
+    git ls-files scripts e2e/run '*.sh' | xargs shellcheck
     just --fmt --check --unstable
     actionlint
     if scripts/has-crates; then cargo fmt --all --check; fi

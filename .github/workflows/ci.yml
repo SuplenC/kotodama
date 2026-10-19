@@ -4,6 +4,9 @@ on:
   push:
     branches: [main]
   pull_request:
+  # Refreshes the bench baseline weekly so GitHub doesn't evict the cache that holds it.
+  schedule:
+    - cron: "0 4 * * 1"
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -61,10 +64,14 @@ jobs:
             grep 'bench:' bench-output.txt > bench-current.txt || true
           fi
       - name: Compare with main
-        run: scripts/bench-compare bench-baseline.txt bench-current.txt 50
-      - if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: |
+          if [ ! -f bench-baseline.txt ]; then
+            echo "::warning::No bench baseline from main; benchmarks were not compared."
+          fi
+          scripts/bench-compare bench-baseline.txt bench-current.txt 50
+      - if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
         run: cp bench-current.txt bench-baseline.txt
-      - if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+      - if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
         uses: actions/cache/save@v4
         with:
           path: bench-baseline.txt
