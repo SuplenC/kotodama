@@ -10,6 +10,7 @@ use std::sync::mpsc;
 use common::*;
 use kotodama_protocol::*;
 use kotodamad::daemon::{Event, FrontEndId};
+use kotodamad::usage::Used;
 
 fn argument(name: &str, optional: bool) -> Argument {
     Argument {
@@ -471,4 +472,83 @@ fn an_empty_argument_from_the_front_end_is_taken_from_the_query() {
         },
     );
     assert_eq!(arguments_run(&tools), [strings(&[("version", "1.23")])]);
+}
+
+// Every run of an Action is recorded, however it was run: the Action panel,
+// a key binding (which the Front end sends as the same RunAction), an Item of
+// a View, or a form that asked for its Arguments.
+
+/// The picks the Daemon put in the usage log: Result id and Action.
+fn picks(h: &Harness) -> Vec<(String, String)> {
+    h.saved
+        .1
+        .borrow()
+        .iter()
+        .filter_map(|entry| match &entry.used {
+            Used::Pick { id, action, .. } => Some((id.clone(), action.clone())),
+            Used::Query { .. } => None,
+        })
+        .collect()
+}
+
+fn pick(id: &str, action: &str) -> (String, String) {
+    (id.to_owned(), action.to_owned())
+}
+
+fn logging(extensions: Vec<kotodamad::discovery::Found>) -> Harness {
+    Harness::with_config(extensions, config("[history]\nusage_log = true"))
+}
+
+#[test]
+fn a_contributed_action_run_from_the_action_panel_is_recorded() {
+    let pinner = manifest(
+        "name = \"pinner\"\ncommand = [\"x\"]\n\
+         [[contributed_actions]]\nkind = \"project\"\nid = \"pin\"\ntitle = \"Pin a version here\"",
+    );
+    let mut h = logging(vec![plain("projects"), pinner]);
+    let projects = h.up(0);
+    let pinner = h.up(1);
+    h.add(&projects, vec![project("kotodama")]);
+    let ui = h.front_end();
+    h.query(&ui, "koto");
+
+    run(&mut h, &ui, "projects", "kotodama", "pinner", "pin");
+    assert!(
+        matches!(&pinner.drain()[..], [.., ToExtension::RunAction { action, .. }] if action == "pin")
+    );
+    assert_eq!(picks(&h), [pick("kotodama", "pin")]);
+}
+
+#[test]
+fn an_action_run_on_an_item_of_a_list_view_is_recorded() {
+    let mut h = logging(vec![plain("git")]);
+    let git = h.up(0);
+    let ui = h.front_end();
+    h.send(&git, FromExtension::PushView(branches()));
+
+    run(&mut h, &ui, "git", "main", "git", "open");
+    assert_eq!(picks(&h), [pick("main", "open")]);
+}
+
+#[test]
+fn an_action_waiting_on_its_arguments_is_recorded_once_it_runs() {
+    let mut h = logging(vec![plain("tools")]);
+    let tools = h.up(0);
+    h.add(&tools, vec![go(vec![argument("version", false)])]);
+    let ui = h.front_end();
+    h.query(&ui, "go");
+    run(&mut h, &ui, "tools", "go", "tools", "open");
+    assert_eq!(picks(&h), [], "nothing has run yet");
+
+    let (_, form) = pushed(&ui).pop().expect("the argument form");
+    h.front_end_sends(
+        &ui,
+        FromFrontEnd::SubmitForm {
+            extension: "kotodama".into(),
+            view: form.id,
+            values: BTreeMap::from([("version".into(), Value::String("1.23".into()))]),
+        },
+    );
+    assert_eq!(arguments_run(&tools), [strings(&[("version", "1.23")])]);
+    assert_eq!(picks(&h), [pick("go", "open")]);
 }
