@@ -1192,17 +1192,26 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
         .ok_or_else(|| format!("`{}` has no Action `{}`", item.title, action.id))?;
 
         let ext = &self.extensions[target.0];
-        let sender = ext
-            .sender()
-            .ok_or_else(|| format!("{} isn't running", ext.name()))?;
+        if ext.sender().is_none() {
+            return Err(format!("{} isn't running", ext.name()));
+        }
+        // One that stopped reading is stopped once this event is handled, so
+        // the Action fails now rather than when its ExtensionDown arrives.
+        let hung = || format!("{} stopped answering", ext.name());
+        if ext.hung.get() {
+            return Err(hung());
+        }
         let invocation = self.next_id;
         self.next_id += 1;
-        let _ = sender.send(ToExtension::RunAction {
+        ext.send(ToExtension::RunAction {
             invocation,
             action: action.id.clone(),
             item: item.to_ref(),
             arguments,
         });
+        if ext.hung.get() {
+            return Err(hung());
+        }
         self.invocations.insert(invocation, (front_end, target));
         self.picked(front_end, result, now);
         Ok(())
