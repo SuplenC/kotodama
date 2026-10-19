@@ -1181,6 +1181,51 @@ fn a_learned_choice_follows_the_same_thing_to_another_extension() {
 }
 
 #[test]
+fn the_empty_query_shows_the_same_thing_once_by_the_result_picked_through_most() {
+    let (mut h, _bookmarks, _visited, ui) = bookmarks_and_visited();
+    pick(&mut h, &ui, "hub", "bookmarks", "gh");
+    pick(&mut h, &ui, "hub", "visited", "1");
+    pick(&mut h, &ui, "hub", "visited", "1");
+    pick(&mut h, &ui, "lab", "visited", "2");
+    assert_eq!(titles(&h.query(&ui, "")), ["github.com", "GitLab"]);
+}
+
+#[test]
+fn the_empty_query_is_ranked_again_when_the_menu_opens() {
+    let mut h = Harness::new(vec![plain("apps")]);
+    let apps = h.up(0);
+    h.add(&apps, vec![app("Mail"), app("Music")]);
+    let menu = h.front_end();
+    let command = h.front_end();
+    for _ in 0..3 {
+        h.advance_to(8);
+        pick(&mut h, &menu, "mail", "apps", "mail");
+        h.advance_to(20);
+        pick(&mut h, &menu, "music", "apps", "music");
+    }
+    h.advance_to(8);
+    assert_eq!(titles(&h.query(&menu, "")), ["Mail", "Music"]);
+
+    h.advance_to(20);
+    h.front_end_sends(&command, FromFrontEnd::Toggle);
+    assert_eq!(titles(&menu.results().unwrap()), ["Music", "Mail"]);
+    assert_eq!(command.drain(), [], "it never searched");
+}
+
+#[test]
+fn the_empty_query_shows_a_result_once_its_extension_sends_it() {
+    let mut h = Harness::with_config(
+        vec![plain("apps")],
+        config("[empty_query]\nmenu = [{ extension = \"apps\", item = \"mail\" }]"),
+    );
+    let ui = h.front_end();
+    assert_eq!(h.query(&ui, ""), []);
+    let apps = h.up(0);
+    h.add(&apps, vec![app("Mail")]);
+    assert_eq!(titles(&ui.results().unwrap()), ["Mail"]);
+}
+
+#[test]
 fn a_pick_of_a_live_query_result_raises_the_same_thing_indexed() {
     let mut h = Harness::new(vec![plain("bookmarks"), web()]);
     let bookmarks = h.up(0);

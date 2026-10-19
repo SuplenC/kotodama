@@ -77,7 +77,7 @@ Long work an Extension reports on while it runs, such as an install; a progress 
 _Avoid_: Task, operation, process
 
 **Frecency**:
-The score that combines how often and how recently the user picked a Result.
+The score that combines how often and how recently the user picked a Result, and how usual this time of day is for picking it.
 _Avoid_: Popularity, history score
 
 **Learned choice**:

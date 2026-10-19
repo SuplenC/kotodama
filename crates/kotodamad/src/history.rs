@@ -2,8 +2,8 @@
 //! kept in `$XDG_STATE_HOME/kotodama/history.json` and written after every
 //! pick, on a thread of its own so the Daemon never waits for the disk.
 //!
-//! Times are seconds since the Unix epoch, passed in by the caller, so the
-//! History is the same in tests as on a real clock.
+//! Times are passed in by the caller, as [`When`], so the History is the same
+//! in tests as on a real clock.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -13,10 +13,11 @@ use std::{fs, io};
 use kotodama_protocol::{Table, Value};
 use serde::{Deserialize, Serialize};
 
+use crate::clock::{DAY_SECS, When};
 use crate::host::spawn;
 use crate::usage::{self, Entry};
 
-const DAY_SECS: f64 = 24.0 * 60.0 * 60.0;
+const DAY: f64 = DAY_SECS as f64;
 
 /// How many of the Results ranked above a Learned choice when it was picked
 /// are remembered as passed over.
@@ -36,6 +37,7 @@ const MAX_QUERIES: usize = 1000;
 /// picks_to_take_over = 2  # picks of another Result, since the choice was last picked, that replace it
 /// half_life_days = 14     # how long a pick takes to count half as much
 /// lift_threshold = 5.0    # the Frecency that lifts a Result one Tier: about a week of daily use
+/// time_of_day = 0.5       # how much less a pick counts at a time of day it is seldom made: 0 to 1
 /// usage_log = false       # log queries and picks, to tune ranking from real use
 /// ```
 ///
@@ -56,6 +58,10 @@ pub struct Settings {
     /// daily whose title starts with the query beat an exact title, but not a
     /// few picks.
     pub lift_threshold: f64,
+    /// How much less a Result's picks count at a time of day it is seldom
+    /// picked: 0 not at all, 1 for nothing at a time it is never picked. At
+    /// the times it is picked most they count in full.
+    pub time_of_day: f64,
     /// Whether queries and picks go in the Usage log (see [`crate::usage`]).
     pub usage_log: bool,
 }
@@ -65,8 +71,9 @@ impl Default for Settings {
         Settings {
             picks_to_learn: 3,
             picks_to_take_over: 2,
-            half_life_secs: 14.0 * DAY_SECS,
+            half_life_secs: 14.0 * DAY,
             lift_threshold: 5.0,
+            time_of_day: 0.5,
             usage_log: false,
         }
     }
@@ -91,11 +98,15 @@ impl Settings {
                 "half_life_days" => number(value)
                     .filter(|&days| days > 0.0)
                     .ok_or("should be a number of days above 0")
-                    .map(|days| settings.half_life_secs = days * DAY_SECS),
+                    .map(|days| settings.half_life_secs = days * DAY),
                 "lift_threshold" => number(value)
                     .filter(|&frecency| frecency > 0.0)
                     .ok_or("should be a number above 0")
                     .map(|frecency| settings.lift_threshold = frecency),
+                "time_of_day" => number(value)
+                    .filter(|weight| (0.0..=1.0).contains(weight))
+                    .ok_or("should be a number from 0 to 1")
+                    .map(|weight| settings.time_of_day = weight),
                 "usage_log" => match value {
                     Value::Bool(on) => {
                         settings.usage_log = *on;
@@ -160,19 +171,105 @@ pub struct History {
     version: u64,
 }
 
-/// How often and how recently one Result was picked.
+/// How many parts the day is cut into, for learning when a Result is picked.
+const HOURS: usize = 6;
+/// How long each part is.
+const HOURS_SECS: f64 = DAY / HOURS as f64;
+/// What [`Picks::hours`] adds up to.
+const SHARES: f64 = u8::MAX as f64;
+
+/// How often, how recently and at what times of day one Result was picked.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Picks {
     /// The decayed number of picks, as of `at`.
     score: f64,
     at: u64,
+    /// How the picks fall across the day: in [`HOURS`] parts from midnight,
+    /// each as its share of `score`, out of [`SHARES`]. All zero when it isn't
+    /// known, for picks kept before it was.
+    #[serde(default, skip_serializing_if = "unknown")]
+    hours: [u8; HOURS],
+}
+
+fn unknown(hours: &[u8; HOURS]) -> bool {
+    hours.iter().all(|&share| share == 0)
+}
+
+/// The two parts of the day a time of day falls between, and how near it is
+/// to the middle of each, from 0 to 1. A pick counts towards both and a time
+/// reads both, so a habit doesn't stop at a part's end.
+fn parts(time_of_day: u32) -> [(usize, f64); 2] {
+    let x = f64::from(time_of_day) / HOURS_SECS - 0.5;
+    let before = x.floor();
+    let after = x - before;
+    let first = (before as i64).rem_euclid(HOURS as i64) as usize;
+    [(first, 1.0 - after), ((first + 1) % HOURS, after)]
 }
 
 impl Picks {
-    /// The Frecency at time `at`: every pick counts 1 when made, and half as
-    /// much every `half_life` seconds after.
-    pub fn frecency(&self, at: u64, half_life: f64) -> f64 {
+    fn new(at: u64) -> Self {
+        Picks {
+            score: 0.0,
+            at,
+            hours: [0; HOURS],
+        }
+    }
+
+    /// The decayed number of picks at time `at`: every pick counts 1 when
+    /// made, and half as much every `half_life` seconds after.
+    fn count(&self, at: u64, half_life: f64) -> f64 {
         decay(self.score, self.at, at, half_life)
+    }
+
+    /// The Frecency at `when`: the decayed number of picks, which count less
+    /// at a time of day the Result is seldom picked, as `settings` say.
+    pub fn frecency(&self, when: When, settings: &Settings) -> f64 {
+        let count = self.count(when.at, settings.half_life_secs);
+        count * (1.0 - settings.time_of_day * (1.0 - self.usual(when.time_of_day)))
+    }
+
+    /// The decayed number of picks made near the time of day of `when`,
+    /// and of all picks, as the empty query ranks by.
+    pub fn used(&self, when: When, half_life: f64) -> (f64, f64) {
+        let count = self.count(when.at, half_life);
+        (count * self.usual(when.time_of_day), count)
+    }
+
+    /// How usual a time of day is for picking it: 1 at the times it is picked
+    /// most, or when that isn't known, down to 0 at times it never is.
+    fn usual(&self, time_of_day: u32) -> f64 {
+        let most = self.hours.iter().copied().max().unwrap_or(0);
+        if most == 0 {
+            return 1.0;
+        }
+        let parts = parts(time_of_day);
+        let read: f64 = parts
+            .iter()
+            .map(|&(part, near)| near * f64::from(self.hours[part]))
+            .sum();
+        // So picks read at the time of day they were made read in full.
+        let whole: f64 = parts.iter().map(|&(_, near)| near * near).sum();
+        (read / (whole * f64::from(most))).min(1.0)
+    }
+
+    /// Adds a pick made at `when`.
+    fn add(&mut self, when: When, half_life: f64) {
+        let before = self.count(when.at, half_life);
+        let total: f64 = self.hours.iter().copied().map(f64::from).sum();
+        // Picks made at times of day that aren't known count as spread evenly.
+        let mut hours = self.hours.map(|share| {
+            if total > 0.0 {
+                before * f64::from(share) / total
+            } else {
+                before / HOURS as f64
+            }
+        });
+        for (part, near) in parts(when.time_of_day) {
+            hours[part] += near;
+        }
+        self.score = before + 1.0;
+        self.at = when.at;
+        self.hours = hours.map(|count| (count / self.score * SHARES).round() as u8);
     }
 }
 
@@ -248,8 +345,16 @@ impl History {
     /// [`Settings::picks_to_learn`] times for one query becomes its Learned
     /// choice, and one picked [`Settings::picks_to_take_over`] times since the
     /// choice was last picked replaces it.
-    pub fn pick(&mut self, extension: &str, id: &str, query: &str, above: &[ResultKey], at: u64) {
-        self.bump(extension, id, at);
+    pub fn pick(
+        &mut self,
+        extension: &str,
+        id: &str,
+        query: &str,
+        above: &[ResultKey],
+        when: When,
+    ) {
+        self.bump(extension, id, when);
+        let at = when.at;
 
         let key = query_key(query);
         let Settings {
@@ -304,34 +409,30 @@ impl History {
     }
 
     /// Records a pick for Frecency alone, with nothing learned for the query.
-    pub fn touch(&mut self, extension: &str, id: &str, at: u64) {
-        self.bump(extension, id, at);
+    pub fn touch(&mut self, extension: &str, id: &str, when: When) {
+        self.bump(extension, id, when);
         self.trim();
     }
 
-    fn bump(&mut self, extension: &str, id: &str, at: u64) {
+    fn bump(&mut self, extension: &str, id: &str, when: When) {
         self.version += 1;
-        let half_life = self.settings.half_life_secs;
-        let picks = self
-            .picks
+        self.picks
             .entry(extension.to_owned())
             .or_default()
             .entry(id.to_owned())
-            .or_insert(Picks { score: 0.0, at });
-        *picks = Picks {
-            score: picks.frecency(at, half_life) + 1.0,
-            at,
-        };
+            .or_insert(Picks::new(when.at))
+            .add(when, self.settings.half_life_secs);
     }
 
-    /// One Result's Frecency at time `at`; 0 if it was never picked.
-    pub fn frecency(&self, extension: &str, id: &str, at: u64) -> f64 {
-        self.picks
-            .get(extension)
-            .and_then(|ids| ids.get(id))
-            .map_or(0.0, |picks| {
-                picks.frecency(at, self.settings.half_life_secs)
-            })
+    /// How one Result was picked, if it was.
+    pub fn picks(&self, extension: &str, id: &str) -> Option<&Picks> {
+        self.picks.get(extension).and_then(|ids| ids.get(id))
+    }
+
+    /// One Result's Frecency at `when`; 0 if it was never picked.
+    pub fn frecency(&self, extension: &str, id: &str, when: When) -> f64 {
+        self.picks(extension, id)
+            .map_or(0.0, |picks| picks.frecency(when, &self.settings))
     }
 
     /// Every Result picked and kept.
@@ -393,13 +494,13 @@ impl History {
             let half_life = self.settings.half_life_secs;
             let mut scores: Vec<f64> = self
                 .picked()
-                .map(|(.., p)| p.frecency(at, half_life))
+                .map(|(.., p)| p.count(at, half_life))
                 .collect();
             let cut = results - MAX_RESULTS;
             scores.select_nth_unstable_by(cut, f64::total_cmp);
             let floor = scores[cut];
             for ids in self.picks.values_mut() {
-                ids.retain(|_, picks| picks.frecency(at, half_life) >= floor);
+                ids.retain(|_, picks| picks.count(at, half_life) >= floor);
             }
             self.picks.retain(|_, ids| !ids.is_empty());
         }
@@ -496,4 +597,62 @@ fn write(path: &Path, bytes: &[u8]) -> io::Result<()> {
     let partial = path.with_extension("json.partial");
     fs::write(&partial, bytes)?;
     fs::rename(&partial, path)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const HOUR: u32 = 3600;
+
+    /// `hour` seconds into day `day`, in UTC.
+    fn when(day: u64, hour: u32) -> When {
+        When {
+            at: 1_792_368_000 + day * DAY_SECS + u64::from(hour),
+            time_of_day: hour,
+        }
+    }
+
+    #[test]
+    fn a_result_takes_a_few_dozen_bytes_however_often_it_is_picked() {
+        let mut history = History::default();
+        for day in 0..100 {
+            for hour in 0..24 {
+                history.touch("apps", "firefox", when(day, hour * HOUR + 17 * 60));
+            }
+        }
+        let json = serde_json::to_string(&history).unwrap();
+        let entry = json.find("\"firefox\"").map(|at| &json[at..]).unwrap();
+        let entry = &entry[..=entry.find('}').unwrap()];
+        assert!(entry.len() < 90, "{entry}");
+    }
+
+    #[test]
+    fn picks_kept_before_times_of_day_were_count_in_full_at_any_time() {
+        let history: History = serde_json::from_str(
+            r#"{"picks":{"apps":{"firefox":{"score":2.0,"at":1792368000}}},"learned":{}}"#,
+        )
+        .unwrap();
+        assert_eq!(counts(&history, "firefox", when(0, 3 * HOUR)), 1.0);
+        assert_eq!(counts(&history, "firefox", when(0, 15 * HOUR)), 1.0);
+    }
+
+    #[test]
+    fn picks_count_in_full_at_the_time_of_day_they_are_made_and_less_away_from_it() {
+        let mut history = History::default();
+        for day in 0..5 {
+            history.touch("apps", "mail", when(day, 7 * HOUR));
+        }
+        assert_eq!(counts(&history, "mail", when(5, 7 * HOUR)), 1.0);
+        let near = counts(&history, "mail", when(5, 9 * HOUR));
+        assert!(near > 0.8 && near < 1.0, "two hours later: {near}");
+        assert_eq!(counts(&history, "mail", when(5, 19 * HOUR)), 0.5, "away");
+    }
+
+    /// How much an app's picks count at `when`, of their decayed number.
+    fn counts(history: &History, id: &str, when: When) -> f64 {
+        let picks = history.picks("apps", id).unwrap();
+        let count = picks.count(when.at, history.settings().half_life_secs);
+        history.frecency("apps", id, when) / count
+    }
 }

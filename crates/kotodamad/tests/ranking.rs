@@ -87,6 +87,11 @@ impl World {
         self.h.advance(by);
     }
 
+    /// Waits for the next `hour` o'clock.
+    fn at(&mut self, hour: u64) {
+        self.h.advance_to(hour);
+    }
+
     /// Replaces the config, as when the user edits it.
     fn reconfigure(&mut self, toml: &str) {
         self.h.event(Event::Config(config(toml)));
@@ -411,6 +416,25 @@ fn a_habit_beats_the_last_thing_picked() {
     assert_eq!(w.first("fi"), "Firefox");
 }
 
+/// R6: in the morning, the tool used every morning comes first, though the
+/// one used every evening was picked more recently.
+#[test]
+fn a_morning_habit_ranks_higher_in_the_morning() {
+    let mut w = World::new(&["Alpha Tool", "Beta Tool"]);
+    for _ in 0..10 {
+        w.at(8);
+        w.pick("alpha", "Alpha Tool");
+        w.at(20);
+        w.pick("beta", "Beta Tool");
+    }
+    w.at(8);
+    assert_eq!(w.first("tool"), "Alpha Tool", "in the morning");
+    w.at(20);
+    assert_eq!(w.first("tool"), "Beta Tool", "in the evening");
+    w.at(14);
+    assert_eq!(w.first("tool"), "Beta Tool", "at neither, the more recent");
+}
+
 /// R7
 #[test]
 fn a_pick_is_never_forgotten_only_weaker() {
@@ -627,6 +651,122 @@ fn a_pick_counts_at_once() {
     assert_eq!(w.first("fi"), "Firefox");
 }
 
+// The empty query.
+
+const HABITS: &[&str] = &[
+    "Mail", "News", "Calendar", "Music", "Editor", "Games", "Files", "Terminal",
+];
+
+/// Ten days of picks: three habits each morning, three each evening.
+fn habits(w: &mut World) {
+    for _ in 0..10 {
+        w.at(8);
+        w.picks(3, "mail", "Mail");
+        w.picks(2, "news", "News");
+        w.pick("calendar", "Calendar");
+        w.at(20);
+        w.picks(3, "music", "Music");
+        w.picks(2, "editor", "Editor");
+        w.pick("games", "Games");
+    }
+}
+
+const MENU: &str = "[empty_query]\nmenu = [\n\
+                    { extension = \"apps\", item = \"files\" },\n\
+                    { extension = \"kotodama\", item = \"clear-history\" },\n\
+                    { extension = \"apps\", item = \"mail\" },\n]";
+
+/// Z1
+#[test]
+fn the_empty_query_shows_the_three_most_used_at_this_time_of_day_then_the_menu() {
+    let mut w = World::with(HABITS.iter().map(|title| app(title)).collect(), MENU);
+    habits(&mut w);
+    w.at(8);
+    assert_eq!(
+        rows(&mut w, ""),
+        ["Mail", "News", "Calendar", "Files", "Clear history"],
+        "in the morning"
+    );
+    w.at(20);
+    assert_eq!(
+        rows(&mut w, ""),
+        ["Music", "Editor", "Games", "Files", "Clear history", "Mail"],
+        "in the evening"
+    );
+}
+
+/// Z1: at a time of day nothing is picked at, the most used overall.
+#[test]
+fn at_a_time_of_day_nothing_is_used_at_the_empty_query_shows_the_most_used() {
+    let mut w = World::new(HABITS);
+    habits(&mut w);
+    w.at(14);
+    assert_eq!(rows(&mut w, ""), ["Music", "Mail", "Editor"]);
+}
+
+/// Z1
+#[test]
+fn with_nothing_picked_the_empty_query_shows_the_menu() {
+    let mut w = World::with(HABITS.iter().map(|title| app(title)).collect(), MENU);
+    assert_eq!(rows(&mut w, ""), ["Files", "Clear history", "Mail"]);
+    let mut w = World::new(HABITS);
+    assert_eq!(rows(&mut w, ""), Vec::<String>::new(), "and no menu");
+}
+
+/// Z1
+#[test]
+fn how_many_of_the_most_used_come_first_is_a_setting() {
+    let mut w = World::with(
+        HABITS.iter().map(|title| app(title)).collect(),
+        "[empty_query]\nmost_used = 1",
+    );
+    habits(&mut w);
+    w.at(8);
+    assert_eq!(rows(&mut w, ""), ["Mail"]);
+}
+
+/// Z1: an Alias's picks count for the Result it names.
+#[test]
+fn picks_through_an_alias_count_towards_the_most_used() {
+    let mut w = World::with(
+        vec![app("Files"), app("Firefox"), app("Fish")],
+        "[aliases]\nweb = { extension = \"apps\", item = \"firefox\" }",
+    );
+    w.picks(2, "fish", "Fish");
+    w.picks(3, "web", "Firefox");
+    assert_eq!(rows(&mut w, ""), ["Firefox", "Fish"]);
+}
+
+/// Z2
+#[test]
+fn the_same_history_gives_the_same_rows() {
+    let mut w = World::new(HABITS);
+    habits(&mut w);
+    w.picks(2, "files", "Files");
+    w.at(8);
+    let expected = rows(&mut w, "");
+    assert_eq!(rows(&mut w, ""), expected);
+
+    let history = w.h.saved.0.borrow().clone().unwrap();
+    let mut h = Harness::with_history(vec![plain("apps")], config(""), history);
+    let apps = h.up(0);
+    h.add(&apps, HABITS.iter().map(|title| app(title)).collect());
+    h.advance(w.h.elapsed());
+    let ui = h.front_end();
+    assert_eq!(titles(&h.query(&ui, "")), expected);
+}
+
+/// Z3
+#[test]
+fn a_pick_from_the_empty_query_counts_at_once() {
+    let mut w = World::new(HABITS);
+    w.pick("term", "Terminal");
+    assert_eq!(rows(&mut w, ""), ["Terminal"]);
+    w.pick("files", "Files");
+    w.pick("", "Files");
+    assert_eq!(rows(&mut w, ""), ["Files", "Terminal"]);
+}
+
 // The History's settings, from the `[history]` table of the config.
 
 /// H4
@@ -702,6 +842,23 @@ fn a_lift_threshold_of_zero_keeps_the_default() {
     w.pick("firefox", "Firefox");
     w.later(DAY);
     assert_eq!(rows(&mut w, "fi"), ["Fi", "Firefox", "Fish", "Files"]);
+}
+
+/// H4
+#[test]
+fn how_much_the_time_of_day_counts_is_a_setting() {
+    let mut w = World::with(
+        vec![app("Alpha Tool"), app("Beta Tool")],
+        "[history]\ntime_of_day = 0",
+    );
+    for _ in 0..10 {
+        w.at(8);
+        w.pick("alpha", "Alpha Tool");
+        w.at(20);
+        w.pick("beta", "Beta Tool");
+    }
+    w.at(8);
+    assert_eq!(w.first("tool"), "Beta Tool", "the more recent");
 }
 
 /// H4

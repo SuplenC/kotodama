@@ -199,7 +199,7 @@ fn quicklink(keyword: &str, value: &Value) -> Result<Quicklink, String> {
 }
 
 /// An optional string in a config table.
-fn string(table: &Table, key: &str) -> Result<Option<String>, String> {
+pub(crate) fn string(table: &Table, key: &str) -> Result<Option<String>, String> {
     match table.get(key) {
         Some(Value::String(value)) => Ok(Some(value.clone())),
         None => Ok(None),
