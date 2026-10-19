@@ -6,11 +6,13 @@ FROM nixos/nix:2.35.3
 LABEL org.opencontainers.image.source=https://github.com/SuplenC/kotodama \
       org.opencontainers.image.description="Kotodama dev environment: enters the flake's dev shell"
 
-COPY nix.conf /etc/nix/nix.conf
+# /etc/nix/nix.conf links into /nix, which the volume covers, so the config lives outside it.
+COPY nix.conf /etc/kotodama/nix.conf
 COPY entrypoint.sh /usr/local/bin/kotodama-dev
 COPY gitconfig /root/.gitconfig
 
-ENV CARGO_HOME=/cargo \
+ENV NIX_CONF_DIR=/etc/kotodama \
+    CARGO_HOME=/cargo \
     CARGO_TARGET_DIR=/cargo/target
 
 WORKDIR /work
