@@ -208,6 +208,10 @@ fn from_extension_messages() -> Vec<FromExtension> {
             }),
         },
         FromExtension::ActionDone {
+            invocation: 7,
+            outcome: Outcome::Copy(Clipboard::Text("84".into())),
+        },
+        FromExtension::ActionDone {
             invocation: 6,
             outcome: Outcome::Failed {
                 message: "no network".into(),
@@ -597,6 +601,18 @@ fn image_bytes_travel_as_base64_in_json() {
     assert_eq!(
         json(&message),
         serde_json::json!({"action_done": {"invocation": 9, "outcome": {"paste": {"image": {"mime": "image/png", "data": "UE5H"}}}}})
+    );
+}
+
+#[test]
+fn a_copy_outcome_in_json_names_what_to_copy() {
+    let message = FromExtension::ActionDone {
+        invocation: 9,
+        outcome: Outcome::Copy(Clipboard::Text("84".into())),
+    };
+    assert_eq!(
+        json(&message),
+        serde_json::json!({"action_done": {"invocation": 9, "outcome": {"copy": {"text": "84"}}}})
     );
 }
 

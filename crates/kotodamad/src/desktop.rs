@@ -1,7 +1,8 @@
 //! Typing and pasting into the focused window over Wayland. Text is typed
 //! through the virtual-keyboard protocol with a keymap made for it, as `wtype`
-//! does, so any character can be typed whatever the user's layout. A paste
-//! sets the clipboard through wlr data-control, then sends Ctrl+V.
+//! does, so any character can be typed whatever the user's layout. A copy
+//! sets the clipboard through wlr data-control; a paste does, then sends
+//! Ctrl+V.
 //!
 //! The Wayland connection lives on a thread of its own, opened on the first
 //! request, and stays open: the Daemon must keep serving the clipboard it set
@@ -103,7 +104,7 @@ fn notify(summary: String, body: String) {
     });
 }
 
-/// Types and pastes on the Wayland display in `WAYLAND_DISPLAY`.
+/// Types, pastes and copies on the Wayland display in `WAYLAND_DISPLAY`.
 #[derive(Default)]
 pub struct Wayland {
     #[cfg(target_os = "linux")]
@@ -151,7 +152,7 @@ impl Desktop for Wayland {
     }
 
     fn output(&mut self, _output: Output) {
-        log::error!("typing and pasting need Wayland, which only Linux has");
+        log::error!("typing, pasting and copying need Wayland, which only Linux has");
     }
 }
 
@@ -313,6 +314,7 @@ mod linux {
             match output {
                 Output::Type(text) => self.type_text(&text),
                 Output::Paste(clipboard) => self.paste(clipboard),
+                Output::Copy(clipboard) => self.copy(clipboard),
             }
         }
 
@@ -328,8 +330,20 @@ mod linux {
         }
 
         fn paste(&mut self, clipboard: Clipboard) -> Result<(), String> {
+            self.copy(clipboard)?;
+            let keymap = Keymap::new("v");
+            self.upload(&keymap)?;
+            self.keyboard.modifiers(CONTROL, 0, 0, 0);
+            self.tap(keymap.code('v').unwrap_or(1));
+            self.keyboard.modifiers(0, 0, 0, 0);
+            self.roundtrip()
+        }
+
+        /// Puts `clipboard` on the clipboard, and serves it until something
+        /// else takes it.
+        fn copy(&mut self, clipboard: Clipboard) -> Result<(), String> {
             let Some((manager, device)) = &self.data else {
-                return Err("the compositor has no wlr data-control, so can't paste".into());
+                return Err("the compositor has no wlr data-control, so can't copy".into());
             };
             let (mimes, data) = match clipboard {
                 Clipboard::Text(text) => (
@@ -352,13 +366,6 @@ mod linux {
             if let Some((old, _)) = self.state.selection.replace((source, Arc::new(data))) {
                 old.destroy();
             }
-            self.roundtrip()?;
-
-            let keymap = Keymap::new("v");
-            self.upload(&keymap)?;
-            self.keyboard.modifiers(CONTROL, 0, 0, 0);
-            self.tap(keymap.code('v').unwrap_or(1));
-            self.keyboard.modifiers(0, 0, 0, 0);
             self.roundtrip()
         }
 
