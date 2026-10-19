@@ -120,6 +120,9 @@ pkgs.testers.runNixOSTest {
         machine.wait_until_succeeds(
             as_alice(f"{front_end} dozer") + " | grep -P '^apps\tdozer\tDozer$'"
         )
+        machine.wait_until_succeeds(
+            as_alice(f"{front_end} clipboard") + " | grep -P '^clipboard\thistory\tClipboard History$'"
+        )
 
     with subtest("programs started from the menu get scopes of their own"):
         user(f"{front_end} --run nap")
