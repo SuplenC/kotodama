@@ -12,6 +12,8 @@ pub struct Paths {
     pub extension_dirs: Vec<PathBuf>,
     /// `$XDG_STATE_HOME/kotodama/history.json`.
     pub history: PathBuf,
+    /// `$XDG_STATE_HOME/kotodama/usage.jsonl`.
+    pub usage_log: PathBuf,
 }
 
 impl Paths {
@@ -43,6 +45,7 @@ impl Paths {
             config_dirs,
             extension_dirs,
             history: state_home.join("kotodama/history.json"),
+            usage_log: state_home.join("kotodama/usage.jsonl"),
         })
     }
 }

@@ -12,6 +12,7 @@ use kotodama_protocol::{FromExtension, FromFrontEnd, Manifest, Table, ToFrontEnd
 use kotodamad::daemon::{Daemon, Desktop, Event, ExtensionId, FrontEndId, Launcher, Output};
 use kotodamad::discovery::Found;
 use kotodamad::history::{History, Store};
+use kotodamad::usage::Entry;
 
 mod corpus;
 
@@ -29,6 +30,7 @@ impl Desktop for Nothing {
 
 impl Store for Nothing {
     fn save(&mut self, _: &History) {}
+    fn log(&mut self, _: Entry) {}
 }
 
 struct Setup {

@@ -457,3 +457,48 @@ fn aliases_and_quicklinks_follow_the_config_directory_without_a_restart() {
     });
     ui.wait_for_titles("gh", &["GitHub"]);
 }
+
+#[test]
+fn the_usage_log_is_written_once_the_config_turns_it_on() {
+    let root = Daemon::home();
+    install(
+        &root,
+        "bookmarks",
+        "",
+        &[item("kotlin", "Kotlin"), item("kotodama", "Kotodama")],
+    );
+    let daemon = Daemon::start(root);
+    let mut ui = daemon.connect();
+    ui.wait_for_titles("kot", &["Kotlin", "Kotodama"]);
+    ui.run("bookmarks", "kotodama", "open");
+    let state = daemon.root.path().join("state/kotodama");
+    wait_for("the pick on disk", || {
+        state.join("history.json").exists().then_some(())
+    });
+    let log = state.join("usage.jsonl");
+    assert!(!log.exists(), "the usage log is off by default");
+
+    fs::write(
+        daemon.root.path().join("config/kotodama/history.toml"),
+        "[history]\nusage_log = true\n",
+    )
+    .unwrap();
+    wait_for("the usage log", || {
+        ui.titles("kotl");
+        log.exists().then_some(())
+    });
+    ui.run("bookmarks", "kotlin", "open");
+    let pick = wait_for("the pick in the usage log", || {
+        fs::read_to_string(&log)
+            .unwrap_or_default()
+            .lines()
+            .find(|line| line.contains(r#""kind":"pick""#))
+            .map(str::to_owned)
+    });
+    let pick: serde_json::Value = serde_json::from_str(&pick).unwrap();
+    assert_eq!(pick["query"], "kotl");
+    assert_eq!(pick["extension"], "bookmarks");
+    assert_eq!(pick["id"], "kotlin");
+    assert_eq!(pick["action"], "open");
+    assert_eq!(pick["row"], 0);
+}
