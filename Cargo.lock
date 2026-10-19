@@ -331,6 +331,7 @@ dependencies = [
  "nucleo-matcher",
  "regex",
  "rustix",
+ "serde_json",
  "tempfile",
  "toml",
  "wayland-client",

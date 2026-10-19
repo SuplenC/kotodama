@@ -1,0 +1,439 @@
+//! Typing and pasting into the focused window over Wayland. Text is typed
+//! through the virtual-keyboard protocol with a keymap made for it, as `wtype`
+//! does, so any character can be typed whatever the user's layout. A paste
+//! sets the clipboard through wlr data-control, then sends Ctrl+V.
+//!
+//! The Wayland connection lives on a thread of its own, opened on the first
+//! request, and stays open: the Daemon must keep serving the clipboard it set
+//! until something else takes it.
+
+use std::fmt::Write as _;
+
+use crate::daemon::{Desktop, Output};
+
+/// The keymap a virtual keyboard uploads to type some text: one key per
+/// distinct character, so the keymap stays small.
+pub struct Keymap {
+    chars: Vec<char>,
+}
+
+impl Keymap {
+    pub fn new(text: &str) -> Self {
+        let mut chars: Vec<char> = Vec::new();
+        for c in text.chars() {
+            if !chars.contains(&c) {
+                chars.push(c);
+            }
+        }
+        Keymap { chars }
+    }
+
+    /// The evdev key code that types `c`.
+    pub fn code(&self, c: char) -> Option<u32> {
+        self.chars
+            .iter()
+            .position(|&known| known == c)
+            .map(|at| at as u32 + 1)
+    }
+
+    /// The keymap in XKB's text format. Key code `n` is XKB key code `n + 8`.
+    pub fn to_xkb(&self) -> String {
+        let mut xkb = String::from("xkb_keymap {\nxkb_keycodes \"(unnamed)\" {\nminimum = 8;\n");
+        let _ = writeln!(xkb, "maximum = {};", self.chars.len() + 9);
+        for n in 1..=self.chars.len() {
+            let _ = writeln!(xkb, "<K{n}> = {};", n + 8);
+        }
+        xkb.push_str(
+            "};\nxkb_types \"(unnamed)\" { include \"complete\" };\n\
+             xkb_compatibility \"(unnamed)\" { include \"complete\" };\n\
+             xkb_symbols \"(unnamed)\" {\n",
+        );
+        for (n, &c) in self.chars.iter().enumerate() {
+            let _ = writeln!(xkb, "key <K{}> {{[{}]}};", n + 1, keysym(c));
+        }
+        xkb.push_str("};\n};\n");
+        xkb
+    }
+}
+
+fn keysym(c: char) -> String {
+    match c {
+        '\n' => "Return".into(),
+        '\t' => "Tab".into(),
+        c => format!("U{:04X}", c as u32),
+    }
+}
+
+/// The modifier mask for Control in the standard XKB modifier order.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+const CONTROL: u32 = 1 << 2;
+
+/// Types and pastes on the Wayland display in `WAYLAND_DISPLAY`.
+#[derive(Default)]
+pub struct Wayland {
+    #[cfg(target_os = "linux")]
+    worker: Option<linux::Worker>,
+}
+
+impl Wayland {
+    pub fn new() -> Self {
+        Wayland::default()
+    }
+}
+
+#[cfg(target_os = "linux")]
+impl Desktop for Wayland {
+    fn output(&mut self, output: Output) {
+        if self.worker.is_none() {
+            self.worker = linux::Worker::start()
+                .map_err(|err| log::error!("can't type or paste: {err}"))
+                .ok();
+        }
+        if let Some(worker) = &self.worker
+            && !worker.send(output)
+        {
+            self.worker = None;
+        }
+    }
+}
+
+#[cfg(not(target_os = "linux"))]
+impl Desktop for Wayland {
+    fn output(&mut self, _output: Output) {
+        log::error!("typing and pasting need Wayland, which only Linux has");
+    }
+}
+
+#[cfg(target_os = "linux")]
+mod linux {
+    use std::fs::File;
+    use std::io::Write;
+    use std::os::fd::{AsFd, OwnedFd};
+    use std::sync::Arc;
+    use std::sync::mpsc::{self, Receiver, Sender};
+    use std::time::Instant;
+
+    use kotodama_protocol::Clipboard;
+    use rustix::event::{PollFd, PollFlags};
+    use wayland_client::globals::{GlobalListContents, registry_queue_init};
+    use wayland_client::protocol::{wl_keyboard::KeyState, wl_registry, wl_seat};
+    use wayland_client::{
+        Connection, Dispatch, EventQueue, QueueHandle, delegate_noop, event_created_child,
+    };
+    use wayland_protocols_misc::zwp_virtual_keyboard_v1::client::{
+        zwp_virtual_keyboard_manager_v1::ZwpVirtualKeyboardManagerV1,
+        zwp_virtual_keyboard_v1::ZwpVirtualKeyboardV1,
+    };
+    use wayland_protocols_wlr::data_control::v1::client::{
+        zwlr_data_control_device_v1::{self, ZwlrDataControlDeviceV1},
+        zwlr_data_control_manager_v1::ZwlrDataControlManagerV1,
+        zwlr_data_control_offer_v1::ZwlrDataControlOfferV1,
+        zwlr_data_control_source_v1::{self, ZwlrDataControlSourceV1},
+    };
+
+    use super::{CONTROL, Keymap, Output};
+    use crate::host::spawn;
+
+    /// The handle the Daemon holds: requests go down a channel, and a byte
+    /// down a pipe wakes the thread, which also waits on the Wayland socket.
+    pub struct Worker {
+        requests: Sender<Output>,
+        wake: OwnedFd,
+    }
+
+    impl Worker {
+        pub fn start() -> Result<Self, String> {
+            let (wake_rx, wake) = rustix::pipe::pipe().map_err(|err| err.to_string())?;
+            let (requests, inbox) = mpsc::channel();
+            spawn("desktop".into(), move || run(&inbox, &wake_rx));
+            Ok(Worker { requests, wake })
+        }
+
+        /// False once the thread has stopped.
+        pub fn send(&self, output: Output) -> bool {
+            self.requests.send(output).is_ok() && rustix::io::write(&self.wake, &[1]).is_ok()
+        }
+    }
+
+    fn run(inbox: &Receiver<Output>, wake: &OwnedFd) {
+        let mut client: Option<Client> = None;
+        loop {
+            // Wait for a request, or for the compositor while we hold the
+            // clipboard and may be asked for its contents.
+            let guard = client.as_mut().and_then(|client| {
+                let _ = client.queue.dispatch_pending(&mut client.state);
+                let _ = client.queue.flush();
+                client.queue.prepare_read()
+            });
+            let (woken, readable) = {
+                let mut fds = vec![PollFd::new(wake, PollFlags::IN)];
+                if let Some(guard) = &guard {
+                    fds.push(PollFd::from_borrowed_fd(
+                        guard.connection_fd(),
+                        PollFlags::IN,
+                    ));
+                }
+                if rustix::event::poll(&mut fds, None).is_err() {
+                    continue;
+                }
+                let ready = |fd: &PollFd| !fd.revents().is_empty();
+                (ready(&fds[0]), fds.get(1).is_some_and(ready))
+            };
+            if let Some(guard) = guard {
+                if readable {
+                    if guard.read().is_err() {
+                        log::warn!("lost the Wayland connection");
+                        client = None;
+                    }
+                } else {
+                    drop(guard);
+                }
+            }
+            if woken {
+                let mut buf = [0; 64];
+                if matches!(rustix::io::read(wake, &mut buf), Ok(0)) {
+                    return;
+                }
+                for output in inbox.try_iter() {
+                    if client.is_none() {
+                        client = Client::connect()
+                            .map_err(|err| log::error!("can't type or paste: {err}"))
+                            .ok();
+                    }
+                    if let Some(c) = &mut client
+                        && let Err(err) = c.output(output)
+                    {
+                        log::error!("can't type or paste: {err}");
+                        client = None;
+                    }
+                }
+            }
+        }
+    }
+
+    struct Client {
+        queue: EventQueue<State>,
+        state: State,
+        qh: QueueHandle<State>,
+        keyboard: ZwpVirtualKeyboardV1,
+        data: Option<(ZwlrDataControlManagerV1, ZwlrDataControlDeviceV1)>,
+        start: Instant,
+    }
+
+    #[derive(Default)]
+    struct State {
+        /// What we put on the clipboard, while we still own it.
+        selection: Option<(ZwlrDataControlSourceV1, Arc<Vec<u8>>)>,
+    }
+
+    impl Client {
+        fn connect() -> Result<Self, String> {
+            let conn = Connection::connect_to_env().map_err(|err| err.to_string())?;
+            let (globals, mut queue) =
+                registry_queue_init::<State>(&conn).map_err(|err| err.to_string())?;
+            let qh = queue.handle();
+            let seat: wl_seat::WlSeat = globals
+                .bind(&qh, 1..=1, ())
+                .map_err(|err| format!("no seat: {err}"))?;
+            let manager: ZwpVirtualKeyboardManagerV1 = globals
+                .bind(&qh, 1..=1, ())
+                .map_err(|err| format!("the compositor has no virtual keyboards: {err}"))?;
+            let keyboard = manager.create_virtual_keyboard(&seat, &qh, ());
+            let data = globals
+                .bind::<ZwlrDataControlManagerV1, _, _>(&qh, 1..=2, ())
+                .ok()
+                .map(|manager| {
+                    let device = manager.get_data_device(&seat, &qh, ());
+                    (manager, device)
+                });
+            let mut state = State::default();
+            queue.roundtrip(&mut state).map_err(|err| err.to_string())?;
+            Ok(Client {
+                queue,
+                state,
+                qh,
+                keyboard,
+                data,
+                start: Instant::now(),
+            })
+        }
+
+        fn output(&mut self, output: Output) -> Result<(), String> {
+            match output {
+                Output::Type(text) => self.type_text(&text),
+                Output::Paste(clipboard) => self.paste(clipboard),
+            }
+        }
+
+        fn type_text(&mut self, text: &str) -> Result<(), String> {
+            let keymap = Keymap::new(text);
+            self.upload(&keymap)?;
+            for c in text.chars() {
+                if let Some(code) = keymap.code(c) {
+                    self.tap(code);
+                }
+            }
+            self.roundtrip()
+        }
+
+        fn paste(&mut self, clipboard: Clipboard) -> Result<(), String> {
+            let Some((manager, device)) = &self.data else {
+                return Err("the compositor has no wlr data-control, so can't paste".into());
+            };
+            let (mimes, data) = match clipboard {
+                Clipboard::Text(text) => (
+                    vec![
+                        "text/plain;charset=utf-8".to_owned(),
+                        "text/plain".into(),
+                        "UTF8_STRING".into(),
+                        "STRING".into(),
+                        "TEXT".into(),
+                    ],
+                    text.into_bytes(),
+                ),
+                Clipboard::Image { mime, data } => (vec![mime], data.0),
+            };
+            let source = manager.create_data_source(&self.qh, ());
+            for mime in mimes {
+                source.offer(mime);
+            }
+            device.set_selection(Some(&source));
+            if let Some((old, _)) = self.state.selection.replace((source, Arc::new(data))) {
+                old.destroy();
+            }
+            self.roundtrip()?;
+
+            let keymap = Keymap::new("v");
+            self.upload(&keymap)?;
+            self.keyboard.modifiers(CONTROL, 0, 0, 0);
+            self.tap(keymap.code('v').unwrap_or(1));
+            self.keyboard.modifiers(0, 0, 0, 0);
+            self.roundtrip()
+        }
+
+        fn upload(&mut self, keymap: &Keymap) -> Result<(), String> {
+            let mut xkb = keymap.to_xkb().into_bytes();
+            xkb.push(0);
+            let fd = rustix::fs::memfd_create("kotodama-keymap", rustix::fs::MemfdFlags::CLOEXEC)
+                .map_err(|err| err.to_string())?;
+            let mut file = File::from(fd);
+            file.write_all(&xkb).map_err(|err| err.to_string())?;
+            // 1 is WL_KEYBOARD_KEYMAP_FORMAT_XKB_V1.
+            self.keyboard.keymap(1, file.as_fd(), xkb.len() as u32);
+            // Let the compositor take the keymap before keys arrive with it.
+            self.roundtrip()
+        }
+
+        fn tap(&self, code: u32) {
+            let time = self.start.elapsed().as_millis() as u32;
+            self.keyboard.key(time, code, KeyState::Pressed.into());
+            self.keyboard.key(time, code, KeyState::Released.into());
+        }
+
+        fn roundtrip(&mut self) -> Result<(), String> {
+            self.queue
+                .roundtrip(&mut self.state)
+                .map(drop)
+                .map_err(|err| err.to_string())
+        }
+    }
+
+    impl Dispatch<wl_registry::WlRegistry, GlobalListContents> for State {
+        fn event(
+            _: &mut Self,
+            _: &wl_registry::WlRegistry,
+            _: wl_registry::Event,
+            _: &GlobalListContents,
+            _: &Connection,
+            _: &QueueHandle<Self>,
+        ) {
+        }
+    }
+
+    delegate_noop!(State: ignore wl_seat::WlSeat);
+    delegate_noop!(State: ZwpVirtualKeyboardManagerV1);
+    delegate_noop!(State: ZwpVirtualKeyboardV1);
+    delegate_noop!(State: ZwlrDataControlManagerV1);
+    delegate_noop!(State: ignore ZwlrDataControlOfferV1);
+
+    impl Dispatch<ZwlrDataControlDeviceV1, ()> for State {
+        fn event(
+            _: &mut Self,
+            _: &ZwlrDataControlDeviceV1,
+            event: zwlr_data_control_device_v1::Event,
+            _: &(),
+            _: &Connection,
+            _: &QueueHandle<Self>,
+        ) {
+            // We never read the clipboard; drop every offer as it arrives.
+            match event {
+                zwlr_data_control_device_v1::Event::Selection { id: Some(offer) }
+                | zwlr_data_control_device_v1::Event::PrimarySelection { id: Some(offer) } => {
+                    offer.destroy()
+                }
+                _ => {}
+            }
+        }
+
+        event_created_child!(State, ZwlrDataControlDeviceV1, [
+            zwlr_data_control_device_v1::EVT_DATA_OFFER_OPCODE => (ZwlrDataControlOfferV1, ()),
+        ]);
+    }
+
+    impl Dispatch<ZwlrDataControlSourceV1, ()> for State {
+        fn event(
+            state: &mut Self,
+            source: &ZwlrDataControlSourceV1,
+            event: zwlr_data_control_source_v1::Event,
+            _: &(),
+            _: &Connection,
+            _: &QueueHandle<Self>,
+        ) {
+            let ours = state
+                .selection
+                .as_ref()
+                .filter(|(selection, _)| selection == source);
+            match event {
+                zwlr_data_control_source_v1::Event::Send { fd, .. } => {
+                    if let Some((_, data)) = ours {
+                        let data = Arc::clone(data);
+                        // A slow reader mustn't hold up the next request.
+                        spawn("clipboard".into(), move || {
+                            let _ = File::from(fd).write_all(&data);
+                        });
+                    }
+                }
+                zwlr_data_control_source_v1::Event::Cancelled => {
+                    if ours.is_some() {
+                        state.selection = None;
+                    }
+                    source.destroy();
+                }
+                _ => {}
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Keymap;
+
+    #[test]
+    fn each_distinct_character_gets_one_key() {
+        let keymap = Keymap::new("hi\nhi");
+        assert_eq!(keymap.code('h'), Some(1));
+        assert_eq!(keymap.code('i'), Some(2));
+        assert_eq!(keymap.code('\n'), Some(3));
+        assert_eq!(keymap.code('x'), None);
+    }
+
+    #[test]
+    fn the_keymap_names_unicode_keysyms_and_return_for_newline() {
+        let xkb = Keymap::new("é\n").to_xkb();
+        assert!(xkb.contains("<K1> = 9;"), "{xkb}");
+        assert!(xkb.contains("key <K1> {[U00E9]};"), "{xkb}");
+        assert!(xkb.contains("key <K2> {[Return]};"), "{xkb}");
+        assert!(xkb.contains("maximum = 11;"), "{xkb}");
+    }
+}

@@ -182,7 +182,7 @@ impl Harness {
         front_end
     }
 
-    fn from_front_end(&mut self, front_end: &FrontEnd, message: FromFrontEnd) {
+    fn front_end_sends(&mut self, front_end: &FrontEnd, message: FromFrontEnd) {
         self.event(Event::FromFrontEnd {
             front_end: front_end.id,
             message,
@@ -190,7 +190,7 @@ impl Harness {
     }
 
     fn query(&mut self, front_end: &FrontEnd, text: &str) -> Vec<ResultRow> {
-        self.from_front_end(front_end, FromFrontEnd::Query { text: text.into() });
+        self.front_end_sends(front_end, FromFrontEnd::Query { text: text.into() });
         front_end.results().expect("a query is always answered")
     }
 }
@@ -360,7 +360,7 @@ fn a_late_result_goes_below_the_visible_rows_however_well_it_scores() {
         vec![app("g rust one"), app("g rust two"), app("g rust three")],
     );
     let ui = h.front_end();
-    h.from_front_end(&ui, FromFrontEnd::Viewport { rows: 2 });
+    h.front_end_sends(&ui, FromFrontEnd::Viewport { rows: 2 });
 
     let shown = titles(&h.query(&ui, "g rust")).join(",");
     h.advance(Duration::from_millis(100));
@@ -390,7 +390,7 @@ fn below_the_visible_rows_live_results_compete_with_indexed_items_on_score() {
     let web = h.up(1);
     h.add(&apps, vec![app("g rust"), app("g xrxuxsxt")]);
     let ui = h.front_end();
-    h.from_front_end(&ui, FromFrontEnd::Viewport { rows: 1 });
+    h.front_end_sends(&ui, FromFrontEnd::Viewport { rows: 1 });
 
     assert_eq!(titles(&h.query(&ui, "g rust")), ["g rust", "g xrxuxsxt"]);
     h.advance(Duration::from_millis(100));
@@ -498,7 +498,7 @@ fn runs(ext: &Ext) -> Vec<(u64, String, ItemRef)> {
 }
 
 fn run(h: &mut Harness, ui: &FrontEnd, owner: &str, id: &str, by: &str, action: &str) {
-    h.from_front_end(
+    h.front_end_sends(
         ui,
         FromFrontEnd::RunAction {
             result: ResultRef {
@@ -801,7 +801,7 @@ fn typing_waits_until_every_front_end_has_closed() {
     assert!(other.drain().contains(&ToFrontEnd::Close));
     assert_eq!(*h.outputs.0.borrow(), []);
 
-    h.from_front_end(&ui, FromFrontEnd::Closed);
+    h.front_end_sends(&ui, FromFrontEnd::Closed);
     assert_eq!(*h.outputs.0.borrow(), []);
     h.event(Event::FrontEndDown {
         front_end: other.id,

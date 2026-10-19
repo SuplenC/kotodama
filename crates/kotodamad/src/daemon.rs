@@ -339,7 +339,7 @@ impl<L: Launcher, D: Desktop> Daemon<L, D> {
                 if self.extensions[extension.0].generation == generation
                     && self.extensions[extension.0].sender().is_some()
                 {
-                    self.from_extension(extension, message, now);
+                    self.extension_message(extension, message, now);
                 }
             }
             Event::ExtensionDown {
@@ -352,7 +352,7 @@ impl<L: Launcher, D: Desktop> Daemon<L, D> {
             }
             Event::FrontEndUp { front_end, sender } => self.front_end_up(front_end, sender),
             Event::FromFrontEnd { front_end, message } => {
-                self.from_front_end(front_end, message, now)
+                self.front_end_message(front_end, message, now)
             }
             Event::FrontEndDown { front_end } => self.front_end_down(front_end),
             Event::Config(config) => self.set_config(config),
@@ -481,7 +481,7 @@ impl<L: Launcher, D: Desktop> Daemon<L, D> {
         self.mark_late();
     }
 
-    fn from_extension(&mut self, id: ExtensionId, message: FromExtension, now: Instant) {
+    fn extension_message(&mut self, id: ExtensionId, message: FromExtension, now: Instant) {
         let name = self.extensions[id.0].name().to_owned();
         match message {
             FromExtension::AddItems { items } => {
@@ -692,7 +692,7 @@ impl<L: Launcher, D: Desktop> Daemon<L, D> {
         self.closed(Some(id));
     }
 
-    fn from_front_end(&mut self, id: FrontEndId, message: FromFrontEnd, now: Instant) {
+    fn front_end_message(&mut self, id: FrontEndId, message: FromFrontEnd, now: Instant) {
         match message {
             FromFrontEnd::Query { text } => self.query(id, text, now),
             FromFrontEnd::Viewport { rows } => {
