@@ -1,0 +1,11 @@
+# The Manifest. The Daemon finds it in an `extensions/<anything>/` directory and
+# starts `command` from that directory.
+name = "shell-example"
+description = "Bookmarks from the config, and \"Paste path\" on every project"
+command = ["./extension.sh"]
+
+# Offered on every `project` Item, whichever Extension added it.
+[[contributed_actions]]
+kind = "project"
+id = "paste-path"
+title = "Paste path"
