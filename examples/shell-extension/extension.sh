@@ -48,10 +48,10 @@ timer='{
 
 # Sends the timer's progress: job id, title, seconds done, seconds in all.
 progress() {
-    send "$(jq -cn --arg id "$1" --arg title "$2" --argjson done "$3" --argjson all "$4" '{
-        job_progress: (if $done < $all then
-            {id: $id, title: $title, state: "running", progress: ($done / $all),
-             message: "\($all - $done)s left"}
+    send "$(jq -cn --arg id "$1" --arg title "$2" --argjson elapsed "$3" --argjson all "$4" '{
+        job_progress: (if $elapsed < $all then
+            {id: $id, title: $title, state: "running", progress: ($elapsed / $all),
+             message: "\($all - $elapsed)s left"}
         else
             {id: $id, title: $title, state: "succeeded", progress: 1, message: "Time is up"}
         end)
@@ -68,11 +68,13 @@ start_timer() {
     id="timer-$timers"
     send "$(jq -cn --arg id "$id" --arg title "$title" \
         '{push_view: {id: $id, title: $title, content: {progress: {job: $id}}}}')"
+    progress "$id" "$title" 0 "$seconds"
     (
-        for ((elapsed = 0; elapsed < seconds; elapsed++)); do
-            progress "$id" "$title" "$elapsed" "$seconds"
+        for ((elapsed = 1; elapsed < seconds; elapsed++)); do
             sleep 1
+            progress "$id" "$title" "$elapsed" "$seconds"
         done
+        sleep 1
         progress "$id" "$title" "$seconds" "$seconds"
     ) </dev/null &
 }
@@ -132,8 +134,8 @@ while read_frame; do
             invocation=$(jq -r '.run_action.invocation' <<<"$frame")
             seconds=$(jq -r '.run_action.arguments.seconds // ""' <<<"$frame")
             if valid_seconds "$seconds"; then
-                start_timer "$seconds second timer" "$seconds"
                 done_with "$invocation" '"keep_open"'
+                start_timer "$seconds second timer" "$seconds"
             else
                 done_with "$invocation" "$(jq -cn --arg s "$seconds" '{failed: {message: "not a number of seconds: \($s)"}}')"
             fi

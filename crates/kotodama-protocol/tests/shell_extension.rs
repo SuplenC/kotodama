@@ -247,13 +247,6 @@ fn the_shell_examples_timer_shows_a_progress_view_and_reports_until_done() {
     let (mut extension, timer) = timer();
     run(&mut extension, &timer, 0, &[("seconds", "2")]);
 
-    let FromExtension::PushView(view) = extension.recv() else {
-        panic!("expected push_view")
-    };
-    assert_eq!(view.title, "2 second timer");
-    let ViewContent::Progress { job } = view.content else {
-        panic!("expected a progress View")
-    };
     assert_eq!(
         extension.recv(),
         FromExtension::ActionDone {
@@ -261,6 +254,13 @@ fn the_shell_examples_timer_shows_a_progress_view_and_reports_until_done() {
             outcome: Outcome::KeepOpen,
         }
     );
+    let FromExtension::PushView(view) = extension.recv() else {
+        panic!("expected push_view")
+    };
+    assert_eq!(view.title, "2 second timer");
+    let ViewContent::Progress { job } = view.content else {
+        panic!("expected a progress View")
+    };
     assert_eq!(
         follow(&mut extension, &job, "2 second timer"),
         [
