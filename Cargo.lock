@@ -588,14 +588,14 @@ dependencies = [
 
 [[package]]
 name = "kotodama"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "kotodama-protocol",
 ]
 
 [[package]]
 name = "kotodama-apps"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "kotodama-protocol",
  "libc",
@@ -623,7 +623,7 @@ dependencies = [
 
 [[package]]
 name = "kotodama-protocol"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "base64",
  "criterion",
@@ -638,7 +638,7 @@ dependencies = [
 
 [[package]]
 name = "kotodama-qml"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "cxx",
  "cxx-qt",
@@ -649,7 +649,7 @@ dependencies = [
 
 [[package]]
 name = "kotodamad"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "criterion",
  "kotodama-protocol",
