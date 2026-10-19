@@ -4,9 +4,6 @@ on:
   push:
     branches: [main]
   pull_request:
-  # Refreshes the bench baseline weekly so GitHub doesn't evict the cache that holds it.
-  schedule:
-    - cron: "0 4 * * 1"
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -42,40 +39,41 @@ jobs:
           path: e2e/out
           if-no-files-found: ignore
 
-  # Compares against the baseline saved by the last push to main. Shared runners are
-  # too noisy for absolute timings, so only the relative change is checked.
+  # Runs the base commit's benchmarks and this commit's on the same runner, one after
+  # the other, and compares them. Shared runners differ too much from one another for
+  # a baseline saved by another run to mean anything. Only the relative change is
+  # checked: 50% for timings, 10% for the Daemon's resident memory.
   bench:
     runs-on: ubuntu-latest
+    env:
+      BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
     steps:
       - uses: actions/checkout@v7
       - uses: ./.github/actions/setup-nix
         with:
           cachix-auth-token: ${{ secrets.CACHIX_AUTH_TOKEN }}
-      - uses: actions/cache/restore@v6
-        with:
-          path: bench-baseline.txt
-          key: bench-baseline-${{ github.sha }}
-          restore-keys: bench-baseline-
-      - name: Run benchmarks
+      - name: Check out the base commit
+        id: base
         run: |
-          touch bench-current.txt
-          if nix develop --command scripts/has-benches; then
-            nix develop --command just bench --bench '*' -- --output-format bencher | tee bench-output.txt
-            grep 'bench:' bench-output.txt > bench-current.txt || true
+          # Both checkouts build into one target directory, so dependencies build once.
+          echo "CARGO_TARGET_DIR=$RUNNER_TEMP/target" >> "$GITHUB_ENV"
+          if [ -z "$BASE" ] || [ "$BASE" = 0000000000000000000000000000000000000000 ]; then
+            echo "::warning::No base commit to compare with; benchmarks were not compared."
+            exit 0
           fi
-      - name: Compare with main
+          git fetch --no-tags --depth=1 origin "$BASE"
+          git worktree add "$RUNNER_TEMP/base" "$BASE"
+          echo "dir=$RUNNER_TEMP/base" >> "$GITHUB_OUTPUT"
+      - name: Run the base commit's benchmarks
+        if: steps.base.outputs.dir
+        run: scripts/bench-run "${{ steps.base.outputs.dir }}" bench-base.txt
+      - name: Run this commit's benchmarks
+        run: scripts/bench-run . bench-current.txt
+      - name: Compare
+        if: steps.base.outputs.dir
         run: |
-          if [ ! -f bench-baseline.txt ]; then
-            echo "::warning::No bench baseline from main; benchmarks were not compared."
-          fi
-          scripts/bench-compare bench-baseline.txt bench-current.txt 50
-      - if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
-        run: cp bench-current.txt bench-baseline.txt
-      - if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
-        uses: actions/cache/save@v6
-        with:
-          path: bench-baseline.txt
-          key: bench-baseline-${{ github.sha }}
+          scripts/bench-compare bench-base.txt bench-current.txt 50
+          scripts/bench-compare bench-base.txt bench-current.txt 10 bytes
 
   # Placeholder for the live Hyprland tests (#13): Hyprland needs a DRM device, so
   # those run in a NixOS VM.

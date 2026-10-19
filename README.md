@@ -8,7 +8,33 @@ Kotodama is a command menu for Wayland desktops. You type, and it finds and does
 - **A Quickshell QML module** written in Rust (cxx-qt) gives QML a native result model. QML only draws the results.
 - **Extensions** are separate processes in any language. They speak a protocol whose wire format is negotiated (JSON, MessagePack or postcard), so a crashing Extension never takes down the menu.
 
-Status: design. See `docs/adr/0001-architecture.md` and the issues.
+Status: early. The protocol and the Daemon work; the Quickshell Front end is next. See `docs/adr/0001-architecture.md` and the issues.
+
+## The Daemon
+
+`kotodamad` serves Front ends on `$XDG_RUNTIME_DIR/kotodama.sock`. It finds Extensions in `$XDG_DATA_DIRS/kotodama/extensions/*/manifest.toml` and `~/.config/kotodama/extensions/*/manifest.toml`, starts each one, and restarts it with backoff when it stops or hangs. Extensions installed, changed or removed while it runs are picked up without a restart. Its config is every top-level `*.toml` in `$XDG_CONFIG_DIRS/kotodama/`, then `~/.config/kotodama/`, merged in order and reloaded when a file changes. `KOTODAMA_LOG=debug` logs more.
+
+To try it from a terminal, run the Daemon, then the bare example Front end:
+
+```sh
+cargo run -p kotodamad
+cargo run -p kotodamad --example front-end -- firefox        # print the Results
+cargo run -p kotodamad --example front-end -- --run firefox  # run the top one
+```
+
+### Performance
+
+`just bench` measures two things with 10k Indexed items:
+
+- `query_10k_items`: from a query arriving to its Results encoded for the Front end, in process (criterion).
+- `daemon`: the real `kotodamad` with a real Extension process: the round trip of 2,000 queries over the socket, and the Daemon's resident memory (`VmRSS`) afterwards.
+
+| Machine | First keystroke | Next keystroke | Socket round trip p99 | Resident memory |
+| --- | --- | --- | --- | --- |
+| Ryzen AI 9 HX 370 (target) | to be measured | to be measured | to be measured | to be measured |
+| Apple M-series, dev container (arm64 Linux VM) | 309 µs | 42 µs | 0.38 ms | 13.3 MiB |
+
+The target is a p99 under 2 ms from query received to Results sent. CI fails when a change makes resident memory more than 10% higher than its base commit does.
 
 ## Development
 
@@ -46,7 +72,7 @@ Hyprland can't run here: it needs a DRM device. Its live tests run in a NixOS VM
 
 ### CI
 
-GitHub Actions runs `check`, `test` and `e2e` on x86_64 and arm64, plus the NixOS VM job on x86_64. The bench job (x86_64 only) compares each benchmark with the baseline saved by the last push to `main` and fails when one is more than 50% slower, and warns when there is no baseline to compare against. A weekly scheduled run keeps that baseline from being evicted. Shared runners are too noisy for absolute timings, so CI never checks them.
+GitHub Actions runs `check`, `test` and `e2e` on x86_64 and arm64, plus the NixOS VM job on x86_64. The bench job (x86_64 only) runs the benchmarks of the base commit and of the change on the same runner, one after the other, and fails when one is more than 50% slower or the Daemon's resident memory is more than 10% higher. Shared runners differ too much for absolute timings, or a baseline saved by another run, to mean anything, so CI only compares the two runs it made itself.
 
 On pushes to `main`, CI publishes:
 
