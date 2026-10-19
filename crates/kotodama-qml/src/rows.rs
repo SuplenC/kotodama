@@ -199,6 +199,7 @@ mod tests {
                 icon: None,
                 keyword: None,
                 keywords: Vec::new(),
+                identity: None,
                 actions: vec![action("open", "Open"), action("term", "Open in terminal")],
             },
             contributed: vec![
