@@ -45,6 +45,8 @@ The Daemon starts `command` from `manifest.toml`, in this directory, and talks t
 
 Adding an Item whose id you already sent replaces it. `remove_items` takes the ids to drop.
 
+**Identity.** When your Item is something another Extension may offer too, such as an app, a file or a web page, give it an `identity`: a string naming the thing itself, which every Extension that offers it spells the same way. Items with the same identity share their History, so picking one raises the others. Each still shows as a Result of its own, and the one the user picks through most comes first. For a shared kind, use the kind and its field, as in `app:firefox.desktop`, `file:/etc/hosts` or `url:https://github.com/SuplenC/kotodama`. Leave it out for anything only your Extension offers. An empty identity is rejected.
+
 **Actions.** When the user runs one of your Actions, you get `run_action` with an `invocation` number, the Action's `id`, the Item's `id`, `kind` and kind field, and any Arguments. Answer with `action_done` and the same `invocation`, and an outcome: `"close"`, `"keep_open"`, `{"type": {"text": "..."}}` to type into the focused window, `{"paste": {"text": "..."}}` to paste, or `{"failed": {"message": "..."}}`. The Daemon does the typing and pasting, so don't call `wtype` or `wl-copy` yourself.
 
 **Contributed actions.** Declare them in `manifest.toml` under `[[contributed_actions]]`, with the Item kind they apply to. They arrive as ordinary `run_action` messages carrying the other Extension's Item id, kind and kind field. That is all you ever see of another Extension's Items.

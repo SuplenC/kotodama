@@ -39,6 +39,7 @@ pub fn items() -> Vec<Item> {
                 subtitle: Some("A typical application with a one-line description".into()),
                 icon: Some(format!("org.example.App{n}")),
                 keyword: None,
+                identity: None,
                 keywords: vec![format!("app{n}")],
                 actions: vec![Action {
                     id: "open".into(),

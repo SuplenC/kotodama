@@ -42,6 +42,7 @@ fn items() -> Vec<Item> {
             subtitle: Some("Web browser".into()),
             icon: Some("firefox".into()),
             keyword: None,
+            identity: Some("app:firefox.desktop".into()),
             keywords: vec!["browser".into(), "web".into()],
             actions: vec![
                 action("open"),
@@ -58,6 +59,7 @@ fn items() -> Vec<Item> {
             subtitle: None,
             icon: None,
             keyword: Some("go".into()),
+            identity: None,
             keywords: vec![],
             actions: vec![Action {
                 arguments: vec![
@@ -84,6 +86,7 @@ fn items() -> Vec<Item> {
             subtitle: None,
             icon: None,
             keyword: None,
+            identity: None,
             keywords: vec![],
             actions: vec![action("open")],
         },

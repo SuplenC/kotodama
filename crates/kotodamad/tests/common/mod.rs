@@ -112,6 +112,7 @@ pub fn item(id: &str, title: &str, kind: ItemKind) -> Item {
         subtitle: None,
         icon: None,
         keyword: None,
+        identity: None,
         keywords: vec![],
         actions: vec![action("open")],
     }

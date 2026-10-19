@@ -94,6 +94,7 @@ impl Quicklink {
             subtitle: Some(subtitle),
             icon: self.icon.clone(),
             keyword: Some(self.keyword.clone()),
+            identity: None,
             keywords: Vec::new(),
             actions: vec![Action {
                 id: "open".into(),
