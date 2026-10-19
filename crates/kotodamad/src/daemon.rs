@@ -8,7 +8,7 @@
 //! `kotodamad`.
 
 use std::cell::Cell;
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::mpsc::{SyncSender, TrySendError};
 use std::time::{Duration, Instant};
 
@@ -25,7 +25,9 @@ use crate::clock::{Clock, When};
 use crate::config::extension_table;
 use crate::discovery::Found;
 use crate::empty_query::EmptyQuery;
-use crate::history::{Habit, History, IDENTITIES, Picks, ResultKey, Settings, Store, query_key};
+use crate::history::{
+    Change, Habit, History, IDENTITIES, Picks, ResultKey, Settings, Store, query_key,
+};
 use crate::index::{Index, Slot};
 use crate::keywords::{self, Keywords};
 use crate::rank::{self, Haystack, Matched, Tier, Tiers};
@@ -36,6 +38,17 @@ use crate::usage::{Entry, Used};
 pub const OWN: &str = "kotodama";
 /// The id of the Daemon's own Item that clears the History.
 pub const CLEAR_HISTORY: &str = "clear-history";
+/// The id of the Action the Daemon offers on every Result the History keeps
+/// anything for, which forgets it.
+pub const FORGET: &str = "forget";
+/// The id of the Action the Daemon offers on an Extension's Results while the
+/// History keeps anything for that Extension, which clears it.
+pub const CLEAR_EXTENSION_HISTORY: &str = "clear-extension-history";
+/// The id of the Daemon's own Item that undoes the latest change to the
+/// History, while there is one to undo.
+pub const UNDO: &str = "undo";
+/// How long after a change to the History it can be undone.
+pub const UNDO_FOR: Duration = Duration::from_secs(60);
 
 /// An Extension, by its position in the list the Daemon was started with.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -400,6 +413,8 @@ enum OwnAction {
     /// Opens the `n`th Quicklink.
     Quicklink(usize),
     ClearHistory,
+    /// Undoes the latest change to the History.
+    Undo,
 }
 
 impl Own {
@@ -430,6 +445,49 @@ fn clear_history() -> Item {
             arguments: Vec::new(),
         }],
     }
+}
+
+/// The Item that undoes the latest change to the History, which `title` names.
+fn undo_item(title: &str) -> Item {
+    Item {
+        id: UNDO.into(),
+        kind: ItemKind::Namespaced(NamespacedKind::new("kotodama.command").expect("a valid kind")),
+        title: title.into(),
+        subtitle: Some("Put back what the History forgot".into()),
+        icon: None,
+        keyword: None,
+        identity: None,
+        keywords: Vec::new(),
+        actions: vec![Action {
+            id: "run".into(),
+            title: "Undo".into(),
+            shortcut: None,
+            arguments: Vec::new(),
+        }],
+    }
+}
+
+/// One of the Actions the Daemon offers on Results.
+fn offered(id: &str, title: String) -> OfferedAction {
+    OfferedAction {
+        extension: OWN.to_owned(),
+        action: Action {
+            id: id.to_owned(),
+            title,
+            shortcut: None,
+            arguments: Vec::new(),
+        },
+    }
+}
+
+/// A change to the History that can be undone until `until`. Changes are
+/// undone by id, so one can be undone whatever changed after it.
+struct Undoable {
+    id: u64,
+    /// What the Undo Result reads while it is the latest.
+    title: String,
+    change: Change,
+    until: Instant,
 }
 
 /// A Result the empty query may show as one of the most used.
@@ -554,8 +612,11 @@ pub struct Daemon<L, D, S> {
     started: Instant,
     keywords: Keywords,
     empty_query: EmptyQuery,
-    /// One per Quicklink, then the clear-history Item.
+    /// One per Quicklink, then the clear-history Item, then the Undo Item
+    /// while there is something to undo.
     own: Vec<Own>,
+    /// The changes to the History that can still be undone, oldest first.
+    undos: Vec<Undoable>,
     /// The picked Indexed items, by slot, as of the index and History
     /// versions in `frecent_versions`.
     frecent: Vec<(Slot, Picks, Counts)>,
@@ -605,6 +666,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             keywords: Keywords::default(),
             empty_query: EmptyQuery::default(),
             own: Vec::new(),
+            undos: Vec::new(),
             frecent: Vec::new(),
             frecent_versions: None,
             scored: Vec::new(),
@@ -712,6 +774,10 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
         {
             self.deliver_output();
         }
+        if self.undos.first().is_some_and(|undo| undo.until <= now) {
+            self.undos.retain(|undo| undo.until > now);
+            self.load_undo_item();
+        }
         self.flush(now);
     }
 
@@ -727,7 +793,8 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             .values()
             .flat_map(|session| session.live.iter().filter_map(|live| live.due));
         let output = self.pending_output.as_ref().map(|pending| pending.deadline);
-        restarts.chain(live).chain(output).min()
+        let undo = self.undos.first().map(|undo| undo.until);
+        restarts.chain(live).chain(output).chain(undo).min()
     }
 
     fn start(&mut self, id: ExtensionId, now: Instant) {
@@ -1173,7 +1240,11 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
                 action,
                 arguments,
             } => {
-                let run = if result.extension == OWN {
+                let run = if action.extension == OWN
+                    && matches!(action.id.as_str(), FORGET | CLEAR_EXTENSION_HISTORY)
+                {
+                    self.forget(id, &result, &action.id, now)
+                } else if result.extension == OWN {
                     self.run_own(id, &result, &action, arguments, now)
                 } else {
                     self.run_action(id, &result, &action, arguments, Missing::AskInForm, now)
@@ -1519,11 +1590,160 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             }
             OwnAction::ClearHistory => {
                 session.send(ToFrontEnd::Close);
-                self.history.clear();
-                self.store.save(&self.history);
+                let change = self.history.clear();
+                self.store.forget_usage(None);
+                self.changed("Undo clearing history".into(), change, now);
+            }
+            OwnAction::Undo => {
+                if let Some(latest) = self.undos.last().map(|undo| undo.id) {
+                    self.undo(latest);
+                }
             }
         }
         Ok(())
+    }
+
+    /// Runs one of the Actions the Daemon offers on every Result: forgets
+    /// the Result, or clears its Extension's history. The menu stays open.
+    fn forget(
+        &mut self,
+        front_end: FrontEndId,
+        result: &ResultRef,
+        action: &str,
+        now: Instant,
+    ) -> Result<(), String> {
+        let gone = || "that Result is gone".to_owned();
+        let session = self.sessions.get(&front_end).ok_or_else(gone)?;
+        let source = self
+            .source_of(session, &result.extension, &result.id)
+            .ok_or_else(gone)?;
+        let (_, item) = self.item(session, source).ok_or_else(gone)?;
+        if action == FORGET {
+            let keys = self.history_keys(session, &result.extension, item);
+            let title = format!("Undo forgetting “{}”", item.title);
+            let change = self.history.forget(&keys);
+            self.changed(title, change, now);
+            return Ok(());
+        }
+        let name = result.extension.as_str();
+        let ext = self
+            .extension_named(name)
+            .ok_or_else(|| format!("`{}` has no Action `{action}`", item.title))?;
+        // The things its Items stand for go too, whoever else offers them.
+        let identities: HashSet<&str> = self
+            .index
+            .items(ext)
+            .chain(session.live[ext.0].results.iter().map(|live| &live.item))
+            .filter_map(|item| item.identity.as_deref())
+            .collect();
+        let aliases: HashSet<String> = self
+            .keywords
+            .aliases
+            .iter()
+            .filter(|(_, alias)| alias.extension == name)
+            .map(|(keyword, _)| alias_id(keyword))
+            .collect();
+        let change = self.history.forget_where(|(extension, id)| {
+            extension == name
+                || (extension == IDENTITIES && identities.contains(id))
+                || (extension == OWN && aliases.contains(id))
+        });
+        self.store.forget_usage(Some(&result.extension));
+        let title = format!("Undo clearing the history of {}", result.extension);
+        self.changed(title, change, now);
+        Ok(())
+    }
+
+    /// Everything the History may keep for one Result: its own picks, its
+    /// Identity's and those of every other Result of that Identity, and the
+    /// picks of the Aliases that name it.
+    fn history_keys(&self, session: &Session, extension: &str, item: &Item) -> Vec<ResultKey> {
+        let mut keys = vec![(extension.to_owned(), item.id.clone())];
+        if let Some(identity) = &item.identity {
+            keys.push((IDENTITIES.to_owned(), identity.clone()));
+            for source in self.sources_of(session, IDENTITIES, identity) {
+                if let Some((other, item)) = self.item(session, source) {
+                    keys.push((other.to_owned(), item.id.clone()));
+                }
+            }
+        }
+        for (keyword, alias) in &self.keywords.aliases {
+            if alias.extension == extension && alias.item == item.id {
+                keys.push((OWN.to_owned(), alias_id(keyword)));
+            }
+        }
+        keys
+    }
+
+    /// Saves a change to the History, which can be undone for [`UNDO_FOR`],
+    /// and ranks every session again. Returns the id to undo it by.
+    fn changed(&mut self, title: String, change: Change, now: Instant) -> u64 {
+        self.store.save(&self.history);
+        let id = self.next_id;
+        self.next_id += 1;
+        self.undos.push(Undoable {
+            id,
+            title,
+            change,
+            until: now + UNDO_FOR,
+        });
+        self.load_undo_item();
+        id
+    }
+
+    /// Undoes the change `id` to the History, if it can still be undone.
+    fn undo(&mut self, id: u64) {
+        let Some(n) = self.undos.iter().position(|undo| undo.id == id) else {
+            return;
+        };
+        let undo = self.undos.remove(n);
+        self.history.undo(undo.change);
+        self.store.save(&self.history);
+        self.load_undo_item();
+    }
+
+    /// Shows the Undo Item for the latest change to the History, or hides it
+    /// when there is nothing left to undo, and ranks every session again.
+    fn load_undo_item(&mut self) {
+        if self
+            .own
+            .last()
+            .is_some_and(|own| matches!(own.does, OwnAction::Undo))
+        {
+            self.own.pop();
+        }
+        if let Some(latest) = self.undos.last() {
+            self.own
+                .push(Own::new(undo_item(&latest.title), OwnAction::Undo));
+        }
+        self.mark_late();
+    }
+
+    /// Adds the Actions the Daemon offers on a Result: Forget, while the
+    /// History keeps anything for it, and clearing its Extension's history,
+    /// while it keeps anything for that Extension.
+    fn offer_forgetting(&self, extension: &str, item: &Item, offers: &mut Vec<OfferedAction>) {
+        if self.history.is_empty() {
+            return;
+        }
+        let picked = |extension: &str, id: &str| self.history.picks(extension, id).is_some();
+        let remembered = picked(extension, &item.id)
+            || item
+                .identity
+                .as_deref()
+                .is_some_and(|identity| picked(IDENTITIES, identity))
+            || self.keywords.aliases.iter().any(|(keyword, alias)| {
+                alias.extension == extension
+                    && alias.item == item.id
+                    && picked(OWN, &alias_id(keyword))
+            });
+        if remembered {
+            offers.push(offered(FORGET, "Forget".into()));
+        }
+        if extension != OWN && self.history.has_extension(extension) {
+            let title = format!("Clear the history of {extension}");
+            offers.push(offered(CLEAR_EXTENSION_HISTORY, title));
+        }
     }
 
     /// Records that the user picked a Result in a Front end's session, by
@@ -1649,6 +1869,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             .chain([Own::new(clear_history(), OwnAction::ClearHistory)])
             .collect();
         self.keywords = keywords;
+        self.load_undo_item();
         // The own Items' positions changed, so rows showing them can't be
         // kept where they are.
         for session in self.sessions.values_mut() {
@@ -2375,13 +2596,14 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
         if let Some(at) = primary.and_then(|id| item.actions.iter().position(|a| a.id == id)) {
             item.actions[..=at].rotate_right(1);
         }
-        let (extension, contributed) = match owner {
+        let (extension, mut contributed) = match owner {
             Some(owner) => (
                 self.extensions[owner.0].name().to_owned(),
                 self.contributed_for(owner, &item),
             ),
             None => (OWN.to_owned(), Vec::new()),
         };
+        self.offer_forgetting(&extension, &item, &mut contributed);
         Some(ShownResult {
             extension,
             item,

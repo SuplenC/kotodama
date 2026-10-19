@@ -106,9 +106,11 @@ pub struct ShownResult {
     /// The Extension that owns the Item.
     pub extension: String,
     pub item: Item,
-    /// Other Extensions' Actions for this Item's kind, grouped by Extension. The
-    /// Action panel lists them after the Item's own Actions, so none is ever the
-    /// primary Action. A shortcut that clashes with the owner's is dropped.
+    /// Other Extensions' Actions for this Item's kind, grouped by Extension,
+    /// then the Daemon's own, under the Extension name `kotodama`, such as
+    /// `forget`. The Action panel lists them after the Item's own Actions, so
+    /// none is ever the primary Action. A shortcut that clashes with the
+    /// owner's is dropped.
     pub contributed: Vec<OfferedAction>,
     /// The positions, in characters, of the title's characters that matched the
     /// query.

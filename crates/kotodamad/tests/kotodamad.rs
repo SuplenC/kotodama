@@ -449,7 +449,8 @@ fn the_history_survives_a_restart_and_the_clear_action_empties_it() {
 
     ui.titles("clear history");
     ui.run("kotodama", "clear-history", "run");
-    assert_eq!(ui.titles("kot"), ["Kotlin", "Kotodama"]);
+    // The query typed is ranked again for the cleared History first.
+    ui.wait_for_titles("kot", &["Kotlin", "Kotodama"]);
     wait_for("the empty history on disk", || {
         fs::read_to_string(&history)
             .ok()

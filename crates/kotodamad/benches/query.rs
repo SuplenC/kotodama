@@ -33,6 +33,7 @@ impl Desktop for Nothing {
 impl Store for Nothing {
     fn save(&mut self, _: &History) {}
     fn log(&mut self, _: Entry) {}
+    fn forget_usage(&mut self, _: Option<&str>) {}
 }
 
 struct Setup {
