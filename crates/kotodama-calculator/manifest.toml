@@ -1,0 +1,27 @@
+# The calculator Bundled extension. A package installs this directory as
+# `$XDG_DATA_DIRS/kotodama/extensions/calculator/`, with the
+# `kotodama-calculator` binary next to this file (or `command` rewritten to its
+# absolute path).
+name = "calculator"
+description = "Arithmetic, units, currency, dates and time zones, answered as you type"
+command = ["./kotodama-calculator"]
+
+# Every keystroke that looks like math is sent at once: an answer must land in
+# the same frame as the keystroke, and only a debounce of 0 may mark one.
+[live_query]
+prefixes = ["="]
+triggers = [
+    # A number first, perhaps after a sign, a bracket or a currency symbol:
+    # `2+2`, `-3*4`, `(1+2)`, `$100 to eur`, `5pm PT in Warsaw`.
+    '^\s*[-+(.√$€£¥]*\s*[0-9]',
+    # A function of a number: `sqrt 2`, `log(100)`.
+    '(?i)^\s*(sqrt|cbrt|sin|cos|tan|asin|acos|atan|ln|log|exp|abs|round)\s*\(?\s*[0-9]',
+    # Date arithmetic: `today + 3 weeks`, `dec 25 - 1 month`.
+    '(?i)^\s*(today|tomorrow|yesterday)\s*[-+]',
+    '(?i)^\s*(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?\s+[0-9]{1,2}(st|nd|rd|th)?,?(\s+[0-9]{4})?\s*[-+]',
+    # The time elsewhere: `now in Tokyo`.
+    '(?i)^\s*now\s+(in|to)\s',
+    # Counting days: `days until dec 25`.
+    '(?i)^\s*days\s+(until|till|to|since|from)\s',
+]
+debounce_ms = 0
