@@ -75,8 +75,9 @@ jobs:
           scripts/bench-compare bench-base.txt bench-current.txt 50
           scripts/bench-compare bench-base.txt bench-current.txt 10 bytes
 
-  # Placeholder for the live Hyprland tests (#13): Hyprland needs a DRM device, so
-  # those run in a NixOS VM.
+  # Builds the package and runs it in a NixOS VM: socket activation and the
+  # home-manager module now, the live Hyprland tests (#13) later, since Hyprland
+  # needs a DRM device.
   nixos-vm:
     runs-on: ubuntu-latest
     steps:

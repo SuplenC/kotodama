@@ -50,8 +50,8 @@ pub fn run(paths: &Paths) -> Result<(), String> {
             .join(", ")
     );
 
-    let listener =
-        server::bind(&paths.socket).map_err(|err| format!("{}: {err}", paths.socket.display()))?;
+    let listener = server::listen(&paths.socket)
+        .map_err(|err| format!("{}: {err}", paths.socket.display()))?;
     let (events_tx, events) = mpsc::channel();
     let _watcher = config::watch(paths.config_dirs.clone(), events_tx.clone())
         .map_err(|err| log::error!("not watching the config directory: {err}"))

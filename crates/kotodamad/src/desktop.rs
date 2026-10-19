@@ -8,7 +8,9 @@
 //! until something else takes it.
 
 use std::fmt::Write as _;
-use std::process::{Command, Stdio};
+use std::process::Stdio;
+
+use kotodama_protocol::launch_command;
 
 use crate::daemon::{Desktop, Output};
 use crate::host::spawn;
@@ -70,19 +72,20 @@ fn keysym(c: char) -> String {
 #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 const CONTROL: u32 = 1 << 2;
 
-/// Starts `command` with no stdio of its own, and reaps it on a thread when it
-/// exits.
+/// Starts `command` through the launch prefix ([`launch_command`]), with no
+/// stdio of its own, and reaps it on a thread when it exits.
 fn launch(command: Vec<String>) {
-    let Some((program, args)) = command.split_first() else {
+    let Some(program) = command.first() else {
         return;
     };
-    match Command::new(program)
-        .args(args)
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()
-    {
+    let started = launch_command(&command).and_then(|mut process| {
+        process
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+    });
+    match started {
         Ok(mut child) => spawn(format!("launch-{program}"), move || {
             let _ = child.wait();
         }),

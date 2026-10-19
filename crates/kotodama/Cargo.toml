@@ -1,6 +1,6 @@
 [package]
 name = "kotodama"
-version = "0.1.0"
+version.workspace = true
 description = "The kotodama command: opens or toggles the menu, for a compositor keybind"
 edition.workspace = true
 license.workspace = true

@@ -3,28 +3,33 @@
 use std::io;
 use std::os::unix::process::CommandExt;
 use std::path::Path;
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 use std::thread;
+
+use kotodama_protocol::launch_command;
 
 /// Small: the thread only waits for the app to exit.
 const REAPER_STACK: usize = 64 * 1024;
 
 /// Starts `command`, after `terminal` if the app runs in one, in `dir` if
-/// given. The app gets no stdio of the Extension's, which carries the
-/// protocol, and a process group of its own, so a signal to the Extension's
-/// group doesn't reach it. A thread reaps it when it exits.
+/// given, through the launch prefix ([`launch_command`]). The app gets no
+/// stdio of the Extension's, which carries the protocol, and a process group
+/// of its own, so a signal to the Extension's group doesn't reach it. A thread
+/// reaps it when it exits.
 pub fn launch(
     command: &[String],
     terminal: Option<&[String]>,
     dir: Option<&Path>,
 ) -> io::Result<()> {
-    let mut argv = terminal.unwrap_or_default().iter().chain(command);
-    let program = argv
-        .next()
-        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "nothing to run"))?;
-    let mut process = Command::new(program);
+    let argv: Vec<String> = terminal
+        .unwrap_or_default()
+        .iter()
+        .chain(command)
+        .cloned()
+        .collect();
+    let mut process = launch_command(&argv)?;
+    let program = &argv[0];
     process
-        .args(argv)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())

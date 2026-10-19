@@ -1,6 +1,6 @@
 [package]
 name = "kotodama-apps"
-version = "0.1.0"
+version.workspace = true
 description = "The apps Bundled extension: desktop applications as Indexed items"
 edition.workspace = true
 license.workspace = true

@@ -3,9 +3,18 @@
 
   # nixos-unstable is the first channel with Quickshell 0.3.2.
   inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+  # Only for the NixOS VM test of the home-manager module.
+  inputs.home-manager = {
+    url = "github:nix-community/home-manager";
+    inputs.nixpkgs.follows = "nixpkgs";
+  };
 
   outputs =
-    { self, nixpkgs }:
+    {
+      self,
+      nixpkgs,
+      home-manager,
+    }:
     let
       systems = [
         "x86_64-linux"
@@ -14,6 +23,26 @@
       forAllSystems = f: nixpkgs.lib.genAttrs systems (system: f nixpkgs.legacyPackages.${system});
     in
     {
+      packages = forAllSystems (
+        pkgs:
+        let
+          kotodama = pkgs.callPackage ./nix/package.nix { };
+        in
+        {
+          default = kotodama;
+          inherit kotodama;
+          # Each part on its own: the command and the Daemon with its systemd
+          # units, the QML module, and the Bundled extensions.
+          kotodamad = kotodama.out;
+          kotodama-qml = kotodama.qml;
+          kotodama-extensions = kotodama.extensions;
+        }
+      );
+
+      homeModules.default = import ./nix/home-manager.nix self;
+      # The name most home-manager configurations still use.
+      homeManagerModules = self.homeModules;
+
       # The only toolchain definition in the repo. Docker, CI and `just` all enter this shell.
       devShells = forAllSystems (
         pkgs:
@@ -92,22 +121,13 @@
 
       formatter = forAllSystems (pkgs: pkgs.nixfmt);
 
-      checks = forAllSystems (
-        pkgs:
-        {
-          devShell = self.devShells.${pkgs.stdenv.hostPlatform.system}.default;
-        }
-        # Placeholder for the live Hyprland tests (#13). Hyprland needs a DRM device,
-        # so they run in a NixOS VM, the way Hyprland tests itself.
-        // nixpkgs.lib.optionalAttrs (pkgs.stdenv.hostPlatform.system == "x86_64-linux") {
-          nixos-vm = pkgs.testers.runNixOSTest {
-            name = "kotodama-vm";
-            nodes.machine = { };
-            testScript = ''
-              machine.wait_for_unit("multi-user.target")
-            '';
-          };
-        }
-      );
+      checks = forAllSystems (pkgs: {
+        devShell = self.devShells.${pkgs.stdenv.hostPlatform.system}.default;
+        package = self.packages.${pkgs.stdenv.hostPlatform.system}.default;
+        # Socket activation, the home-manager module, and later the live Hyprland
+        # tests (#13): Hyprland needs a DRM device, so they run in a NixOS VM, the
+        # way Hyprland tests itself. CI runs it on x86_64, which has KVM.
+        nixos-vm = import ./nix/tests/vm.nix { inherit pkgs self home-manager; };
+      });
     };
 }

@@ -21,6 +21,7 @@ pub mod frame;
 mod front_end;
 mod handshake;
 mod item;
+mod launch;
 mod manifest;
 mod message;
 mod value;
@@ -36,6 +37,7 @@ pub use item::{
     Action, Argument, Item, ItemKind, ItemRef, KindName, NamespacedKind, SHARED_KINDS,
     is_valid_name,
 };
+pub use launch::{LAUNCH_PREFIX, launch_command};
 pub use manifest::{ContributedAction, LiveQueries, Manifest};
 pub use message::{CatalogEntry, Clipboard, FromExtension, LiveResult, Outcome, ToExtension};
 pub use value::{Bytes, Fraction, Table, Value};
