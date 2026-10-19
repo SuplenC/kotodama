@@ -43,7 +43,8 @@ jobs:
           if-no-files-found: ignore
 
   # Compares against the baseline saved by the last push to main. Shared runners are
-  # too noisy for absolute timings, so only the relative change is checked.
+  # too noisy for absolute timings, so only the relative change is checked: 50% for
+  # timings, 10% for the Daemon's resident memory.
   bench:
     runs-on: ubuntu-latest
     steps:
@@ -69,6 +70,7 @@ jobs:
             echo "::warning::No bench baseline from main; benchmarks were not compared."
           fi
           scripts/bench-compare bench-baseline.txt bench-current.txt 50
+          scripts/bench-compare bench-baseline.txt bench-current.txt 10 bytes
       - if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
         run: cp bench-current.txt bench-baseline.txt
       - if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'

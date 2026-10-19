@@ -20,7 +20,22 @@ impl log::Log for Stderr {
     fn flush(&self) {}
 }
 
+/// Keeps resident memory down. Each thread that allocates would get its own
+/// glibc malloc arena, and with transparent huge pages set to `always` each
+/// arena costs a 2 MiB page however little it holds. The Daemon's threads mostly
+/// wait on I/O, so one arena costs no speed.
+fn lean_memory() {
+    #[cfg(target_os = "linux")]
+    // SAFETY: both calls only set process-wide flags, before any thread starts.
+    unsafe {
+        libc::prctl(libc::PR_SET_THP_DISABLE, 1, 0, 0, 0);
+        #[cfg(target_env = "gnu")]
+        libc::mallopt(libc::M_ARENA_MAX, 1);
+    }
+}
+
 fn main() -> ExitCode {
+    lean_memory();
     let level = match std::env::var("KOTODAMA_LOG").as_deref() {
         Ok("debug") => log::LevelFilter::Debug,
         Ok("warn") => log::LevelFilter::Warn,

@@ -325,7 +325,9 @@ dependencies = [
 name = "kotodamad"
 version = "0.1.0"
 dependencies = [
+ "criterion",
  "kotodama-protocol",
+ "libc",
  "log",
  "notify",
  "nucleo-matcher",

@@ -17,6 +17,9 @@ pub struct Channel<R, W: Write> {
     buf: Vec<u8>,
 }
 
+/// The largest frame buffer a [`ChannelReader`] keeps between messages.
+const KEEP_BUFFER: usize = 64 * 1024;
+
 /// The receiving half of a [`Channel`], for a thread that only reads.
 pub struct ChannelReader<R> {
     reader: BufReader<R>,
@@ -95,11 +98,18 @@ impl<R: Read> ChannelReader<R> {
     /// The next message, or `None` once the peer has closed the connection. A
     /// [`Error::Decode`] leaves the reader at the next frame, so a caller may
     /// skip the bad message and carry on.
+    ///
+    /// A reader lives as long as its connection, so after a large frame, such
+    /// as a first batch of Items, it frees the buffer rather than keep it.
     pub fn recv<T: DeserializeOwned>(&mut self) -> Result<Option<T>, Error> {
         if !frame::read(&mut self.reader, &mut self.buf)? {
             return Ok(None);
         }
-        self.format.decode(&self.buf).map(Some)
+        let message = self.format.decode(&self.buf).map(Some);
+        if self.buf.capacity() > KEEP_BUFFER {
+            self.buf = Vec::new();
+        }
+        message
     }
 }
 
