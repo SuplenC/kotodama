@@ -1,6 +1,6 @@
 [package]
 name = "kotodama-qml"
-version = "0.1.0"
+version.workspace = true
 description = "The Quickshell Front end: a QML module that shows the Daemon's Results through a native list model"
 edition.workspace = true
 license.workspace = true

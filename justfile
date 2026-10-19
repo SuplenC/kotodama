@@ -37,7 +37,7 @@ image:
 
 [private]
 _check:
-    nixfmt --check flake.nix
+    git ls-files '*.nix' | xargs nixfmt --check
     git ls-files scripts e2e/run '*.sh' | xargs shellcheck
     just --fmt --check --unstable
     actionlint

@@ -76,7 +76,13 @@ impl Daemon {
 }
 
 fn spawn(root: &Path) -> Child {
-    Command::new(env!("CARGO_BIN_EXE_kotodamad"))
+    with_home(&mut Command::new(env!("CARGO_BIN_EXE_kotodamad")), root)
+        .spawn()
+        .unwrap()
+}
+
+fn with_home<'a>(command: &'a mut Command, root: &Path) -> &'a mut Command {
+    command
         .env("XDG_RUNTIME_DIR", root.join("runtime"))
         .env("XDG_CONFIG_HOME", root.join("config"))
         .env("XDG_CONFIG_DIRS", root.join("etc"))
@@ -84,8 +90,40 @@ fn spawn(root: &Path) -> Child {
         .env("XDG_STATE_HOME", root.join("state"))
         .env("HOME", root)
         .env_remove("WAYLAND_DISPLAY")
-        .spawn()
-        .unwrap()
+}
+
+/// Starts the Daemon the way systemd's socket activation does: `listener` as
+/// file descriptor 3, named by `LISTEN_PID` and `LISTEN_FDS`.
+#[cfg(target_os = "linux")]
+fn spawn_activated(root: &Path, listener: &std::os::unix::net::UnixListener) -> Child {
+    use std::os::fd::AsRawFd;
+    use std::os::unix::process::CommandExt;
+
+    let fd = listener.as_raw_fd();
+    // LISTEN_PID must be the Daemon's own pid, which only the shell that execs
+    // it knows.
+    let mut command = Command::new("bash");
+    command
+        .args(["-c", "LISTEN_PID=$$ LISTEN_FDS=1 exec \"$0\""])
+        .arg(env!("CARGO_BIN_EXE_kotodamad"));
+    with_home(&mut command, root);
+    // SAFETY: dup2 and fcntl are async-signal-safe, as code between fork and
+    // exec must be. A copy made by dup2 stays open across exec; dup2 onto
+    // itself changes nothing, so then the flag is cleared by hand.
+    unsafe {
+        command.pre_exec(move || {
+            let done = if fd == 3 {
+                libc::fcntl(3, libc::F_SETFD, 0)
+            } else {
+                libc::dup2(fd, 3)
+            };
+            if done == -1 {
+                return Err(std::io::Error::last_os_error());
+            }
+            Ok(())
+        });
+    }
+    command.spawn().unwrap()
 }
 
 fn extension_dir(root: &TempDir, name: &str) -> PathBuf {
@@ -501,4 +539,87 @@ fn the_usage_log_is_written_once_the_config_turns_it_on() {
     assert_eq!(pick["id"], "kotlin");
     assert_eq!(pick["action"], "open");
     assert_eq!(pick["row"], 0);
+}
+
+/// Under systemd the prefix starts each program in a scope of its own, so
+/// stopping the Daemon doesn't take it along.
+#[test]
+fn a_quicklinks_command_starts_through_the_launch_prefix() {
+    let root = Daemon::home();
+    let out = root.path().join("wrapped");
+    let wrapper = root.path().join("wrap");
+    fs::write(
+        &wrapper,
+        format!(
+            "#!/bin/sh\nprintf '%s\\n' \"$@\" > {}.tmp\nmv {0}.tmp {0}\n",
+            out.display()
+        ),
+    )
+    .unwrap();
+    Command::new("chmod")
+        .args(["+x", wrapper.to_str().unwrap()])
+        .status()
+        .unwrap();
+    fs::write(
+        root.path().join("config/kotodama/links.toml"),
+        "[quicklinks.say]\ntitle = \"Say\"\ncommand = [\"echo\", \"{query}\"]\n",
+    )
+    .unwrap();
+    let mut command = Command::new(env!("CARGO_BIN_EXE_kotodamad"));
+    with_home(&mut command, root.path()).env(
+        "KOTODAMA_LAUNCH_PREFIX",
+        format!("{} --scope", wrapper.display()),
+    );
+    let daemon = Daemon {
+        child: command.spawn().unwrap(),
+        root,
+    };
+    let mut ui = daemon.connect();
+    wait_for("the Quicklink", || {
+        ui.titles("say hi")
+            .first()
+            .is_some_and(|title| title.starts_with("Say"))
+            .then_some(())
+    });
+    ui.run("kotodama", "quicklink:say", "open");
+
+    wait_for("the wrapped command", || {
+        (fs::read_to_string(&out).ok()? == "--scope\necho\nhi\n").then_some(())
+    });
+}
+
+/// systemd holds the socket while the Daemon is stopped, so a `kotodama toggle`
+/// then waits in its queue and starts the next Daemon, which must serve it.
+#[cfg(target_os = "linux")]
+#[test]
+fn under_socket_activation_the_daemon_serves_the_socket_it_is_handed_and_the_next_one_takes_over() {
+    let root = Daemon::home();
+    install(&root, "bookmarks", "", &[item("kotodama", "Kotodama")]);
+    // Bound at the Daemon's own path: a Daemon that bound it itself would find
+    // it answering and refuse to start.
+    let socket = root.path().join("runtime/kotodama.sock");
+    let listener = std::os::unix::net::UnixListener::bind(&socket).unwrap();
+    let mut daemon = Daemon {
+        child: spawn_activated(root.path(), &listener),
+        root,
+    };
+    let mut ui = daemon.connect();
+    ui.wait_for_titles("kotodama", &["Kotodama"]);
+    drop(ui);
+
+    let _ = daemon.child.kill();
+    let _ = daemon.child.wait();
+    // Connects while no Daemon runs: the socket queues it.
+    let waiting = UnixStream::connect(&socket).unwrap();
+    daemon.child = spawn_activated(daemon.root.path(), &listener);
+    waiting.set_read_timeout(Some(TIMEOUT)).unwrap();
+    let channel = Channel::handshake(
+        waiting.try_clone().unwrap(),
+        waiting,
+        &Hello::new(&WireFormat::ALL),
+    )
+    .unwrap();
+    let mut ui = Client { channel };
+    ui.wait_for_titles("kotodama", &["Kotodama"]);
+    assert!(socket.exists(), "the Daemon left systemd's socket in place");
 }

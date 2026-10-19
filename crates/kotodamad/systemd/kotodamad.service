@@ -1,0 +1,14 @@
+# Started by kotodamad.socket. A package fills in the directory it installs
+# `kotodamad` in.
+[Unit]
+Description=Kotodama Daemon
+Documentation=https://github.com/SuplenC/kotodama
+Requires=kotodamad.socket
+After=kotodamad.socket
+
+[Service]
+ExecStart=@bindir@/kotodamad
+# Every program the Daemon or an Extension starts for the user gets a scope of
+# its own, so stopping or restarting the Daemon doesn't kill the user's apps.
+Environment="KOTODAMA_LAUNCH_PREFIX=systemd-run --user --scope --slice=app.slice --collect --quiet"
+Restart=on-failure

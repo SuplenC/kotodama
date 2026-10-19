@@ -1,0 +1,14 @@
+# The Daemon starts on the first connection to its socket (the first
+# `kotodama toggle`, or a Front end coming up) and stays running after that.
+# While it is stopped, systemd keeps the socket and holds new connections for
+# the next start.
+[Unit]
+Description=Kotodama Daemon socket
+Documentation=https://github.com/SuplenC/kotodama
+
+[Socket]
+ListenStream=%t/kotodama.sock
+SocketMode=0600
+
+[Install]
+WantedBy=sockets.target

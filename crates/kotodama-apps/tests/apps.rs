@@ -3,6 +3,7 @@
 
 use std::collections::BTreeMap;
 use std::fs;
+use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::mpsc::{self, Receiver};
@@ -27,6 +28,11 @@ impl Apps {
     /// Starts the Extension on `dir`, as from [`data_dirs`], and does the
     /// handshake.
     fn start(dir: TempDir) -> Self {
+        Apps::start_with(dir, &[])
+    }
+
+    /// Starts the Extension with `env` added to its environment.
+    fn start_with(dir: TempDir, env: &[(&str, &str)]) -> Self {
         let mut child = Command::new(env!("CARGO_BIN_EXE_kotodama-apps"))
             .env("XDG_DATA_HOME", dir.path().join("home"))
             .env("XDG_DATA_DIRS", dir.path().join("system"))
@@ -34,6 +40,8 @@ impl Apps {
             .env("LANG", "pl_PL.UTF-8")
             .env_remove("LC_ALL")
             .env_remove("LC_MESSAGES")
+            .env_remove("KOTODAMA_LAUNCH_PREFIX")
+            .envs(env.iter().copied())
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .spawn()
@@ -577,6 +585,61 @@ fn an_action_on_a_missing_app_or_program_fails_with_a_message() {
             "{id} {action}"
         );
     }
+}
+
+/// Under systemd the prefix starts each app in a scope of its own, so stopping
+/// the Daemon doesn't take the user's apps with it.
+#[test]
+fn apps_start_through_the_launch_prefix_and_a_missing_program_still_fails() {
+    let dir = data_dirs();
+    let out = dir.path().join("wrapped");
+    let ran = dir.path().join("ran");
+    // A prefix that writes down its own arguments, then runs the rest.
+    let wrapper = dir.path().join("wrap");
+    fs::write(
+        &wrapper,
+        format!(
+            "#!/bin/sh\nprintf '%s\\n' \"$@\" > {}\nshift\nexec \"$@\"\n",
+            out.display()
+        ),
+    )
+    .unwrap();
+    fs::set_permissions(&wrapper, fs::Permissions::from_mode(0o755)).unwrap();
+    install(
+        dir.path(),
+        "system",
+        "app.desktop",
+        &app("App", &format!("touch {}", ran.display())),
+    );
+    install(
+        dir.path(),
+        "system",
+        "broken.desktop",
+        &app("Broken", "/nonexistent/program"),
+    );
+    let mut apps = Apps::start_with(
+        dir,
+        &[(
+            "KOTODAMA_LAUNCH_PREFIX",
+            &format!("{} --scope", wrapper.display()),
+        )],
+    );
+    apps.send(ToExtension::Config(Table::new()));
+    apps.added();
+
+    assert_eq!(apps.run("app", "open"), Outcome::Close);
+    assert_eq!(
+        wait_for(&out),
+        format!("--scope\ntouch\n{}\n", ran.display())
+    );
+    for _ in 0..100 {
+        if ran.exists() {
+            break;
+        }
+        thread::sleep(Duration::from_millis(50));
+    }
+    assert!(ran.exists(), "the app ran");
+    assert!(matches!(apps.run("broken", "open"), Outcome::Failed { .. }));
 }
 
 #[test]

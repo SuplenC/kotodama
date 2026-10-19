@@ -10,9 +10,49 @@ Kotodama is a command menu for Wayland desktops. You type, and it finds and does
 
 Status: early. The protocol, the Daemon, the Quickshell Front end and the apps Bundled extension work; Views, the Action panel and the other Bundled extensions are next. See `docs/adr/0001-architecture.md` and the issues.
 
+## Installing
+
+The flake builds Kotodama once and splits it into outputs, each also a package of its own:
+
+| Package | Output | What's in it |
+| --- | --- | --- |
+| `kotodamad` | `out` | the `kotodama` command, the Daemon, and its systemd user units in `lib/systemd/user/` |
+| `kotodama-qml` | `qml` | the `Kotodama` QML module, in `lib/qt-6/qml/` |
+| `kotodama-extensions` | `extensions` | the Bundled extensions, in `share/kotodama/extensions/` |
+
+`default` installs all three. With home-manager:
+
+```nix
+{
+  inputs.kotodama.url = "github:SuplenC/kotodama";
+
+  # in your home-manager configuration
+  imports = [ inputs.kotodama.homeModules.default ];
+  programs.kotodama = {
+    enable = true;
+    # Written to ~/.config/kotodama/home-manager.toml; any other *.toml there still applies.
+    settings = {
+      extensions.apps.terminal = [ "ghostty" "-e" ];
+      quicklinks.gh = { title = "GitHub"; url = "https://github.com"; };
+    };
+  };
+}
+```
+
+The module installs the package and enables `kotodamad.socket`. On NixOS without home-manager, add the package to `systemd.packages` and `environment.systemPackages`, and set `systemd.user.sockets.kotodamad.wantedBy = [ "sockets.target" ]`.
+
+The Daemon starts the first time something connects to its socket, whether a `kotodama toggle` or the Quickshell Front end, and stays running after that. While it is stopped, systemd holds new connections and starts it again. It runs with the environment of the systemd user manager, not the compositor's:
+
+- **Desktop notifications** (a job finishing) go over the session bus at `DBUS_SESSION_BUS_ADDRESS`, or `$XDG_RUNTIME_DIR/bus` when that isn't set. That is where systemd's per-user bus lives, so this works with no setup.
+- **Typing and pasting** need `WAYLAND_DISPLAY`, and the apps it starts need the rest of the graphical session's environment. The compositor must hand these to the user manager before the menu is first used, since the Daemon reads its environment once, when it starts. uwsm does this. In a plain Hyprland session, add `exec-once = dbus-update-activation-environment --systemd --all` (or `systemctl --user import-environment WAYLAND_DISPLAY XDG_CURRENT_DESKTOP`). If the Daemon started before that, run `systemctl --user restart kotodamad`.
+
+The Nix package's `kotodamad` puts its Bundled extensions first on its own `XDG_DATA_DIRS`, followed by the inherited directories (or `/usr/local/share:/usr/share` when there are none). The rest of the session's `XDG_DATA_DIRS` is left alone.
+
 ## The Daemon
 
-`kotodamad` serves Front ends on `$XDG_RUNTIME_DIR/kotodama.sock`. It finds Extensions in `$XDG_DATA_DIRS/kotodama/extensions/*/manifest.toml` and `~/.config/kotodama/extensions/*/manifest.toml`, starts each one, and restarts it with backoff when it stops or hangs. Extensions installed, changed or removed while it runs are picked up without a restart. Its config is every top-level `*.toml` in `$XDG_CONFIG_DIRS/kotodama/`, then `~/.config/kotodama/`, merged in order and reloaded when a file changes. `KOTODAMA_LOG=debug` logs more.
+`kotodamad` serves Front ends on `$XDG_RUNTIME_DIR/kotodama.sock`. It finds Extensions in `$XDG_DATA_DIRS/kotodama/extensions/*/manifest.toml` and `~/.config/kotodama/extensions/*/manifest.toml`, starts each one, and restarts it with backoff when it stops or hangs. Extensions installed, changed or removed while it runs are picked up without a restart. Its config is every top-level `*.toml` in `$XDG_CONFIG_DIRS/kotodama/`, then `~/.config/kotodama/`, merged in order and reloaded when a file changes. `KOTODAMA_LOG=debug` logs more. Under systemd socket activation (`kotodamad.socket`) it serves the socket systemd hands it instead of binding its own.
+
+Apps, Quicklinks and every other program started for the user run after the words in `KOTODAMA_LAUNCH_PREFIX`, if it is set. Extensions inherit it from the Daemon and should do the same. The systemd unit sets it to `systemd-run --user --scope --slice=app.slice --collect --quiet`, so each program gets a scope of its own and outlives a stop or restart of the Daemon, whose service would otherwise take every process in its cgroup down with it. A prefix such as `uwsm app --` works too. The words are split on whitespace, so the prefix can't contain a path with spaces.
 
 ### Ranking that learns
 
@@ -181,7 +221,7 @@ Nix only sees files that git tracks, so `git add` new files before running a rec
 
 `e2e/run` starts sway with the headless backend and the pixman renderer on one 640x480 output, then runs every `e2e/*/test.sh` against it. A test starts its clients with `spawn`, types with `wtype`, and checks the screen with `expect_screen reference.png`, which compares a grim screenshot with the stored image. Each test's screenshots, diff images and logs go in `e2e/out/<test>`, which CI uploads as an artifact.
 
-Hyprland can't run here: it needs a DRM device. Its live tests run in a NixOS VM (`checks.x86_64-linux.nixos-vm`).
+Hyprland can't run here: it needs a DRM device. Its live tests will run in the NixOS VM test (`checks.<system>.nixos-vm`), which already installs Kotodama through the home-manager module and checks socket activation, the settings, and that apps started from the menu outlive the Daemon.
 
 ### CI
 
@@ -198,3 +238,7 @@ CI and the dev container read from that cache. To use it with your own Nix, add 
 extra-substituters = https://kotodama.cachix.org
 extra-trusted-public-keys = kotodama.cachix.org-1:8/a1e4X26O1hz2m5HFJBfKQ+P8m3GL7Z3Iy+xRIeZWE=
 ```
+
+### Releases
+
+release-please (`.github/workflows/release-please.yml`) reads the Conventional Commits that reach `main` and keeps a release PR open. The PR bumps the workspace version in `Cargo.toml` and `Cargo.lock` and adds the changelog. Merging it tags the release. Before 1.0, a breaking change bumps the minor version. Two things must be set up first: the repository setting that allows GitHub Actions to create pull requests, and a `RELEASE_PLEASE_TOKEN` secret so that CI runs on the release PR (a PR opened with the default token starts no workflows).

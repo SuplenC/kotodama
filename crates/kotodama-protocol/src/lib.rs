@@ -1,6 +1,7 @@
 //! The protocol the Kotodama Daemon, Front ends and Extensions share: the
 //! messages, how they are framed, the handshake that picks a Wire format, and the
-//! `manifest.toml` schema.
+//! `manifest.toml` schema. It also builds the [`launch_command`] that the Daemon
+//! and Extensions start the user's programs with.
 //!
 //! A connection opens with each side sending a [`Hello`] in JSON. Both then use
 //! the fastest [`WireFormat`] they share for every later message, each sent as
@@ -21,6 +22,7 @@ pub mod frame;
 mod front_end;
 mod handshake;
 mod item;
+mod launch;
 mod manifest;
 mod message;
 mod value;
@@ -36,6 +38,7 @@ pub use item::{
     Action, Argument, Item, ItemKind, ItemRef, KindName, NamespacedKind, SHARED_KINDS,
     is_valid_name,
 };
+pub use launch::{LAUNCH_PREFIX, launch_command};
 pub use manifest::{ContributedAction, LiveQueries, Manifest};
 pub use message::{CatalogEntry, Clipboard, FromExtension, LiveResult, Outcome, ToExtension};
 pub use value::{Bytes, Fraction, Table, Value};
