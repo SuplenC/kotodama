@@ -5,15 +5,16 @@
 use std::fmt::Write;
 use std::ops::Range;
 
-use kotodama_protocol::{ActionRef, ResultRef, ShownResult};
+use kotodama_protocol::{Action, ActionRef, OfferedAction, ResultRef, ShownResult};
 
 /// One row of the list model.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Row {
     pub result: ResultRef,
-    /// What Enter runs. Every Item has at least one Action, but a row is never
-    /// trusted to.
-    pub primary: Option<ActionRef>,
+    /// The Item's own Actions, the primary one (what Enter runs) first.
+    own: Vec<Action>,
+    /// Other Extensions' Actions for the Item, grouped by Extension.
+    contributed: Vec<OfferedAction>,
     pub title: String,
     pub subtitle: String,
     pub icon: String,
@@ -21,22 +22,28 @@ pub struct Row {
     pub highlights: Vec<u32>,
 }
 
+/// One entry of the Action panel.
+#[derive(Debug, PartialEq)]
+pub struct PanelEntry<'a> {
+    pub action: &'a Action,
+    /// The Extension that offers a Contributed action; `None` for the Item's
+    /// own Actions.
+    pub group: Option<&'a str>,
+}
+
 impl From<ShownResult> for Row {
     fn from(shown: ShownResult) -> Self {
-        let mut item = shown.item;
-        let primary = item.actions.first().map(|action| ActionRef {
-            extension: shown.extension.clone(),
-            id: action.id.clone(),
-        });
+        let item = shown.item;
         let mut highlights = shown.highlights;
         highlights.sort_unstable();
         highlights.dedup();
         Row {
             result: ResultRef {
                 extension: shown.extension,
-                id: std::mem::take(&mut item.id),
+                id: item.id,
             },
-            primary,
+            own: item.actions,
+            contributed: shown.contributed,
             title: item.title,
             subtitle: item.subtitle.unwrap_or_default(),
             icon: item.icon.unwrap_or_default(),
@@ -46,6 +53,37 @@ impl From<ShownResult> for Row {
 }
 
 impl Row {
+    /// The Action panel: the Item's own Actions, then the Contributed ones.
+    /// Built when asked for, since most rows are never opened.
+    pub fn actions(&self) -> impl Iterator<Item = PanelEntry<'_>> {
+        let own = self.own.iter().map(|action| PanelEntry {
+            action,
+            group: None,
+        });
+        let contributed = self.contributed.iter().map(|offered| PanelEntry {
+            action: &offered.action,
+            group: Some(offered.extension.as_str()),
+        });
+        own.chain(contributed)
+    }
+
+    /// What runs the `n`th entry of the Action panel.
+    pub fn action(&self, n: usize) -> Option<ActionRef> {
+        match self.own.get(n) {
+            Some(own) => Some(ActionRef {
+                extension: self.result.extension.clone(),
+                id: own.id.clone(),
+            }),
+            None => self
+                .contributed
+                .get(n - self.own.len())
+                .map(|offered| ActionRef {
+                    extension: offered.extension.clone(),
+                    id: offered.action.id.clone(),
+                }),
+        }
+    }
+
     /// The title as Qt's StyledText, with each run of matched characters set
     /// in `color` (any color QML accepts, such as `#89b4fa`).
     pub fn markup(&self, color: &str) -> String {
@@ -112,6 +150,8 @@ impl Replace {
 
 #[cfg(test)]
 mod tests {
+    use kotodama_protocol::{Item, ItemKind, OfferedAction};
+
     use super::*;
 
     fn row(title: &str, highlights: &[u32]) -> Row {
@@ -120,12 +160,80 @@ mod tests {
                 extension: "apps".into(),
                 id: "x".into(),
             },
-            primary: None,
+            own: Vec::new(),
+            contributed: Vec::new(),
             title: title.into(),
             subtitle: String::new(),
             icon: String::new(),
             highlights: highlights.to_vec(),
         }
+    }
+
+    fn action(id: &str, title: &str) -> kotodama_protocol::Action {
+        kotodama_protocol::Action {
+            id: id.into(),
+            title: title.into(),
+            shortcut: None,
+            arguments: Vec::new(),
+        }
+    }
+
+    fn offered(extension: &str, id: &str, title: &str) -> OfferedAction {
+        OfferedAction {
+            extension: extension.into(),
+            action: action(id, title),
+        }
+    }
+
+    #[test]
+    fn the_action_panel_lists_the_items_own_actions_then_contributed_ones_under_their_extension() {
+        let shown = ShownResult {
+            extension: "projects".into(),
+            item: Item {
+                id: "kotodama".into(),
+                kind: ItemKind::Project {
+                    path: "/src/kotodama".into(),
+                },
+                title: "kotodama".into(),
+                subtitle: None,
+                icon: None,
+                keyword: None,
+                keywords: Vec::new(),
+                identity: None,
+                actions: vec![action("open", "Open"), action("term", "Open in terminal")],
+            },
+            contributed: vec![
+                offered("pinner", "pin", "Pin a version here"),
+                offered("pinner", "unpin", "Unpin"),
+                offered("git", "log", "Show log"),
+            ],
+            highlights: Vec::new(),
+        };
+        let row = Row::from(shown);
+        let panel: Vec<_> = row
+            .actions()
+            .enumerate()
+            .map(|(n, entry)| {
+                let runs = row.action(n).unwrap();
+                let runs = format!("{}/{}", runs.extension, runs.id);
+                (entry.group, entry.action.title.as_str(), runs)
+            })
+            .collect();
+        assert_eq!(
+            panel,
+            [
+                (None, "Open", "projects/open".to_owned()),
+                (None, "Open in terminal", "projects/term".to_owned()),
+                (
+                    Some("pinner"),
+                    "Pin a version here",
+                    "pinner/pin".to_owned()
+                ),
+                (Some("pinner"), "Unpin", "pinner/unpin".to_owned()),
+                (Some("git"), "Show log", "git/log".to_owned()),
+            ]
+        );
+        assert_eq!(row.action(5), None);
     }
 
     #[test]

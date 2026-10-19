@@ -90,6 +90,16 @@ fn launch(command: Vec<String>) {
     }
 }
 
+/// Sends a desktop notification on a thread of its own, so a slow session bus
+/// never holds up the Daemon.
+fn notify(summary: String, body: String) {
+    spawn("notify".into(), move || {
+        if let Err(err) = crate::notify::send(&summary, &body) {
+            log::warn!("couldn't show the notification “{summary}”: {err}");
+        }
+    });
+}
+
 /// Types and pastes on the Wayland display in `WAYLAND_DISPLAY`.
 #[derive(Default)]
 pub struct Wayland {
@@ -107,6 +117,10 @@ impl Wayland {
 impl Desktop for Wayland {
     fn launch(&mut self, command: Vec<String>) {
         launch(command);
+    }
+
+    fn notify(&mut self, summary: String, body: String) {
+        notify(summary, body);
     }
 
     fn output(&mut self, output: Output) {
@@ -127,6 +141,10 @@ impl Desktop for Wayland {
 impl Desktop for Wayland {
     fn launch(&mut self, command: Vec<String>) {
         launch(command);
+    }
+
+    fn notify(&mut self, summary: String, body: String) {
+        notify(summary, body);
     }
 
     fn output(&mut self, _output: Output) {

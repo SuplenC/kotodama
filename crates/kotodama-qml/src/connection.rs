@@ -8,7 +8,8 @@ use std::os::unix::net::UnixStream;
 use std::time::Duration;
 
 use kotodama_protocol::{
-    Channel, ChannelWriter, Error, FromFrontEnd, Hello, ToFrontEnd, WireFormat, socket_path,
+    Channel, ChannelWriter, Error, FromFrontEnd, Hello, Job, ToFrontEnd, View, WireFormat,
+    socket_path,
 };
 
 use crate::rows::Row;
@@ -26,9 +27,29 @@ pub enum Update {
     Rows(Vec<Row>),
     Down(Vec<String>),
     Close,
-    Open { query: String, view: Option<String> },
+    Open {
+        query: String,
+        view: Option<String>,
+    },
     Toggle,
     ActionFailed(String),
+    PushView {
+        extension: String,
+        view: View,
+    },
+    /// The protocol's `UpdateView`: the open View with the same id changes.
+    ReplaceView {
+        extension: String,
+        view: View,
+    },
+    PopView {
+        extension: String,
+        view: String,
+    },
+    JobProgress {
+        extension: String,
+        job: Job,
+    },
     Disconnected,
 }
 
@@ -133,11 +154,10 @@ fn read(mut reader: Reader, deliver: &impl Fn(Update) -> bool) -> Result<(), Err
             ToFrontEnd::ActionFailed { message } => Update::ActionFailed(message),
             ToFrontEnd::Open { query, view } => Update::Open { query, view },
             ToFrontEnd::Toggle => Update::Toggle,
-            // Views and jobs aren't shown yet.
-            ToFrontEnd::PushView { .. }
-            | ToFrontEnd::UpdateView { .. }
-            | ToFrontEnd::PopView { .. }
-            | ToFrontEnd::JobProgress { .. } => continue,
+            ToFrontEnd::PushView { extension, view } => Update::PushView { extension, view },
+            ToFrontEnd::UpdateView { extension, view } => Update::ReplaceView { extension, view },
+            ToFrontEnd::PopView { extension, view } => Update::PopView { extension, view },
+            ToFrontEnd::JobProgress { extension, job } => Update::JobProgress { extension, job },
         };
         if !deliver(update) {
             return Ok(());

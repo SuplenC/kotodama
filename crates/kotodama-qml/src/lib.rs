@@ -3,12 +3,18 @@
 //! [`KotodamaSearch`](qobject::KotodamaSearch) is a `QAbstractListModel` over
 //! the Daemon's Results. It talks to the Daemon in the fastest Wire format they
 //! share and hands QML each Result's fields through model roles, so Results
-//! never pass through JavaScript. `KotodamaMenu.qml` is the window that draws
-//! them; a host shell can use it as it is, set its look, or draw its own.
+//! never pass through JavaScript. It also keeps the stack of Views Extensions
+//! push, the jobs they report, and each Result's Action panel. While a list View
+//! is on top, the model holds that View's Items instead of the Results.
+//! `KotodamaMenu.qml` is the window that draws them; a host shell can use it as
+//! it is, set its look, or draw its own.
 
 mod connection;
 mod plugin;
 mod rows;
+mod shortcut;
+mod variant;
+mod views;
 
 use std::pin::Pin;
 use std::sync::OnceLock;
@@ -16,10 +22,11 @@ use std::time::Instant;
 
 use cxx_qt::{CxxQtType, Initialize, Threading};
 use cxx_qt_lib::{QByteArray, QHash, QHashPair_i32_QByteArray, QModelIndex, QString, QVariant};
-use kotodama_protocol::FromFrontEnd;
+use kotodama_protocol::{FromFrontEnd, ShownResult, Value, ViewContent};
 
 use connection::{Update, Writer};
 use rows::{Replace, Row};
+use views::Views;
 
 #[cxx_qt::bridge]
 pub mod qobject {
@@ -47,6 +54,12 @@ pub mod qobject {
 
         include!("cxx-qt-lib/qvector.h");
         type QVector_i32 = cxx_qt_lib::QVector<i32>;
+
+        include!("cxx-qt-lib/qlist.h");
+        type QList_QVariant = cxx_qt_lib::QList<cxx_qt_lib::QVariant>;
+
+        include!("cxx-qt-lib/qmap.h");
+        type QMap_QString_QVariant = cxx_qt_lib::QMap<cxx_qt_lib::QMapPair_QString_QVariant>;
     }
 
     extern "RustQt" {
@@ -59,6 +72,12 @@ pub mod qobject {
         #[qproperty(bool, connected, READ, NOTIFY)]
         #[qproperty(QStringList, down, READ, NOTIFY)]
         #[qproperty(i32, latency, READ, NOTIFY)]
+        /// The top View, as a map; empty at the search. See `variant::view`.
+        #[qproperty(QMap_QString_QVariant, view, READ, NOTIFY)]
+        /// How many Views are open.
+        #[qproperty(i32, depth, READ, NOTIFY)]
+        /// The jobs still running, oldest first. See `variant::jobs`.
+        #[qproperty(QList_QVariant, jobs, READ, NOTIFY)]
         type KotodamaSearch = super::SearchRust;
 
         fn set_query(self: Pin<&mut KotodamaSearch>, query: QString);
@@ -68,6 +87,47 @@ pub mod qobject {
         /// none, or the Daemon isn't there to run it.
         #[qinvokable]
         fn run(self: Pin<&mut KotodamaSearch>, row: i32) -> bool;
+
+        /// The Action panel of the Result in `row`: the Item's own Actions,
+        /// then Contributed actions grouped by Extension. See
+        /// `variant::actions`.
+        #[qinvokable]
+        fn actions(self: &KotodamaSearch, row: i32) -> QList_QVariant;
+
+        /// Runs the `n`th Action of the Result in `row`'s Action panel.
+        #[qinvokable]
+        #[cxx_name = "runAction"]
+        fn run_action(self: Pin<&mut KotodamaSearch>, row: i32, n: i32) -> bool;
+
+        /// Runs the Action of the Result in `row` bound to `key` (a `Qt::Key`)
+        /// with `modifiers` held, as a key event gives them. False if none is.
+        #[qinvokable]
+        #[cxx_name = "runShortcut"]
+        fn run_shortcut(self: Pin<&mut KotodamaSearch>, row: i32, key: i32, modifiers: i32)
+        -> bool;
+
+        /// Pops the top View, as Esc does, and tells its Extension the user
+        /// left it. False if there is none. Closing the menu pops nothing:
+        /// it opens again where it was.
+        #[qinvokable]
+        #[cxx_name = "popView"]
+        fn pop_view(self: Pin<&mut KotodamaSearch>) -> bool;
+
+        /// Sets the text of the top form's `field`th field, or the value of
+        /// the option chosen in a select.
+        #[qinvokable]
+        #[cxx_name = "setText"]
+        fn set_text(self: Pin<&mut KotodamaSearch>, field: i32, text: QString) -> bool;
+
+        /// Ticks or unticks the top form's `field`th field, a checkbox.
+        #[qinvokable]
+        #[cxx_name = "setChecked"]
+        fn set_checked(self: Pin<&mut KotodamaSearch>, field: i32, checked: bool) -> bool;
+
+        /// Submits the top form. False if the top View isn't a form, or the
+        /// Daemon isn't there to take it.
+        #[qinvokable]
+        fn submit(self: Pin<&mut KotodamaSearch>) -> bool;
 
         /// Tells the Daemon which rows are on screen.
         #[qinvokable]
@@ -174,7 +234,14 @@ pub struct SearchRust {
     /// Microseconds from the query that Results were last asked for to the
     /// model showing them.
     latency: i32,
+    /// What the list shows: the Results, or the Items of the list View on top.
     rows: Vec<Row>,
+    /// The Results, kept here while a list View's Items are shown instead.
+    results: Option<Vec<Row>>,
+    views: Views,
+    view: variant::Map,
+    depth: i32,
+    jobs: variant::List,
     writer: Option<Writer>,
     /// When the oldest query still waiting for its Results was sent. Results
     /// for a later query are measured from it too, so typing faster than the
@@ -191,6 +258,11 @@ impl Default for SearchRust {
             down: QStringList::default(),
             latency: 0,
             rows: Vec::new(),
+            results: None,
+            views: Views::default(),
+            view: variant::Map::default(),
+            depth: 0,
+            jobs: variant::List::default(),
             writer: None,
             asked: None,
         }
@@ -241,17 +313,79 @@ impl KotodamaSearch {
         }
     }
 
-    fn run(mut self: Pin<&mut Self>, row: i32) -> bool {
-        let Some(row) = usize::try_from(row).ok().and_then(|row| self.rows.get(row)) else {
+    fn row(&self, row: i32) -> Option<&Row> {
+        usize::try_from(row).ok().and_then(|row| self.rows.get(row))
+    }
+
+    fn run(self: Pin<&mut Self>, row: i32) -> bool {
+        self.run_action(row, 0)
+    }
+
+    fn actions(&self, row: i32) -> variant::List {
+        self.row(row).map(variant::actions).unwrap_or_default()
+    }
+
+    fn run_action(mut self: Pin<&mut Self>, row: i32, n: i32) -> bool {
+        let Some(row) = self.row(row) else {
             return false;
         };
-        let Some(action) = row.primary.clone() else {
+        let Some(action) = usize::try_from(n).ok().and_then(|n| row.action(n)) else {
             return false;
         };
         let message = FromFrontEnd::RunAction {
             result: row.result.clone(),
             action,
             arguments: Default::default(),
+        };
+        self.as_mut().rust_mut().send(&message)
+    }
+
+    fn run_shortcut(self: Pin<&mut Self>, row: i32, key: i32, modifiers: i32) -> bool {
+        let Some(n) = self.row(row).and_then(|found| {
+            found.actions().position(|entry| {
+                entry
+                    .action
+                    .shortcut
+                    .as_deref()
+                    .is_some_and(|bound| shortcut::matches(bound, key, modifiers))
+            })
+        }) else {
+            return false;
+        };
+        self.run_action(row, n as i32)
+    }
+
+    fn pop_view(mut self: Pin<&mut Self>) -> bool {
+        let Some(popped) = self.as_mut().rust_mut().views.pop_top() else {
+            return false;
+        };
+        self.as_mut().rust_mut().send(&popped);
+        self.as_mut().show_view();
+        true
+    }
+
+    fn set_text(mut self: Pin<&mut Self>, field: i32, text: QString) -> bool {
+        // The field shows what was typed already, so the view isn't told.
+        let Ok(field) = usize::try_from(field) else {
+            return false;
+        };
+        let value = Value::String(String::from(&text));
+        self.as_mut().rust_mut().views.set_value(field, value)
+    }
+
+    fn set_checked(mut self: Pin<&mut Self>, field: i32, checked: bool) -> bool {
+        let Ok(field) = usize::try_from(field) else {
+            return false;
+        };
+        self.as_mut()
+            .rust_mut()
+            .views
+            .set_value(field, Value::Bool(checked))
+    }
+
+    fn submit(mut self: Pin<&mut Self>) -> bool {
+        let Some(message) = self.views.submit() else {
+            return false;
         };
         self.as_mut().rust_mut().send(&message)
     }
@@ -324,7 +458,11 @@ impl KotodamaSearch {
                 }
             }
             Update::Rows(rows) => {
-                self.as_mut().replace(rows);
+                if self.results.is_some() {
+                    self.as_mut().rust_mut().results = Some(rows);
+                } else {
+                    self.as_mut().replace(rows);
+                }
                 if let Some(asked) = self.as_mut().rust_mut().asked.take() {
                     let micros = asked.elapsed().as_micros().min(i32::MAX as u128) as i32;
                     if debug() {
@@ -347,14 +485,97 @@ impl KotodamaSearch {
             Update::ActionFailed(message) => {
                 self.as_mut().action_failed(QString::from(&message));
             }
+            Update::PushView { extension, view } => {
+                self.as_mut().rust_mut().views.push(extension, view);
+                self.as_mut().show_view();
+            }
+            Update::ReplaceView { extension, view } => {
+                if self.as_mut().rust_mut().views.update(extension, view) {
+                    self.as_mut().show_view();
+                }
+            }
+            Update::PopView { extension, view } => {
+                self.as_mut().rust_mut().views.pop(&extension, &view);
+                self.as_mut().show_view();
+            }
+            Update::JobProgress { extension, job } => {
+                let followed = self
+                    .views
+                    .top()
+                    .is_some_and(|open| open.follows(&extension, &job.id));
+                self.as_mut().rust_mut().views.progress(extension, job);
+                if followed {
+                    let view = variant::view(&self.views);
+                    self.as_mut().rust_mut().view = view;
+                    self.as_mut().view_changed();
+                }
+                self.as_mut().show_jobs();
+            }
             Update::Disconnected => {
                 let mut this = self.as_mut().rust_mut();
                 this.writer = None;
                 this.asked = None;
+                this.views.reset();
                 self.as_mut().set_connected(false);
+                self.as_mut().show_view();
+                self.as_mut().show_jobs();
                 self.as_mut().replace(Vec::new());
             }
         }
+    }
+
+    /// Shows the top View after the stack changed: its map, the depth, and,
+    /// for a list View, its Items in place of the Results.
+    fn show_view(mut self: Pin<&mut Self>) {
+        let view = variant::view(&self.views);
+        let depth = self.views.depth() as i32;
+        let items = match self.views.top() {
+            Some(open) => match &open.view.content {
+                ViewContent::List { items } => Some(
+                    items
+                        .iter()
+                        .map(|item| {
+                            Row::from(ShownResult {
+                                extension: open.extension.clone(),
+                                item: item.clone(),
+                                contributed: Vec::new(),
+                                highlights: Vec::new(),
+                            })
+                        })
+                        .collect(),
+                ),
+                _ => None,
+            },
+            None => None,
+        };
+        let mut this = self.as_mut().rust_mut();
+        this.view = view;
+        let deeper = this.depth != depth;
+        this.depth = depth;
+        self.as_mut().view_changed();
+        if deeper {
+            self.as_mut().depth_changed();
+        }
+        match items {
+            Some(items) => {
+                if self.results.is_none() {
+                    let results = self.rows.clone();
+                    self.as_mut().rust_mut().results = Some(results);
+                }
+                self.as_mut().replace(items);
+            }
+            None => {
+                if let Some(results) = self.as_mut().rust_mut().results.take() {
+                    self.as_mut().replace(results);
+                }
+            }
+        }
+    }
+
+    fn show_jobs(mut self: Pin<&mut Self>) {
+        let jobs = variant::jobs(&self.views);
+        self.as_mut().rust_mut().jobs = jobs;
+        self.as_mut().jobs_changed();
     }
 
     fn set_connected(mut self: Pin<&mut Self>, connected: bool) {

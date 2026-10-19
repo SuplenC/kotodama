@@ -72,6 +72,10 @@ _Avoid_: Page, panel, mode, screen
 A value typed inline after an Item's keyword, such as `1.23` in `go 1.23`, passed to its Action.
 _Avoid_: Parameter, input
 
+**Job**:
+Long work an Extension reports on while it runs, such as an install; a progress View follows it, it keeps running when the menu closes, and the desktop is notified when it ends.
+_Avoid_: Task, operation, process
+
 **Frecency**:
 The score that combines how often and how recently the user picked a Result.
 _Avoid_: Popularity, history score
