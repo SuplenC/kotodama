@@ -35,11 +35,15 @@ if [ -t 0 ] && [ -t 1 ]; then
 fi
 
 # /nix and /cargo are named volumes: the Nix store, the cargo registry and the
-# Linux build output survive between runs and stay off the bind mount. --init
-# forwards signals and reaps the processes e2e tests start.
+# Linux build output survive between runs and stay off the bind mount. Each
+# checkout (a git worktree, say) builds into its own target directory there, so
+# parallel checkouts don't wait on one cargo lock or rebuild each other's output.
+# --init forwards signals and reaps the processes e2e tests start.
+target=/cargo/target-$(printf '%s' "$root" | cksum | cut -d' ' -f1)
 exec docker run --rm --init "${tty[@]}" \
     -v kotodama-nix:/nix \
     -v kotodama-cargo:/cargo \
     -v "$root:/work" \
     -e CI \
+    -e CARGO_TARGET_DIR="$target" \
     "$image" "$@"
