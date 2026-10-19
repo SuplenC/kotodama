@@ -46,3 +46,16 @@ expect_screen() {
     echo "screen does not match $reference: $pixels pixels differ (see $shot, $diff)" >&2
     return 1
 }
+
+# Waits until a spawned command's log contains a line with the given text.
+wait_for_log() {
+    local log="$E2E_OUT/$1" text=$2
+    for _ in $(seq 50); do
+        if grep -qF -- "$text" "$log" 2>/dev/null; then
+            return 0
+        fi
+        sleep 0.2
+    done
+    echo "$1 never logged: $text" >&2
+    return 1
+}
