@@ -8,7 +8,7 @@ Kotodama is a command menu for Wayland desktops. You type, and it finds and does
 - **A Quickshell QML module** written in Rust (cxx-qt) gives QML a native result model. QML only draws the results.
 - **Extensions** are separate processes in any language. They speak a protocol whose wire format is negotiated (JSON, MessagePack or postcard), so a crashing Extension never takes down the menu.
 
-Status: early. The protocol, the Daemon and the Quickshell Front end work; Views, the Action panel and the Bundled extensions are next. See `docs/adr/0001-architecture.md` and the issues.
+Status: early. The protocol, the Daemon, the Quickshell Front end and the apps Bundled extension work; Views, the Action panel and the other Bundled extensions are next. See `docs/adr/0001-architecture.md` and the issues.
 
 ## The Daemon
 
@@ -68,6 +68,27 @@ cargo run -p kotodamad --example front-end -- --run firefox  # run the top one
 The target is a p99 under 2 ms from query received to Results sent. CI fails when a change makes resident memory more than 10% higher than its base commit does.
 
 The `latency` e2e test types into the real menu with 10k Indexed items and fails if any keystroke takes 8 ms (one frame at 120 Hz) or more from its query to the list model's update. In the dev container on an Apple M-series machine, under software rendering, the worst of 40 keystrokes takes about 5 ms.
+
+## Bundled extensions
+
+### Apps
+
+`kotodama-apps` (`crates/kotodama-apps`) makes every desktop application an Item of kind `app`. It reads the `.desktop` files in the `applications` directory of `$XDG_DATA_HOME` and each of `$XDG_DATA_DIRS`, and watches them, so an app installed, changed or removed while it runs shows up, changes or goes within a moment. It follows the Desktop Entry Specification: a file in a more important directory replaces one with the same desktop id, `Hidden`, `NoDisplay`, `OnlyShowIn`, `NotShowIn` and `TryExec` leave entries out, and names, generic names, comments and keywords are read in the user's language.
+
+Each Item's id is its desktop id without `.desktop` (`firefox`, `org.gnome.Nautilus`), and its Identity is `app:` and the desktop id (`app:firefox.desktop`). It is found by its name, its keywords, its generic name and its desktop id, and shows its generic name, or failing that its comment, below. Its primary Action, "Open", starts the app; its desktop actions, such as Firefox's "New Private Window", follow as more Actions. Apps with `Terminal=true` start in the configured terminal.
+
+```toml
+[extensions.apps]
+# What starts apps with `Terminal=true`; the app's command follows it.
+# The default is `xdg-terminal-exec`.
+terminal = ["ghostty", "-e"]
+# Apps to leave out, by desktop id, with or without `.desktop`.
+hidden = ["qt5ct", "qt6ct"]
+# Names to show instead of the app's own; it is still found by its own name too.
+names = { nvim = "Neovim" }
+```
+
+Its `manifest.toml` runs `./kotodama-apps`, so a package installs the binary next to it in `$XDG_DATA_DIRS/kotodama/extensions/apps/`.
 
 ## The Quickshell Front end
 
