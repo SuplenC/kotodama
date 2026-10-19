@@ -20,13 +20,13 @@ use kotodama_protocol::{
     Channel, ChannelWriter, FromExtension, Hello, Outcome, ToExtension, WireFormat,
 };
 
-use items::{DESKTOP_ACTION, OPEN, Sent, Settings};
+use items::{SentItems, Settings};
 use scan::{App, Environment};
 
 enum Event {
     Message(ToExtension),
-    /// An `applications` directory changed.
-    Changed,
+    /// An `applications` directory changed, and these are the apps now.
+    Scanned(BTreeMap<String, App>),
     /// The Daemon hung up, or its messages can't be read any more.
     Hangup,
 }
@@ -84,25 +84,29 @@ fn run() -> Result<(), kotodama_protocol::Error> {
             let _ = messages.send(Event::Hangup);
         })?;
 
+    // Rescans happen on the watching thread, so an Action never waits for one.
     let dirs = scan::application_dirs();
-    let _watcher = watch::watch(dirs.clone(), move || {
-        let _ = events.send(Event::Changed);
+    let env = Environment::from_env();
+    let apps = scan::scan(&dirs, &env);
+    let watching = dirs.clone();
+    let _watcher = watch::watch(dirs, move || {
+        let _ = events.send(Event::Scanned(scan::scan(&watching, &env)));
     })
     .map_err(|err| eprintln!("kotodama-apps: not watching for new apps: {err}"))
     .ok();
 
-    let env = Environment::from_env();
     let mut extension = Extension {
         writer,
-        apps: scan::scan(&dirs, &env),
-        settings: None,
-        sent: Sent::default(),
+        apps,
+        settings: Settings::default(),
+        configured: false,
+        sent: SentItems::default(),
     };
     for event in received {
         match event {
             Event::Message(message) => extension.message(message)?,
-            Event::Changed => {
-                extension.apps = scan::scan(&dirs, &env);
+            Event::Scanned(apps) => {
+                extension.apps = apps;
                 extension.publish()?;
             }
             Event::Hangup => break,
@@ -114,16 +118,18 @@ fn run() -> Result<(), kotodama_protocol::Error> {
 struct Extension {
     writer: ChannelWriter<Stdout>,
     apps: BTreeMap<String, App>,
-    /// `None` until the config arrives, before which no Items are sent.
-    settings: Option<Settings>,
-    sent: Sent,
+    settings: Settings,
+    /// Whether the config has arrived. No Items are sent before it.
+    configured: bool,
+    sent: SentItems,
 }
 
 impl Extension {
     fn message(&mut self, message: ToExtension) -> Result<(), kotodama_protocol::Error> {
         match message {
             ToExtension::Config(config) => {
-                self.settings = Some(Settings::from_config(&config));
+                self.settings = Settings::from_config(&config);
+                self.configured = true;
                 self.publish()
             }
             ToExtension::RunAction {
@@ -147,10 +153,10 @@ impl Extension {
 
     /// Sends what changed in the Items since they were last sent.
     fn publish(&mut self) -> Result<(), kotodama_protocol::Error> {
-        let Some(settings) = &self.settings else {
+        if !self.configured {
             return Ok(());
-        };
-        let (removed, added) = self.sent.update(settings.items(&self.apps));
+        }
+        let (removed, added) = self.sent.update(self.settings.items(&self.apps));
         if !removed.is_empty() {
             self.send(&FromExtension::RemoveItems { ids: removed })?;
         }
@@ -165,24 +171,9 @@ impl Extension {
             .apps
             .get(id)
             .ok_or_else(|| format!("the app `{id}` is gone"))?;
-        let command = if action == OPEN {
-            &app.command
-        } else {
-            &action
-                .strip_prefix(DESKTOP_ACTION)
-                .and_then(|own| app.actions.iter().find(|action| action.id == own))
-                .ok_or_else(|| format!("{} has no Action `{action}`", app.name))?
-                .command
-        };
-        let default;
-        let settings = match &self.settings {
-            Some(settings) => settings,
-            None => {
-                default = Settings::default();
-                &default
-            }
-        };
-        let terminal = app.terminal.then_some(settings.terminal.as_slice());
+        let command = items::command(app, action)
+            .ok_or_else(|| format!("{} has no Action `{action}`", app.name))?;
+        let terminal = app.terminal.then_some(self.settings.terminal.as_slice());
         launch::launch(command, terminal, app.dir.as_deref()).map_err(|err| err.to_string())
     }
 

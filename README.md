@@ -75,7 +75,7 @@ The `latency` e2e test types into the real menu with 10k Indexed items and fails
 
 `kotodama-apps` (`crates/kotodama-apps`) makes every desktop application an Item of kind `app`. It reads the `.desktop` files in the `applications` directory of `$XDG_DATA_HOME` and each of `$XDG_DATA_DIRS`, and watches them, so an app installed, changed or removed while it runs shows up, changes or goes within a moment. It follows the Desktop Entry Specification: a file in a more important directory replaces one with the same desktop id, `Hidden`, `NoDisplay`, `OnlyShowIn`, `NotShowIn` and `TryExec` leave entries out, and names, generic names, comments and keywords are read in the user's language.
 
-Each Item's id is its desktop id without `.desktop` (`firefox`, `org.gnome.Nautilus`). It is found by its name, its keywords, its generic name and its desktop id, and shows its generic name, or failing that its comment, below. Its primary Action, "Open", starts the app; its desktop actions, such as Firefox's "New Private Window", follow as more Actions. Apps with `Terminal=true` start in the configured terminal.
+Each Item's id is its desktop id without `.desktop` (`firefox`, `org.gnome.Nautilus`), and its Identity is `app:` and the desktop id (`app:firefox.desktop`). It is found by its name, its keywords, its generic name and its desktop id, and shows its generic name, or failing that its comment, below. Its primary Action, "Open", starts the app; its desktop actions, such as Firefox's "New Private Window", follow as more Actions. Apps with `Terminal=true` start in the configured terminal.
 
 ```toml
 [extensions.apps]

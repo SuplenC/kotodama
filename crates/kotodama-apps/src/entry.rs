@@ -2,7 +2,9 @@
 //! the `[Desktop Entry]` group and its `[Desktop Action <id>]` groups, with
 //! localized values picked for the user's locale.
 
-/// What a `.desktop` file says, before anything is decided about showing it.
+/// A desktop entry, in the specification's words: what a `.desktop` file says,
+/// before anything is decided about showing it. It isn't an Item; the scan
+/// turns the entries to show into apps, and those become Items.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Entry {
     /// `Type`; only `Application` entries are apps.

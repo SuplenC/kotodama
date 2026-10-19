@@ -12,10 +12,11 @@
 //! ```
 
 use std::collections::{BTreeMap, HashMap, HashSet};
+use std::hash::{DefaultHasher, Hash, Hasher};
 
 use kotodama_protocol::{Action, Item, ItemKind, Table, Value};
 
-use crate::scan::App;
+use crate::scan::{App, app_id};
 
 /// The primary Action, which starts the app.
 pub const OPEN: &str = "open";
@@ -100,23 +101,21 @@ impl Settings {
             keywords.push(app.id.clone());
         }
         let mut actions = Vec::with_capacity(1 + app.actions.len());
-        actions.push(Action {
-            id: OPEN.to_owned(),
-            title: "Open".to_owned(),
-            shortcut: None,
-            arguments: Vec::new(),
-        });
-        actions.extend(app.actions.iter().map(|action| Action {
-            id: format!("{DESKTOP_ACTION}{}", action.id),
-            title: action.name.clone(),
-            shortcut: None,
-            arguments: Vec::new(),
+        actions.push(action(OPEN.to_owned(), "Open".to_owned()));
+        actions.extend(app.actions.iter().map(|desktop| {
+            action(
+                format!("{DESKTOP_ACTION}{}", desktop.id),
+                desktop.name.clone(),
+            )
         }));
         Item {
             id: app.id.clone(),
             kind: ItemKind::App {
                 desktop_id: app.desktop_id.clone(),
             },
+            // The same app from another Extension, such as a Folder source,
+            // shares its History (ADR 0008).
+            identity: Some(format!("app:{}", app.desktop_id)),
             title,
             subtitle: app.generic_name.clone().or_else(|| app.comment.clone()),
             icon: app.icon.clone(),
@@ -127,9 +126,26 @@ impl Settings {
     }
 }
 
-/// An app id without `.desktop`, as the config may name it either way.
-fn app_id(id: &str) -> String {
-    id.strip_suffix(".desktop").unwrap_or(id).to_owned()
+/// The command an Action of `app` runs: [`OPEN`] or one of its desktop
+/// actions. `None` for an Action the app doesn't have.
+pub fn command<'a>(app: &'a App, action: &str) -> Option<&'a [String]> {
+    if action == OPEN {
+        return Some(&app.command);
+    }
+    let own = action.strip_prefix(DESKTOP_ACTION)?;
+    app.actions
+        .iter()
+        .find(|desktop| desktop.id == own)
+        .map(|desktop| desktop.command.as_slice())
+}
+
+fn action(id: String, title: String) -> Action {
+    Action {
+        id,
+        title,
+        shortcut: None,
+        arguments: Vec::new(),
+    }
 }
 
 fn strings(value: &Value) -> Option<Vec<String>> {
@@ -149,24 +165,56 @@ fn warn(message: &str) {
     eprintln!("kotodama-apps: config: {message}");
 }
 
-/// The Items the Daemon has, so only what changed is sent again.
+/// What the Daemon has of each Item, by id, so only what changed is sent
+/// again. A fingerprint stands in for each Item, so the Items aren't kept
+/// twice.
 #[derive(Default)]
-pub struct Sent(HashMap<String, Item>);
+pub struct SentItems(HashMap<String, u64>);
 
-impl Sent {
+impl SentItems {
     /// Makes `items` what the Daemon has. Returns the ids to remove and the
     /// Items to add or replace.
     pub fn update(&mut self, items: impl Iterator<Item = Item>) -> (Vec<String>, Vec<Item>) {
         let mut next = HashMap::with_capacity(self.0.len());
         let mut added = Vec::new();
         for item in items {
-            if self.0.remove(&item.id).as_ref() != Some(&item) {
-                added.push(item.clone());
+            let print = fingerprint(&item);
+            if self.0.remove(&item.id) != Some(print) {
+                next.insert(item.id.clone(), print);
+                added.push(item);
+            } else {
+                next.insert(item.id, print);
             }
-            next.insert(item.id.clone(), item);
         }
         let mut removed: Vec<String> = std::mem::replace(&mut self.0, next).into_keys().collect();
         removed.sort();
         (removed, added)
     }
+}
+
+/// A hash of everything an Item sends.
+fn fingerprint(item: &Item) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    let Item {
+        id,
+        kind,
+        identity,
+        title,
+        subtitle,
+        icon,
+        keyword,
+        keywords,
+        actions,
+    } = item;
+    (id, kind, identity, title, subtitle, icon, keyword, keywords).hash(&mut hasher);
+    for Action {
+        id,
+        title,
+        shortcut,
+        arguments,
+    } in actions
+    {
+        (id, title, shortcut, arguments.len()).hash(&mut hasher);
+    }
+    hasher.finish()
 }

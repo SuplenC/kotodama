@@ -135,15 +135,20 @@ fn collect(dir: &Path, prefix: &str, depth: usize, out: &mut Vec<(String, PathBu
         return;
     };
     for entry in entries.flatten() {
-        let path = entry.path();
         let Some(name) = entry.file_name().to_str().map(str::to_owned) else {
             continue;
         };
-        // Follows symlinks, as packages and Nix profiles use them.
-        let Ok(meta) = fs::metadata(&path) else {
+        let path = entry.path();
+        let Ok(kind) = entry.file_type() else {
             continue;
         };
-        if meta.is_dir() {
+        // Follows symlinks, as packages and Nix profiles use them.
+        let is_dir = if kind.is_symlink() {
+            fs::metadata(&path).is_ok_and(|meta| meta.is_dir())
+        } else {
+            kind.is_dir()
+        };
+        if is_dir {
             if depth < MAX_DEPTH {
                 collect(&path, &format!("{prefix}{name}-"), depth + 1, out);
             }
@@ -151,6 +156,15 @@ fn collect(dir: &Path, prefix: &str, depth: usize, out: &mut Vec<(String, PathBu
             out.push((format!("{prefix}{name}"), path));
         }
     }
+}
+
+/// A desktop id without `.desktop`: the app's Item id, and how the config
+/// names it, with the suffix or without.
+pub fn app_id(desktop_id: &str) -> String {
+    desktop_id
+        .strip_suffix(".desktop")
+        .unwrap_or(desktop_id)
+        .to_owned()
 }
 
 /// The app an entry describes, or `None` if it isn't one to show here.
@@ -197,12 +211,8 @@ fn app(
             }
         })
         .collect();
-    let id = desktop_id
-        .strip_suffix(".desktop")
-        .unwrap_or(&desktop_id)
-        .to_owned();
     Ok(Some(App {
-        id,
+        id: app_id(&desktop_id),
         desktop_id,
         name: entry.name,
         generic_name: entry.generic_name,

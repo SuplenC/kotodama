@@ -189,6 +189,8 @@ fn each_desktop_file_becomes_an_app_item() {
             desktop_id: "firefox.desktop".into()
         }
     );
+    // Shares its History with the same app from any other Extension.
+    assert_eq!(firefox.identity.as_deref(), Some("app:firefox.desktop"));
     assert_eq!(firefox.title, "Firefox");
     assert_eq!(firefox.subtitle.as_deref(), Some("Web Browser"));
     assert_eq!(firefox.icon.as_deref(), Some("firefox"));
@@ -585,6 +587,24 @@ fn the_manifest_names_the_extension_apps() {
     .unwrap();
     assert_eq!(manifest.name, "apps");
     assert!(manifest.live_query.is_none());
+}
+
+#[test]
+fn an_app_whose_directory_is_missing_says_so() {
+    let dir = data_dirs();
+    install(
+        dir.path(),
+        "system",
+        "lost.desktop",
+        "[Desktop Entry]\nType=Application\nName=Lost\nExec=sh\nPath=/nonexistent/dir\n",
+    );
+    let mut apps = Apps::configured(dir, Table::new());
+    apps.added();
+
+    let Outcome::Failed { message } = apps.run("lost", "open") else {
+        panic!("expected a failure");
+    };
+    assert!(message.contains("/nonexistent/dir"), "{message}");
 }
 
 #[test]
