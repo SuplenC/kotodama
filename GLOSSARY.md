@@ -28,6 +28,10 @@ _Avoid_: Config, descriptor
 One searchable thing an Extension contributes, such as an app, a script, an emoji or a setting.
 _Avoid_: Entry, result (for the stored thing), record
 
+**Item kind**:
+What sort of thing an Item is, such as `app`, `project` or `window`, which lets other Extensions offer Actions for it.
+_Avoid_: Type, category, class
+
 **Result**:
 An Item as it appears for the current query, ranked and highlighted.
 _Avoid_: Match, hit, row
@@ -43,6 +47,14 @@ _Avoid_: Dynamic search, remote query
 **Action**:
 Something the user can do to a Result; every Result has one primary Action and may have more, listed in the Action panel.
 _Avoid_: Command, handler, verb
+
+**Contributed action**:
+An Action one Extension offers for Items of a given Item kind that another Extension owns, such as "Pin a version here" on a project.
+_Avoid_: Foreign action, plugin action, extension action
+
+**Action catalog**:
+The description of every Action on offer (its title, Item kind, Arguments and Extension) that an Extension may ask to read; it never includes the Items themselves.
+_Avoid_: Action registry, action list
 
 **Action panel**:
 The list of all Actions available for the selected Result.
