@@ -1,287 +1,20 @@
 //! The Daemon's state machine, driven through its events: Extensions and Front ends are
 //! channels here, and starting a process or typing is recorded instead of done.
 
-use std::cell::RefCell;
+mod common;
+
 use std::collections::BTreeMap;
 use std::path::PathBuf;
-use std::rc::Rc;
-use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::{self, Receiver};
-use std::time::{Duration, Instant};
+use std::sync::atomic::Ordering;
+use std::sync::mpsc;
+use std::time::Duration;
 
+use common::*;
 use kotodama_protocol::*;
 use kotodamad::daemon::{
-    Daemon, Desktop, Event, ExtensionId, FrontEndId, HANDSHAKE_TIMEOUT, Launcher, MAX_LIVE_RESULTS,
-    Output,
+    Event, ExtensionId, FrontEndId, HANDSHAKE_TIMEOUT, MAX_LIVE_RESULTS, Output,
 };
 use kotodamad::discovery::Found;
-use kotodamad::history::{History, Store};
-
-#[derive(Clone, Default)]
-struct Launches(
-    Rc<RefCell<Vec<(ExtensionId, u64)>>>,
-    Rc<RefCell<Vec<(ExtensionId, u64)>>>,
-);
-
-impl Launcher for Launches {
-    fn start(&mut self, extension: ExtensionId, generation: u64, _found: &Found) {
-        self.0.borrow_mut().push((extension, generation));
-    }
-
-    fn stop(&mut self, extension: ExtensionId, generation: u64) {
-        self.1.borrow_mut().push((extension, generation));
-    }
-}
-
-/// How many messages a test Extension's channel holds before it counts as full.
-const OUTBOX: usize = 64;
-
-/// What the Daemon typed or pasted, and the programs it started.
-#[derive(Clone, Default)]
-struct Outputs(Rc<RefCell<Vec<Output>>>, Rc<RefCell<Vec<Vec<String>>>>);
-
-impl Desktop for Outputs {
-    fn output(&mut self, output: Output) {
-        self.0.borrow_mut().push(output);
-    }
-
-    fn launch(&mut self, command: Vec<String>) {
-        self.1.borrow_mut().push(command);
-    }
-}
-
-/// The History as last saved.
-#[derive(Clone, Default)]
-struct Saved(Rc<RefCell<Option<History>>>);
-
-impl Store for Saved {
-    fn save(&mut self, history: &History) {
-        *self.0.borrow_mut() = Some(history.clone());
-    }
-}
-
-struct Harness {
-    daemon: Daemon<Launches, Outputs, Saved>,
-    now: Instant,
-    launches: Launches,
-    outputs: Outputs,
-    saved: Saved,
-    next_front_end: u64,
-}
-
-/// One running Extension: what the Daemon sent it.
-struct Ext {
-    id: ExtensionId,
-    generation: u64,
-    rx: Receiver<ToExtension>,
-}
-
-struct FrontEnd {
-    id: FrontEndId,
-    rx: Receiver<ToFrontEnd>,
-    /// Set once the Daemon cuts this Front end off.
-    closed: Arc<AtomicBool>,
-}
-
-fn manifest(toml: &str) -> Found {
-    Found::new(Manifest::from_toml(toml).unwrap(), PathBuf::from("/ext")).unwrap()
-}
-
-fn plain(name: &str) -> Found {
-    manifest(&format!("name = \"{name}\"\ncommand = [\"x\"]"))
-}
-
-fn action(id: &str) -> Action {
-    Action {
-        id: id.into(),
-        title: id.into(),
-        shortcut: None,
-        arguments: vec![],
-    }
-}
-
-fn item(id: &str, title: &str, kind: ItemKind) -> Item {
-    Item {
-        id: id.into(),
-        kind,
-        title: title.into(),
-        subtitle: None,
-        icon: None,
-        keyword: None,
-        keywords: vec![],
-        actions: vec![action("open")],
-    }
-}
-
-fn app(title: &str) -> Item {
-    let id = title.to_lowercase().replace(' ', "-");
-    item(
-        &id,
-        title,
-        ItemKind::App {
-            desktop_id: format!("{id}.desktop"),
-        },
-    )
-}
-
-fn project(id: &str) -> Item {
-    item(
-        id,
-        id,
-        ItemKind::Project {
-            path: format!("/src/{id}").into(),
-        },
-    )
-}
-
-impl Harness {
-    fn new(extensions: Vec<Found>) -> Self {
-        Self::with_config(extensions, Table::new())
-    }
-
-    fn with_config(extensions: Vec<Found>, config: Table) -> Self {
-        Self::with_history(extensions, config, History::default())
-    }
-
-    fn with_history(extensions: Vec<Found>, config: Table, history: History) -> Self {
-        let now = Instant::now();
-        let launches = Launches::default();
-        let outputs = Outputs::default();
-        let saved = Saved::default();
-        let daemon = Daemon::new(
-            extensions,
-            config,
-            history,
-            launches.clone(),
-            outputs.clone(),
-            saved.clone(),
-            now,
-        );
-        Harness {
-            daemon,
-            now,
-            launches,
-            outputs,
-            saved,
-            next_front_end: 0,
-        }
-    }
-
-    fn event(&mut self, event: Event) {
-        self.daemon.handle(event, self.now);
-    }
-
-    fn advance(&mut self, by: Duration) {
-        self.now += by;
-        self.daemon.tick(self.now);
-    }
-
-    /// Completes the handshake of the latest launch of `extension`.
-    fn up(&mut self, extension: usize) -> Ext {
-        self.up_with_room(extension, OUTBOX)
-    }
-
-    /// Like `up`, with room for only `room` messages the Extension hasn't read.
-    fn up_with_room(&mut self, extension: usize, room: usize) -> Ext {
-        let id = ExtensionId(extension);
-        let generation = self
-            .launches
-            .0
-            .borrow()
-            .iter()
-            .rev()
-            .find(|(ext, _)| *ext == id)
-            .expect("the extension was never started")
-            .1;
-        let (tx, rx) = mpsc::sync_channel(room);
-        self.event(Event::ExtensionUp {
-            extension: id,
-            generation,
-            sender: tx,
-        });
-        Ext { id, generation, rx }
-    }
-
-    fn send(&mut self, ext: &Ext, message: FromExtension) {
-        self.event(Event::FromExtension {
-            extension: ext.id,
-            generation: ext.generation,
-            message,
-        });
-    }
-
-    fn add(&mut self, ext: &Ext, items: Vec<Item>) {
-        self.send(ext, FromExtension::AddItems { items });
-    }
-
-    fn down(&mut self, ext: &Ext) {
-        self.event(Event::ExtensionDown {
-            extension: ext.id,
-            generation: ext.generation,
-        });
-    }
-
-    fn front_end(&mut self) -> FrontEnd {
-        self.front_end_with_room(OUTBOX)
-    }
-
-    /// A Front end with room for only `room` messages it hasn't read.
-    fn front_end_with_room(&mut self, room: usize) -> FrontEnd {
-        let id = FrontEndId(self.next_front_end);
-        self.next_front_end += 1;
-        let (tx, rx) = mpsc::sync_channel(room);
-        let closed = Arc::new(AtomicBool::new(false));
-        let flag = Arc::clone(&closed);
-        self.event(Event::FrontEndUp {
-            front_end: id,
-            sender: tx,
-            disconnect: Box::new(move || flag.store(true, Ordering::SeqCst)),
-        });
-        let front_end = FrontEnd { id, rx, closed };
-        front_end.drain();
-        front_end
-    }
-
-    fn front_end_sends(&mut self, front_end: &FrontEnd, message: FromFrontEnd) {
-        self.event(Event::FromFrontEnd {
-            front_end: front_end.id,
-            message,
-        });
-    }
-
-    fn query(&mut self, front_end: &FrontEnd, text: &str) -> Vec<ShownResult> {
-        self.front_end_sends(front_end, FromFrontEnd::Query { text: text.into() });
-        front_end.results().expect("a query is always answered")
-    }
-}
-
-impl Ext {
-    fn drain(&self) -> Vec<ToExtension> {
-        self.rx.try_iter().collect()
-    }
-}
-
-impl FrontEnd {
-    fn drain(&self) -> Vec<ToFrontEnd> {
-        self.rx.try_iter().collect()
-    }
-
-    /// The latest Results sent, if any were.
-    fn results(&self) -> Option<Vec<ShownResult>> {
-        self.drain()
-            .into_iter()
-            .rev()
-            .find_map(|message| match message {
-                ToFrontEnd::Results { results } => Some(results),
-                _ => None,
-            })
-    }
-}
-
-fn titles(rows: &[ShownResult]) -> Vec<&str> {
-    rows.iter().map(|row| row.item.title.as_str()).collect()
-}
 
 #[test]
 fn indexed_items_are_found_by_a_fuzzy_query_best_match_first() {
@@ -430,7 +163,7 @@ fn a_late_result_goes_below_the_visible_rows_however_well_it_scores() {
         &web,
         FromExtension::LiveResults {
             live_query: id,
-            results: vec![live("perfect", 1.0, false)],
+            results: vec![live("rust", 1.0, false)],
             done: true,
         },
     );
@@ -441,7 +174,7 @@ fn a_late_result_goes_below_the_visible_rows_however_well_it_scores() {
         titles[..2].join(","),
         shown.split(',').take(2).collect::<Vec<_>>().join(",")
     );
-    assert_eq!(titles[2], "perfect", "first row below the visible ones");
+    assert_eq!(titles[2], "rust", "first row below the visible ones");
 }
 
 #[test]
@@ -556,23 +289,6 @@ fn runs(ext: &Ext) -> Vec<(u64, String, ItemRef)> {
             _ => None,
         })
         .collect()
-}
-
-fn run(h: &mut Harness, ui: &FrontEnd, owner: &str, id: &str, by: &str, action: &str) {
-    h.front_end_sends(
-        ui,
-        FromFrontEnd::RunAction {
-            result: ResultRef {
-                extension: owner.into(),
-                id: id.into(),
-            },
-            action: ActionRef {
-                extension: by.into(),
-                id: action.into(),
-            },
-            arguments: BTreeMap::new(),
-        },
-    );
 }
 
 #[test]
@@ -1041,13 +757,13 @@ fn rows_scrolled_past_are_protected_like_the_ones_on_screen() {
         &web,
         FromExtension::LiveResults {
             live_query: id,
-            results: vec![live("perfect", 1.0, false)],
+            results: vec![live("rust", 1.0, false)],
             done: true,
         },
     );
     assert_eq!(
         titles(&ui.results().unwrap()),
-        ["g rust a", "g rust bb", "perfect", "g rust ccc"]
+        ["g rust a", "g rust bb", "rust", "g rust ccc"]
     );
 }
 
@@ -1185,9 +901,10 @@ fn three_picks_of_a_result_for_a_query_make_it_that_querys_learned_choice() {
     let apps = h.up(0);
     h.add(&apps, launcher_apps());
     let ui = h.front_end();
-    // Files is picked the most, so Frecency alone keeps it first for "fi".
+    // Files is picked the most, so Frecency alone keeps it first for "fi". It
+    // is picked after a query that teaches "fi" nothing.
     for _ in 0..5 {
-        pick(&mut h, &ui, "files", "apps", "files");
+        pick(&mut h, &ui, "fles", "apps", "files");
     }
     assert_eq!(first(&mut h, &ui, "fi"), "Files");
 
@@ -1206,18 +923,23 @@ fn three_picks_of_a_result_for_a_query_make_it_that_querys_learned_choice() {
     assert_eq!(
         first(&mut h, &ui, "f"),
         "Files",
-        "another query learned nothing"
+        "learned 5 times for \"fles\", which starts with \"f\" too"
+    );
+    assert_eq!(
+        first(&mut h, &ui, "fl"),
+        "Files",
+        "a query that isn't a prefix learns nothing"
     );
 }
 
 #[test]
-fn three_picks_of_another_result_replace_a_learned_choice() {
+fn two_picks_of_another_result_replace_a_learned_choice() {
     let mut h = Harness::new(vec![plain("apps")]);
     let apps = h.up(0);
     h.add(&apps, launcher_apps());
     let ui = h.front_end();
     for _ in 0..5 {
-        pick(&mut h, &ui, "files", "apps", "files");
+        pick(&mut h, &ui, "fles", "apps", "files");
     }
     for _ in 0..3 {
         pick(&mut h, &ui, "fi", "apps", "firefox");
@@ -1225,16 +947,15 @@ fn three_picks_of_another_result_replace_a_learned_choice() {
     assert_eq!(first(&mut h, &ui, "fi"), "Firefox");
 
     pick(&mut h, &ui, "fi", "apps", "fish");
+    assert_eq!(first(&mut h, &ui, "fi"), "Firefox", "one stray pick");
     pick(&mut h, &ui, "fi", "apps", "fish");
-    assert_eq!(first(&mut h, &ui, "fi"), "Firefox");
-    pick(&mut h, &ui, "fi", "apps", "fish");
-    // Fish and Firefox were picked as often, and Files more, so only a
-    // Learned choice puts Fish first.
+    // Files was picked more than either, so only a Learned choice puts Fish
+    // first.
     assert_eq!(first(&mut h, &ui, "fi"), "Fish");
 }
 
 #[test]
-fn frecency_lifts_a_picked_result_and_decays_over_time() {
+fn frecency_breaks_a_tie_and_a_pick_only_ever_weakens() {
     let mut h = Harness::new(vec![plain("apps")]);
     let apps = h.up(0);
     h.add(&apps, launcher_apps());
@@ -1251,7 +972,14 @@ fn frecency_lifts_a_picked_result_and_decays_over_time() {
     h.advance(Duration::from_secs(7 * 24 * 60 * 60));
     assert_eq!(first(&mut h, &ui, "fi"), "Firefox", "a week later");
     h.advance(Duration::from_secs(60 * 24 * 60 * 60));
-    assert_eq!(first(&mut h, &ui, "fi"), "Fish", "two months later");
+    assert_eq!(first(&mut h, &ui, "fi"), "Firefox", "two months later");
+
+    pick(&mut h, &ui, "fish", "apps", "fish");
+    assert_eq!(
+        first(&mut h, &ui, "fi"),
+        "Fish",
+        "a recent pick counts more"
+    );
 }
 
 #[test]
@@ -1268,7 +996,7 @@ fn frecency_and_learned_choices_apply_to_live_query_results() {
             FromExtension::LiveResults {
                 live_query: id,
                 results: vec![
-                    live("Rust book", 0.9, false),
+                    live("Rust", 0.9, false),
                     live("Rust lang", 0.5, false),
                     live("Rustup", 0.4, false),
                 ],
@@ -1280,17 +1008,20 @@ fn frecency_and_learned_choices_apply_to_live_query_results() {
             .map(str::to_owned)
             .collect()
     };
-    assert_eq!(search(&mut h), ["Rust book", "Rust lang", "Rustup"]);
+    assert_eq!(search(&mut h), ["Rust", "Rust lang", "Rustup"]);
     run(&mut h, &ui, "web", "Rustup", "web", "open");
     assert_eq!(
         search(&mut h),
-        ["Rust book", "Rustup", "Rust lang"],
-        "Frecency lifts it"
+        ["Rust", "Rustup", "Rust lang"],
+        "Frecency breaks the tie, under the exact match"
     );
     run(&mut h, &ui, "web", "Rustup", "web", "open");
-    assert_eq!(search(&mut h)[0], "Rust book");
     run(&mut h, &ui, "web", "Rustup", "web", "open");
-    assert_eq!(search(&mut h)[0], "Rustup", "the Learned choice");
+    assert_eq!(
+        search(&mut h),
+        ["Rustup", "Rust", "Rust lang"],
+        "the Learned choice, picked over the exact match"
+    );
 }
 
 #[test]
@@ -1337,12 +1068,6 @@ fn the_clear_history_action_forgets_every_pick() {
 fn no_extension_may_take_the_daemons_own_name() {
     let manifest = Manifest::from_toml("name = \"kotodama\"\ncommand = [\"x\"]").unwrap();
     assert!(Found::new(manifest, PathBuf::from("/ext")).is_err());
-}
-
-fn config(toml: &str) -> Table {
-    let dir = tempfile::tempdir().unwrap();
-    std::fs::write(dir.path().join("a.toml"), toml).unwrap();
-    kotodamad::config::load(&[dir.path().to_owned()]).unwrap()
 }
 
 #[test]
@@ -1409,7 +1134,7 @@ fn a_quicklink_keyword_takes_the_rest_of_the_query_into_its_template() {
     let rows = h.query(&ui, "yt cats & dogs/ü");
     assert_eq!(
         (rows[0].extension.as_str(), rows[0].item.title.as_str()),
-        ("kotodama", "Search YouTube")
+        ("kotodama", "Search YouTube for “cats & dogs/ü”")
     );
     run(&mut h, &ui, "kotodama", "quicklink:yt", "kotodama", "open");
     assert!(ui.drain().contains(&ToFrontEnd::Close));
@@ -1439,8 +1164,8 @@ fn a_quicklink_keyword_takes_the_rest_of_the_query_into_its_template() {
     );
     assert_eq!(
         titles(&h.query(&ui, "gh extra")),
-        Vec::<&str>::new(),
-        "a Quicklink without a query takes no more words"
+        ["gh"],
+        "a Quicklink without a query ignores more words"
     );
 }
 
@@ -1468,12 +1193,11 @@ fn picks_of_a_result_count_towards_a_learned_choice_even_when_others_come_betwee
     h.add(&apps, launcher_apps());
     let ui = h.front_end();
     for _ in 0..5 {
-        pick(&mut h, &ui, "files", "apps", "files");
+        pick(&mut h, &ui, "fles", "apps", "files");
     }
     pick(&mut h, &ui, "fi", "apps", "firefox");
     pick(&mut h, &ui, "fi", "apps", "fish");
     pick(&mut h, &ui, "fi", "apps", "firefox");
-    pick(&mut h, &ui, "fi", "apps", "files");
     assert_eq!(first(&mut h, &ui, "fi"), "Files");
     pick(&mut h, &ui, "fi", "apps", "firefox");
     assert_eq!(first(&mut h, &ui, "fi"), "Firefox");

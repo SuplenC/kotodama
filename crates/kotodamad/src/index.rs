@@ -4,10 +4,11 @@
 use std::collections::HashMap;
 
 use kotodama_protocol::Item;
+use nucleo_matcher::Matcher;
 use nucleo_matcher::pattern::Pattern;
-use nucleo_matcher::{Matcher, Utf32String};
 
 use crate::daemon::ExtensionId;
+use crate::rank::{Filter, Haystack, Matched};
 
 /// Where an Indexed item lives. Stable until the Item is removed.
 pub type Slot = u32;
@@ -16,40 +17,6 @@ pub struct Entry {
     pub extension: ExtensionId,
     pub item: Item,
     pub haystack: Haystack,
-}
-
-/// What nucleo searches in an Item, converted once on the way in.
-pub struct Haystack {
-    pub title: Utf32String,
-    /// The keyword and keywords, joined by spaces; empty if there are none.
-    words: Utf32String,
-}
-
-impl Haystack {
-    pub fn new(item: &Item) -> Self {
-        let mut words = String::new();
-        for word in item.keyword.iter().chain(&item.keywords) {
-            if !words.is_empty() {
-                words.push(' ');
-            }
-            words.push_str(word);
-        }
-        Haystack {
-            title: Utf32String::from(item.title.as_str()),
-            words: Utf32String::from(words),
-        }
-    }
-
-    /// How well the Item matches: its title's score, or failing that its
-    /// words'. `None` if neither matches.
-    pub fn score(&self, pattern: &Pattern, matcher: &mut Matcher) -> Option<u32> {
-        let title = pattern.score(self.title.slice(..), matcher);
-        if self.words.is_empty() {
-            return title;
-        }
-        let words = pattern.score(self.words.slice(..), matcher);
-        title.max(words)
-    }
 }
 
 impl Entry {
@@ -68,6 +35,8 @@ pub struct Index {
     free: Vec<Slot>,
     /// Each Extension's Items by id.
     ids: Vec<HashMap<String, Slot>>,
+    /// The Items that have a keyword, by it in lowercase.
+    keywords: HashMap<String, Vec<Slot>>,
     /// Bumped on every change, so a search narrowed from an earlier one knows
     /// when it can't be trusted.
     version: u64,
@@ -93,32 +62,69 @@ impl Index {
     /// Adds an Item, or replaces the one with the same id.
     pub fn add(&mut self, extension: ExtensionId, item: Item) {
         self.version += 1;
-        let ids = &mut self.ids[extension.0];
-        if let Some(&slot) = ids.get(&item.id) {
-            self.slots[slot as usize] = Some(Entry::new(extension, item));
-            return;
-        }
-        let id = item.id.clone();
-        let entry = Some(Entry::new(extension, item));
-        let slot = match self.free.pop() {
-            Some(slot) => {
-                self.slots[slot as usize] = entry;
+        let keyword = item.keyword.as_deref().map(str::to_lowercase);
+        let slot = match self.ids[extension.0].get(&item.id) {
+            Some(&slot) => {
+                self.unkey(slot);
+                self.slots[slot as usize] = Some(Entry::new(extension, item));
                 slot
             }
             None => {
-                self.slots.push(entry);
-                (self.slots.len() - 1) as Slot
+                let id = item.id.clone();
+                let entry = Some(Entry::new(extension, item));
+                let slot = match self.free.pop() {
+                    Some(slot) => {
+                        self.slots[slot as usize] = entry;
+                        slot
+                    }
+                    None => {
+                        self.slots.push(entry);
+                        (self.slots.len() - 1) as Slot
+                    }
+                };
+                self.ids[extension.0].insert(id, slot);
+                slot
             }
         };
-        ids.insert(id, slot);
+        if let Some(keyword) = keyword {
+            self.keywords.entry(keyword).or_default().push(slot);
+        }
     }
 
     pub fn remove(&mut self, extension: ExtensionId, id: &str) {
         if let Some(slot) = self.ids[extension.0].remove(id) {
             self.version += 1;
-            self.slots[slot as usize] = None;
-            self.free.push(slot);
+            self.empty(slot);
         }
+    }
+
+    /// Frees a slot.
+    fn empty(&mut self, slot: Slot) {
+        self.unkey(slot);
+        self.slots[slot as usize] = None;
+        self.free.push(slot);
+    }
+
+    /// Forgets the keyword of the Item in `slot`.
+    fn unkey(&mut self, slot: Slot) {
+        let Some(keyword) = self
+            .entry(slot)
+            .and_then(|entry| entry.item.keyword.as_deref())
+        else {
+            return;
+        };
+        let keyword = keyword.to_lowercase();
+        if let Some(slots) = self.keywords.get_mut(&keyword) {
+            slots.retain(|&other| other != slot);
+            if slots.is_empty() {
+                self.keywords.remove(&keyword);
+            }
+        }
+    }
+
+    /// The Items whose keyword is `keyword`, given in lowercase.
+    pub fn keyed(&self, keyword: &str) -> &[Slot] {
+        self.keywords.get(keyword).map_or(&[], Vec::as_slice)
     }
 
     /// Removes every Item of one Extension. Returns whether there were any.
@@ -129,8 +135,7 @@ impl Index {
         }
         self.version += 1;
         for slot in ids.into_values() {
-            self.slots[slot as usize] = None;
-            self.free.push(slot);
+            self.empty(slot);
         }
         true
     }
@@ -152,19 +157,21 @@ impl Index {
 
     /// Scores every Item against `pattern`, or only the slots in `within` when
     /// the caller knows nothing else can match. Appends `(slot, score)` for
-    /// each match to `out`, in slot order if `within` is.
+    /// each match, with what matched, to `out`, in slot order if `within` is.
+    /// `filter` is as [`Haystack::score`] takes it.
     pub fn search(
         &self,
         pattern: &Pattern,
         matcher: &mut Matcher,
+        filter: Filter,
         within: Option<&[Slot]>,
-        out: &mut Vec<(Slot, u32)>,
+        out: &mut Vec<(Slot, u32, Matched)>,
     ) {
         let mut score = |slot: Slot| {
             if let Some(entry) = self.entry(slot)
-                && let Some(score) = entry.haystack.score(pattern, matcher)
+                && let Some((score, matched)) = entry.haystack.score(pattern, matcher, filter)
             {
-                out.push((slot, score));
+                out.push((slot, score, matched));
             }
         };
         match within {

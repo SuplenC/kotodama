@@ -11,6 +11,7 @@ mod index;
 pub mod keywords;
 mod link;
 pub mod paths;
+pub mod rank;
 mod server;
 
 use std::sync::mpsc::{self, RecvTimeoutError};
