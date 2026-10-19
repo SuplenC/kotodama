@@ -9,6 +9,7 @@ use std::time::Instant;
 
 use criterion::{Criterion, criterion_group, criterion_main};
 use kotodama_protocol::{FromExtension, FromFrontEnd, Manifest, Table, ToFrontEnd, WireFormat};
+use kotodamad::clock::{DAY_SECS, When};
 use kotodamad::daemon::{Daemon, Desktop, Event, ExtensionId, FrontEndId, Launcher, Output};
 use kotodamad::discovery::Found;
 use kotodamad::history::{History, Store};
@@ -42,13 +43,37 @@ struct Setup {
 
 impl Setup {
     fn new() -> Self {
+        Self::with_history(History::default())
+    }
+
+    /// With 2000 Items picked, the most the History keeps, at every time of
+    /// day over a month.
+    fn picked() -> Self {
+        let mut history = History::default();
+        let start = std::time::SystemTime::now()
+            .duration_since(std::time::SystemTime::UNIX_EPOCH)
+            .unwrap()
+            .as_secs()
+            - 30 * DAY_SECS;
+        for n in 0..2000u64 {
+            let at = start + n * 30 * DAY_SECS / 2000;
+            let when = When {
+                at,
+                time_of_day: (at % DAY_SECS) as u32,
+            };
+            history.touch("apps", &format!("item-{}", n * 5), when);
+        }
+        Self::with_history(history)
+    }
+
+    fn with_history(history: History) -> Self {
         let manifest = Manifest::from_toml("name = \"apps\"\ncommand = [\"x\"]").unwrap();
         let found = Found::new(manifest, PathBuf::from("/")).unwrap();
         let now = Instant::now();
         let mut daemon = Daemon::new(
             vec![found],
             Table::new(),
-            History::default(),
+            history,
             Nothing,
             Nothing,
             Nothing,
@@ -133,6 +158,11 @@ fn bench(c: &mut Criterion) {
             len = len % word.len() + 1;
             black_box(setup.query(&word[..len]))
         })
+    });
+    // Opening the menu: the Results most used at this time of day.
+    let mut setup = Setup::picked();
+    group.bench_function("empty_query_2k_picked", |b| {
+        b.iter(|| black_box(setup.query("")))
     });
     group.finish();
 }

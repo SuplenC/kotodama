@@ -2,10 +2,12 @@
 //! and serves Front ends on a Unix socket.
 
 mod arguments;
+pub mod clock;
 pub mod config;
 pub mod daemon;
 pub mod desktop;
 pub mod discovery;
+pub mod empty_query;
 pub mod history;
 mod host;
 mod index;

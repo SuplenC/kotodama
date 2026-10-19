@@ -14,6 +14,7 @@ use std::sync::mpsc::{self, Receiver};
 use std::time::{Duration, Instant};
 
 use kotodama_protocol::*;
+use kotodamad::clock::{Clock, DAY_SECS};
 use kotodamad::daemon::{Daemon, Desktop, Event, ExtensionId, FrontEndId, Launcher, Output};
 use kotodamad::discovery::Found;
 use kotodamad::history::{History, Store};
@@ -78,8 +79,12 @@ impl Store for Saved {
     }
 }
 
+/// When every test's Daemon starts: 2026-10-19 at 09:00 UTC.
+pub const START: u64 = 1_792_400_400;
+
 pub struct Harness {
     pub daemon: Daemon<Launches, Outputs, Saved>,
+    pub started: Instant,
     pub now: Instant,
     pub launches: Launches,
     pub outputs: Outputs,
@@ -167,7 +172,7 @@ impl Harness {
         let launches = Launches::default();
         let outputs = Outputs::default();
         let saved = Saved::default();
-        let daemon = Daemon::new(
+        let mut daemon = Daemon::new(
             extensions,
             config,
             history,
@@ -176,8 +181,10 @@ impl Harness {
             saved.clone(),
             now,
         );
+        daemon.set_clock(Clock::starting_at(START));
         Harness {
             daemon,
+            started: now,
             now,
             launches,
             outputs,
@@ -193,6 +200,19 @@ impl Harness {
     pub fn advance(&mut self, by: Duration) {
         self.now += by;
         self.daemon.tick(self.now);
+    }
+
+    /// Waits for the next `hour` o'clock, in UTC, the Daemon's time zone in
+    /// tests.
+    pub fn advance_to(&mut self, hour: u64) {
+        let time_of_day = (START + self.elapsed().as_secs()) % DAY_SECS;
+        let wait = (hour * 3600 + DAY_SECS - time_of_day) % DAY_SECS;
+        self.advance(Duration::from_secs(if wait == 0 { DAY_SECS } else { wait }));
+    }
+
+    /// How long the Daemon has run.
+    pub fn elapsed(&self) -> Duration {
+        self.now.duration_since(self.started)
     }
 
     /// Completes the handshake of the latest launch of `extension`.

@@ -10,7 +10,7 @@
 use std::cell::Cell;
 use std::collections::{BTreeMap, HashMap};
 use std::sync::mpsc::{SyncSender, TrySendError};
-use std::time::{Duration, Instant, SystemTime};
+use std::time::{Duration, Instant};
 
 use kotodama_protocol::{
     Action, ActionRef, CatalogEntry, Clipboard, FromExtension, FromFrontEnd, Item, ItemKind, Job,
@@ -21,9 +21,11 @@ use nucleo_matcher::pattern::{CaseMatching, Normalization, Pattern};
 use nucleo_matcher::{Config, Matcher, Utf32Str};
 
 use crate::arguments;
+use crate::clock::{Clock, When};
 use crate::config::extension_table;
 use crate::discovery::Found;
-use crate::history::{History, IDENTITIES, Picks, ResultKey, Settings, Store, query_key};
+use crate::empty_query::EmptyQuery;
+use crate::history::{Habit, History, IDENTITIES, Picks, ResultKey, Settings, Store, query_key};
 use crate::index::{Index, Slot};
 use crate::keywords::{self, Keywords};
 use crate::rank::{self, Haystack, Matched, Tier, Tiers};
@@ -360,6 +362,9 @@ struct Session {
     /// The Result an Alias named, and the Alias: picking it counts for the
     /// Alias alone.
     via_alias: Option<(Source, String)>,
+    /// Whether it has sent a query. A Front end that only passes on commands
+    /// never does, and gets no Results.
+    searched: bool,
     update: Update,
 }
 
@@ -424,6 +429,25 @@ fn clear_history() -> Item {
             shortcut: None,
             arguments: Vec::new(),
         }],
+    }
+}
+
+/// A Result the empty query may show as one of the most used.
+struct MostUsed {
+    source: Source,
+    used: Habit,
+    /// How much it was picked through itself rather than its Identity: of
+    /// the Results of one Identity, the one picked through most stands for it.
+    direct: f64,
+}
+
+impl MostUsed {
+    fn new(source: Source) -> Self {
+        MostUsed {
+            source,
+            used: Habit::default(),
+            direct: 0.0,
+        }
     }
 }
 
@@ -525,10 +549,11 @@ pub struct Daemon<L, D, S> {
     desktop: D,
     store: S,
     history: History,
-    /// Wall-clock seconds at `started`, so the History's times follow `now`.
-    epoch: u64,
+    /// The wall clock the History's times come from.
+    clock: Clock,
     started: Instant,
     keywords: Keywords,
+    empty_query: EmptyQuery,
     /// One per Quicklink, then the clear-history Item.
     own: Vec<Own>,
     /// The picked Indexed items, by slot, as of the index and History
@@ -551,9 +576,6 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
         store: S,
         now: Instant,
     ) -> Self {
-        let epoch = SystemTime::now()
-            .duration_since(SystemTime::UNIX_EPOCH)
-            .map_or(0, |since| since.as_secs());
         let mut daemon = Daemon {
             index: Index::new(found.len()),
             extensions: found
@@ -578,9 +600,10 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             desktop,
             store,
             history,
-            epoch,
+            clock: Clock::system(),
             started: now,
             keywords: Keywords::default(),
+            empty_query: EmptyQuery::default(),
             own: Vec::new(),
             frecent: Vec::new(),
             frecent_versions: None,
@@ -590,6 +613,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
         };
         daemon.load_keywords();
         daemon.load_settings();
+        daemon.empty_query = EmptyQuery::from_config(&daemon.config);
         for id in 0..daemon.extensions.len() {
             daemon.start(ExtensionId(id), now);
         }
@@ -605,9 +629,20 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
         &self.history
     }
 
+    /// Replaces the wall clock, which starts as the system's.
+    pub fn set_clock(&mut self, clock: Clock) {
+        self.clock = clock;
+        self.mark_late();
+    }
+
+    /// The wall-clock time at `now`.
+    fn when(&self, now: Instant) -> When {
+        self.clock.when(now.saturating_duration_since(self.started))
+    }
+
     /// Seconds since the Unix epoch at `now`.
     fn wall(&self, now: Instant) -> u64 {
-        self.epoch + now.saturating_duration_since(self.started).as_secs()
+        self.when(now).at
     }
 
     pub fn handle(&mut self, event: Event, now: Instant) {
@@ -948,8 +983,20 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
 
     fn mark_late(&mut self) {
         for session in self.sessions.values_mut() {
-            if !session.query.is_empty() {
+            if session.searched {
                 session.update = session.update.max(Update::Late);
+            }
+        }
+    }
+
+    /// Ranks the empty query again in every session showing it but `except`,
+    /// for what the History learned or the time of day now: from scratch
+    /// for a menu opening, and otherwise as a late update, which keeps the
+    /// rows on screen where they are.
+    fn refresh_empty(&mut self, update: Update, except: Option<FrontEndId>) {
+        for (&id, session) in &mut self.sessions {
+            if session.searched && session.query.is_empty() && Some(id) != except {
+                session.update = session.update.max(update);
             }
         }
     }
@@ -1084,6 +1131,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             live: self.extensions.iter().map(|_| Live::default()).collect(),
             shown: Vec::new(),
             via_alias: None,
+            searched: false,
             update: Update::None,
         };
         session.send(ToFrontEnd::Status {
@@ -1152,11 +1200,19 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
                 }
             }
             FromFrontEnd::Closed => self.closed(Some(id)),
-            FromFrontEnd::Open { query, view } => self.broadcast_from(id, || ToFrontEnd::Open {
-                query: query.clone(),
-                view: view.clone(),
-            }),
-            FromFrontEnd::Toggle => self.broadcast_from(id, || ToFrontEnd::Toggle),
+            // The menu may open on the empty query, which may have been
+            // ranked hours ago.
+            FromFrontEnd::Open { query, view } => {
+                self.refresh_empty(Update::Fresh, Some(id));
+                self.broadcast_from(id, || ToFrontEnd::Open {
+                    query: query.clone(),
+                    view: view.clone(),
+                });
+            }
+            FromFrontEnd::Toggle => {
+                self.refresh_empty(Update::Fresh, Some(id));
+                self.broadcast_from(id, || ToFrontEnd::Toggle);
+            }
         }
     }
 
@@ -1301,6 +1357,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             .sum();
         session.key = query_key(&text);
         session.query = text;
+        session.searched = true;
         session.update = Update::Fresh;
         for (ext_id, ext) in self.extensions.iter().enumerate() {
             let live = &mut session.live[ext_id];
@@ -1478,7 +1535,8 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
         action: &ActionRef,
         now: Instant,
     ) {
-        let at = self.wall(now);
+        let when = self.when(now);
+        let at = when.at;
         let Some(session) = self.sessions.get(&front_end) else {
             return;
         };
@@ -1504,7 +1562,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             .as_ref()
             .filter(|(named, _)| Some(*named) == source)
         {
-            self.history.touch(OWN, &alias_id(alias), at);
+            self.history.touch(OWN, &alias_id(alias), when);
         } else {
             let key = source
                 .and_then(|source| self.item(session, source))
@@ -1526,20 +1584,26 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
                 .unwrap_or_default();
             let (extension, id) = (key.0.to_owned(), key.1.to_owned());
             let query = session.key.clone();
-            self.history.pick(&extension, &id, &query, &above, at);
+            self.history.pick(&extension, &id, &query, &above, when);
             if extension == IDENTITIES {
                 // The Result itself too, so it goes ahead of the same thing
                 // from other Extensions.
-                self.history.touch(&result.extension, &result.id, at);
+                self.history.touch(&result.extension, &result.id, when);
             }
         }
         self.store.save(&self.history);
+        self.refresh_empty(Update::Late, None);
     }
 
     fn set_config(&mut self, config: Table) {
         self.config = config;
         self.load_keywords();
         self.load_settings();
+        let empty_query = EmptyQuery::from_config(&self.config);
+        if empty_query != self.empty_query {
+            self.empty_query = empty_query;
+            self.mark_late();
+        }
         for ext in &mut self.extensions {
             if ext.sender().is_none() {
                 continue;
@@ -1699,35 +1763,58 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
         let fresh = session.update == Update::Fresh;
         session.update = Update::None;
 
+        if session.query.is_empty() {
+            let mut ranked = self.empty_query(&session, now);
+            if !fresh {
+                // The rows on screen stay put, as for any query.
+                let visible: Vec<Source> = session
+                    .shown
+                    .iter()
+                    .take(session.rows)
+                    .map(|&(source, _)| source)
+                    .filter(|source| ranked.contains(source))
+                    .collect();
+                ranked.retain(|source| !visible.contains(source));
+                ranked.splice(0..0, visible);
+            }
+            session.via_alias = None;
+            session.shown = ranked.iter().map(|&source| (source, false)).collect();
+            let results = ranked
+                .iter()
+                .filter_map(|&source| self.row(&session, source, None))
+                .collect();
+            session.send(ToFrontEnd::Results { results });
+            self.sessions.insert(id, session);
+            return;
+        }
+
         let mut candidates = Vec::new();
-        if !session.query.is_empty() {
-            self.scored.clear();
-            let within = session
-                .can_narrow(self.index.version())
-                .then_some(session.narrowed.as_slice());
-            self.index.search(
-                &session.pattern,
-                &mut self.matcher,
-                session.folded.filter(),
-                within,
-                &mut self.scored,
-            );
-            session.narrowed.clear();
-            session
-                .narrowed
-                .extend(self.scored.iter().map(|&(slot, ..)| slot));
-            session.narrowed_query.clone_from(&session.query);
-            session.narrowed_version = self.index.version();
-            session.narrowed_subtitles = session.folded.searches_subtitles();
-            for &(slot, score, matched) in &self.scored {
-                if let Some(entry) = self.index.entry(slot)
-                    && let Some(tier) =
-                        self.tiers
-                            .item(&entry.haystack, &entry.item, &session.folded, matched)
-                {
-                    let len = entry.haystack.title.len() as u32;
-                    candidates.push(Candidate::new(Source::Indexed(slot), tier, score, len));
-                }
+        self.scored.clear();
+        let within = session
+            .can_narrow(self.index.version())
+            .then_some(session.narrowed.as_slice());
+        self.index.search(
+            &session.pattern,
+            &mut self.matcher,
+            session.folded.filter(),
+            within,
+            &mut self.scored,
+        );
+        session.narrowed.clear();
+        session
+            .narrowed
+            .extend(self.scored.iter().map(|&(slot, ..)| slot));
+        session.narrowed_query.clone_from(&session.query);
+        session.narrowed_version = self.index.version();
+        session.narrowed_subtitles = session.folded.searches_subtitles();
+        for &(slot, score, matched) in &self.scored {
+            if let Some(entry) = self.index.entry(slot)
+                && let Some(tier) =
+                    self.tiers
+                        .item(&entry.haystack, &entry.item, &session.folded, matched)
+            {
+                let len = entry.haystack.title.len() as u32;
+                candidates.push(Candidate::new(Source::Indexed(slot), tier, score, len));
             }
         }
         // Up to here the candidates are in slot order.
@@ -1754,19 +1841,17 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
                 candidates.push(candidate);
             }
         }
-        if !session.query.is_empty() {
-            for (n, own) in self.own.iter().enumerate() {
-                let filter = session.folded.filter();
-                if let Some((score, matched)) =
-                    own.haystack
-                        .score(&session.pattern, &mut self.matcher, filter)
-                    && let Some(tier) =
-                        self.tiers
-                            .item(&own.haystack, &own.item, &session.folded, matched)
-                {
-                    let len = own.haystack.title.len() as u32;
-                    candidates.push(Candidate::new(Source::Own(n as u32), tier, score, len));
-                }
+        for (n, own) in self.own.iter().enumerate() {
+            let filter = session.folded.filter();
+            if let Some((score, matched)) =
+                own.haystack
+                    .score(&session.pattern, &mut self.matcher, filter)
+                && let Some(tier) =
+                    self.tiers
+                        .item(&own.haystack, &own.item, &session.folded, matched)
+            {
+                let len = own.haystack.title.len() as u32;
+                candidates.push(Candidate::new(Source::Own(n as u32), tier, score, len));
             }
         }
         let primary = self.learn(&mut session, &mut candidates, indexed, now);
@@ -1836,19 +1921,16 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
         if session.key.is_empty() {
             return None;
         }
-        let at = self.wall(now);
+        let when = self.when(now);
+        let at = when.at;
         if !self.history.is_empty() {
-            let Settings {
-                half_life_secs,
-                lift_threshold,
-                ..
-            } = *self.history.settings();
+            let settings = *self.history.settings();
             self.cache_frecent();
             for &(slot, picks, counts) in &self.frecent {
                 if let Ok(n) =
                     candidates[..indexed].binary_search_by_key(&Source::Indexed(slot), |c| c.source)
                 {
-                    let frecency = picks.frecency(at, half_life_secs);
+                    let frecency = picks.frecency(when, &settings);
                     if counts != Counts::Direct {
                         candidates[n].frecency = frecency;
                     }
@@ -1859,11 +1941,11 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             }
             for candidate in &mut candidates[indexed..] {
                 if let Some((extension, item)) = self.item(session, candidate.source) {
-                    (candidate.frecency, candidate.direct) = self.frecency(extension, item, at);
+                    (candidate.frecency, candidate.direct) = self.frecency(extension, item, when);
                 }
             }
             for candidate in candidates.iter_mut() {
-                if candidate.frecency >= lift_threshold {
+                if candidate.frecency >= settings.lift_threshold {
                     candidate.tier = rank::lift(candidate.tier);
                 }
             }
@@ -1886,7 +1968,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             named.push(Keyword {
                 source,
                 alias: true,
-                frecency: Some(self.history.frecency(OWN, &alias_id(keyword), at)),
+                frecency: Some(self.history.frecency(OWN, &alias_id(keyword), when)),
             });
             primary = alias.action.clone().map(|action| (source, action));
             session.via_alias = Some((source, keyword.clone()));
@@ -1928,7 +2010,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
                         session.max_score,
                         item.title.chars().count() as u32,
                     );
-                    (candidate.frecency, candidate.direct) = self.frecency(extension, item, at);
+                    (candidate.frecency, candidate.direct) = self.frecency(extension, item, when);
                     candidates.push(candidate);
                     candidates.len() - 1
                 }
@@ -1992,6 +2074,112 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             }
         }
         primary
+    }
+
+    /// What the empty query shows: the Results most used at this time of day,
+    /// then the config's menu, each thing once. The most used rank by their
+    /// picks near this time of day, then by all their picks; an Alias's
+    /// picks count for the Result it names. Of the Results of one Identity,
+    /// the one picked through most stands for it.
+    fn empty_query(&mut self, session: &Session, now: Instant) -> Vec<Source> {
+        let when = self.when(now);
+        let half_life = self.history.settings().half_life_secs;
+        let mut most: Vec<MostUsed> = Vec::new();
+        if self.empty_query.most_used > 0 && !self.history.is_empty() {
+            self.cache_frecent();
+            // In slot order, an Item's Identity's picks next to its own.
+            for &(slot, picks, counts) in &self.frecent {
+                let source = Source::Indexed(slot);
+                if most.last().is_none_or(|last| last.source != source) {
+                    most.push(MostUsed::new(source));
+                }
+                let entry = most.last_mut().expect("just pushed");
+                let used = picks.habit(when, half_life);
+                if counts != Counts::Direct {
+                    entry.used = used;
+                }
+                if counts != Counts::Shared {
+                    entry.direct = used.overall;
+                }
+            }
+            for (n, own) in self.own.iter().enumerate() {
+                if let Some(picks) = self.history.picks(OWN, &own.item.id) {
+                    most.push(MostUsed {
+                        used: picks.habit(when, half_life),
+                        ..MostUsed::new(Source::Own(n as u32))
+                    });
+                }
+            }
+            let mut aliases: Vec<_> = self.keywords.aliases.iter().collect();
+            aliases.sort_unstable_by_key(|&(keyword, _)| keyword);
+            for (keyword, alias) in aliases {
+                let Some(picks) = self.history.picks(OWN, &alias_id(keyword)) else {
+                    continue;
+                };
+                let Some(source) = self.source_of(session, &alias.extension, &alias.item) else {
+                    continue;
+                };
+                let used = picks.habit(when, half_life);
+                match most.iter_mut().find(|entry| entry.source == source) {
+                    Some(entry) => entry.used = entry.used.and(used),
+                    None => most.push(MostUsed {
+                        used,
+                        ..MostUsed::new(source)
+                    }),
+                }
+            }
+        }
+
+        let identity = |source: Source| {
+            self.item(session, source)
+                .and_then(|(_, item)| item.identity.as_deref())
+        };
+        let mut stands_for: HashMap<&str, usize> = HashMap::new();
+        let mut keep = vec![true; most.len()];
+        for n in 0..most.len() {
+            let Some(id) = identity(most[n].source) else {
+                continue;
+            };
+            let Some(&other) = stands_for.get(id) else {
+                stands_for.insert(id, n);
+                continue;
+            };
+            let (best, rest) = if most[n].direct > most[other].direct {
+                (n, other)
+            } else {
+                (other, n)
+            };
+            // They share their Identity's picks, but an Alias may name one.
+            most[best].used = most[best].used.max(most[rest].used);
+            keep[rest] = false;
+            stands_for.insert(id, best);
+        }
+        let mut kept = keep.iter();
+        most.retain(|_| *kept.next().expect("one per Result"));
+        let rank = |a: &MostUsed, b: &MostUsed| a.used.rank(&b.used).then(a.source.cmp(&b.source));
+        let wanted = self.empty_query.most_used;
+        if most.len() > wanted && wanted > 0 {
+            most.select_nth_unstable_by(wanted - 1, rank);
+        }
+        most.truncate(wanted);
+        most.sort_unstable_by(rank);
+
+        let mut shown: Vec<Source> = most.into_iter().map(|entry| entry.source).collect();
+        for (extension, id) in &self.empty_query.menu {
+            if shown.len() >= MAX_RESULTS {
+                break;
+            }
+            let Some(source) = self.source_of(session, extension, id) else {
+                continue;
+            };
+            let same = |&shown: &Source| {
+                shown == source || identity(shown).is_some_and(|id| identity(source) == Some(id))
+            };
+            if !shown.iter().any(same) {
+                shown.push(source);
+            }
+        }
+        shown
     }
 
     /// Rebuilds the list of picked Indexed items if the index or the History
@@ -2109,10 +2297,10 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
 
     /// A Result's Frecency, shared with every Result of its Identity, and
     /// that of picks of the Result itself.
-    fn frecency(&self, extension: &str, item: &Item, at: u64) -> (f64, f64) {
-        let own = self.history.frecency(extension, &item.id, at);
+    fn frecency(&self, extension: &str, item: &Item, when: When) -> (f64, f64) {
+        let own = self.history.frecency(extension, &item.id, when);
         match &item.identity {
-            Some(identity) => (self.history.frecency(IDENTITIES, identity, at), own),
+            Some(identity) => (self.history.frecency(IDENTITIES, identity, when), own),
             None => (own, own),
         }
     }
