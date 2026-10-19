@@ -53,6 +53,7 @@ pub fn run(paths: &Paths) -> Result<(), String> {
         config,
         host::Processes::new(events_tx),
         desktop::Wayland::new(),
+        Instant::now(),
     );
     loop {
         let event = match daemon.next_deadline() {

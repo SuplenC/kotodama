@@ -15,9 +15,11 @@ pub enum FromFrontEnd {
     /// The search text changed. The Daemon answers with [`ToFrontEnd::Results`],
     /// and again whenever late Results arrive.
     Query { text: String },
-    /// How many Results fit on screen. Results that arrive after the list is
-    /// shown go below these rows (ADR 0003). The Daemon assumes 10 until told.
-    Viewport { rows: u32 },
+    /// Which Results are on screen: `rows` of them, from the one at `top`. Results
+    /// that arrive after the list is shown go below these rows, so neither the
+    /// rows on screen nor any scrolled past ever move (ADR 0003). The Daemon
+    /// assumes the top 10 until told.
+    Viewport { top: u32, rows: u32 },
     /// Runs one Action of a Result's Action list.
     RunAction {
         result: ResultRef,

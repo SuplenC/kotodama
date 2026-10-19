@@ -18,6 +18,7 @@ struct Nothing;
 
 impl Launcher for Nothing {
     fn start(&mut self, _: ExtensionId, _: u64, _: &Found) {}
+    fn stop(&mut self, _: ExtensionId, _: u64) {}
 }
 
 impl Desktop for Nothing {
@@ -35,8 +36,8 @@ impl Setup {
         let manifest = Manifest::from_toml("name = \"apps\"\ncommand = [\"x\"]").unwrap();
         let found = Found::new(manifest, PathBuf::from("/")).unwrap();
         let now = Instant::now();
-        let mut daemon = Daemon::new(vec![found], Table::new(), Nothing, Nothing);
-        let (sender, _extension) = mpsc::channel();
+        let mut daemon = Daemon::new(vec![found], Table::new(), Nothing, Nothing, now);
+        let (sender, _extension) = mpsc::sync_channel(64);
         daemon.handle(
             Event::ExtensionUp {
                 extension: ExtensionId(0),

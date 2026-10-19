@@ -9,17 +9,29 @@ use std::sync::mpsc::{self, Receiver};
 use std::time::{Duration, Instant};
 
 use kotodama_protocol::*;
-use kotodamad::daemon::{Daemon, Desktop, Event, ExtensionId, FrontEndId, Launcher, Output};
+use kotodamad::daemon::{
+    Daemon, Desktop, Event, ExtensionId, FrontEndId, HANDSHAKE_TIMEOUT, Launcher, Output,
+};
 use kotodamad::discovery::Found;
 
 #[derive(Clone, Default)]
-struct Launches(Rc<RefCell<Vec<(ExtensionId, u64)>>>);
+struct Launches(
+    Rc<RefCell<Vec<(ExtensionId, u64)>>>,
+    Rc<RefCell<Vec<(ExtensionId, u64)>>>,
+);
 
 impl Launcher for Launches {
     fn start(&mut self, extension: ExtensionId, generation: u64, _found: &Found) {
         self.0.borrow_mut().push((extension, generation));
     }
+
+    fn stop(&mut self, extension: ExtensionId, generation: u64) {
+        self.1.borrow_mut().push((extension, generation));
+    }
 }
+
+/// How many messages a test Extension's channel holds before it counts as full.
+const OUTBOX: usize = 64;
 
 #[derive(Clone, Default)]
 struct Outputs(Rc<RefCell<Vec<Output>>>);
@@ -110,7 +122,7 @@ impl Harness {
         let now = Instant::now();
         let launches = Launches::default();
         let outputs = Outputs::default();
-        let daemon = Daemon::new(extensions, config, launches.clone(), outputs.clone());
+        let daemon = Daemon::new(extensions, config, launches.clone(), outputs.clone(), now);
         Harness {
             daemon,
             now,
@@ -131,6 +143,11 @@ impl Harness {
 
     /// Completes the handshake of the latest launch of `extension`.
     fn up(&mut self, extension: usize) -> Ext {
+        self.up_with_room(extension, OUTBOX)
+    }
+
+    /// Like `up`, with room for only `room` messages the Extension hasn't read.
+    fn up_with_room(&mut self, extension: usize, room: usize) -> Ext {
         let id = ExtensionId(extension);
         let generation = self
             .launches
@@ -141,7 +158,7 @@ impl Harness {
             .find(|(ext, _)| *ext == id)
             .expect("the extension was never started")
             .1;
-        let (tx, rx) = mpsc::channel();
+        let (tx, rx) = mpsc::sync_channel(room);
         self.event(Event::ExtensionUp {
             extension: id,
             generation,
@@ -360,7 +377,7 @@ fn a_late_result_goes_below_the_visible_rows_however_well_it_scores() {
         vec![app("g rust one"), app("g rust two"), app("g rust three")],
     );
     let ui = h.front_end();
-    h.front_end_sends(&ui, FromFrontEnd::Viewport { rows: 2 });
+    h.front_end_sends(&ui, FromFrontEnd::Viewport { top: 0, rows: 2 });
 
     let shown = titles(&h.query(&ui, "g rust")).join(",");
     h.advance(Duration::from_millis(100));
@@ -390,7 +407,7 @@ fn below_the_visible_rows_live_results_compete_with_indexed_items_on_score() {
     let web = h.up(1);
     h.add(&apps, vec![app("g rust"), app("g xrxuxsxt")]);
     let ui = h.front_end();
-    h.front_end_sends(&ui, FromFrontEnd::Viewport { rows: 1 });
+    h.front_end_sends(&ui, FromFrontEnd::Viewport { top: 0, rows: 1 });
 
     assert_eq!(titles(&h.query(&ui, "g rust")), ["g rust", "g xrxuxsxt"]);
     h.advance(Duration::from_millis(100));
@@ -828,7 +845,7 @@ fn a_new_item_taking_a_removed_visible_items_place_in_the_index_is_still_late() 
     let apps = h.up(0);
     h.add(&apps, vec![app("Fire one"), app("Fire two")]);
     let ui = h.front_end();
-    h.front_end_sends(&ui, FromFrontEnd::Viewport { rows: 1 });
+    h.front_end_sends(&ui, FromFrontEnd::Viewport { top: 0, rows: 1 });
     assert_eq!(titles(&h.query(&ui, "fire"))[0], "Fire one");
 
     h.send(
@@ -851,10 +868,10 @@ fn a_bigger_viewport_protects_the_rows_it_shows_at_once() {
     let web = h.up(1);
     h.add(&apps, vec![app("g rust a"), app("g rust bb")]);
     let ui = h.front_end();
-    h.front_end_sends(&ui, FromFrontEnd::Viewport { rows: 1 });
+    h.front_end_sends(&ui, FromFrontEnd::Viewport { top: 0, rows: 1 });
     assert_eq!(titles(&h.query(&ui, "g rust")), ["g rust a", "g rust bb"]);
 
-    h.front_end_sends(&ui, FromFrontEnd::Viewport { rows: 2 });
+    h.front_end_sends(&ui, FromFrontEnd::Viewport { top: 0, rows: 2 });
     h.advance(Duration::from_millis(100));
     let (id, ..) = live_queries(&web)[0].clone();
     h.send(
@@ -897,4 +914,94 @@ fn a_stopped_extensions_jobs_are_not_shown_to_new_front_ends() {
         .filter(|m| matches!(m, ToFrontEnd::JobProgress { .. }))
         .collect();
     assert_eq!(jobs, []);
+}
+
+fn stops(h: &Harness) -> Vec<(ExtensionId, u64)> {
+    h.launches.1.borrow().clone()
+}
+
+#[test]
+fn an_extension_that_never_finishes_its_handshake_is_stopped_and_restarted() {
+    let mut h = Harness::new(vec![plain("apps")]);
+    let ui = h.front_end();
+
+    h.advance(HANDSHAKE_TIMEOUT - Duration::from_millis(1));
+    assert_eq!(stops(&h), []);
+    h.advance(Duration::from_millis(1));
+    assert_eq!(stops(&h), [(ExtensionId(0), 1)]);
+
+    // Stopping it ends the process, which reads as any other stop: a marker,
+    // then a restart.
+    h.event(Event::ExtensionDown {
+        extension: ExtensionId(0),
+        generation: 1,
+    });
+    assert!(ui.drain().contains(&ToFrontEnd::Status {
+        down: vec!["apps".into()]
+    }));
+    h.advance(Duration::from_millis(100));
+    assert_eq!(h.launches.0.borrow().len(), 2);
+}
+
+#[test]
+fn an_extension_that_stops_reading_is_stopped_instead_of_queueing_without_end() {
+    let mut h = Harness::new(vec![calculator()]);
+    let calc = h.up_with_room(0, 4);
+    let ui = h.front_end();
+
+    // Config plus a Live query and a cancel per keystroke: it never reads them.
+    for n in 0..3 {
+        h.query(&ui, &n.to_string());
+    }
+    assert_eq!(stops(&h), [(ExtensionId(0), 1)]);
+    drop(calc);
+}
+
+#[test]
+fn a_restarted_extension_gets_the_live_query_already_typed() {
+    let mut h = Harness::new(vec![calculator()]);
+    let calc = h.up(0);
+    let ui = h.front_end();
+    h.query(&ui, "2+2");
+    h.down(&calc);
+    h.advance(Duration::from_millis(100));
+
+    let calc = h.up(0);
+    let sent = live_queries(&calc);
+    assert_eq!(sent.len(), 1);
+    assert_eq!(sent[0].1, "2+2");
+}
+
+#[test]
+fn rows_scrolled_past_are_protected_like_the_ones_on_screen() {
+    let mut h = Harness::new(vec![plain("apps"), web()]);
+    let apps = h.up(0);
+    let web = h.up(1);
+    h.add(
+        &apps,
+        vec![app("g rust a"), app("g rust bb"), app("g rust ccc")],
+    );
+    let ui = h.front_end();
+    h.front_end_sends(&ui, FromFrontEnd::Viewport { top: 0, rows: 1 });
+    assert_eq!(
+        titles(&h.query(&ui, "g rust")),
+        ["g rust a", "g rust bb", "g rust ccc"]
+    );
+
+    // Scrolled so the second row is the one on screen.
+    h.front_end_sends(&ui, FromFrontEnd::Viewport { top: 1, rows: 1 });
+    h.advance(Duration::from_millis(100));
+    let (id, ..) = live_queries(&web)[0].clone();
+    h.send(
+        &web,
+        FromExtension::LiveResults {
+            live_query: id,
+            results: vec![live("perfect", 1.0, false)],
+            done: true,
+        },
+    );
+    assert_eq!(
+        titles(&ui.results().unwrap()),
+        ["g rust a", "g rust bb", "perfect", "g rust ccc"]
+    );
 }

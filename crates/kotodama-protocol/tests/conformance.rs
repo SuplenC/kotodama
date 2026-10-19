@@ -375,7 +375,7 @@ fn to_front_end_messages() -> Vec<ToFrontEnd> {
 fn from_front_end_messages() -> Vec<FromFrontEnd> {
     vec![
         FromFrontEnd::Query { text: "fir".into() },
-        FromFrontEnd::Viewport { rows: 8 },
+        FromFrontEnd::Viewport { top: 3, rows: 8 },
         FromFrontEnd::RunAction {
             result: ResultRef {
                 extension: "projects".into(),

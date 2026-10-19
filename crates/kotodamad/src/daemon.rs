@@ -6,8 +6,9 @@
 //! Starting processes and typing into windows are behind [`Launcher`] and
 //! [`Desktop`], so it runs the same in tests as in `kotodamad`.
 
+use std::cell::Cell;
 use std::collections::{BTreeMap, HashMap};
-use std::sync::mpsc::Sender;
+use std::sync::mpsc::{Sender, SyncSender, TrySendError};
 use std::time::{Duration, Instant};
 
 use kotodama_protocol::{
@@ -29,11 +30,13 @@ pub struct ExtensionId(pub usize);
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct FrontEndId(pub u64);
 
-/// Starts an Extension's process. When the handshake is done it reports
-/// [`Event::ExtensionUp`], and when the process ends, [`Event::ExtensionDown`],
-/// both with the `generation` it was given.
+/// Starts and stops Extension processes. When the handshake is done it reports
+/// [`Event::ExtensionUp`], and when the process ends, however it ends,
+/// [`Event::ExtensionDown`], both with the `generation` it was given.
 pub trait Launcher {
     fn start(&mut self, extension: ExtensionId, generation: u64, found: &Found);
+    /// Kills the process, if that run of it is still going.
+    fn stop(&mut self, extension: ExtensionId, generation: u64);
 }
 
 /// Types or pastes into the focused window.
@@ -52,7 +55,8 @@ pub enum Event {
     ExtensionUp {
         extension: ExtensionId,
         generation: u64,
-        sender: Sender<ToExtension>,
+        /// Bounded: an Extension that leaves it full has stopped reading.
+        sender: SyncSender<ToExtension>,
     },
     FromExtension {
         extension: ExtensionId,
@@ -89,12 +93,16 @@ const FIRST_RETRY: Duration = Duration::from_millis(100);
 const MAX_RETRY: Duration = Duration::from_secs(30);
 /// An Extension that ran this long before it stopped starts its backoff over.
 const STABLE: Duration = Duration::from_secs(10);
+/// How long an Extension may take to say hello before it counts as hung.
+pub const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(5);
 
 enum State {
-    /// Started; waiting for the handshake.
-    Starting,
+    /// Started; waiting for the handshake until `deadline`.
+    Starting {
+        deadline: Instant,
+    },
     Up {
-        sender: Sender<ToExtension>,
+        sender: SyncSender<ToExtension>,
         since: Instant,
     },
     Down {
@@ -112,6 +120,10 @@ struct Extension {
     config: Option<Table>,
     /// Asked for the Action catalog, and is allowed to.
     catalog: bool,
+    /// Hung: it left its channel full, or never finished the handshake.
+    hung: Cell<bool>,
+    /// Asked the Launcher to stop this run; its ExtensionDown is on its way.
+    stopping: bool,
 }
 
 impl Extension {
@@ -119,18 +131,22 @@ impl Extension {
         &self.found.manifest.name
     }
 
-    fn sender(&self) -> Option<&Sender<ToExtension>> {
+    fn sender(&self) -> Option<&SyncSender<ToExtension>> {
         match &self.state {
             State::Up { sender, .. } => Some(sender),
             _ => None,
         }
     }
 
+    /// Never blocks. An Extension that has left its channel full has stopped
+    /// reading, so it is marked hung, and stopped once the event is handled.
+    /// A disconnected channel means it is gone, and its ExtensionDown is on its
+    /// way.
     fn send(&self, message: ToExtension) {
-        if let Some(sender) = self.sender() {
-            // A send fails only once the Extension is gone, and its
-            // ExtensionDown is on its way.
-            let _ = sender.send(message);
+        if let Some(sender) = self.sender()
+            && let Err(TrySendError::Full(_)) = sender.try_send(message)
+        {
+            self.hung.set(true);
         }
     }
 
@@ -138,7 +154,7 @@ impl Extension {
     fn is_down(&self) -> bool {
         match self.state {
             State::Down { .. } => true,
-            State::Starting => self.generation > 1,
+            State::Starting { .. } => self.generation > 1,
             State::Up { .. } => false,
         }
     }
@@ -222,6 +238,8 @@ struct Session {
     /// What a perfect match of the query scores, which Live query scores are
     /// scaled to.
     max_score: u32,
+    /// How many rows, from the first, late Results may not move: those on
+    /// screen and those scrolled past.
     rows: usize,
     /// The slots that matched `narrowed_query` at index version
     /// `narrowed_version`. A query that only adds to it can only match a
@@ -282,7 +300,7 @@ pub struct Daemon<L, D> {
 
 impl<L: Launcher, D: Desktop> Daemon<L, D> {
     /// Starts every Extension.
-    pub fn new(found: Vec<Found>, config: Table, launcher: L, desktop: D) -> Self {
+    pub fn new(found: Vec<Found>, config: Table, launcher: L, desktop: D, now: Instant) -> Self {
         let mut daemon = Daemon {
             index: Index::new(found.len()),
             extensions: found
@@ -290,10 +308,12 @@ impl<L: Launcher, D: Desktop> Daemon<L, D> {
                 .map(|found| Extension {
                     found,
                     generation: 0,
-                    state: State::Starting,
+                    state: State::Down { retry_at: now },
                     failures: 0,
                     config: None,
                     catalog: false,
+                    hung: Cell::new(false),
+                    stopping: false,
                 })
                 .collect(),
             matcher: Matcher::new(Config::DEFAULT),
@@ -314,7 +334,7 @@ impl<L: Launcher, D: Desktop> Daemon<L, D> {
             highlights: Vec::new(),
         };
         for id in 0..daemon.extensions.len() {
-            daemon.start(ExtensionId(id));
+            daemon.start(ExtensionId(id), now);
         }
         daemon
     }
@@ -367,7 +387,16 @@ impl<L: Launcher, D: Desktop> Daemon<L, D> {
             if let State::Down { retry_at } = self.extensions[id].state
                 && retry_at <= now
             {
-                self.start(ExtensionId(id));
+                self.start(ExtensionId(id), now);
+            }
+            if let State::Starting { deadline } = self.extensions[id].state
+                && deadline <= now
+            {
+                log::warn!(
+                    "{} didn't finish its handshake in {HANDSHAKE_TIMEOUT:?}",
+                    self.extensions[id].name()
+                );
+                self.extensions[id].hung.set(true);
             }
         }
         if self
@@ -384,6 +413,7 @@ impl<L: Launcher, D: Desktop> Daemon<L, D> {
     pub fn next_deadline(&self) -> Option<Instant> {
         let restarts = self.extensions.iter().filter_map(|ext| match ext.state {
             State::Down { retry_at } => Some(retry_at),
+            State::Starting { deadline } if !ext.stopping => Some(deadline),
             _ => None,
         });
         let live = self
@@ -394,12 +424,16 @@ impl<L: Launcher, D: Desktop> Daemon<L, D> {
         restarts.chain(live).chain(output).min()
     }
 
-    fn start(&mut self, id: ExtensionId) {
+    fn start(&mut self, id: ExtensionId, now: Instant) {
         let ext = &mut self.extensions[id.0];
         ext.generation += 1;
-        ext.state = State::Starting;
+        ext.state = State::Starting {
+            deadline: now + HANDSHAKE_TIMEOUT,
+        };
         ext.catalog = false;
         ext.config = None;
+        ext.hung.set(false);
+        ext.stopping = false;
         self.launcher.start(id, ext.generation, &ext.found);
     }
 
@@ -407,17 +441,37 @@ impl<L: Launcher, D: Desktop> Daemon<L, D> {
         &mut self,
         id: ExtensionId,
         generation: u64,
-        sender: Sender<ToExtension>,
+        sender: SyncSender<ToExtension>,
         now: Instant,
     ) {
         let ext = &mut self.extensions[id.0];
-        if ext.generation != generation || !matches!(ext.state, State::Starting) {
+        if ext.generation != generation
+            || ext.stopping
+            || !matches!(ext.state, State::Starting { .. })
+        {
             return;
         }
         let table = extension_table(&self.config, ext.name());
-        let _ = sender.send(ToExtension::Config(table.clone()));
-        ext.config = Some(table);
         ext.state = State::Up { sender, since: now };
+        ext.send(ToExtension::Config(table.clone()));
+        ext.config = Some(table);
+
+        // Whatever is typed already reaches it, as if typed just now.
+        if let Some(debounce) = ext.debounce() {
+            for session in self.sessions.values_mut() {
+                if session.query.is_empty() {
+                    continue;
+                }
+                if let Some((query, prefix)) = ext.route(&session.query) {
+                    session.live[id.0] = Live {
+                        query,
+                        prefix,
+                        due: Some(now + debounce),
+                        ..Live::default()
+                    };
+                }
+            }
+        }
         self.extensions_changed();
     }
 
@@ -696,9 +750,10 @@ impl<L: Launcher, D: Desktop> Daemon<L, D> {
     fn front_end_message(&mut self, id: FrontEndId, message: FromFrontEnd, now: Instant) {
         match message {
             FromFrontEnd::Query { text } => self.query(id, text, now),
-            FromFrontEnd::Viewport { rows } => {
+            FromFrontEnd::Viewport { top, rows } => {
                 if let Some(session) = self.sessions.get_mut(&id) {
-                    session.rows = rows as usize;
+                    // Rows scrolled past are protected as much as those on screen.
+                    session.rows = top as usize + rows as usize;
                 }
             }
             FromFrontEnd::RunAction {
@@ -869,6 +924,14 @@ impl<L: Launcher, D: Desktop> Daemon<L, D> {
                 }
             } else {
                 self.catalog = None;
+            }
+        }
+
+        for (id, ext) in self.extensions.iter_mut().enumerate() {
+            if ext.hung.get() && !ext.stopping {
+                log::warn!("{} stopped answering; stopping it", ext.name());
+                ext.stopping = true;
+                self.launcher.stop(ExtensionId(id), ext.generation);
             }
         }
 

@@ -259,3 +259,58 @@ fn a_config_change_reaches_the_extension_without_a_restart_and_a_broken_file_kee
         received(&dir)
     );
 }
+
+#[test]
+fn an_extension_that_never_says_hello_is_killed_restarted_and_dies_with_the_daemon() {
+    let root = Daemon::home();
+    let dir = extension_dir(&root, "silent");
+    fs::create_dir_all(&dir).unwrap();
+    // Counts its starts, then hangs without a word.
+    fs::write(
+        dir.join("hang.sh"),
+        "#!/usr/bin/env bash\necho started >>starts\necho $$ >pid\nexec sleep 1000\n",
+    )
+    .unwrap();
+    Command::new("chmod")
+        .args(["+x", dir.join("hang.sh").to_str().unwrap()])
+        .status()
+        .unwrap();
+    fs::write(
+        dir.join("manifest.toml"),
+        "name = \"silent\"\ncommand = [\"hang.sh\"]\n",
+    )
+    .unwrap();
+    let daemon = Daemon::start(root);
+    let mut ui = daemon.connect();
+
+    ui.until(|message| match message {
+        ToFrontEnd::Status { down } if down == ["silent"] => Some(()),
+        _ => None,
+    });
+    let starts = || {
+        fs::read_to_string(dir.join("starts"))
+            .unwrap_or_default()
+            .lines()
+            .count()
+    };
+    wait_for("a second start", || (starts() >= 2).then_some(()));
+
+    let pid = wait_for("the second run's pid", || {
+        fs::read_to_string(dir.join("pid"))
+            .ok()
+            .filter(|pid| !pid.trim().is_empty())
+    });
+    drop(ui);
+    drop(daemon);
+    let alive = || {
+        Command::new("kill")
+            .args(["-0", pid.trim()])
+            .stderr(std::process::Stdio::null())
+            .status()
+            .unwrap()
+            .success()
+    };
+    wait_for("the Extension to die with the Daemon", || {
+        (!alive()).then_some(())
+    });
+}
