@@ -33,7 +33,7 @@ e2e *args:
 
 # Rebuild the dev container image locally (machines without Nix only)
 image:
-    docker build -t "${KOTODAMA_DEV_IMAGE:-ghcr.io/suplenc/kotodama-dev:latest}" docker
+    docker build -t "$(scripts/dev-image)" docker
 
 [private]
 _check:

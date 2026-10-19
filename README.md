@@ -34,7 +34,7 @@ The first run fetches the toolchain (Rust, Qt 6, Quickshell, sway) into the `kot
 | `just test` | Runs the tests; extra arguments go to `cargo test` |
 | `just bench` | Runs the benchmarks; extra arguments go to `cargo bench` |
 | `just e2e` | Runs the e2e tests against headless sway; `just e2e --update` rewrites the reference images |
-| `just image` | Rebuilds the dev container image locally |
+| `just image` | Rebuilds the dev container image locally, e.g. after editing `docker/` without committing |
 
 Nix only sees files that git tracks, so `git add` new files before running a recipe.
 
@@ -50,5 +50,12 @@ GitHub Actions runs `check`, `test` and `e2e` on x86_64 and arm64, plus the NixO
 
 On pushes to `main`, CI publishes:
 
-- the dev container image to **`ghcr.io/suplenc/kotodama-dev`** (linux/amd64 and linux/arm64);
-- Nix build outputs to the **`kotodama`** Cachix cache, once the maintainer adds a `CACHIX_AUTH_TOKEN` repository secret. Until then, CI skips the cache.
+- the dev container image to **`ghcr.io/suplenc/kotodama-dev`** (linux/amd64 and linux/arm64), tagged `latest` and with git's hash of `docker/`, which is the tag `just` uses;
+- Nix build outputs to the **`kotodama`** Cachix cache, using the `CACHIX_AUTH_TOKEN` repository secret.
+
+CI and the dev container read from that cache. To use it with your own Nix, add it to `/etc/nix/nix.conf` (or run `cachix use kotodama`):
+
+```
+extra-substituters = https://kotodama.cachix.org
+extra-trusted-public-keys = kotodama.cachix.org-1:8/a1e4X26O1hz2m5HFJBfKQ+P8m3GL7Z3Iy+xRIeZWE=
+```

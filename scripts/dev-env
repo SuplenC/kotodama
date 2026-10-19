@@ -6,7 +6,6 @@
 set -euo pipefail
 
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
-image=${KOTODAMA_DEV_IMAGE:-ghcr.io/suplenc/kotodama-dev:latest}
 
 if [ "$#" -eq 0 ]; then
     set -- bash
@@ -25,6 +24,7 @@ if ! command -v docker >/dev/null 2>&1; then
     exit 1
 fi
 
+image=$("$root/scripts/dev-image")
 if ! docker image inspect "$image" >/dev/null 2>&1; then
     docker pull "$image" >&2 || docker build -t "$image" "$root/docker" >&2
 fi

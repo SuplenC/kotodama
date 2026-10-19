@@ -98,6 +98,8 @@ jobs:
       packages: write
     steps:
       - uses: actions/checkout@v7
+      - id: image
+        run: echo "name=$(scripts/dev-image)" >> "$GITHUB_OUTPUT"
       - uses: docker/setup-buildx-action@v4
       - uses: docker/login-action@v4
         with:
@@ -111,4 +113,4 @@ jobs:
           push: true
           tags: |
             ghcr.io/suplenc/kotodama-dev:latest
-            ghcr.io/suplenc/kotodama-dev:${{ github.sha }}
+            ${{ steps.image.outputs.name }}
