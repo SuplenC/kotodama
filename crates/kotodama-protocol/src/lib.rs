@@ -8,7 +8,9 @@
 //!
 //! Between the Daemon and an Extension, the Daemon sends [`ToExtension`] and the
 //! Extension sends [`FromExtension`]. The first message after the handshake is
-//! always the Extension's [`ToExtension::Config`].
+//! always the Extension's [`ToExtension::Config`]. Between the Daemon and a
+//! Front end, the Front end sends [`FromFrontEnd`] and the Daemon sends
+//! [`ToFrontEnd`].
 //!
 //! Every type decodes from all three Wire formats, so none uses serde features
 //! postcard can't decode: no internally tagged or untagged enums, no flattening,
@@ -16,6 +18,7 @@
 
 mod channel;
 pub mod frame;
+mod front_end;
 mod handshake;
 mod item;
 mod manifest;
@@ -24,7 +27,8 @@ mod value;
 mod view;
 mod wire;
 
-pub use channel::Channel;
+pub use channel::{Channel, ChannelReader, ChannelWriter};
+pub use front_end::{ActionRef, ExtensionAction, FromFrontEnd, ResultRef, ResultRow, ToFrontEnd};
 pub use handshake::{Hello, PROTOCOL_VERSION};
 pub use item::{
     Action, Argument, Item, ItemKind, ItemRef, KindName, NamespacedKind, SHARED_KINDS,

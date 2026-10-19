@@ -323,6 +323,135 @@ fn from_extension_variant(message: &FromExtension) -> usize {
 }
 const FROM_EXTENSION_VARIANTS: usize = 9;
 
+fn to_front_end_messages() -> Vec<ToFrontEnd> {
+    vec![
+        ToFrontEnd::Results {
+            results: vec![ResultRow {
+                extension: "projects".into(),
+                item: items()[2].clone(),
+                contributed: vec![ExtensionAction {
+                    extension: "kubaos".into(),
+                    action: action("pin-version"),
+                }],
+                highlights: vec![0, 1, 4],
+            }],
+        },
+        ToFrontEnd::Results { results: vec![] },
+        ToFrontEnd::Status {
+            down: vec!["calculator".into()],
+        },
+        ToFrontEnd::Close,
+        ToFrontEnd::ActionFailed {
+            message: "no network".into(),
+        },
+        ToFrontEnd::PushView {
+            extension: "kubaos".into(),
+            view: view(ViewContent::Detail {
+                markdown: "# Hi".into(),
+                metadata: vec![],
+            }),
+        },
+        ToFrontEnd::UpdateView {
+            extension: "kubaos".into(),
+            view: view(ViewContent::Progress { job: "j".into() }),
+        },
+        ToFrontEnd::PopView {
+            extension: "kubaos".into(),
+            view: "v".into(),
+        },
+        ToFrontEnd::JobProgress {
+            extension: "kubaos".into(),
+            job: Job {
+                id: "j".into(),
+                title: "Installing".into(),
+                state: JobState::Running,
+                progress: Some(Fraction::new(0.5).unwrap()),
+                message: None,
+            },
+        },
+    ]
+}
+
+fn from_front_end_messages() -> Vec<FromFrontEnd> {
+    vec![
+        FromFrontEnd::Query { text: "fir".into() },
+        FromFrontEnd::Viewport { rows: 8 },
+        FromFrontEnd::RunAction {
+            result: ResultRef {
+                extension: "projects".into(),
+                id: "kotodama".into(),
+            },
+            action: ActionRef {
+                extension: "kubaos".into(),
+                id: "pin-version".into(),
+            },
+            arguments: BTreeMap::from([("version".into(), "1.23".into())]),
+        },
+        FromFrontEnd::SubmitForm {
+            extension: "kubaos".into(),
+            view: "new".into(),
+            values: table(),
+        },
+        FromFrontEnd::ViewPopped {
+            extension: "kubaos".into(),
+            view: "new".into(),
+        },
+        FromFrontEnd::Closed,
+    ]
+}
+
+fn to_front_end_variant(message: &ToFrontEnd) -> usize {
+    match message {
+        ToFrontEnd::Results { .. } => 0,
+        ToFrontEnd::Status { .. } => 1,
+        ToFrontEnd::Close => 2,
+        ToFrontEnd::ActionFailed { .. } => 3,
+        ToFrontEnd::PushView { .. } => 4,
+        ToFrontEnd::UpdateView { .. } => 5,
+        ToFrontEnd::PopView { .. } => 6,
+        ToFrontEnd::JobProgress { .. } => 7,
+    }
+}
+const TO_FRONT_END_VARIANTS: usize = 8;
+
+fn from_front_end_variant(message: &FromFrontEnd) -> usize {
+    match message {
+        FromFrontEnd::Query { .. } => 0,
+        FromFrontEnd::Viewport { .. } => 1,
+        FromFrontEnd::RunAction { .. } => 2,
+        FromFrontEnd::SubmitForm { .. } => 3,
+        FromFrontEnd::ViewPopped { .. } => 4,
+        FromFrontEnd::Closed => 5,
+    }
+}
+const FROM_FRONT_END_VARIANTS: usize = 6;
+
+#[test]
+fn every_message_to_a_front_end_survives_every_wire_format() {
+    let messages = to_front_end_messages();
+    let mut covered: Vec<usize> = messages.iter().map(to_front_end_variant).collect();
+    covered.dedup();
+    assert_eq!(
+        covered,
+        (0..TO_FRONT_END_VARIANTS).collect::<Vec<_>>(),
+        "a variant has no sample"
+    );
+    messages.iter().for_each(round_trip);
+}
+
+#[test]
+fn every_message_from_a_front_end_survives_every_wire_format() {
+    let messages = from_front_end_messages();
+    let mut covered: Vec<usize> = messages.iter().map(from_front_end_variant).collect();
+    covered.dedup();
+    assert_eq!(
+        covered,
+        (0..FROM_FRONT_END_VARIANTS).collect::<Vec<_>>(),
+        "a variant has no sample"
+    );
+    messages.iter().for_each(round_trip);
+}
+
 #[test]
 fn every_message_to_an_extension_survives_every_wire_format() {
     let messages = to_extension_messages();
@@ -365,6 +494,8 @@ fn messagepack_has_the_same_shape_as_json() {
     }
     to_extension_messages().iter().for_each(same_shape);
     from_extension_messages().iter().for_each(same_shape);
+    to_front_end_messages().iter().for_each(same_shape);
+    from_front_end_messages().iter().for_each(same_shape);
 }
 
 fn json<T: Serialize>(message: &T) -> serde_json::Value {
