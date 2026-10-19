@@ -20,6 +20,26 @@ Results rank by how well they match before anything else, in tiers: the whole ti
 
 Every Action the user runs is recorded in `$XDG_STATE_HOME/kotodama/history.json` (by default `~/.local/state/kotodama/`). A picked Result gets a Frecency boost, which halves every 14 days but never quite reaches zero. A Result used about daily for a week ranks one tier higher, but never above an exact title. When the user picks the same Result 3 times for one query, it becomes that query's Learned choice: it ranks first for that query and for the queries that extend it or that it extends (`fi`, `fir`, `fire`), but only over the Results that ranked above it when it was picked, so a new app with exactly that title still wins. Two picks of another Result since the Learned choice was last picked take over from it. Learning fades with Frecency's half-life; when two Learned choices apply, the one picked more often wins, then the one learned for the closer query. Both apply to Indexed items and Live query results. Items that several Extensions offer with the same Identity (an app from the apps Extension and from a Folder source, a page from bookmarks and from browser history) share their Frecency and Learned choices: picking one raises the others. Each still shows as a Result of its own, and the one the user picks through most takes the best place any of them ranks in. The "Clear history" Result empties the history.
 
+These numbers are settings in the config's `[history]` table, which reloads with the config. The values shown are the defaults:
+
+```toml
+[history]
+picks_to_learn = 3      # picks of one Result for one query that make it the query's Learned choice
+picks_to_take_over = 2  # picks of another Result, since the choice was last picked, that replace it
+half_life_days = 14     # how long a pick takes to count half as much; above 0
+lift_threshold = 5.0    # the Frecency that lifts a Result one tier, about a week of daily use; above 0
+usage_log = false       # log queries and picks, to tune ranking from real use
+```
+
+A setting that doesn't parse is logged and keeps its default. With `usage_log = true`, every query typed and every Action run is appended to `$XDG_STATE_HOME/kotodama/usage.jsonl`, one JSON object per line, which only the user can read and which never leaves the machine:
+
+```json
+{"at":1760870400,"kind":"query","query":"fi"}
+{"at":1760870401,"kind":"pick","query":"fi","extension":"apps","id":"firefox","action":"open","row":1}
+```
+
+`at` is seconds since the Unix epoch; a pick's `extension` and `id` name the Result, `action` the Action run, and `row` where the Result was in the list (from 0), or `null` if it wasn't in it. Emptying the search box isn't logged as a query, but a pick made with nothing typed is, with `"query":""`. When the file would pass 4 MiB it becomes `usage.jsonl.1`, replacing the older one, so the log never takes more than 8 MiB. Turning it off keeps what was written; delete the files to forget it.
+
 Aliases and Quicklinks live in the config directory and reload with it:
 
 ```toml

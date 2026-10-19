@@ -13,6 +13,7 @@ mod link;
 pub mod paths;
 pub mod rank;
 mod server;
+pub mod usage;
 
 use std::sync::mpsc::{self, RecvTimeoutError};
 use std::time::Instant;
@@ -64,7 +65,7 @@ pub fn run(paths: &Paths) -> Result<(), String> {
         history::load(&paths.history),
         host::Processes::new(events_tx),
         desktop::Wayland::new(),
-        history::Disk::new(paths.history.clone()),
+        history::Disk::new(paths.history.clone(), paths.usage_log.clone()),
         Instant::now(),
     );
     loop {

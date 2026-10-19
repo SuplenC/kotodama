@@ -15,6 +15,7 @@ use kotodamad::daemon::{
     Event, ExtensionId, FrontEndId, HANDSHAKE_TIMEOUT, MAX_LIVE_RESULTS, Output,
 };
 use kotodamad::discovery::Found;
+use kotodamad::usage::Used;
 
 #[test]
 fn indexed_items_are_found_by_a_fuzzy_query_best_match_first() {
@@ -354,6 +355,20 @@ fn a_contributed_action_reaches_the_contributing_extension_with_the_item() {
         },
     );
     assert!(ui.drain().contains(&ToFrontEnd::Close));
+}
+
+#[test]
+fn running_a_contributed_action_counts_as_a_pick() {
+    let mut h = Harness::new(vec![pinner(), projects()]);
+    h.up(0);
+    let projects = h.up(1);
+    h.add(&projects, vec![project("kotodama"), project("kotlin")]);
+    let ui = h.front_end();
+    assert_eq!(titles(&h.query(&ui, "kot")), ["kotlin", "kotodama"]);
+
+    run(&mut h, &ui, "projects", "kotodama", "pinner", "pin");
+    ui.drain();
+    assert_eq!(titles(&h.query(&ui, "kot")), ["kotodama", "kotlin"]);
 }
 
 #[test]
@@ -1237,6 +1252,65 @@ fn the_clear_history_action_forgets_every_pick() {
     assert!(ui.drain().contains(&ToFrontEnd::Close));
     assert!(h.saved.0.borrow().as_ref().unwrap().is_empty());
     assert_eq!(first(&mut h, &ui, "fi"), "Fish");
+}
+
+/// What the Daemon put in the usage log, without the times.
+fn logged(h: &Harness) -> Vec<Used> {
+    h.saved
+        .1
+        .borrow()
+        .iter()
+        .map(|entry| entry.used.clone())
+        .collect()
+}
+
+#[test]
+fn with_the_usage_log_on_every_query_and_pick_is_logged() {
+    let mut h = Harness::with_config(vec![plain("apps")], config("[history]\nusage_log = true"));
+    let apps = h.up(0);
+    h.add(&apps, launcher_apps());
+    let ui = h.front_end();
+    h.query(&ui, "f");
+    let rows = h.query(&ui, "fi");
+    let row = rows.iter().position(|row| row.item.id == "firefox");
+    run(&mut h, &ui, "apps", "firefox", "apps", "open");
+    h.query(&ui, "");
+
+    assert_eq!(
+        logged(&h),
+        [
+            Used::Query { query: "f".into() },
+            Used::Query { query: "fi".into() },
+            Used::Pick {
+                query: "fi".into(),
+                extension: "apps".into(),
+                id: "firefox".into(),
+                action: "open".into(),
+                row,
+            },
+        ]
+    );
+}
+
+#[test]
+fn the_usage_log_is_off_until_the_config_turns_it_on() {
+    let mut h = Harness::new(vec![plain("apps")]);
+    let apps = h.up(0);
+    h.add(&apps, launcher_apps());
+    let ui = h.front_end();
+    pick(&mut h, &ui, "fi", "apps", "firefox");
+    assert_eq!(logged(&h), []);
+
+    h.event(Event::Config(config("[history]\nusage_log = true")));
+    h.query(&ui, "fis");
+    h.event(Event::Config(config("")));
+    h.query(&ui, "fish");
+    assert_eq!(
+        logged(&h),
+        [Used::Query {
+            query: "fis".into()
+        }]
+    );
 }
 
 #[test]

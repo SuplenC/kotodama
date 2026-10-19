@@ -84,6 +84,10 @@ _Avoid_: Pin, favorite
 How well a Result matches a query, ranked before anything else: exact, initials or word start, inside a word, or letters scattered.
 _Avoid_: Match quality, bucket
 
+**Usage log**:
+An opt-in record, kept on the user's machine, of the queries typed and the Results picked, for tuning ranking from real use.
+_Avoid_: Telemetry, analytics, query log
+
 **Alias**:
 A user-defined keyword that stands for an Item or an Action.
 _Avoid_: Shortcut, abbreviation

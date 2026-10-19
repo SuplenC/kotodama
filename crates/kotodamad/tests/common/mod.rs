@@ -17,6 +17,7 @@ use kotodama_protocol::*;
 use kotodamad::daemon::{Daemon, Desktop, Event, ExtensionId, FrontEndId, Launcher, Output};
 use kotodamad::discovery::Found;
 use kotodamad::history::{History, Store};
+use kotodamad::usage::Entry;
 
 #[derive(Clone, Default)]
 pub struct Launches(
@@ -54,13 +55,20 @@ impl Desktop for Outputs {
     }
 }
 
-/// The History as last saved.
+/// The History as last saved, and what was put in the usage log.
 #[derive(Clone, Default)]
-pub struct Saved(pub Rc<RefCell<Option<History>>>);
+pub struct Saved(
+    pub Rc<RefCell<Option<History>>>,
+    pub Rc<RefCell<Vec<Entry>>>,
+);
 
 impl Store for Saved {
     fn save(&mut self, history: &History) {
         *self.0.borrow_mut() = Some(history.clone());
+    }
+
+    fn log(&mut self, entry: Entry) {
+        self.1.borrow_mut().push(entry);
     }
 }
 

@@ -22,10 +22,11 @@ use nucleo_matcher::{Config, Matcher, Utf32Str};
 
 use crate::config::extension_table;
 use crate::discovery::Found;
-use crate::history::{History, IDENTITIES, Picks, ResultKey, Store, query_key};
+use crate::history::{History, IDENTITIES, Picks, ResultKey, Settings, Store, query_key};
 use crate::index::{Index, Slot};
 use crate::keywords::{self, Keywords};
 use crate::rank::{self, Haystack, Matched, Tier, Tiers};
+use crate::usage::{Entry, Used};
 
 /// The name the Daemon's own Results go by: Quicklinks and the Action that
 /// clears the History. No Extension may take it.
@@ -117,10 +118,6 @@ pub const MAX_LIVE_RESULTS: usize = 500;
 /// How long an Extension or Front end may take to say hello before it counts as
 /// hung.
 pub const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(5);
-/// A Result whose Frecency reaches this, about a week of daily use, ranks one
-/// tier above how well it matches: something used daily whose title starts
-/// with the query can beat an exact title, but a few picks can't.
-const LIFT_AT: f64 = 5.0;
 
 enum State {
     /// Started; waiting for the handshake until `deadline`.
@@ -563,6 +560,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             highlights: Vec::new(),
         };
         daemon.load_keywords();
+        daemon.load_settings();
         for id in 0..daemon.extensions.len() {
             daemon.start(ExtensionId(id), now);
         }
@@ -1140,6 +1138,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
     }
 
     fn query(&mut self, id: FrontEndId, text: String, now: Instant) {
+        let logged = (self.history.settings().usage_log && !text.is_empty()).then(|| text.clone());
         let Some(session) = self.sessions.get_mut(&id) else {
             return;
         };
@@ -1180,6 +1179,12 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
                 live.prefix = prefix;
                 live.due = Some(now + debounce);
             }
+        }
+        if let Some(query) = logged {
+            self.store.log(Entry {
+                at: self.wall(now),
+                used: Used::Query { query },
+            });
         }
     }
 
@@ -1239,7 +1244,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             return Err(format!("{} stopped answering", ext.name()));
         }
         self.invocations.insert(invocation, (front_end, target));
-        self.picked(front_end, result, now);
+        self.picked(front_end, result, action, now);
         Ok(())
     }
 
@@ -1272,7 +1277,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
                 };
                 self.desktop.launch(quicklink.command(query));
                 session.send(ToFrontEnd::Close);
-                self.picked(front_end, result, now);
+                self.picked(front_end, result, action, now);
             }
             OwnAction::ClearHistory => {
                 session.send(ToFrontEnd::Close);
@@ -1283,14 +1288,36 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
         Ok(())
     }
 
-    /// Records that the user picked a Result in a Front end's session. A
-    /// Result an Alias named counts for the Alias alone.
-    fn picked(&mut self, front_end: FrontEndId, result: &ResultRef, now: Instant) {
+    /// Records that the user picked a Result in a Front end's session, by
+    /// running `action`. A Result an Alias named counts for the Alias alone.
+    fn picked(
+        &mut self,
+        front_end: FrontEndId,
+        result: &ResultRef,
+        action: &ActionRef,
+        now: Instant,
+    ) {
         let at = self.wall(now);
         let Some(session) = self.sessions.get(&front_end) else {
             return;
         };
         let source = self.source_of(session, &result.extension, &result.id);
+        let row = session
+            .shown
+            .iter()
+            .position(|(shown, _)| Some(*shown) == source);
+        if self.history.settings().usage_log {
+            self.store.log(Entry {
+                at,
+                used: Used::Pick {
+                    query: session.query.clone(),
+                    extension: result.extension.clone(),
+                    id: result.id.clone(),
+                    action: action.id.clone(),
+                    row,
+                },
+            });
+        }
         if let Some((_, alias)) = session
             .via_alias
             .as_ref()
@@ -1304,10 +1331,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
                 .unwrap_or((&result.extension, &result.id));
             // What ranked above it, nearest first: what it was picked over.
             // The same thing from another Extension wasn't.
-            let above: Vec<ResultKey> = session
-                .shown
-                .iter()
-                .position(|(shown, _)| Some(*shown) == source)
+            let above: Vec<ResultKey> = row
                 .map(|at| {
                     session.shown[..at]
                         .iter()
@@ -1334,6 +1358,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
     fn set_config(&mut self, config: Table) {
         self.config = config;
         self.load_keywords();
+        self.load_settings();
         for ext in &mut self.extensions {
             if ext.sender().is_none() {
                 continue;
@@ -1342,6 +1367,24 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             if ext.config.as_ref() != Some(&table) {
                 ext.send(ToExtension::Config(table.clone()));
                 ext.config = Some(table);
+            }
+        }
+    }
+
+    /// Reads the History's settings from the config. Open sessions are ranked
+    /// again if one that ranks changed.
+    fn load_settings(&mut self) {
+        let settings = Settings::from_config(&self.config);
+        let old = *self.history.settings();
+        if settings != old {
+            self.history.set_settings(settings);
+            let usage_log = old.usage_log;
+            if (Settings {
+                usage_log,
+                ..settings
+            }) != old
+            {
+                self.mark_late();
             }
         }
     }
@@ -1596,7 +1639,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
 
     /// Applies what the Daemon learned from the user, and the user's
     /// keywords, to the candidates. Frecency breaks ties within a tier and,
-    /// from [`LIFT_AT`], lifts a Result a tier. What the query names by an
+    /// from [`Settings::lift_threshold`], lifts a Result a tier. What the query names by an
     /// Alias goes first, with exact matches the Learned choice wasn't picked
     /// over, then the Learned choice. The candidates before
     /// `indexed` must be the Indexed items, in slot order. Returns the Action
@@ -1614,12 +1657,17 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
         }
         let at = self.wall(now);
         if !self.history.is_empty() {
+            let Settings {
+                half_life_secs,
+                lift_threshold,
+                ..
+            } = *self.history.settings();
             self.cache_frecent();
             for &(slot, picks, counts) in &self.frecent {
                 if let Ok(n) =
                     candidates[..indexed].binary_search_by_key(&Source::Indexed(slot), |c| c.source)
                 {
-                    let frecency = picks.frecency(at);
+                    let frecency = picks.frecency(at, half_life_secs);
                     if counts != Counts::Direct {
                         candidates[n].frecency = frecency;
                     }
@@ -1634,7 +1682,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
                 }
             }
             for candidate in candidates.iter_mut() {
-                if candidate.frecency >= LIFT_AT {
+                if candidate.frecency >= lift_threshold {
                     candidate.tier = rank::lift(candidate.tier);
                 }
             }

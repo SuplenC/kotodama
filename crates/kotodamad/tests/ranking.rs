@@ -10,6 +10,7 @@ use std::time::Duration;
 
 use common::*;
 use kotodama_protocol::*;
+use kotodamad::daemon::Event;
 use kotodamad::rank::{Haystack, Matched, Query, Tiers};
 
 const DAY: Duration = Duration::from_secs(24 * 60 * 60);
@@ -84,6 +85,12 @@ impl World {
 
     fn later(&mut self, by: Duration) {
         self.h.advance(by);
+    }
+
+    /// Replaces the config, as when the user edits it.
+    fn reconfigure(&mut self, toml: &str) {
+        self.h.event(Event::Config(config(toml)));
+        self.ui.drain();
     }
 }
 
@@ -618,6 +625,99 @@ fn a_pick_counts_at_once() {
     let mut w = World::new(&["Files", "Firefox", "Fish"]);
     w.pick("fi", "Firefox");
     assert_eq!(w.first("fi"), "Firefox");
+}
+
+// The History's settings, from the `[history]` table of the config.
+
+/// H4
+#[test]
+fn the_picks_to_learn_are_a_setting() {
+    let mut w = World::with(
+        vec![app("Files"), app("Firefox"), app("Fish")],
+        "[history]\npicks_to_learn = 2",
+    );
+    w.picks(5, "fles", "Files");
+    w.picks(2, "fi", "Firefox");
+    assert_eq!(w.first("fi"), "Firefox");
+}
+
+/// H4
+#[test]
+fn the_picks_to_take_over_are_a_setting() {
+    let mut w = World::with(
+        vec![app("Files"), app("Firefox"), app("Fish")],
+        "[history]\npicks_to_take_over = 1",
+    );
+    w.picks(3, "fi", "Firefox");
+    w.pick("fi", "Fish");
+    assert_eq!(w.first("fi"), "Fish");
+}
+
+/// H4
+#[test]
+fn the_half_life_is_a_setting() {
+    let mut w = World::with(
+        vec![app("Alpha Tool"), app("Beta Tool")],
+        "[history]\nhalf_life_days = 1",
+    );
+    w.picks(10, "alpha", "Alpha Tool");
+    w.later(7 * DAY);
+    w.picks(3, "beta", "Beta Tool");
+    assert_eq!(w.first("tool"), "Beta Tool");
+}
+
+/// H4
+#[test]
+fn the_frecency_that_lifts_a_result_a_tier_is_a_setting() {
+    let mut w = World::with(
+        vec![app("Files"), app("Firefox"), app("Fish"), app("Fi")],
+        "[history]\nlift_threshold = 0.5",
+    );
+    w.pick("firefox", "Firefox");
+    w.later(DAY);
+    assert_eq!(rows(&mut w, "fi"), ["Firefox", "Fi", "Fish", "Files"]);
+}
+
+/// H4
+#[test]
+fn a_setting_that_does_not_parse_keeps_its_default() {
+    let mut w = World::with(
+        vec![app("Files"), app("Firefox"), app("Fish")],
+        "[history]\npicks_to_learn = 0\nhalf_life_days = \"two weeks\"",
+    );
+    w.picks(5, "fles", "Files");
+    w.picks(2, "fi", "Firefox");
+    assert_eq!(w.first("fi"), "Files");
+    w.pick("fi", "Firefox");
+    assert_eq!(w.first("fi"), "Firefox");
+}
+
+/// H4: a threshold of 0 would lift every Result, picked or not.
+#[test]
+fn a_lift_threshold_of_zero_keeps_the_default() {
+    let mut w = World::with(
+        vec![app("Files"), app("Firefox"), app("Fish"), app("Fi")],
+        "[history]\nlift_threshold = 0",
+    );
+    w.pick("firefox", "Firefox");
+    w.later(DAY);
+    assert_eq!(rows(&mut w, "fi"), ["Fi", "Firefox", "Fish", "Files"]);
+}
+
+/// H4
+#[test]
+fn the_settings_reload_with_the_config() {
+    let mut w = World::new(&["Files", "Firefox", "Fish"]);
+    w.picks(5, "fles", "Files");
+    w.reconfigure("[history]\npicks_to_learn = 2");
+    w.picks(2, "fi", "Firefox");
+    assert_eq!(w.first("fi"), "Firefox");
+
+    w.reconfigure("[history]\npicks_to_take_over = 3");
+    w.picks(2, "fi", "Fish");
+    assert_eq!(w.first("fi"), "Firefox");
+    w.pick("fi", "Fish");
+    assert_eq!(w.first("fi"), "Fish");
 }
 
 // Invariants, over a desktop's worth of apps and a range of queries.
