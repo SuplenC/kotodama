@@ -183,13 +183,14 @@ impl Extension {
     /// Never blocks. An Extension that has left its channel full has stopped
     /// reading, so it is marked hung, and stopped once the event is handled.
     /// A disconnected channel means it is gone, and its ExtensionDown is on its
-    /// way.
-    fn send(&self, message: ToExtension) {
+    /// way. Returns whether it is still answering.
+    fn send(&self, message: ToExtension) -> bool {
         if let Some(sender) = self.sender()
             && let Err(TrySendError::Full(_)) = sender.try_send(message)
         {
             self.hung.set(true);
         }
+        !self.hung.get()
     }
 
     /// Stopped, or restarting after it stopped: its Results are gone.
@@ -1195,22 +1196,19 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
         if ext.sender().is_none() {
             return Err(format!("{} isn't running", ext.name()));
         }
-        // One that stopped reading is stopped once this event is handled, so
-        // the Action fails now rather than when its ExtensionDown arrives.
-        let hung = || format!("{} stopped answering", ext.name());
-        if ext.hung.get() {
-            return Err(hung());
-        }
         let invocation = self.next_id;
         self.next_id += 1;
-        ext.send(ToExtension::RunAction {
+        let answering = ext.send(ToExtension::RunAction {
             invocation,
             action: action.id.clone(),
             item: item.to_ref(),
             arguments,
         });
-        if ext.hung.get() {
-            return Err(hung());
+        // An Extension that stopped reading is stopped once this event is
+        // handled, so the Action fails now rather than when its ExtensionDown
+        // arrives.
+        if !answering {
+            return Err(format!("{} stopped answering", ext.name()));
         }
         self.invocations.insert(invocation, (front_end, target));
         self.picked(front_end, result, now);

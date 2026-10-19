@@ -756,17 +756,24 @@ fn running_an_action_on_an_extension_that_stopped_reading_fails_without_blocking
     let ui = h.front_end();
     h.query(&ui, "fire");
 
-    run(&mut h, &ui, "apps", "firefox", "apps", "open");
-    assert!(
+    let failed = |ui: &FrontEnd| {
         ui.drain()
             .iter()
-            .any(|m| matches!(m, ToFrontEnd::ActionFailed { .. }))
-    );
+            .filter(|m| matches!(m, ToFrontEnd::ActionFailed { .. }))
+            .count()
+    };
+    run(&mut h, &ui, "apps", "firefox", "apps", "open");
+    assert_eq!(failed(&ui), 1);
     assert_eq!(stops(&h), [(ExtensionId(0), 1)]);
 
     // The Daemon goes on answering while the Extension is stopped.
     assert_eq!(titles(&h.query(&ui, "files")), ["Files"]);
-    drop(apps);
+
+    // The stop lands: the Action doesn't fail twice, and it is restarted.
+    h.down(&apps);
+    assert_eq!(failed(&ui), 0);
+    h.advance(Duration::from_millis(100));
+    assert_eq!(h.launches.0.borrow().len(), 2);
 }
 
 #[test]
