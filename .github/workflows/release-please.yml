@@ -5,9 +5,12 @@ name: Release
 # tags the release and publishes it on GitHub. Its config is
 # release-please-config.json; .release-please-manifest.json holds the last
 # released version.
+#
+# It runs only when started by hand for now: the repo doesn't let workflows open
+# PRs, so a run on every push to main would fail. Put `push: branches: [main]`
+# back once that's allowed or a RELEASE_PLEASE_TOKEN secret exists.
 on:
-  push:
-    branches: [main]
+  workflow_dispatch:
 
 permissions:
   contents: write
