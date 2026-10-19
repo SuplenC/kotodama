@@ -49,6 +49,9 @@
               grim
               imagemagick
 
+              # The shell example Extension
+              jq
+
               just
               nixfmt
               shellcheck

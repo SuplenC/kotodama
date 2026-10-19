@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = []
+members = ["crates/kotodama-protocol"]
 
 [workspace.package]
 edition = "2024"
