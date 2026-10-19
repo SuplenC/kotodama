@@ -8,7 +8,7 @@ Kotodama is a command menu for Wayland desktops. You type, and it finds and does
 - **A Quickshell QML module** written in Rust (cxx-qt) gives QML a native result model. QML only draws the results.
 - **Extensions** are separate processes in any language. They speak a protocol whose wire format is negotiated (JSON, MessagePack or postcard), so a crashing Extension never takes down the menu.
 
-Status: early. The protocol and the Daemon work; the Quickshell Front end is next. See `docs/adr/0001-architecture.md` and the issues.
+Status: early. The protocol, the Daemon and the Quickshell Front end work; Views, the Action panel and the Bundled extensions are next. See `docs/adr/0001-architecture.md` and the issues.
 
 ## The Daemon
 
@@ -67,6 +67,47 @@ cargo run -p kotodamad --example front-end -- --run firefox  # run the top one
 
 The target is a p99 under 2 ms from query received to Results sent. CI fails when a change makes resident memory more than 10% higher than its base commit does.
 
+The `latency` e2e test types into the real menu with 10k Indexed items and fails if any keystroke takes 8 ms (one frame at 120 Hz) or more from its query to the list model's update. In the dev container on an Apple M-series machine, under software rendering, the worst of 40 keystrokes takes about 5 ms.
+
+## The Quickshell Front end
+
+The `Kotodama` QML module is a Rust plugin (`crates/kotodama-qml`) that Quickshell imports. It connects to the Daemon, reconnects whenever the Daemon restarts, and gives QML two types:
+
+- **`KotodamaMenu`**, the menu itself: a layer-shell window with a search box over the Results. Up and Down (or Ctrl+N and Ctrl+P) move the selection, Enter runs the selected Result's primary Action, and Esc closes it.
+- **`KotodamaSearch`**, a list model of the Results, for a shell that draws its own window. Setting `query` searches; each row has the roles `title`, `subtitle`, `icon`, `extension` and `markup` (the title as StyledText, with its matched characters in `highlightColor`). `run(row)` runs a Result, and the signals `openRequested`, `toggleRequested` and `closeRequested` carry the `kotodama` command and the Daemon's requests. When it gets `closeRequested`, a window must hide and then call `closed()`, so the Daemon types or pastes into the window underneath and not into the menu.
+
+```qml
+import Quickshell
+import Kotodama
+
+ShellRoot {
+    KotodamaMenu {
+        // The look follows the host shell, e.g. from a matugen palette.
+        background: "#1e1e2e"
+        foreground: "#cdd6f4"
+        accent: "#89b4fa"
+        fontFamily: "Inter"
+    }
+}
+```
+
+The other look properties are `dimmed`, `selection`, `border`, `fontSize`, `radius`, `menuWidth`, `rowHeight`, `maxRows`, `top` and `placeholder`.
+
+A compositor keybind opens it through the `kotodama` command, which asks the Daemon to pass the request on to every Front end:
+
+```
+# Hyprland
+bind = SUPER, Space, exec, kotodama toggle
+```
+
+`kotodama open [--view <id>] [--query <text>]` opens it with text already typed. To try it, build the module and point Quickshell at it:
+
+```sh
+QML_IMPORT_PATH=$(scripts/qml-module --release) quickshell --path shell.qml
+```
+
+With `KOTODAMA_LOG=debug` in Quickshell's environment, the module logs how long each query took from the keystroke to the list model showing its Results.
+
 ## Development
 
 One environment, defined by the Nix flake's dev shell, runs everywhere. The `just` recipes run in it on every machine:
@@ -90,14 +131,14 @@ The first run fetches the toolchain (Rust, Qt 6, Quickshell, sway) into the `kot
 | `just check` | Checks formatting and runs the lints (rustfmt, clippy, nixfmt, shellcheck, actionlint) |
 | `just test` | Runs the tests; extra arguments go to `cargo test` |
 | `just bench` | Runs the benchmarks; extra arguments go to `cargo bench` |
-| `just e2e` | Runs the e2e tests against headless sway; `just e2e --update` rewrites the reference images |
+| `just e2e` | Runs the e2e tests against headless sway, or only those named (`just e2e menu`); `just e2e --update menu` rewrites a test's reference image |
 | `just image` | Rebuilds the dev container image locally, e.g. after editing `docker/` without committing |
 
 Nix only sees files that git tracks, so `git add` new files before running a recipe.
 
 ### e2e tests
 
-`e2e/run` starts sway with the headless backend and the pixman renderer on one 640x480 output, then runs every `e2e/*/test.sh` against it. A test starts its clients with `spawn` and checks the screen with `expect_screen reference.png`, which compares a grim screenshot with the stored image. When a test fails, the screenshot, a diff image and every log are in `e2e/out`, which CI uploads as an artifact.
+`e2e/run` starts sway with the headless backend and the pixman renderer on one 640x480 output, then runs every `e2e/*/test.sh` against it. A test starts its clients with `spawn`, types with `wtype`, and checks the screen with `expect_screen reference.png`, which compares a grim screenshot with the stored image. Each test's screenshots, diff images and logs go in `e2e/out/<test>`, which CI uploads as an artifact.
 
 Hyprland can't run here: it needs a DRM device. Its live tests run in a NixOS VM (`checks.x86_64-linux.nixos-vm`).
 

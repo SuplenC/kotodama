@@ -369,6 +369,15 @@ fn to_front_end_messages() -> Vec<ToFrontEnd> {
                 message: None,
             },
         },
+        ToFrontEnd::Open {
+            query: "fir".into(),
+            view: Some("clipboard".into()),
+        },
+        ToFrontEnd::Open {
+            query: String::new(),
+            view: None,
+        },
+        ToFrontEnd::Toggle,
     ]
 }
 
@@ -397,6 +406,11 @@ fn from_front_end_messages() -> Vec<FromFrontEnd> {
             view: "new".into(),
         },
         FromFrontEnd::Closed,
+        FromFrontEnd::Open {
+            query: "fir".into(),
+            view: None,
+        },
+        FromFrontEnd::Toggle,
     ]
 }
 
@@ -410,9 +424,11 @@ fn to_front_end_variant(message: &ToFrontEnd) -> usize {
         ToFrontEnd::UpdateView { .. } => 5,
         ToFrontEnd::PopView { .. } => 6,
         ToFrontEnd::JobProgress { .. } => 7,
+        ToFrontEnd::Open { .. } => 8,
+        ToFrontEnd::Toggle => 9,
     }
 }
-const TO_FRONT_END_VARIANTS: usize = 8;
+const TO_FRONT_END_VARIANTS: usize = 10;
 
 fn from_front_end_variant(message: &FromFrontEnd) -> usize {
     match message {
@@ -422,9 +438,11 @@ fn from_front_end_variant(message: &FromFrontEnd) -> usize {
         FromFrontEnd::SubmitForm { .. } => 3,
         FromFrontEnd::ViewPopped { .. } => 4,
         FromFrontEnd::Closed => 5,
+        FromFrontEnd::Open { .. } => 6,
+        FromFrontEnd::Toggle => 7,
     }
 }
-const FROM_FRONT_END_VARIANTS: usize = 6;
+const FROM_FRONT_END_VARIANTS: usize = 8;
 
 #[test]
 fn every_message_to_a_front_end_survives_every_wire_format() {

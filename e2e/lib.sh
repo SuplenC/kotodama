@@ -1,6 +1,7 @@
 # shellcheck shell=bash
 # Helpers for e2e tests. e2e/run sources this before each test; it sets
-# E2E_OUT (artifact dir), E2E_UPDATE (1 rewrites references), WAYLAND_DISPLAY and SWAYSOCK.
+# E2E_OUT (the test's own artifact dir), E2E_UPDATE (1 rewrites references),
+# WAYLAND_DISPLAY and SWAYSOCK.
 
 # Starts a command in the background and kills it when the test exits.
 spawn() {
@@ -9,10 +10,15 @@ spawn() {
 }
 
 E2E_PIDS=()
+# Stops what the test started and waits for it to go, so the next test starts
+# with no window of this one's left and the Daemon's socket free.
 stop_spawned() {
     local pid
     for pid in "${E2E_PIDS[@]}"; do
         kill "$pid" 2>/dev/null || true
+    done
+    for pid in "${E2E_PIDS[@]}"; do
+        wait "$pid" 2>/dev/null || true
     done
 }
 trap stop_spawned EXIT
@@ -47,11 +53,21 @@ expect_screen() {
     return 1
 }
 
-# Waits until a spawned command's log contains a line with the given text.
+# How many lines a spawned command's log has, to pass to wait_for_log.
+log_lines() {
+    if [ -f "$E2E_OUT/$1" ]; then
+        wc -l <"$E2E_OUT/$1"
+    else
+        echo 0
+    fi
+}
+
+# Waits until a spawned command's log contains a line with the given text,
+# ignoring its first lines if given how many (see log_lines).
 wait_for_log() {
-    local log="$E2E_OUT/$1" text=$2
+    local log="$E2E_OUT/$1" text=$2 after=${3:-0}
     for _ in $(seq 50); do
-        if grep -qF -- "$text" "$log" 2>/dev/null; then
+        if tail -n "+$((after + 1))" "$log" 2>/dev/null | grep -qF -- "$text"; then
             return 0
         fi
         sleep 0.2

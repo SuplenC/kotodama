@@ -27,7 +27,7 @@ test *args:
 bench *args:
     @{{ dev }} just _bench "$@"
 
-# Run the e2e tests against headless sway; `--update` rewrites the reference images
+# Run the e2e tests against headless sway, or only the named ones; `--update` rewrites the reference images
 e2e *args:
     @{{ dev }} just _e2e "$@"
 

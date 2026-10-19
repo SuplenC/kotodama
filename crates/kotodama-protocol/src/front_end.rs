@@ -3,6 +3,7 @@
 //! just `"closed"` for a variant without fields.
 
 use std::collections::BTreeMap;
+use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
@@ -39,6 +40,17 @@ pub enum FromFrontEnd {
     /// Answers [`ToFrontEnd::Close`]: the window is gone and focus is back on the
     /// window the user came from, so the Daemon may type or paste into it.
     Closed,
+    /// Asks every other Front end to open, as `kotodama open` does from a
+    /// compositor keybind. The Daemon passes it on as [`ToFrontEnd::Open`].
+    Open {
+        /// The search text to open with; empty clears it.
+        query: String,
+        /// A View to open on, by id.
+        view: Option<String>,
+    },
+    /// Asks every other Front end to open if it is closed and close if it is
+    /// open, as `kotodama toggle` does.
+    Toggle,
 }
 
 /// From the Daemon to a Front end.
@@ -77,6 +89,13 @@ pub enum ToFrontEnd {
         extension: String,
         job: Job,
     },
+    /// Open the menu, as another Front end asked with [`FromFrontEnd::Open`].
+    Open {
+        query: String,
+        view: Option<String>,
+    },
+    /// Open the menu if it is closed, or close it if it is open.
+    Toggle,
 }
 
 /// One Result as the Front end shows it.
@@ -114,4 +133,12 @@ pub struct ResultRef {
 pub struct ActionRef {
     pub extension: String,
     pub id: String,
+}
+
+/// Where the Daemon serves Front ends: `$XDG_RUNTIME_DIR/kotodama.sock`, or
+/// `None` when `XDG_RUNTIME_DIR` isn't set.
+pub fn socket_path() -> Option<PathBuf> {
+    std::env::var_os("XDG_RUNTIME_DIR")
+        .filter(|dir| !dir.is_empty())
+        .map(|dir| PathBuf::from(dir).join("kotodama.sock"))
 }

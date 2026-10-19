@@ -1,0 +1,21 @@
+[package]
+name = "kotodama-qml"
+version = "0.1.0"
+description = "The Quickshell Front end: a QML module that shows the Daemon's Results through a native list model"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+# Qt loads the module as a plugin, so it must be a shared library (cxx-qt's
+# PluginType::Dynamic).
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+cxx = "1.0.194"
+cxx-qt = "0.10.0"
+cxx-qt-lib = "0.10.0"
+kotodama-protocol = { path = "../kotodama-protocol" }
+
+[build-dependencies]
+cxx-qt-build = "0.10.0"

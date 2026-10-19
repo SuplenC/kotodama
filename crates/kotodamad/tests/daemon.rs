@@ -587,6 +587,35 @@ fn typing_waits_until_every_front_end_has_closed() {
 }
 
 #[test]
+fn open_and_toggle_go_to_every_front_end_but_the_one_that_asked() {
+    let mut h = Harness::new(vec![]);
+    let menu = h.front_end();
+    let other = h.front_end();
+    let command = h.front_end();
+    menu.drain();
+    other.drain();
+
+    h.front_end_sends(
+        &command,
+        FromFrontEnd::Open {
+            query: "fir".into(),
+            view: None,
+        },
+    );
+    h.front_end_sends(&command, FromFrontEnd::Toggle);
+    let expected = [
+        ToFrontEnd::Open {
+            query: "fir".into(),
+            view: None,
+        },
+        ToFrontEnd::Toggle,
+    ];
+    assert_eq!(menu.drain(), expected);
+    assert_eq!(other.drain(), expected);
+    assert_eq!(command.drain(), []);
+}
+
+#[test]
 fn typing_goes_ahead_when_a_front_end_never_answers() {
     let mut h = Harness::new(vec![typer()]);
     let typer = h.up(0);
