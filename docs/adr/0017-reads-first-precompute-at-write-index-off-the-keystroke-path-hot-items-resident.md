@@ -6,6 +6,8 @@ The Index is read thousands of times for every time an Extension writes to it, y
 
 **Precompute at write.** Each Extension's Indexed items are one Segment, built when the Items arrive. It holds dense arrays of each row's letters and word initials, and the folded texts of every row in one arena. The arena takes one byte per character, or one `char` per character for the few texts that aren't ASCII. It also holds where each text's words start. A search runs down the arrays and the arena without following a pointer per Item, and ranking never reads the Item itself.
 
+A search passes over a row on its letters and word initials alone, both dense. For the rows left, it reads only the title and keywords to score them, and nucleo turns most of them down. Only for a match does it read the rest of the row's keys, and ranking takes those from the search without looking the row up again. Each Segment numbers its kinds of Item, and each search works out once where every kind ranks (ADR 0011), so ranking looks a kind's place up instead of comparing kind names for every Result. Looking for near misses, the Daemon checks a row's letters before it reads the row's texts.
+
 A Slot is now an Extension's Segment plus a row in it. The last tie-break (ADR 0006, ADR 0011) is the Extension, then the order Items arrived in within it, whatever order the Extensions' batches arrive in. A row emptied by one change is taken only by the change after it, so a new Item never takes a shown Item's place on screen.
 
 **Index off the keystroke path.** An indexing thread makes Extensions' changes into a new version of the changed Extension's Segment, copied on write. The Daemon swaps the new version in whole between two events, so a keystroke never waits for a change and never sees half of one. Changes that queue up while the thread works are made together, as one version per Segment. A version built before its Extension stopped is dropped.
@@ -29,7 +31,7 @@ A list View's filter (ADR 0015) uses the same matcher, but runs on the View's ow
 ## Consequences
 
 - The heap per Item drops from 983 bytes to 461 for the 10k apps corpus, and from 1,271 to 533 for the emoji. Each payload, about 155 bytes, sits in a file that the kernel pages in and out.
-- Showing a cold row costs a `pread` and a decode, a few microseconds. A keystroke shows at most 50 rows, and the ones it showed last stay resident.
+- Showing a cold row costs a `pread` and a decode, a few microseconds. A keystroke shows at most 50 rows, and the ones it showed last stay resident. Decoding takes about 4,000 instructions an Item, most of them allocations and UTF-8 checks. A first keystroke on the 10k apps corpus, with none of its 50 rows resident, runs about 3% more instructions than before this change. With its rows resident, it runs about 8% fewer.
 - A Learned choice, an Alias's keyword, Identity grouping and the catalog of Actions by kind all read only what the Segment keeps in memory. For each kind and Action id, the catalog offers the Action of the first row whose Item has it.
 - A batch takes longer to index, because each Item is also encoded and written once.
 - The hot set comes only from the time-of-day habit. Learned choices aren't hot unless they were shown lately. The History has no weekday, so weekdays and weekends share one routine. The empty query's rows are still ranked when the menu opens, not ahead of each window. Each of these is left for later.

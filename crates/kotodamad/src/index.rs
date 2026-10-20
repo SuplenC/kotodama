@@ -8,6 +8,7 @@
 
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
+use std::hash::{BuildHasherDefault, Hasher};
 use std::ops::Deref;
 use std::path::Path;
 use std::sync::Arc;
@@ -18,7 +19,7 @@ use nucleo_matcher::pattern::Pattern;
 
 use crate::daemon::ExtensionId;
 use crate::rank::{Filter, Letters, Matched, Texts};
-use crate::segment::{Edit, Row, Segment};
+use crate::segment::{Edit, Ranked, Row, Segment};
 
 /// Where an Indexed item lives: its Extension's Segment and its row there.
 /// Slots order by Extension, then by row.
@@ -96,6 +97,36 @@ pub fn read(segments: &[Arc<Segment>], slot: Slot) -> Option<Read> {
     })
 }
 
+/// Hashes a [`Slot`] with a multiply per word, as rustc's FxHash does. The
+/// Daemon makes the Slots, so SipHash's guard against keys picked to collide
+/// buys nothing, and would cost each row a keystroke shows.
+#[derive(Default)]
+pub struct SlotHasher(u64);
+
+impl Hasher for SlotHasher {
+    #[inline]
+    fn write(&mut self, bytes: &[u8]) {
+        for &byte in bytes {
+            self.write_u64(byte.into());
+        }
+    }
+
+    #[inline]
+    fn write_u32(&mut self, n: u32) {
+        self.write_u64(n.into());
+    }
+
+    #[inline]
+    fn write_u64(&mut self, n: u64) {
+        self.0 = (self.0.rotate_left(5) ^ n).wrapping_mul(0x51_7c_c1_b7_27_22_0a_95);
+    }
+
+    #[inline]
+    fn finish(&self) -> u64 {
+        self.0
+    }
+}
+
 /// How many Items that aren't hot stay resident after they were shown: the
 /// Results of a few keystrokes.
 pub const SHOWN_RESIDENT: usize = 256;
@@ -111,9 +142,12 @@ pub struct Index {
     /// memory.
     dir: Option<Arc<Path>>,
     /// Items read back off their Shelves: the hot ones and those shown last.
-    resident: RefCell<HashMap<Slot, Resident>>,
+    /// Looked up for each row a keystroke shows.
+    resident: RefCell<HashMap<Slot, Resident, BuildHasherDefault<SlotHasher>>>,
     /// Counts the Items read, so the latest read are kept.
     reads: Cell<u64>,
+    /// What an Item is read off its Shelf into, kept from one to the next.
+    read_buf: RefCell<Vec<u8>>,
     /// The Items expected to be shown soon, in slot order, kept resident.
     hot: Vec<Slot>,
     /// The Items a keyword or an Alias names, in slot order, kept resident
@@ -247,7 +281,7 @@ impl Index {
             kept.read = read;
             return Some(Arc::clone(&kept.item));
         }
-        let item = Arc::new(shelf.get(place)?);
+        let item = Arc::new(shelf.get_with(place, &mut self.read_buf.borrow_mut())?);
         resident.insert(
             slot,
             Resident {
@@ -416,19 +450,15 @@ impl Index {
         self.segments.get(slot.segment as usize)?.texts(slot.row)
     }
 
-    /// The title's length in characters, of an Item that is there.
-    pub fn title_len(&self, slot: Slot) -> u32 {
-        self.segments
-            .get(slot.segment as usize)
-            .map_or(0, |segment| segment.title_len(slot.row))
+    /// What ranking reads of the Item in `slot`, if there is one.
+    pub fn ranked(&self, slot: Slot) -> Option<Ranked<'_>> {
+        self.segments.get(slot.segment as usize)?.ranked(slot.row)
     }
 
-    /// The name of the kind of an Item that is there.
-    pub fn kind(&self, slot: Slot) -> &str {
-        self.segments
-            .get(slot.segment as usize)
-            .and_then(|segment| segment.kinds().get(segment.kind(slot.row)))
-            .map_or("", String::as_str)
+    /// The names of the kinds of Item each Segment has held, in Segment
+    /// order.
+    pub fn kinds(&self) -> impl Iterator<Item = &[String]> {
+        self.segments.iter().map(|segment| segment.kinds())
     }
 
     /// Every Identity one Extension's Items have.
@@ -451,16 +481,18 @@ impl Index {
     }
 
     /// Scores every Item against `pattern`, or only the slots in `within` when
-    /// the caller knows nothing else can match. Appends `(slot, score)` for
-    /// each match, with what matched, to `out`, in slot order if `within` is.
-    /// `filter` is as [`Texts::score`] takes it.
+    /// the caller knows nothing else can match. Calls `found` with each
+    /// match's slot, what ranking reads of it, its score and what matched, in
+    /// slot order if `within` is: ranking reads what the scan read of a row
+    /// without looking the row up again. `filter` is as [`Texts::score`]
+    /// takes it.
     pub fn search(
         &self,
         pattern: &Pattern,
         matcher: &mut Matcher,
         filter: Filter,
         within: Option<&[Slot]>,
-        out: &mut Vec<(Slot, u32, Matched)>,
+        mut found: impl FnMut(Slot, Ranked<'_>, u32, Matched),
     ) {
         match within {
             Some(slots) => {
@@ -468,29 +500,32 @@ impl Index {
                     let Some(segment) = self.segments.get(slot.segment as usize) else {
                         continue;
                     };
-                    if segment
-                        .every_letter()
-                        .get(slot.row as usize)
-                        .is_some_and(|&letters| filter.may_match(letters))
-                        && let Some(texts) = segment.texts(slot.row)
-                        && let Some((score, matched)) = texts.score(pattern, matcher, filter)
+                    let row = slot.row as usize;
+                    if let (Some(&letters), Some(&initials)) =
+                        (segment.every_letter().get(row), segment.initials().get(row))
+                        && filter.may_match(letters, initials)
+                        && let Some((ranked, score, matched)) =
+                            segment.score(slot.row, pattern, matcher, filter)
                     {
-                        out.push((slot, score, matched));
+                        found(slot, ranked, score, matched);
                     }
                 }
             }
             None => {
                 for (n, segment) in self.segments.iter().enumerate() {
-                    for (row, &letters) in segment.every_letter().iter().enumerate() {
-                        if filter.may_match(letters)
-                            && let Some(texts) = segment.texts(row as Row)
-                            && let Some((score, matched)) = texts.score(pattern, matcher, filter)
+                    // Both dense: a row is passed over on them alone, without
+                    // reading its keys.
+                    let rows = segment.every_letter().iter().zip(segment.initials());
+                    for (row, (&letters, &initials)) in rows.enumerate() {
+                        if filter.may_match(letters, initials)
+                            && let Some((ranked, score, matched)) =
+                                segment.score(row as Row, pattern, matcher, filter)
                         {
                             let slot = Slot {
                                 segment: n as u32,
                                 row: row as Row,
                             };
-                            out.push((slot, score, matched));
+                            found(slot, ranked, score, matched);
                         }
                     }
                 }
@@ -640,7 +675,13 @@ mod tests {
         );
         let query = Query::new(text);
         let mut out = Vec::new();
-        index.search(&pattern, matcher, query.filter(), None, &mut out);
+        index.search(
+            &pattern,
+            matcher,
+            query.filter(),
+            None,
+            |slot, _, score, matched| out.push((slot, score, matched)),
+        );
         let mut found = Found::new();
         for (n, segment) in index.segments.iter().enumerate() {
             for row in 0..segment.every_letter().len() as Row {

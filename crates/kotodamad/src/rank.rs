@@ -75,6 +75,9 @@ pub struct Query {
     last_is_whole: bool,
     /// The letters of each word.
     letters: Vec<Letters>,
+    /// As [`Query::typo_initials`] gives them: asked of every row looked at
+    /// for a near miss.
+    typo_initials: Letters,
 }
 
 /// One character, lowercase and without accents. Letters nucleo doesn't fold,
@@ -113,6 +116,11 @@ impl Query {
             query.letters.push(Letters::in_text(word.iter().copied()));
             query.words.push(word);
         }
+        query.typo_initials = query
+            .words
+            .iter()
+            .filter(|word| typos(word.len()) > 0)
+            .fold(Letters::NONE, |set, word| set | Letters::of(word[0]));
         query
     }
 
@@ -129,10 +137,22 @@ impl Query {
     /// [`Haystack::initials`] gives them: a near miss has a word starting
     /// with one of them.
     pub fn typo_initials(&self) -> Letters {
-        self.words
+        self.typo_initials
+    }
+
+    /// Whether an Item whose title and keywords have `letters`, and words
+    /// starting with `initials`, as [`Texts`] has them, may be a near miss:
+    /// each letter they lack takes a typo, and a word that could have one
+    /// must start a word of theirs, as one with a typo does. Never, for a
+    /// query that tolerates no typo.
+    #[inline]
+    pub fn may_nearly_match(&self, letters: Letters, initials: Letters) -> bool {
+        let enough = self
+            .words
             .iter()
-            .filter(|word| typos(word.len()) > 0)
-            .fold(Letters::NONE, |set, word| set | Letters::of(word[0]))
+            .zip(&self.letters)
+            .all(|(word, &wanted)| letters.lacks(wanted) <= typos(word.len()));
+        enough && initials.meets(self.typo_initials())
     }
 
     /// Whether whatever nearly matches `longer`, a query that adds to this
@@ -202,10 +222,12 @@ impl Filter {
     }
 
     /// Whether an Item with `letters` in its texts, as
-    /// [`Haystack::every_letter`] gives them, may match.
+    /// [`Haystack::every_letter`] gives them, and `initials` starting the
+    /// words of its title and keywords, as [`Haystack::initials`] gives them,
+    /// may match.
     #[inline]
-    pub fn may_match(&self, letters: Letters) -> bool {
-        letters.contains(self.letters)
+    pub fn may_match(&self, letters: Letters, initials: Letters) -> bool {
+        letters.contains(self.letters) && self.letter.is_none_or(|letter| initials.meets(letter))
     }
 }
 
@@ -536,6 +558,7 @@ pub const OPTIMAL_CHARS: usize = 64;
 
 /// `pattern`'s score in `haystack`, as [`Pattern::score`] gives it up to
 /// [`OPTIMAL_CHARS`].
+#[inline]
 fn score(pattern: &Pattern, haystack: Utf32Str<'_>, matcher: &mut Matcher) -> Option<u32> {
     if haystack.len() <= OPTIMAL_CHARS {
         return pattern.score(haystack, matcher);
@@ -555,6 +578,53 @@ fn score(pattern: &Pattern, haystack: Utf32Str<'_>, matcher: &mut Matcher) -> Op
     Some(score)
 }
 
+/// What [`Texts::score`] reads of an Item's texts before nucleo turns most
+/// Items down: the Index scores a row from these alone, and reads the rest
+/// of its texts only for a match.
+#[derive(Clone, Copy)]
+pub struct Searched<'a> {
+    pub title: Utf32Str<'a>,
+    /// The keyword and keywords, as [`Texts::words`] has them.
+    pub words: Utf32Str<'a>,
+    pub subtitle_initials: Letters,
+}
+
+impl<'a> Searched<'a> {
+    /// As [`Texts::score`], once `filter`'s letter, if it has one, is known
+    /// to start a word of the title or keywords. `subtitle` is read only if
+    /// the subtitle is searched.
+    #[inline]
+    pub fn score(
+        self,
+        subtitle: impl FnOnce() -> Utf32Str<'a>,
+        pattern: &Pattern,
+        matcher: &mut Matcher,
+        filter: Filter,
+    ) -> Option<(u32, Matched)> {
+        let title = score(pattern, self.title, matcher);
+        let words = if self.words.is_empty() {
+            None
+        } else {
+            score(pattern, self.words, matcher)
+        };
+        let matched = Matched {
+            title: title.is_some(),
+            words: words.is_some(),
+            subtitle: false,
+        };
+        match title.max(words) {
+            Some(score) => Some((score, matched)),
+            None if filter
+                .subtitles
+                .is_some_and(|initials| self.subtitle_initials.contains(initials)) =>
+            {
+                score(pattern, subtitle(), matcher).map(|score| (score, Matched::SUBTITLE))
+            }
+            None => None,
+        }
+    }
+}
+
 impl Texts<'_> {
     /// nucleo's score, the best of the title's and the keywords', and which of
     /// them matched. Failing both, the subtitle's, if `filter` lets subtitles
@@ -571,40 +641,12 @@ impl Texts<'_> {
         {
             return None;
         }
-        let title = score(pattern, self.title.chars, matcher);
-        let words = if self.words.is_empty() {
-            None
-        } else {
-            score(pattern, self.words.chars, matcher)
+        let searched = Searched {
+            title: self.title.chars,
+            words: self.words.chars,
+            subtitle_initials: self.subtitle_initials,
         };
-        let matched = Matched {
-            title: title.is_some(),
-            words: words.is_some(),
-            subtitle: false,
-        };
-        match title.max(words) {
-            Some(score) => Some((score, matched)),
-            None if filter
-                .subtitles
-                .is_some_and(|initials| self.subtitle_initials.contains(initials)) =>
-            {
-                score(pattern, self.subtitle, matcher).map(|score| (score, Matched::SUBTITLE))
-            }
-            None => None,
-        }
-    }
-
-    /// Whether the title and keywords have enough of each word's letters for
-    /// the Item to be a near miss: each letter they lack takes a typo, and a
-    /// word that could have one must start a word of theirs, as one with a
-    /// typo does.
-    fn may_nearly_match(&self, query: &Query) -> bool {
-        let letters = query
-            .words
-            .iter()
-            .zip(&query.letters)
-            .all(|(word, &letters)| self.letters.lacks(letters) <= typos(word.len()));
-        letters && self.initials.meets(query.typo_initials())
+        searched.score(|| self.subtitle, pattern, matcher, filter)
     }
 }
 
@@ -735,7 +777,7 @@ impl Tiers {
     /// the query's word but for as many typos as that may have. Subtitles
     /// aren't looked at.
     pub fn near_miss_texts(&mut self, texts: Texts, query: &Query) -> bool {
-        if !query.tolerates_typos() || !texts.may_nearly_match(query) {
+        if !query.may_nearly_match(texts.letters, texts.initials) {
             return false;
         }
         self.nearly(texts.title, query)

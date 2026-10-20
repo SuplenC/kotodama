@@ -17,10 +17,11 @@ use std::path::Path;
 use std::sync::Arc;
 
 use kotodama_protocol::Item;
-use nucleo_matcher::{Utf32Str, Utf32String};
+use nucleo_matcher::pattern::Pattern;
+use nucleo_matcher::{Matcher, Utf32Str, Utf32String};
 
 use crate::payload::{Place, Shelf, encode};
-use crate::rank::{Folded, Letters, Text, Texts};
+use crate::rank::{Filter, Folded, Letters, Matched, Searched, Text, Texts};
 
 /// Where an Item lives in its Segment. Stable until the Item is removed, and
 /// not taken by another Item until the change after that.
@@ -66,6 +67,42 @@ struct Keys {
     /// Whether the row holds an Item: a search reads it here, beside the
     /// rest, rather than in the Segment's `held`.
     filled: bool,
+}
+
+/// A filled row, as ranking reads it: its keys, looked up once, and its
+/// texts only when asked for, as most rows looked at for a near miss turn
+/// out not to be one on their letters alone.
+#[derive(Clone, Copy)]
+pub struct Ranked<'a> {
+    segment: &'a Segment,
+    row: Row,
+    keys: &'a Keys,
+}
+
+impl<'a> Ranked<'a> {
+    #[inline]
+    pub fn texts(self) -> Texts<'a> {
+        self.segment.keys_texts(self.row, self.keys)
+    }
+
+    /// The title's length in characters.
+    #[inline]
+    pub fn len(self) -> u32 {
+        self.keys.title.len() as u32
+    }
+
+    /// The Item's kind, as an index into [`Segment::kinds`].
+    #[inline]
+    pub fn kind(self) -> u16 {
+        self.keys.kind
+    }
+
+    /// Every letter of the title and keywords, and the letters their words
+    /// start with, as [`Texts`] has them.
+    #[inline]
+    pub fn letters(self) -> (Letters, Letters) {
+        (self.keys.letters, self.segment.initials[self.row as usize])
+    }
 }
 
 /// One change to an Extension's Items, as it sent it.
@@ -481,6 +518,7 @@ impl Segment {
         }
     }
 
+    #[inline]
     fn text(&self, span: Span) -> Utf32Str<'_> {
         if span.len & WIDE != 0 {
             Utf32Str::Unicode(&self.wide[span.range()])
@@ -496,9 +534,15 @@ impl Segment {
     /// What a search reads of `row`, if it holds an Item.
     pub fn texts(&self, row: Row) -> Option<Texts<'_>> {
         let keys = self.keys.get(row as usize).filter(|keys| keys.filled)?;
+        Some(self.keys_texts(row, keys))
+    }
+
+    /// The texts `keys`, the keys of `row`, point to.
+    #[inline]
+    fn keys_texts(&self, row: Row, keys: &Keys) -> Texts<'_> {
         let starts = keys.starts as usize;
         let words = starts + keys.title_starts as usize;
-        Some(Texts {
+        Texts {
             title: Text {
                 chars: self.text(keys.title),
                 starts: &self.starts[starts..words],
@@ -511,7 +555,7 @@ impl Segment {
             initials: self.initials[row as usize],
             subtitle_initials: keys.subtitle_initials,
             letters: keys.letters,
-        })
+        }
     }
 
     /// Every letter of each row's texts, none for an empty row.
@@ -555,18 +599,44 @@ impl Segment {
         })
     }
 
-    /// The title's length in characters.
-    pub fn title_len(&self, row: Row) -> u32 {
-        self.keys
-            .get(row as usize)
-            .map_or(0, |keys| keys.title.len() as u32)
+    /// Scores the Item in `row`, if there is one, as [`Texts::score`] does,
+    /// with `filter`'s letter already known to start one of its words. Reads
+    /// only its title and keywords unless it matches, or its subtitle is
+    /// searched: most rows a search reads, nucleo turns down. On a match,
+    /// gives what ranking reads of it too.
+    #[inline]
+    pub fn score(
+        &self,
+        row: Row,
+        pattern: &Pattern,
+        matcher: &mut Matcher,
+        filter: Filter,
+    ) -> Option<(Ranked<'_>, u32, Matched)> {
+        let keys = self.keys.get(row as usize).filter(|keys| keys.filled)?;
+        let searched = Searched {
+            title: self.text(keys.title),
+            words: self.text(keys.words),
+            subtitle_initials: keys.subtitle_initials,
+        };
+        let subtitle = || self.text(keys.subtitle);
+        let (score, matched) = searched.score(subtitle, pattern, matcher, filter)?;
+        let ranked = Ranked {
+            segment: self,
+            row,
+            keys,
+        };
+        Some((ranked, score, matched))
     }
 
-    /// The kind of the Item in `row`, as an index into [`Segment::kinds`].
-    pub fn kind(&self, row: Row) -> usize {
-        self.keys
-            .get(row as usize)
-            .map_or(usize::MAX, |keys| keys.kind.into())
+    /// What ranking reads of `row`, if it holds an Item.
+    #[inline]
+    pub fn ranked(&self, row: Row) -> Option<Ranked<'_>> {
+        let keys = self.keys.get(row as usize).filter(|keys| keys.filled)?;
+        Some(Ranked {
+            segment: self,
+            row,
+            keys,
+        })
     }
 
     /// The names of the kinds of Item the Segment has held.

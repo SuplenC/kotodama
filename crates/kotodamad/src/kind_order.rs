@@ -123,6 +123,46 @@ impl KindOrder {
     }
 }
 
+/// The place of each kind every Segment of the Index names, by Segment and
+/// kind (see [`Segment::kinds`](crate::segment::Segment::kinds)): worked out
+/// once a search from the few kinds there are, so ranking looks a Result's
+/// place up rather than comparing kind names once a Result.
+#[derive(Default)]
+pub struct KindPlaces {
+    places: Vec<Vec<u8>>,
+    others: u8,
+}
+
+impl KindPlaces {
+    /// The places of `segments`' kinds, each Segment's kind names in Segment
+    /// order, in `order`.
+    pub fn update<'a>(&mut self, order: &KindOrder, segments: impl Iterator<Item = &'a [String]>) {
+        self.others = order.others;
+        let mut n = 0;
+        for kinds in segments {
+            if n == self.places.len() {
+                self.places.push(Vec::new());
+            }
+            let places = &mut self.places[n];
+            places.clear();
+            places.extend(kinds.iter().map(|kind| order.place_named(kind)));
+            n += 1;
+        }
+        self.places.truncate(n);
+    }
+
+    /// Where Results of `kind` in `segment` rank on an equal match, lowest
+    /// first.
+    #[inline]
+    pub fn place(&self, segment: u32, kind: u16) -> u8 {
+        self.places
+            .get(segment as usize)
+            .and_then(|places| places.get(usize::from(kind)))
+            .copied()
+            .unwrap_or(self.others)
+    }
+}
+
 /// A shared kind's index in [`SHARED_KINDS`], without comparing names.
 fn shared_index(kind: &ItemKind) -> usize {
     match kind {

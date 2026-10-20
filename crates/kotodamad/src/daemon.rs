@@ -32,7 +32,7 @@ use crate::history::{
 use crate::index::{Index, ItemRef, Slot};
 use crate::indexer::{Indexed, Indexer, Kept, Plan};
 use crate::keywords::{self, Keywords};
-use crate::kind_order::KindOrder;
+use crate::kind_order::{KindOrder, KindPlaces};
 use crate::open_view::{Opening, ViewName};
 use crate::rank::{self, Haystack, Matched, Text, Tier, Tiers};
 use crate::segment::Edit;
@@ -763,6 +763,8 @@ pub struct Daemon<L, D, S> {
     keywords: Keywords,
     empty_query: EmptyQuery,
     kinds: KindOrder,
+    /// `kinds` for each Segment's kinds, as of the last search.
+    kind_places: KindPlaces,
     /// One per Quicklink, then the clear-history Item, then the Undo Item
     /// while there is something to undo.
     own: Vec<Own>,
@@ -772,7 +774,8 @@ pub struct Daemon<L, D, S> {
     /// versions in `frecent_versions`.
     frecent: Vec<(Slot, Picks, Counts)>,
     frecent_versions: Option<(u64, u64)>,
-    scored: Vec<(Slot, u32, Matched)>,
+    /// The slots the last search matched.
+    scored: Vec<Slot>,
     tiers: Tiers,
     highlights: Vec<u32>,
 }
@@ -826,6 +829,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             keywords: Keywords::default(),
             empty_query: EmptyQuery::default(),
             kinds: KindOrder::default(),
+            kind_places: KindPlaces::default(),
             own: Vec::new(),
             undos: Vec::new(),
             frecent: Vec::new(),
@@ -2781,34 +2785,35 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             .narrowing
             .narrows(&session.query, &session.folded, version);
         let within = narrow.then_some(session.narrowing.matched.as_slice());
-        self.index.search(
+        self.kind_places.update(&self.kinds, self.index.kinds());
+        let Daemon {
+            index,
+            matcher,
+            tiers,
+            kind_places,
+            scored,
+            ..
+        } = self;
+        index.search(
             &session.pattern,
-            &mut self.matcher,
+            matcher,
             session.folded.filter(),
             within,
-            &mut self.scored,
+            |slot, ranked, score, matched| {
+                scored.push(slot);
+                if let Some(tier) = tiers.texts(ranked.texts(), &session.folded, matched) {
+                    let kind = kind_places.place(slot.segment, ranked.kind());
+                    let source = Source::Indexed(slot);
+                    candidates.push(Candidate::new(source, tier, kind, score, ranked.len()));
+                }
+            },
         );
         session.narrowing.found(
             &session.query,
             &session.folded,
             version,
-            self.scored.iter().map(|&(slot, ..)| slot),
+            self.scored.iter().copied(),
         );
-        for &(slot, score, matched) in &self.scored {
-            if let Some(texts) = self.index.texts(slot)
-                && let Some(tier) = self.tiers.texts(texts, &session.folded, matched)
-            {
-                let len = self.index.title_len(slot);
-                let kind = self.kinds.place_named(self.index.kind(slot));
-                candidates.push(Candidate::new(
-                    Source::Indexed(slot),
-                    tier,
-                    kind,
-                    score,
-                    len,
-                ));
-            }
-        }
         // Up to here the candidates are in slot order.
         let indexed = candidates.len();
         let mut fallbacks = Vec::new();
@@ -2992,13 +2997,14 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             own,
             tiers,
             kinds,
+            kind_places,
             ..
         } = self;
         let folded = &session.folded;
         let known = &candidates[..];
         // The near miss `source` is, unless it is a candidate already.
         let mut near_miss = |source: Source| {
-            let (texts, kind, len) = match source {
+            let (texts, len, kind) = match source {
                 Source::Indexed(slot) => {
                     if known[..indexed]
                         .binary_search_by_key(&source, |c| c.source)
@@ -3006,9 +3012,15 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
                     {
                         return None;
                     }
-                    let texts = index.texts(slot)?;
-                    let kind = kinds.place_named(index.kind(slot));
-                    (texts, kind, index.title_len(slot))
+                    let ranked = index.ranked(slot)?;
+                    // Most rows fail on their letters: their texts aren't
+                    // looked up.
+                    let (letters, initials) = ranked.letters();
+                    if !folded.may_nearly_match(letters, initials) {
+                        return None;
+                    }
+                    let kind = kind_places.place(slot.segment, ranked.kind());
+                    (ranked.texts(), ranked.len(), kind)
                 }
                 Source::Own(n) => {
                     if known[indexed..].iter().any(|c| c.source == source) {
@@ -3016,7 +3028,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
                     }
                     let own = own.get(n as usize)?;
                     let len = own.haystack.title.len() as u32;
-                    (own.haystack.texts(), kinds.place(&own.item.kind), len)
+                    (own.haystack.texts(), len, kinds.place(&own.item.kind))
                 }
                 Source::Live(..) => return None,
             };

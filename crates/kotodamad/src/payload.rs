@@ -109,11 +109,16 @@ impl Shelf {
 
     /// The Item at `place`.
     pub fn get(&self, place: Place) -> Option<Item> {
-        let mut buf = Vec::new();
+        self.get_with(place, &mut Vec::new())
+    }
+
+    /// The Item at `place`, read through `buf`, which a caller reading one
+    /// Item after another keeps rather than allocate one per Item.
+    pub fn get_with(&self, place: Place, buf: &mut Vec<u8>) -> Option<Item> {
         let item = self
-            .read(place, &mut buf)
+            .read(place, buf)
             .map_err(|err| err.to_string())
-            .and_then(|()| decode(&buf).map_err(|err| err.to_string()));
+            .and_then(|()| decode(buf).map_err(|err| err.to_string()));
         match item {
             Ok(item) => Some(item),
             Err(err) => {
