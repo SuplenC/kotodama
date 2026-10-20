@@ -14,14 +14,30 @@
 //!     { name = "YouTube", url = "https://www.youtube.com/results?search_query={query}" },
 //! ]
 //! ```
+//!
+//! # Owns
+//!
+//! - The protocol loop: the config, each Live query and each Action.
+//!
+//! # Not here
+//!
+//! - The engines, addresses and Results: the library, `lib.rs`.
+//! - Launching a command: `kotodama_extension::launch`.
 
 #![forbid(unsafe_code)]
 
 use std::process::ExitCode;
 
-use kotodama_extension::{Connection, Event, launch};
-use kotodama_protocol::{FromExtension, Outcome, ToExtension};
-use kotodama_web_search::{Engine, command, default_engines, results};
+use kotodama_extension::Connection;
+use kotodama_extension::Event;
+use kotodama_extension::launch;
+use kotodama_protocol::FromExtension;
+use kotodama_protocol::Outcome;
+use kotodama_protocol::ToExtension;
+use kotodama_web_search::Engine;
+use kotodama_web_search::command;
+use kotodama_web_search::default_engines;
+use kotodama_web_search::results;
 
 fn main() -> ExitCode {
     kotodama_extension::main("kotodama-web-search", run)
@@ -29,9 +45,7 @@ fn main() -> ExitCode {
 
 fn run() -> Result<(), kotodama_protocol::Error> {
     let Connection {
-        mut writer,
-        received,
-        ..
+        mut writer, received, ..
     } = kotodama_extension::connect::<()>()?;
     let mut engines: Vec<Engine> = default_engines();
     for event in received {
@@ -63,10 +77,7 @@ fn run() -> Result<(), kotodama_protocol::Error> {
                         message: format!("web-search has no Action `{action}`"),
                     },
                 };
-                writer.send(&FromExtension::ActionDone {
-                    invocation,
-                    outcome,
-                })?;
+                writer.send(&FromExtension::ActionDone { invocation, outcome })?;
             }
             Event::Message(_) | Event::Own(()) => {}
             Event::Hangup => break,

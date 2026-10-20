@@ -1,5 +1,6 @@
 //! Drives the web search Extension the way the Daemon does, over its stdio.
 
+use std::collections::BTreeMap;
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
@@ -22,7 +23,7 @@ fn start(config: &str, path: &Path) -> Spawned {
             .env("KOTODAMA_LAUNCH_PREFIX", ""),
         WAIT,
     );
-    web.send(ToExtension::Config(toml::from_str(config).unwrap()));
+    web.send(ToExtension::Config(toml::from_str(config).expect("parse the config")));
     web
 }
 
@@ -59,11 +60,7 @@ fn a_query_is_answered_with_a_search_of_each_default_engine() {
             "Search Wikipedia for rust book"
         ]
     );
-    assert!(
-        results
-            .iter()
-            .all(|r| !r.answer && r.item.kind.name() == "url")
-    );
+    assert!(results.iter().all(|r| !r.answer && r.item.kind.name() == "url"));
 }
 
 #[test]
@@ -74,10 +71,7 @@ fn engines_come_from_the_config_and_an_address_comes_first() {
         dir.path(),
     );
     let results = ask(&mut web, 7, "crates.io");
-    assert_eq!(
-        titles(&results),
-        ["Open crates.io", "Search Crates for crates.io"]
-    );
+    assert_eq!(titles(&results), ["Open crates.io", "Search Crates for crates.io"]);
     assert!(results[0].answer);
     assert_eq!(
         results[1].item.kind,
@@ -101,7 +95,7 @@ fn opening_a_row_runs_xdg_open_on_its_url() {
     let mut web = start("", dir.path());
     let row = ask(&mut web, 1, "żółw & co").remove(0).item;
 
-    web.start_run(2, "open", row.to_ref(), Default::default());
+    web.start_run(2, "open", row.to_ref(), BTreeMap::default());
     assert_eq!(web.outcome(2, |_| false), Outcome::Close);
     for _ in 0..100 {
         if out.exists() {
@@ -114,7 +108,7 @@ fn opening_a_row_runs_xdg_open_on_its_url() {
         "https://duckduckgo.com/?q=%C5%BC%C3%B3%C5%82w%20%26%20co\n"
     );
 
-    web.start_run(3, "copy", row.to_ref(), Default::default());
+    web.start_run(3, "copy", row.to_ref(), BTreeMap::default());
     assert!(matches!(web.outcome(3, |_| false), Outcome::Failed { .. }));
 }
 
