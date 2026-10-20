@@ -1,16 +1,38 @@
-//! Web search: for a query, a Result searching each configured engine for
-//! it and, if the query looks like an address, one opening it, marked as the
-//! answer. Templates are filled and opened as Quicklinks' are
-//! ([`kotodama_extension::url`]).
+//! Web search: for a query, a Result searching each configured engine for it and, if the query
+//! looks like an address, one opening it, marked as the answer.
+//!
+//! # Owns
+//!
+//! - The `engines` setting and the default engines.
+//! - What counts as an address, and the scheme it opens with.
+//! - The Live query results for a query, and the command an Action on one runs.
+//!
+//! # Not here
+//!
+//! - The protocol loop: `main.rs`.
+//! - Filling a URL template and the opener it runs: [`kotodama_extension::url`], shared with
+//!   Quicklinks.
+//! - Which queries the Extension is asked and where its Results rank: the Daemon's
+//!   `Daemon::add_fallbacks`.
 
 #![forbid(unsafe_code)]
 
-use kotodama_extension::{config, url};
-use kotodama_protocol::{Action, Fraction, Item, ItemKind, ItemRef, LiveResult, Table, Value};
+use kotodama_extension::config;
+use kotodama_extension::url;
+use kotodama_protocol::Action;
+use kotodama_protocol::Fraction;
+use kotodama_protocol::Item;
+use kotodama_protocol::ItemKind;
+use kotodama_protocol::ItemRef;
+use kotodama_protocol::LiveResult;
+use kotodama_protocol::Table;
+use kotodama_protocol::Value;
 
 /// The one Action of every Item: opens its URL.
 pub const OPEN: &str = "open";
 const ICON: &str = "web-browser";
+/// The longest label a domain name may have (RFC 1035).
+const MAX_LABEL: usize = 63;
 
 /// A search engine: what it is called and the URL template a query goes in,
 /// with `{query}` where the query goes.
@@ -21,6 +43,7 @@ pub struct Engine {
 }
 
 impl Engine {
+    #[must_use]
     fn new(name: &str, url: &str) -> Self {
         Engine {
             name: name.into(),
@@ -34,10 +57,7 @@ pub fn default_engines() -> Vec<Engine> {
     vec![
         Engine::new("DuckDuckGo", "https://duckduckgo.com/?q={query}"),
         Engine::new("Google", "https://www.google.com/search?q={query}"),
-        Engine::new(
-            "Wikipedia",
-            "https://en.wikipedia.org/w/index.php?search={query}",
-        ),
+        Engine::new("Wikipedia", "https://en.wikipedia.org/w/index.php?search={query}"),
     ]
 }
 
@@ -67,13 +87,10 @@ pub fn engines(table: &Table) -> Vec<Engine> {
             }
         })
         .collect();
-    if engines.is_empty() {
-        default_engines()
-    } else {
-        engines
-    }
+    if engines.is_empty() { default_engines() } else { engines }
 }
 
+/// The engine one entry of the `engines` setting names, or why the entry is not one.
 fn engine(value: &Value) -> Result<Engine, &'static str> {
     let Value::Table(table) = value else {
         return Err("should be a { name, url } table");
@@ -92,10 +109,9 @@ fn engine(value: &Value) -> Result<Engine, &'static str> {
 /// The address `query` names, ready to open, if it looks like one:
 ///
 /// - a URL with an `http` or `https` scheme and a host, taken as it is;
-/// - a domain name such as `example.com`, opened over `https`, whose last
-///   label is a common generic top-level domain ([`GENERIC`]), a two-letter
-///   country code that isn't also a common file extension ([`FILES`]), so
-///   `main.rs` and `notes.md` stay searches, or not ASCII, such as `рф`;
+/// - a domain name such as `example.com`, opened over `https`, whose last label is a common generic
+///   top-level domain ([`GENERIC`]), a two-letter country code that isn't also a common file
+///   extension ([`FILES`]), so `main.rs` and `notes.md` stay searches, or not ASCII, such as `рф`;
 /// - `localhost` with a port, or an IPv4 address, opened over `http`.
 ///
 /// A port and a path may follow. Anything with whitespace inside is a
@@ -120,16 +136,16 @@ pub fn address(query: &str) -> Option<String> {
 /// Generic top-level domains common enough to take without a scheme. Others
 /// open with one typed.
 pub const GENERIC: &[&str] = &[
-    "app", "art", "biz", "blog", "cloud", "club", "com", "design", "dev", "edu", "email", "gov",
-    "info", "int", "link", "live", "mil", "name", "net", "news", "online", "org", "page", "pro",
-    "shop", "site", "space", "store", "tech", "today", "top", "website", "wiki", "xyz",
+    "app", "art", "biz", "blog", "cloud", "club", "com", "design", "dev", "edu", "email", "gov", "info", "int", "link",
+    "live", "mil", "name", "net", "news", "online", "org", "page", "pro", "shop", "site", "space", "store", "tech",
+    "today", "top", "website", "wiki", "xyz",
 ];
 
 /// Two-letter file extensions, country codes or not, that a file name ends
 /// in more often than an address does.
 pub const FILES: &[&str] = &[
-    "cc", "cs", "db", "el", "ex", "go", "gz", "hs", "js", "jl", "kt", "md", "mk", "ml", "nb", "pm",
-    "ps", "py", "rb", "rc", "rs", "sh", "so", "sv", "ts", "vh", "xz",
+    "cc", "cs", "db", "el", "ex", "go", "gz", "hs", "js", "jl", "kt", "md", "mk", "ml", "nb", "pm", "ps", "py", "rb",
+    "rc", "rs", "sh", "so", "sv", "ts", "vh", "xz",
 ];
 
 /// The scheme an address at `authority`, a host and an optional port, opens
@@ -145,31 +161,11 @@ fn scheme_for(authority: &str) -> Option<&'static str> {
     if host.eq_ignore_ascii_case("localhost") {
         return port.map(|_| "http://");
     }
-    if host.split('.').count() == 4
-        && host
-            .split('.')
-            .all(|octet| (1..=3).contains(&octet.len()) && octet.parse::<u8>().is_ok())
-    {
+    if is_ipv4(host) {
         return Some("http://");
     }
     let (rest, tld) = host.rsplit_once('.')?;
-    let label = |label: &str| {
-        !label.is_empty()
-            && label.len() <= 63
-            && !label.starts_with('-')
-            && !label.ends_with('-')
-            && label.chars().all(|c| c.is_alphanumeric() || c == '-')
-    };
-    let tld_lower = tld.to_lowercase();
-    let known = if tld.is_ascii() {
-        match tld.len() {
-            2 => tld.bytes().all(|b| b.is_ascii_alphabetic()) && !FILES.contains(&&*tld_lower),
-            _ => GENERIC.contains(&&*tld_lower),
-        }
-    } else {
-        tld.chars().count() >= 2 && tld.chars().all(char::is_alphabetic)
-    };
-    (known && rest.split('.').all(label)).then_some("https://")
+    (is_known_tld(tld) && rest.split('.').all(is_label)).then_some("https://")
 }
 
 /// The host and port at the start of an address, before its path.
@@ -180,9 +176,36 @@ fn authority(address: &str) -> &str {
 fn is_port(port: &str) -> bool {
     (1..=5).contains(&port.len())
         && port.bytes().all(|b| b.is_ascii_digit())
-        && port
-            .parse::<u32>()
-            .is_ok_and(|port| (1..=65535).contains(&port))
+        && port.parse::<u32>().is_ok_and(|port| (1..=65535).contains(&port))
+}
+
+fn is_ipv4(host: &str) -> bool {
+    host.split('.').count() == 4
+        && host
+            .split('.')
+            .all(|octet| (1..=3).contains(&octet.len()) && octet.parse::<u8>().is_ok())
+}
+
+/// Whether `tld` is a top-level domain taken without a scheme: one in [`GENERIC`], a two-letter
+/// country code not in [`FILES`], or any alphabetic one outside ASCII.
+fn is_known_tld(tld: &str) -> bool {
+    if !tld.is_ascii() {
+        return tld.chars().count() >= 2 && tld.chars().all(char::is_alphabetic);
+    }
+    let tld_lower = tld.to_lowercase();
+    match tld.len() {
+        2 => tld.bytes().all(|b| b.is_ascii_alphabetic()) && !FILES.contains(&&*tld_lower),
+        _ => GENERIC.contains(&&*tld_lower),
+    }
+}
+
+/// Whether `label`, one dot-separated part of a host below its top-level domain, is a valid one.
+fn is_label(label: &str) -> bool {
+    !label.is_empty()
+        && label.len() <= MAX_LABEL
+        && !label.starts_with('-')
+        && !label.ends_with('-')
+        && label.chars().all(|c| c.is_alphanumeric() || c == '-')
 }
 
 /// The Live query results for `query`: the address it names first, as the answer, then a
@@ -194,7 +217,7 @@ pub fn results(query: &str, engines: &[Engine]) -> Vec<LiveResult> {
     }
     let opening = address(query).map(|address| LiveResult {
         item: item(format!("open:{address}"), format!("Open {query}"), address),
-        score: Fraction::new(1.0).expect("in range"),
+        score: score(0),
         answer: true,
     });
     let searches = engines.iter().enumerate().map(|(n, engine)| LiveResult {
@@ -203,11 +226,17 @@ pub fn results(query: &str, engines: &[Engine]) -> Vec<LiveResult> {
             format!("Search {} for {query}", engine.name),
             url::fill(&engine.url, query),
         ),
-        // Earlier engines first, everything else being equal.
-        score: Fraction::new(1.0 / (n as f32 + 1.0)).expect("in range"),
+        score: score(n),
         answer: false,
     });
     opening.into_iter().chain(searches).collect()
+}
+
+/// The score of the Result `rank` places after the first, which scores 1: earlier engines come
+/// first, everything else being equal.
+fn score(rank: usize) -> Fraction {
+    // 1 / (rank + 1) is in (0, 1] for every rank.
+    Fraction::new(1.0 / (rank as f32 + 1.0)).expect("a web search score is in range")
 }
 
 fn item(id: String, title: String, url: String) -> Item {
@@ -234,186 +263,4 @@ pub fn command(action: &str, item: &ItemRef) -> Option<Vec<String>> {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    const ADDRESSES: &[(&str, &str)] = &[
-        ("example.com", "https://example.com"),
-        ("  example.com ", "https://example.com"),
-        (
-            "github.com/SuplenC/kotodama",
-            "https://github.com/SuplenC/kotodama",
-        ),
-        (
-            "sub.example.co.uk?q=1#top",
-            "https://sub.example.co.uk?q=1#top",
-        ),
-        ("example.com:8443/x", "https://example.com:8443/x"),
-        ("https://example.com/a?b=c", "https://example.com/a?b=c"),
-        ("HTTP://Example.com", "HTTP://Example.com"),
-        ("localhost:8080", "http://localhost:8080"),
-        ("localhost:3000/api", "http://localhost:3000/api"),
-        ("192.168.1.10", "http://192.168.1.10"),
-        ("127.0.0.1:8000/", "http://127.0.0.1:8000/"),
-        ("żółw.pl", "https://żółw.pl"),
-        ("пример.рф", "https://пример.рф"),
-        ("kotodama.dev", "https://kotodama.dev"),
-        ("http://localhost/", "http://localhost/"),
-        ("https://intranet/wiki", "https://intranet/wiki"),
-    ];
-
-    #[test]
-    fn domains_addresses_with_a_scheme_and_localhost_with_a_port_are_addresses() {
-        for &(query, url) in ADDRESSES {
-            assert_eq!(address(query).as_deref(), Some(url), "{query:?}");
-        }
-    }
-
-    /// The Daemon sends what may be an address whatever else matches, by the
-    /// Manifest's triggers, so they must let every address through.
-    #[test]
-    fn the_manifest_triggers_send_every_address() {
-        let manifest = kotodama_protocol::Manifest::from_toml(include_str!("../manifest.toml"));
-        let triggers = manifest.unwrap().live_query.unwrap().triggers;
-        let triggers: Vec<regex::Regex> = triggers
-            .iter()
-            .map(|trigger| regex::Regex::new(trigger).unwrap())
-            .collect();
-        for &(query, _) in ADDRESSES {
-            assert!(triggers.iter().any(|t| t.is_match(query)), "{query:?}");
-        }
-    }
-
-    #[test]
-    fn words_numbers_and_text_with_spaces_are_not_addresses() {
-        let cases = [
-            "",
-            "weather",
-            "foo.bar baz",
-            "go to example.com",
-            "3.14",
-            "1.2.3",
-            "256.1.1.1",
-            "localhost",
-            "localhost:",
-            "localhost:99999",
-            "example.com:port",
-            "example.",
-            ".com",
-            "a..com",
-            "-a.com",
-            "main.c",
-            "main.rs",
-            "notes.md",
-            "Cargo.toml",
-            "index.js",
-            "node.js",
-            "setup.py",
-            "example.unknowntld",
-            "v1.2",
-            "https://",
-            "https:// example.com",
-            "mailto:me@example.com",
-            "ftp://example.com",
-        ];
-        for query in cases {
-            assert_eq!(address(query), None, "{query:?}");
-        }
-    }
-
-    fn titles(results: &[LiveResult]) -> Vec<&str> {
-        results.iter().map(|r| r.item.title.as_str()).collect()
-    }
-
-    fn url_of(result: &LiveResult) -> &str {
-        match &result.item.kind {
-            ItemKind::Url { url } => url,
-            kind => panic!("{kind:?}"),
-        }
-    }
-
-    #[test]
-    fn a_query_gives_a_search_of_each_engine_in_order() {
-        let results = results("rust book", &default_engines());
-        assert_eq!(
-            titles(&results),
-            [
-                "Search DuckDuckGo for rust book",
-                "Search Google for rust book",
-                "Search Wikipedia for rust book"
-            ]
-        );
-        assert!(results.iter().all(|r| !r.answer));
-        assert!(results.is_sorted_by(|a, b| a.score.get() > b.score.get()));
-        assert_eq!(url_of(&results[0]), "https://duckduckgo.com/?q=rust%20book");
-    }
-
-    #[test]
-    fn queries_are_encoded_into_the_template() {
-        let engines = [Engine::new("X", "https://x.example/s?q={query}&lang=pl")];
-        let results = results("tom & jerry żółw", &engines);
-        assert_eq!(
-            url_of(&results[0]),
-            "https://x.example/s?q=tom%20%26%20jerry%20%C5%BC%C3%B3%C5%82w&lang=pl"
-        );
-    }
-
-    #[test]
-    fn an_address_opens_first_as_the_answer_and_is_searched_too() {
-        let results = results("example.com", &default_engines()[..1]);
-        assert_eq!(
-            titles(&results),
-            ["Open example.com", "Search DuckDuckGo for example.com"]
-        );
-        assert!(results[0].answer);
-        assert_eq!(url_of(&results[0]), "https://example.com");
-    }
-
-    #[test]
-    fn a_blank_query_gives_nothing() {
-        assert!(results("  ", &default_engines()).is_empty());
-    }
-
-    #[test]
-    fn open_runs_the_opener_on_the_items_url() {
-        let item = results("x", &default_engines()).remove(0).item.to_ref();
-        assert_eq!(
-            command(OPEN, &item),
-            Some(vec![
-                "xdg-open".to_owned(),
-                "https://duckduckgo.com/?q=x".to_owned()
-            ])
-        );
-        assert_eq!(command("copy", &item), None);
-    }
-
-    fn table(text: &str) -> Table {
-        toml::from_str(text).unwrap()
-    }
-
-    #[test]
-    fn engines_come_from_the_config_in_order() {
-        let engines = engines(&table(
-            r#"engines = [
-                { name = "Kagi", url = "https://kagi.com/search?q={query}" },
-                { name = "Broken" },
-                { name = "No query", url = "https://example.com" },
-                { name = "Crates", url = "https://crates.io/search?q={query}" },
-            ]"#,
-        ));
-        assert_eq!(
-            engines,
-            [
-                Engine::new("Kagi", "https://kagi.com/search?q={query}"),
-                Engine::new("Crates", "https://crates.io/search?q={query}"),
-            ]
-        );
-    }
-
-    #[test]
-    fn no_setting_gives_the_defaults_and_an_empty_list_none() {
-        assert_eq!(engines(&Table::new()), default_engines());
-        assert_eq!(engines(&table("engines = []")), []);
-        assert_eq!(engines(&table("engines = 3")), default_engines());
-    }
-}
+mod tests;

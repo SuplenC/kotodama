@@ -15,3 +15,6 @@ kotodama-extension = { path = "../kotodama-extension", features = ["testing"] }
 regex = "1.13.1"
 tempfile = "3.27.0"
 toml = { version = "1.1.8", default-features = false, features = ["parse", "serde", "std"] }
+
+[lints]
+workspace = true
