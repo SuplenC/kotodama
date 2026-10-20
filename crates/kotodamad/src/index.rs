@@ -154,6 +154,11 @@ impl Index {
         self.ids[extension.0].get(id).copied()
     }
 
+    /// How many slots there are, empty or not: every slot is below this.
+    pub fn slots(&self) -> Slot {
+        self.slots.len() as Slot
+    }
+
     pub fn entry(&self, slot: Slot) -> Option<&Entry> {
         self.slots.get(slot as usize)?.as_ref()
     }

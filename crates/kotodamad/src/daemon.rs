@@ -2171,6 +2171,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
                 ));
             }
         }
+        let indexed = self.add_near_misses(&session, &mut candidates, indexed);
         let primary = self.learn(&mut session, &mut candidates, indexed, now);
 
         let mut answers: Vec<Candidate> = Vec::new();
@@ -2218,6 +2219,63 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             .collect();
         session.send(ToFrontEnd::Results { results });
         self.sessions.insert(id, session);
+    }
+
+    /// Adds the near misses of the session's query, Indexed items and the
+    /// Daemon's own, to `candidates`, unless the real matches already fill the
+    /// rows: near misses rank below every real match, so they would never be
+    /// seen. The candidates before `indexed` are the Indexed items, in slot
+    /// order, and stay so; returns how many there are now.
+    fn add_near_misses(
+        &mut self,
+        session: &Session,
+        candidates: &mut Vec<Candidate>,
+        indexed: usize,
+    ) -> usize {
+        if candidates.len() >= session.rows || !session.folded.tolerates_typos() {
+            return indexed;
+        }
+        let mut found = Vec::new();
+        for slot in 0..self.index.slots() {
+            let source = Source::Indexed(slot);
+            if let Some(entry) = self.index.entry(slot)
+                && candidates[..indexed]
+                    .binary_search_by_key(&source, |c| c.source)
+                    .is_err()
+                && self
+                    .tiers
+                    .near_miss(&entry.haystack, &entry.item, &session.folded)
+            {
+                found.push(Candidate::new(
+                    source,
+                    Tier::NearMiss,
+                    self.kinds.place(&entry.item.kind),
+                    0,
+                    entry.haystack.title.len() as u32,
+                ));
+            }
+        }
+        for (n, own) in self.own.iter().enumerate() {
+            let source = Source::Own(n as u32);
+            if !candidates[indexed..].iter().any(|c| c.source == source)
+                && self
+                    .tiers
+                    .near_miss(&own.haystack, &own.item, &session.folded)
+            {
+                candidates.push(Candidate::new(
+                    source,
+                    Tier::NearMiss,
+                    self.kinds.place(&own.item.kind),
+                    0,
+                    own.haystack.title.len() as u32,
+                ));
+            }
+        }
+        let added = found.len();
+        candidates.splice(indexed..indexed, found);
+        let indexed = indexed + added;
+        candidates[..indexed].sort_unstable_by_key(|candidate| candidate.source);
+        indexed
     }
 
     /// Applies what the Daemon learned from the user, and the user's

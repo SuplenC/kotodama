@@ -2,7 +2,8 @@
 //! before anything else: an exact title beats a word that starts with the
 //! query, which beats the query inside a word, which beats its letters
 //! scattered. nucleo decides what matches at all and breaks ties within a
-//! tier.
+//! tier. Below every real match comes a near miss: the query with typos in
+//! it, at most one per [`LETTERS_PER_TYPO`] letters of each word.
 //!
 //! Text is folded before it's compared: lowercase, with accents dropped
 //! (`Żółw` is `zolw`), so neither case nor accents in the query matter.
@@ -14,6 +15,9 @@ use nucleo_matcher::{Matcher, Utf32Str, Utf32String, chars};
 /// How well a text matches, worst first.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Tier {
+    /// No match, but the query would match with as many typos as it may have:
+    /// a letter missing, extra or wrong, or two letters swapped.
+    NearMiss,
     /// The query's letters in order, with gaps.
     Scattered,
     /// The query inside a word, or a word of a subtitle.
@@ -31,18 +35,31 @@ impl Tier {
     /// The tier as ranking compares it, where initials count as a word start.
     pub fn coarse(self) -> u8 {
         match self {
-            Tier::Scattered => 0,
-            Tier::Inside => 1,
-            Tier::WordStart | Tier::Initials => 2,
-            Tier::Exact => 3,
+            Tier::NearMiss => 0,
+            Tier::Scattered => 1,
+            Tier::Inside => 2,
+            Tier::WordStart | Tier::Initials => 3,
+            Tier::Exact => 4,
         }
     }
 }
 
 /// The coarse tier one above `coarse`: where a Result the user picks often
-/// ranks.
+/// ranks. A near miss stays one, so every real match ranks above it.
 pub fn lift(coarse: u8) -> u8 {
+    if coarse == Tier::NearMiss.coarse() {
+        return coarse;
+    }
     (coarse + 1).min(Tier::Exact.coarse())
+}
+
+/// How many letters of a query's word allow it one typo. A shorter word
+/// allows none, so a short query doesn't nearly match everything.
+pub const LETTERS_PER_TYPO: usize = 4;
+
+/// How many typos a word of `len` letters may have.
+fn typos(len: usize) -> usize {
+    len / LETTERS_PER_TYPO
 }
 
 /// A query, folded for comparing with [`Tiers`].
@@ -54,6 +71,8 @@ pub struct Query {
     whole: Vec<char>,
     /// The query ends in whitespace, so its last word must be a whole word.
     last_is_whole: bool,
+    /// The letters of each word, as [`letters`] gives them.
+    letters: Vec<u64>,
 }
 
 /// One character, lowercase and without accents. Letters nucleo doesn't fold,
@@ -89,6 +108,7 @@ impl Query {
                 query.whole.push(' ');
             }
             query.whole.extend(&word);
+            query.letters.push(letters(word.iter().copied()));
             query.words.push(word);
         }
         query
@@ -96,6 +116,11 @@ impl Query {
 
     pub fn is_empty(&self) -> bool {
         self.words.is_empty()
+    }
+
+    /// Whether any word is long enough to have a typo.
+    pub fn tolerates_typos(&self) -> bool {
+        self.words.iter().any(|word| typos(word.len()) > 0)
     }
 
     /// Whether the query is long enough for subtitles to be searched.
@@ -163,6 +188,9 @@ pub struct Haystack {
     initials: u64,
     /// The same for the subtitle.
     subtitle_initials: u64,
+    /// Every letter of the title and keywords, as [`letters`] gives them, so
+    /// looking for near misses passes over most Items without searching them.
+    letters: u64,
 }
 
 /// A character as a bit of a set of word initials: one of 36 for a folded
@@ -173,6 +201,12 @@ fn initial(c: char) -> u64 {
         '0'..='9' => 1 << (26 + c as u32 - '0' as u32),
         _ => 1 << 63,
     }
+}
+
+/// Every character of `chars`, as [`initial`] gives them. The bit every other
+/// character shares is always set, as in [`initials`].
+fn letters(chars: impl Iterator<Item = char>) -> u64 {
+    chars.map(initial).fold(1 << 63, |set, c| set | c)
 }
 
 /// The letters words of `folded` start with, as [`initial`] gives them, with
@@ -219,6 +253,7 @@ impl Haystack {
         Haystack {
             initials: initials(&title, Some(&item.title)) | initials(&words, None),
             subtitle_initials: initials(&subtitle, None),
+            letters: letters(title.chars().chain(words.chars())),
             title: Utf32String::from(title),
             words: Utf32String::from(words),
             subtitle: Utf32String::from(subtitle),
@@ -264,6 +299,14 @@ impl Haystack {
             None => None,
         }
     }
+
+    /// Whether the title and keywords have enough of each word's letters for
+    /// the Item to be a near miss: each letter they lack takes a typo.
+    fn may_nearly_match(&self, query: &Query) -> bool {
+        query.words.iter().zip(&query.letters).all(|(word, &letters)| {
+            (letters & !self.letters).count_ones() as usize <= typos(word.len())
+        })
+    }
 }
 
 /// Which of an Item's texts matched a query.
@@ -294,6 +337,8 @@ pub struct Tiers {
     chars: Vec<char>,
     /// Where each word of `chars` starts.
     starts: Vec<usize>,
+    /// The table [`within`] works in.
+    distances: Vec<usize>,
 }
 
 impl Tiers {
@@ -327,6 +372,52 @@ impl Tiers {
         best
     }
 
+    /// Whether an Item that doesn't match is a near miss: each word of the
+    /// query matches its title or keywords, or a word of them starts with
+    /// the query's word but for as many typos as that may have. Subtitles
+    /// aren't looked at.
+    pub fn near_miss(&mut self, haystack: &Haystack, item: &Item, query: &Query) -> bool {
+        if !query.tolerates_typos() || !haystack.may_nearly_match(query) {
+            return false;
+        }
+        self.nearly(haystack.title.slice(..), Some(&item.title), query)
+            || (!haystack.words.is_empty() && self.nearly(haystack.words.slice(..), None, query))
+    }
+
+    fn nearly(&mut self, folded: Utf32Str, original: Option<&str>, query: &Query) -> bool {
+        self.load(folded, original);
+        let last = query.words.len() - 1;
+        query.words.iter().enumerate().all(|(n, word)| {
+            let whole = n == last && query.last_is_whole;
+            self.word(word, whole).is_some() || self.typo(word, whole)
+        })
+    }
+
+    /// Whether a word of the text, or with `whole` false the start of one, is
+    /// `word` but for as many typos as it may have.
+    fn typo(&mut self, word: &[char], whole: bool) -> bool {
+        let typos = typos(word.len());
+        if typos == 0 {
+            return false;
+        }
+        for &at in &self.starts {
+            let len = self.chars[at..]
+                .iter()
+                .position(|c| !c.is_alphanumeric())
+                .unwrap_or(self.chars.len() - at);
+            if within(
+                word,
+                &self.chars[at..at + len],
+                typos,
+                whole,
+                &mut self.distances,
+            ) {
+                return true;
+            }
+        }
+        false
+    }
+
     /// How well one folded text matches: the worst of the query's words, or
     /// `Exact` if the whole text, or one of its parts between
     /// [`SEPARATOR`]s, is the query. A one-letter word only matches at the
@@ -343,6 +434,25 @@ impl Tiers {
         {
             return one_letter(*letter, folded, original);
         }
+        self.load(folded, original);
+        if self
+            .chars
+            .split(|&c| c == SEPARATOR)
+            .any(|part| part == query.whole)
+        {
+            return Some(Tier::Exact);
+        }
+        let last = query.words.len() - 1;
+        let mut worst = Tier::Initials;
+        for (n, word) in query.words.iter().enumerate() {
+            worst = worst.min(self.word(word, n == last && query.last_is_whole)?);
+        }
+        Some(worst)
+    }
+
+    /// Fills `chars` with a folded text and `starts` with where its words
+    /// start.
+    fn load(&mut self, folded: Utf32Str, original: Option<&str>) {
         self.chars.clear();
         self.starts.clear();
         // The original's case, where it has the same characters.
@@ -363,19 +473,6 @@ impl Tiers {
             prev_lower = lower.is_some_and(|(lower, _)| lower);
             self.chars.push(c);
         }
-        if self
-            .chars
-            .split(|&c| c == SEPARATOR)
-            .any(|part| part == query.whole)
-        {
-            return Some(Tier::Exact);
-        }
-        let last = query.words.len() - 1;
-        let mut worst = Tier::Initials;
-        for (n, word) in query.words.iter().enumerate() {
-            worst = worst.min(self.word(word, n == last && query.last_is_whole)?);
-        }
-        Some(worst)
     }
 
     fn word(&self, word: &[char], whole: bool) -> Option<Tier> {
@@ -410,6 +507,53 @@ impl Tiers {
         word.iter()
             .all(|c| rest.any(|t| t == c))
             .then_some(Tier::Scattered)
+    }
+}
+
+/// Whether `text`, or with `whole` false a start of it, is `word` but for at
+/// most `typos` letters missing, extra or wrong, or swapped with the next one
+/// (the optimal string alignment distance). `distances` holds the table, a
+/// row per letter of `word`.
+fn within(
+    word: &[char],
+    text: &[char],
+    typos: usize,
+    whole: bool,
+    distances: &mut Vec<usize>,
+) -> bool {
+    // A longer start has more letters than typos to spare.
+    let n = text.len().min(word.len() + typos);
+    if whole && text.len() > n {
+        return false;
+    }
+    let width = n + 1;
+    let d = distances;
+    d.clear();
+    d.extend(0..width);
+    for i in 1..=word.len() {
+        d.push(i);
+        let mut best = i;
+        for j in 1..=n {
+            let above = (i - 1) * width + j;
+            let mut cost = (d[above - 1] + usize::from(word[i - 1] != text[j - 1]))
+                .min(d[above] + 1)
+                .min(d[i * width + j - 1] + 1);
+            if i > 1 && j > 1 && word[i - 1] == text[j - 2] && word[i - 2] == text[j - 1] {
+                cost = cost.min(d[above - width - 2] + 1);
+            }
+            d.push(cost);
+            best = best.min(cost);
+        }
+        // No later row does better than this one's best.
+        if best > typos {
+            return false;
+        }
+    }
+    let last = &d[word.len() * width..];
+    if whole {
+        last[n] <= typos
+    } else {
+        last.iter().any(|&cost| cost <= typos)
     }
 }
 
