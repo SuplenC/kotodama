@@ -68,6 +68,10 @@ _Avoid_: Foreign action, plugin action, extension action
 The description of every Action on offer (its title, Item kind, Arguments and Extension) that an Extension may ask to read; it never includes the Items themselves.
 _Avoid_: Action registry, action list
 
+**Proposal**:
+An Action from the Action catalog that the AI Extension suggests for a request in plain words, with any Arguments it could fill in; nothing runs until the user confirms it.
+_Avoid_: Suggestion, AI action, recommendation
+
 **Action panel**:
 The list of all Actions available for the selected Result.
 _Avoid_: Context menu, actions menu

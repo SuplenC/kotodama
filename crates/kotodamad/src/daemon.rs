@@ -1631,7 +1631,88 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             Outcome::Type { text } => self.output(Output::Type(text), now),
             Outcome::Paste(clipboard) => self.output(Output::Paste(clipboard), now),
             Outcome::Copy(clipboard) => self.copy(clipboard),
+            Outcome::RunCatalogAction {
+                extension,
+                kind,
+                action,
+                arguments,
+            } => {
+                let action = ActionRef {
+                    extension,
+                    id: action,
+                };
+                let run = self.run_catalog_action(front_end, id, &kind, action, arguments, now);
+                self.failed(front_end, run);
+            }
         }
+    }
+
+    /// Runs an Action from the Action catalog that `proposer` proposed and the
+    /// user confirmed, on the one Indexed item of its kind that
+    /// offers it, as if the user had picked that Item's Action.
+    fn run_catalog_action(
+        &mut self,
+        front_end: FrontEndId,
+        proposer: ExtensionId,
+        kind: &KindName,
+        action: ActionRef,
+        arguments: BTreeMap<String, String>,
+        now: Instant,
+    ) -> Result<(), String> {
+        let asking = &self.extensions[proposer.0];
+        if !asking.found.manifest.action_catalog {
+            return Err(format!(
+                "{} may not run Actions from the Action catalog",
+                asking.name()
+            ));
+        }
+        let target = self
+            .extension_named(&action.extension)
+            .filter(|&target| target != proposer && self.extensions[target.0].sender().is_some())
+            .ok_or_else(|| format!("{} isn't running", action.extension))?;
+        // Two are enough to know it isn't one.
+        let mut offering: Vec<String> = self
+            .index
+            .offering(target, kind.as_str(), &action.id)
+            .take(2)
+            .filter_map(|slot| self.index.id(slot).map(str::to_owned))
+            .collect();
+        let id = match offering.len() {
+            1 => offering.swap_remove(0),
+            2 => {
+                return Err(format!(
+                    "several {kind} Items offer `{}`; pick one in the search",
+                    action.id
+                ));
+            }
+            _ => {
+                let contributed = self.extensions[target.0]
+                    .found
+                    .manifest
+                    .contributed_actions
+                    .iter()
+                    .find(|offered| offered.kind == *kind && offered.action.id == action.id);
+                return Err(match contributed {
+                    Some(offered) => format!(
+                        "pick a {kind} in the search, then “{}” in its Action panel",
+                        offered.action.title
+                    ),
+                    None => format!("no {kind} Item offers `{}`", action.id),
+                });
+            }
+        };
+        let result = ResultRef {
+            extension: action.extension.clone(),
+            id,
+        };
+        self.run_action(
+            front_end,
+            &result,
+            &action,
+            arguments,
+            Missing::AskInForm,
+            now,
+        )
     }
 
     /// Nothing goes into a window, so there is no waiting for the menus to

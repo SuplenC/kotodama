@@ -136,6 +136,20 @@ pub enum Outcome {
     Copy(Clipboard),
     /// The Action failed; the menu stays open and shows `message`.
     Failed { message: String },
+    /// The user confirmed a proposal: the Daemon runs this Action from the
+    /// Action catalog, as if the user had picked it. Only an
+    /// Extension whose Manifest reads the catalog may answer with it, and only
+    /// as the outcome of an Action the user ran, so it never runs on its own.
+    RunCatalogAction {
+        /// The Extension that offers the Action, as the catalog names it.
+        extension: String,
+        kind: KindName,
+        action: String,
+        /// Argument values by Argument name. One that is required but missing
+        /// is asked for in a form, as for any Action.
+        #[serde(default)]
+        arguments: BTreeMap<String, String>,
+    },
 }
 
 /// What to paste.
