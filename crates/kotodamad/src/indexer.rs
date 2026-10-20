@@ -12,7 +12,8 @@
 //! version it was read from, so the thread answering keystrokes never reads
 //! a payload for them, nor plans.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
+use std::hash::BuildHasherDefault;
 use std::path::Path;
 use std::sync::Arc;
 use std::sync::mpsc::{self, Receiver, Sender};
@@ -20,8 +21,9 @@ use std::thread;
 
 use crate::clock::{DAY_SECS, When};
 use crate::daemon::{Event, ExtensionId};
-use crate::history::Picks;
-use crate::index::{self, Read, Slot};
+use crate::history::{self, Habit};
+use crate::index::{self, Read, Slot, SlotHasher};
+use crate::most_used::{Ahead, Usage, Versions};
 use crate::segment::{Edit, Row, Segment};
 
 /// A new version of one Extension's Segment, for the Daemon to put in.
@@ -38,6 +40,9 @@ pub struct Indexed {
 pub struct Kept {
     /// The hot Items, in slot order, when they were planned again.
     pub(crate) hot: Option<Vec<Slot>>,
+    /// The Empty query's most used Results, ranked ahead as the hot Items
+    /// were planned.
+    pub(crate) ahead: Option<Ahead>,
     pub(crate) reads: Vec<Read>,
 }
 
@@ -45,50 +50,112 @@ pub struct Kept {
 const HOT_LEAD_SECS: i64 = 15 * 60;
 /// How long after a time of day an Item picked then stays hot.
 const HOT_GRACE_SECS: i64 = 30 * 60;
+/// Learned choices take up to one in this many of the hot Items before the
+/// time-of-day habit takes the rest, and then whatever room the habit
+/// leaves. A quarter of 256 is about the queries a user types often enough
+/// to teach a choice; the habit keeps the most room, as it predicts the
+/// Empty query and the first keystrokes.
+const LEARNED_SHARE: usize = 4;
 
-/// What the hot Items are worked out from: a copy of the picks of each
-/// Indexed item picked, and the time.
+/// What the hot Items are worked out from: a copy of what the Empty query
+/// ranks by, the Learned choices, and the time.
 pub struct Plan {
-    pub picked: Vec<(Slot, Picks)>,
+    pub usage: Usage,
+    /// The Items that are a query's Learned choice, strongest first.
+    pub learned: Arc<[Slot]>,
     pub when: When,
-    pub half_life: f64,
     pub capacity: usize,
+    /// What `usage` was gathered from, for the rows ranked ahead.
+    pub versions: Versions,
 }
 
 impl Plan {
-    /// The hot Items, in slot order: those picked most near this time of
-    /// day, from a little before it to a little after, up to the capacity.
-    pub fn hot(&self) -> Vec<Slot> {
-        if self.capacity == 0 {
+    /// The hot Items, in slot order, and the Empty query's most used Results
+    /// ranked ahead: for now, and for the start of the coming part of the
+    /// day.
+    pub fn run(&self) -> (Vec<Slot>, Ahead) {
+        let mut habits = Vec::new();
+        let ranked = [self.when, history::next_part(self.when)]
+            .map(|when| (when, self.usage.rank(when, &mut habits)))
+            .into();
+        let ahead = Ahead {
+            versions: self.versions,
+            ranked,
+        };
+        let hot = self.hot(ahead.slots(), &mut habits);
+        (hot, ahead)
+    }
+
+    /// The hot Items, in slot order, up to the capacity. The Items the
+    /// Empty query shows go first, then Learned choices, strongest first, up
+    /// to one [`LEARNED_SHARE`] of the capacity, then the Items picked most
+    /// near this time of day, from a little before it to a little after,
+    /// then Learned choices again while there is room.
+    fn hot(&self, shown: impl Iterator<Item = Slot>, habits: &mut Vec<Habit>) -> Vec<Slot> {
+        let capacity = self.capacity;
+        if capacity == 0 {
             return Vec::new();
         }
-        let when = self.when;
-        let around = [-HOT_GRACE_SECS, 0, HOT_LEAD_SECS].map(|by| When {
-            at: when.at.saturating_add_signed(by),
-            time_of_day: (i64::from(when.time_of_day) + by).rem_euclid(DAY_SECS as i64) as u32,
-        });
-        let mut hot: Vec<(f64, Slot)> = Vec::new();
-        for &(slot, picks) in &self.picked {
-            let near = around
-                .iter()
-                .map(|&when| picks.habit(when, self.half_life).near_now)
-                .fold(0.0, f64::max);
-            if near > 0.0 {
-                hot.push((near, slot));
-            }
-        }
-        hot.sort_unstable_by(|a, b| b.0.total_cmp(&a.0).then(a.1.cmp(&b.1)));
-        let mut slots: Vec<Slot> = Vec::with_capacity(self.capacity.min(hot.len()));
-        for (_, slot) in hot {
-            if slots.len() == self.capacity {
-                break;
-            }
-            if !slots.contains(&slot) {
-                slots.push(slot);
-            }
-        }
+        let mut hot = Hot {
+            slots: Vec::with_capacity(capacity),
+            taken: HashSet::default(),
+            capacity,
+        };
+        hot.take(shown);
+        let mut learned = self.learned.iter().copied();
+        hot.take(learned.by_ref().take(capacity / LEARNED_SHARE));
+        hot.take(self.habit(habits));
+        hot.take(learned);
+        let mut slots = hot.slots;
         slots.sort_unstable();
         slots
+    }
+
+    /// The Items picked near this time of day, from a little before it to a
+    /// little after, most first.
+    fn habit(&self, habits: &mut Vec<Habit>) -> Vec<Slot> {
+        let picked = &*self.usage.picked;
+        let mut near = vec![0.0f64; picked.slots.len()];
+        for by in [-HOT_GRACE_SECS, 0, HOT_LEAD_SECS] {
+            let when = When {
+                at: self.when.at.saturating_add_signed(by),
+                time_of_day: (i64::from(self.when.time_of_day) + by).rem_euclid(DAY_SECS as i64)
+                    as u32,
+            };
+            picked.picks.habits(when, habits);
+            for (near, habit) in near.iter_mut().zip(habits.iter()) {
+                *near = near.max(habit.near_now);
+            }
+        }
+        let mut habit: Vec<(f64, Slot)> = near
+            .into_iter()
+            .zip(&picked.slots)
+            .filter(|&(near, _)| near > 0.0)
+            .map(|(near, &(slot, _))| (near, slot))
+            .collect();
+        habit.sort_unstable_by(|a, b| b.0.total_cmp(&a.0).then(a.1.cmp(&b.1)));
+        habit.into_iter().map(|(_, slot)| slot).collect()
+    }
+}
+
+/// The hot Items as they are taken, each once, up to the capacity.
+struct Hot {
+    slots: Vec<Slot>,
+    taken: HashSet<Slot, BuildHasherDefault<SlotHasher>>,
+    capacity: usize,
+}
+
+impl Hot {
+    /// Takes those of `slots` not taken already, in order, until full.
+    fn take(&mut self, slots: impl IntoIterator<Item = Slot>) {
+        for slot in slots {
+            if self.slots.len() == self.capacity {
+                return;
+            }
+            if self.taken.insert(slot) {
+                self.slots.push(slot);
+            }
+        }
     }
 }
 
@@ -286,7 +353,7 @@ fn work(queue: Receiver<Job>, dir: Option<Arc<Path>>, mut send: impl FnMut(Event
                 return;
             }
         }
-        let hot = plan.map(|plan| plan.hot());
+        let (hot, ahead) = plan.map(|plan| plan.run()).unzip();
         if hot.is_none() && !pinned {
             continue;
         }
@@ -294,7 +361,7 @@ fn work(queue: Receiver<Job>, dir: Option<Arc<Path>>, mut send: impl FnMut(Event
             keeping.hot.clone_from(hot);
         }
         let reads = keeping.read_all(&segments);
-        if !send(Event::Kept(Kept { hot, reads })) {
+        if !send(Event::Kept(Kept { hot, ahead, reads })) {
             return;
         }
     }
@@ -303,6 +370,9 @@ fn work(queue: Receiver<Job>, dir: Option<Arc<Path>>, mut send: impl FnMut(Event
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::daemon::Source;
+    use crate::history::{Frecent, History};
+    use crate::most_used::{Counts, Picked};
     use kotodama_protocol::{Action, Item, ItemKind};
 
     fn item(id: &str) -> Item {
@@ -420,25 +490,80 @@ mod tests {
         assert_eq!(sent, [vec![slot(1), slot(2)], vec![]]);
     }
 
+    const EIGHT: When = When {
+        at: 10 * DAY_SECS,
+        time_of_day: 8 * 3600,
+    };
+
+    /// A plan at eight o'clock, of `rows` picked at eight `picks` times
+    /// each and at no other time, with the Empty query showing `wanted`.
+    fn plan(rows: &[(Row, u32)], learned: &[Row], capacity: usize, wanted: usize) -> Plan {
+        let mut history = History::default();
+        let mut picked = Vec::new();
+        for &(row, picks) in rows {
+            let id = row.to_string();
+            for _ in 0..picks {
+                history.touch("apps", &id, EIGHT);
+            }
+            picked.push(*history.picks("apps", &id).unwrap());
+        }
+        let half_life = history.settings().half_life_secs;
+        Plan {
+            usage: Usage {
+                picked: Arc::new(Picked {
+                    slots: rows.iter().map(|&(row, _)| (slot(row), Counts::Both)).collect(),
+                    groups: vec![None; rows.len()],
+                    picks: Frecent::new(&picked, half_life),
+                }),
+                others: Vec::new(),
+                wanted,
+            },
+            learned: learned.iter().map(|&row| slot(row)).collect(),
+            when: EIGHT,
+            capacity,
+            versions: (0, 0, 0),
+        }
+    }
+
+    fn slots(rows: &[Row]) -> Vec<Slot> {
+        rows.iter().map(|&row| slot(row)).collect()
+    }
+
     #[test]
     fn the_hot_items_are_planned_and_read_here() {
-        let when = When {
-            at: 10 * DAY_SECS,
-            time_of_day: 8 * 3600,
-        };
-        let mut history = crate::history::History::default();
-        history.pick("apps", "b", "", &[], when);
-        let picks = *history.picks("apps", "b").unwrap();
         let sent = sent(vec![
             edit(0, 1, Edit::Add(vec![item("a"), item("b")])),
-            Job::Plan(Plan {
-                picked: vec![(slot(1), picks)],
-                when,
-                half_life: history.settings().half_life_secs,
-                capacity: 8,
-            }),
+            Job::Plan(plan(&[(1, 1)], &[], 8, 0)),
         ]);
         assert_eq!(sent, [vec![], vec![slot(1)]]);
+    }
+
+    #[test]
+    fn learned_choices_take_a_quarter_of_the_hot_items_before_the_habit() {
+        let habit: Vec<(Row, u32)> = (0..10).map(|row| (row, 10 - row)).collect();
+
+        let (hot, _) = plan(&habit, &[20, 21, 22], 8, 0).run();
+
+        assert_eq!(hot, slots(&[0, 1, 2, 3, 4, 5, 20, 21]));
+    }
+
+    #[test]
+    fn learned_choices_take_the_room_the_habit_leaves() {
+        let (hot, _) = plan(&[(0, 1)], &[20, 21, 22, 23], 4, 0).run();
+
+        assert_eq!(hot, slots(&[0, 20, 21, 22]));
+    }
+
+    #[test]
+    fn the_items_the_empty_query_shows_are_hot_before_learned_choices() {
+        let habit = [(0, 5), (1, 4), (2, 3), (3, 2), (4, 1)];
+
+        let (hot, ahead) = plan(&habit, &[20], 4, 4).run();
+
+        let ranked: Vec<&[Source]> = ahead.ranked.iter().map(|(_, ranked)| &ranked[..]).collect();
+        let shown = [0, 1, 2, 3].map(|row| Source::Indexed(slot(row)));
+        assert_eq!(ranked, [shown, shown]);
+        assert_eq!(hot, slots(&[0, 1, 2, 3]));
     }
 
     #[test]

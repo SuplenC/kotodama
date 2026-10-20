@@ -45,7 +45,8 @@ fn keystroke((mut setup, query): (Setup, &'static str)) -> Setup {
 }
 
 /// The menu opening on 2,000 Items picked, with the Results most used then
-/// shown once already: what the empty query costs from then on.
+/// ranked ahead as the hot Items were planned, and shown once already: what
+/// the empty query costs from then on.
 fn picked_then_empty() -> Setup {
     let mut setup = Setup::picked();
     setup.query("");

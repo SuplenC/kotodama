@@ -227,6 +227,17 @@ pub fn part_of_day(when: When) -> (u64, u32) {
     (started, when.time_of_day / part_secs)
 }
 
+/// The moment the part of the day after the one `when` falls in starts, in
+/// the time zone `when` was read in.
+pub fn next_part(when: When) -> When {
+    let part_secs = (DAY_SECS / PARTS as u64) as u32;
+    let until = part_secs - when.time_of_day % part_secs;
+    When {
+        at: when.at + u64::from(until),
+        time_of_day: (when.time_of_day + until) % DAY_SECS as u32,
+    }
+}
+
 /// How much a Result was picked, as the empty query ranks it.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Habit {
@@ -865,6 +876,18 @@ impl History {
         })
     }
 
+    /// Every query's Learned choice, by Extension name and Item id (or
+    /// [`IDENTITIES`] and Identity), with how many picks it was learned
+    /// from, decayed to `at`.
+    pub fn choices(&self, at: u64) -> impl Iterator<Item = (&str, &str, f64)> {
+        let half_life = self.settings.half_life_secs;
+        self.learned.values().filter_map(move |learned| {
+            let (extension, id) = learned.choice.as_ref()?;
+            let strength = decay(learned.strength.into(), learned.at, at, half_life);
+            Some((extension.as_str(), id.as_str(), strength))
+        })
+    }
+
     /// The Learned choices that apply to a query, given as [`query_key`]
     /// gives it: those learned for it, for a query it starts with, or for one
     /// that starts with it. The strongest come first, and of two as strong,
@@ -1145,6 +1168,16 @@ mod tests {
             };
             assert_ne!(part_of_day(nine), part_of_day(in_another_zone), "{ahead}");
         }
+    }
+
+    #[test]
+    fn the_next_part_of_the_day_starts_where_this_one_ends() {
+        assert_eq!(next_part(when(0, 10 * HOUR)), when(0, 12 * HOUR));
+        assert_eq!(next_part(when(0, 9 * HOUR)), when(0, 12 * HOUR));
+        assert_eq!(next_part(when(0, 23 * HOUR)), when(1, 0));
+        let started = next_part(when(0, 10 * HOUR));
+        assert_ne!(part_of_day(started), part_of_day(when(0, 12 * HOUR - 1)));
+        assert_eq!(part_of_day(started), part_of_day(when(0, 14 * HOUR)));
     }
 
     /// 2,000 Results, the most the History keeps, picked one to seven

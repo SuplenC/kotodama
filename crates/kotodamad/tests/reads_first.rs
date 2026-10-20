@@ -4,13 +4,15 @@
 
 mod common;
 
-use std::sync::mpsc::{self, Receiver};
+use std::sync::mpsc::{self, Receiver, Sender};
 use std::time::{Duration, Instant};
 
 use common::*;
 use kotodama_protocol::*;
+use kotodamad::clock::{DAY_SECS, When};
 use kotodamad::daemon::RERANK_FOR;
 use kotodamad::daemon::{Event, HOT_CAPACITY};
+use kotodamad::history::History;
 
 /// How long a change may take to show: about one frame of a slow typist.
 const STALENESS: Duration = Duration::from_millis(50);
@@ -33,6 +35,14 @@ fn next_version(h: &mut Harness, indexed: &Receiver<Event>) {
 /// to the Daemon, with the versions it sent before them.
 fn next_hot(h: &mut Harness, indexed: &Receiver<Event>) {
     next(h, indexed, |event| matches!(event, Event::Kept(_)));
+}
+
+/// Hands the Daemon what the indexing thread sends until it sends nothing
+/// for a while: the versions and the plans asked for so far.
+fn settle(h: &mut Harness, indexed: &Receiver<Event>) {
+    while let Ok(event) = indexed.recv_timeout(Duration::from_millis(200)) {
+        h.event(event);
+    }
 }
 
 /// Hands the Daemon what the indexing thread sends, up to the first event
@@ -151,21 +161,30 @@ fn pick(h: &mut Harness, ui: &FrontEnd, apps: &Ext, query: &str, id: &str) {
     apps.drain();
 }
 
+/// The queries a routine picks Firefox and Mail by, one a day, so neither
+/// becomes a Learned choice, which would be hot all day.
+const FIREFOX_BY: [&str; 5] = ["fi", "fir", "fire", "firef", "firefox"];
+const MAIL_BY: [&str; 5] = ["ma", "mai", "mail", "mal", "ml"];
+
+/// No most used Results on the Empty query, whose rows are hot all day.
+const NO_MOST_USED: &str = "[empty_query]\nmost_used = 0";
+
 /// Firefox picked at half past eight on five mornings, and Mail at eight
-/// on five evenings, with at most `hot` Items hot.
+/// on five evenings, with at most `hot` Items hot. Only their time-of-day
+/// habit makes them hot.
 fn routine(hot: usize) -> (Harness, FrontEnd) {
-    let mut h = Harness::new(vec![plain("apps")]);
+    let mut h = Harness::with_config(vec![plain("apps")], config(NO_MOST_USED));
     h.daemon.set_hot_capacity(hot);
     let apps = h.up(0);
     let titles = ["Firefox", "Fire Alarm", "Mail", "Files", "Terminal"];
     h.add(&apps, titles.map(app).into());
     let ui = h.front_end();
-    for _ in 0..5 {
+    for (firefox_by, mail_by) in FIREFOX_BY.into_iter().zip(MAIL_BY) {
         h.advance_to(8);
         h.advance(Duration::from_secs(30 * 60));
-        pick(&mut h, &ui, &apps, "fire", "firefox");
+        pick(&mut h, &ui, &apps, firefox_by, "firefox");
         h.advance_to(20);
-        pick(&mut h, &ui, &apps, "mail", "mail");
+        pick(&mut h, &ui, &apps, mail_by, "mail");
     }
     (h, ui)
 }
@@ -211,20 +230,19 @@ fn an_item_picked_at_half_past_eight_is_hot_by_twenty_past_and_cold_again_later(
 #[test]
 fn the_hot_items_are_planned_and_read_on_the_indexing_thread() {
     let (mut h, indexed) = indexing(vec![plain("apps")]);
+    h.event(Event::Config(config(NO_MOST_USED)));
     let apps = h.up(0);
     let titles = ["Firefox", "Fire Alarm", "Mail"];
     h.add(&apps, titles.map(app).into());
     next_version(&mut h, &indexed);
     let ui = h.front_end();
-    for _ in 0..5 {
+    for query in FIREFOX_BY {
         h.advance_to(8);
         h.advance(Duration::from_secs(30 * 60));
-        pick(&mut h, &ui, &apps, "fire", "firefox");
+        pick(&mut h, &ui, &apps, query, "firefox");
     }
     // Plans asked for while picking.
-    while let Ok(event) = indexed.recv_timeout(Duration::from_millis(200)) {
-        h.event(event);
-    }
+    settle(&mut h, &indexed);
     advance_to(&mut h, 2, 0);
     next_hot(&mut h, &indexed);
     assert_eq!(h.daemon.hot(), []);
@@ -254,6 +272,181 @@ fn no_more_items_are_hot_than_there_is_room_for() {
     let (mut h, _) = routine(1);
     advance_to(&mut h, 8, 20);
     assert_eq!(h.daemon.hot().len(), 1);
+}
+
+/// `hour`:`minute` on the day `days_before` the day the Harness starts on,
+/// in UTC.
+fn on(days_before: u64, hour: u64, minute: u64) -> When {
+    let time_of_day = hour * 3600 + minute * 60;
+    When {
+        at: START - START % DAY_SECS - days_before * DAY_SECS + time_of_day,
+        time_of_day: time_of_day as u32,
+    }
+}
+
+/// A Daemon running `apps`, with `history`, `config`, and a Front end,
+/// indexing on its own thread if `indexed` is given one.
+fn with_history(
+    history: History,
+    toml: &str,
+    indexed: Option<Sender<Event>>,
+) -> (Harness, Ext, FrontEnd) {
+    let mut h = Harness::with_history(vec![plain("apps")], config(toml), history);
+    if let Some(events) = indexed {
+        h.daemon.index_in_background(events);
+    }
+    let apps = h.up(0);
+    let ui = h.front_end();
+    (h, apps, ui)
+}
+
+#[test]
+fn a_learned_choice_is_resident_once_planned_and_its_query_reads_nothing_off_its_shelf() {
+    let mut history = History::default();
+    for day in 1..=3 {
+        history.pick("apps", "fire-alarm", "alarm", &[], on(day, 8, 0));
+    }
+    let (events, indexed) = mpsc::channel();
+    let (mut h, apps, ui) = with_history(history.clone(), NO_MOST_USED, Some(events));
+    let (mut cold, cold_apps, cold_ui) = with_history(history, NO_MOST_USED, None);
+    cold.daemon.set_hot_capacity(0);
+    let titles_added = ["Firefox", "Fire Alarm", "Mail"];
+    h.add(&apps, titles_added.map(app).into());
+    settle(&mut h, &indexed);
+    cold.add(&cold_apps, titles_added.map(app).into());
+    // Far from eight o'clock, when it was picked: no habit makes it hot.
+    advance_to(&mut h, 20, 0);
+    advance_to(&mut cold, 20, 0);
+    next_hot(&mut h, &indexed);
+
+    let read = h.daemon.shelf_reads();
+    let shown = h.query(&ui, "alarm");
+    let cold_read = cold.daemon.shelf_reads();
+    cold.query(&cold_ui, "alarm");
+
+    let alarm = ("apps".to_owned(), "fire-alarm".to_owned());
+    assert_eq!(h.daemon.hot(), [alarm]);
+    assert_eq!(titles(&shown), ["Fire Alarm"]);
+    assert_eq!(h.daemon.shelf_reads(), read, "read off its Shelf on the keystroke");
+    assert_eq!(cold.daemon.shelf_reads(), cold_read + 1, "read when nothing is hot");
+}
+
+/// Firefox picked at half past ten and Mail at half past one, on each of
+/// the five days before the Harness starts. By the time of day, Firefox
+/// ranks first until noon, and Mail from noon on.
+fn morning_and_afternoon() -> History {
+    let mut history = History::default();
+    for day in 1..=5 {
+        history.touch("apps", "firefox", on(day, 10, 30));
+        history.touch("apps", "mail", on(day, 13, 30));
+        history.touch("apps", "terminal", on(day, 11, 0));
+    }
+    history
+}
+
+/// A Daemon that ranks the Empty query ahead on its indexing thread, and
+/// one that ranks it on each query, with `history`, both at `11:58`, the
+/// hot Items planned.
+struct AheadAndHere {
+    ahead: Harness,
+    ahead_apps: Ext,
+    ahead_ui: FrontEnd,
+    indexed: Receiver<Event>,
+    here: Harness,
+    here_apps: Ext,
+    here_ui: FrontEnd,
+}
+
+impl AheadAndHere {
+    fn new(history: History, titles: &[&str]) -> Self {
+        let (events, indexed) = mpsc::channel();
+        let (mut ahead, ahead_apps, ahead_ui) = with_history(history.clone(), "", Some(events));
+        let (mut here, here_apps, here_ui) = with_history(history, "", None);
+        here.daemon.set_hot_capacity(0);
+        ahead.add(&ahead_apps, titles.iter().map(|&title| app(title)).collect());
+        settle(&mut ahead, &indexed);
+        here.add(&here_apps, titles.iter().map(|&title| app(title)).collect());
+        let mut both = AheadAndHere {
+            ahead,
+            ahead_apps,
+            ahead_ui,
+            indexed,
+            here,
+            here_apps,
+            here_ui,
+        };
+        advance_to(&mut both.ahead, 11, 58);
+        advance_to(&mut both.here, 11, 58);
+        next_hot(&mut both.ahead, &both.indexed);
+        both
+    }
+
+    fn advance(&mut self, by: Duration) {
+        self.ahead.advance(by);
+        self.here.advance(by);
+    }
+
+    /// The Empty query's rows from both, the same, and whether the one
+    /// that ranks ahead ranked them on the keystroke.
+    fn empty_query(&mut self, context: &str) -> (Vec<String>, bool) {
+        let ranked_here = self.ahead.daemon.ranked_here();
+        let ahead = self.ahead.query(&self.ahead_ui, "");
+        let here = self.here.query(&self.here_ui, "");
+        assert_eq!(titles(&ahead), titles(&here), "{context}");
+        let ranked_on_keystroke = self.ahead.daemon.ranked_here() > ranked_here;
+        (titles(&ahead).into_iter().map(str::to_owned).collect(), ranked_on_keystroke)
+    }
+}
+
+#[test]
+fn the_empty_querys_rows_for_the_next_part_of_the_day_are_ranked_before_the_menu_opens_in_it() {
+    let mut both = AheadAndHere::new(morning_and_afternoon(), &["Firefox", "Mail"]);
+    let before_noon = both.empty_query("at 11:58");
+    // Before the hot Items are planned again, at 12:03.
+    both.advance(Duration::from_secs(3 * 60));
+    let ranked_here = both.ahead.daemon.ranked_here();
+
+    for (h, ui) in [(&mut both.ahead, &both.ahead_ui), (&mut both.here, &both.here_ui)] {
+        h.front_end_sends(ui, FromFrontEnd::Shown);
+    }
+    let after_noon = both.ahead_ui.results().expect("ranked again for the afternoon");
+    let here = both.here_ui.results().expect("ranked again for the afternoon");
+
+    assert_eq!(before_noon, (vec!["Firefox".to_owned(), "Mail".to_owned()], false));
+    assert_eq!(titles(&after_noon), ["Mail", "Firefox"]);
+    assert_eq!(titles(&after_noon), titles(&here));
+    assert_eq!(both.ahead.daemon.ranked_here(), ranked_here, "ranked ahead");
+}
+
+#[test]
+fn rows_ranked_ahead_are_ranked_again_once_the_items_or_the_history_change() {
+    let mut both = AheadAndHere::new(morning_and_afternoon(), &["Firefox", "Mail"]);
+    let ranked = both.empty_query("as planned");
+
+    for (h, apps) in [(&mut both.ahead, &both.ahead_apps), (&mut both.here, &both.here_apps)] {
+        h.add(apps, vec![app("Terminal")]);
+    }
+    next_version(&mut both.ahead, &both.indexed);
+    let terminal_added = both.empty_query("Terminal added");
+    for (h, ui, apps) in [
+        (&mut both.ahead, &both.ahead_ui, &both.ahead_apps),
+        (&mut both.here, &both.here_ui, &both.here_apps),
+    ] {
+        for _ in 0..3 {
+            pick(h, ui, apps, "mail", "mail");
+        }
+    }
+    let mail_picked = both.empty_query("Mail picked");
+    // Once the History settles, the hot Items are planned again.
+    both.advance(Duration::from_secs(1));
+    next_hot(&mut both.ahead, &both.indexed);
+    let planned_again = both.empty_query("planned again");
+
+    let rows = |titles: &[&str]| titles.iter().map(|&title| title.to_owned()).collect::<Vec<_>>();
+    assert_eq!(ranked, (rows(&["Firefox", "Mail"]), false));
+    assert_eq!(terminal_added, (rows(&["Terminal", "Firefox", "Mail"]), true));
+    assert_eq!(mail_picked, (rows(&["Mail", "Terminal", "Firefox"]), true));
+    assert_eq!(planned_again, (mail_picked.0, false));
 }
 
 #[test]

@@ -32,6 +32,7 @@ use crate::history::{
 };
 use crate::index::{Index, ItemRef, Slot};
 use crate::indexer::{Indexed, Indexer, Kept, Plan};
+use crate::most_used::{Ahead, Counts, Other, Picked, Usage, Versions};
 use crate::keywords::{self, Alias, Keywords};
 use crate::kind_order::{KindOrder, KindPlaces};
 use crate::narrowing::Narrowing;
@@ -296,7 +297,7 @@ impl Extension {
 
 /// Where a Result comes from.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
-enum Source {
+pub(crate) enum Source {
     Indexed(Slot),
     /// The `n`th Live query result from an Extension, in arrival order.
     Live(ExtensionId, u32),
@@ -747,24 +748,6 @@ impl Done {
 }
 
 /// A Result the Empty query may show as one of the most used.
-struct MostUsed {
-    source: Source,
-    used: Habit,
-    /// How much it was picked through itself rather than its Identity: of
-    /// the Results of one Identity, the one picked through most stands for it.
-    direct: f64,
-}
-
-impl MostUsed {
-    fn new(source: Source) -> Self {
-        MostUsed {
-            source,
-            used: Habit::default(),
-            direct: 0.0,
-        }
-    }
-}
-
 /// A Result the query names by a keyword.
 struct Keyword {
     source: Source,
@@ -778,17 +761,6 @@ struct Keyword {
 /// The id an Alias's picks are kept under, for the Extension [`OWN`].
 fn alias_id(keyword: &str) -> String {
     format!("alias:{keyword}")
-}
-
-/// What a pick the History kept counts for, for one Indexed item.
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum Counts {
-    /// Its Identity's: the Frecency it ranks by.
-    Shared,
-    /// Picks of the Item itself, which only order the Results of one Identity.
-    Direct,
-    /// An Item without an Identity's: both.
-    Both,
 }
 
 /// What was typed after `keyword`, if the query starts with it. `keyword` is
@@ -839,8 +811,23 @@ pub struct Daemon<L, D, S> {
     hot_capacity: usize,
     /// When the hot Items are next worked out.
     hot_due: Instant,
-    /// The versions of the Index and the History they were worked out for.
-    hot_versions: (u64, u64),
+    /// The versions of what they were worked out from (see
+    /// [`versions`](Self::versions)).
+    hot_versions: Versions,
+    /// Bumped whenever something the Empty query ranks by changes, other
+    /// than the Index and the History: the own Items, the Aliases, the
+    /// settings, the clock.
+    ranks_version: u64,
+    /// The Empty query's most used Results, ranked ahead as the hot Items
+    /// were last planned.
+    ahead: Option<Ahead>,
+    /// How many times the Empty query's most used Results were ranked on
+    /// this thread, for want of a ranking made ahead.
+    ranked_here: u64,
+    /// The Items that are a query's Learned choice, strongest first, as of
+    /// the Index and History versions in `learned_versions`.
+    learned: Arc<[Slot]>,
+    learned_versions: Option<(u64, u64)>,
     /// A menu is opening: read what its first keystroke will read.
     warm: bool,
     /// How many times the CPU cache was warmed for a menu.
@@ -898,9 +885,9 @@ pub struct Daemon<L, D, S> {
     /// The changes to the History that can still be undone, oldest first.
     undos: Vec<Undoable>,
     /// The picked Indexed items, by slot, as of the index and History
-    /// versions in `frecent_versions`, and their picks, in the same order.
-    frecent: Vec<(Slot, Counts)>,
-    frecent_picks: Frecent,
+    /// versions in `frecent_versions`, and their picks. Shared with the
+    /// indexing thread, which plans from it.
+    frecent: Arc<Picked>,
     frecent_versions: Option<(u64, u64)>,
     /// What the picks of `frecent` count for at one time, in its order: kept
     /// from one query to the next.
@@ -930,7 +917,12 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             stale: vec![0; found.len()],
             hot_capacity: HOT_CAPACITY,
             hot_due: now,
-            hot_versions: (0, 0),
+            hot_versions: (0, 0, 0),
+            ranks_version: 0,
+            ahead: None,
+            ranked_here: 0,
+            learned: Arc::new([]),
+            learned_versions: None,
             warm: false,
             warmed: 0,
             extensions: found
@@ -969,8 +961,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             kind_places: KindPlaces::default(),
             own: Vec::new(),
             undos: Vec::new(),
-            frecent: Vec::new(),
-            frecent_picks: Frecent::default(),
+            frecent: Arc::default(),
             frecent_versions: None,
             habits: Vec::new(),
             frecencies: Vec::new(),
@@ -1046,36 +1037,101 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             .collect()
     }
 
-    /// Works out the hot Items: those picked most near this time of day,
-    /// from a little before it to a little after, up to the hot capacity,
-    /// and reads their payloads, so the menu shows them without waiting. Both
-    /// happen on the indexing thread, when there is one.
+    /// How many times the Empty query's most used Results were ranked on the
+    /// thread that answers keystrokes, rather than ahead as the hot Items
+    /// were planned.
+    pub fn ranked_here(&self) -> u64 {
+        self.ranked_here
+    }
+
+    /// How many Items the thread that answers keystrokes read back off their
+    /// Shelves.
+    pub fn shelf_reads(&self) -> u64 {
+        self.index.shelf_reads()
+    }
+
+    /// Whether the hot Items are planned, and the Empty query ranked ahead.
+    fn plans(&self) -> bool {
+        self.hot_capacity > 0 && !self.history.is_empty()
+    }
+
+    /// The versions of what the Empty query and the hot Items are worked
+    /// out from: the Index, the History, and the rest (`ranks_version`).
+    fn versions(&self) -> Versions {
+        (self.index.version(), self.history.version(), self.ranks_version)
+    }
+
+    /// Works out the hot Items, up to the hot capacity, and reads their
+    /// payloads, so the menu shows them without waiting; and ranks the
+    /// Empty query's most used Results for now and for the coming part of
+    /// the day, so a menu opening sends them ranked already. All of it
+    /// happens on the indexing thread, when there is one.
     fn plan_hot(&mut self, now: Instant) {
         self.hot_due = now + HOT_EVERY;
-        self.hot_versions = (self.index.version(), self.history.version());
-        let mut picked = Vec::new();
-        if self.hot_capacity > 0 && !self.history.is_empty() {
-            self.cache_frecent();
-            let picks = &self.frecent_picks;
-            picked.extend(
-                self.frecent
-                    .iter()
-                    .enumerate()
-                    .map(|(n, &(slot, _))| (slot, picks.picks(n))),
-            );
-        }
-        let plan = Plan {
-            picked,
-            when: self.when(now),
-            half_life: self.history.settings().half_life_secs,
-            capacity: self.hot_capacity,
+        self.hot_versions = self.versions();
+        let when = self.when(now);
+        let plan = if self.plans() {
+            Plan {
+                usage: self.usage(),
+                learned: self.cache_learned(when.at),
+                when,
+                capacity: self.hot_capacity,
+                versions: self.hot_versions,
+            }
+        } else {
+            self.ahead = None;
+            // Nothing hot to let go of.
+            if self.index.hot().is_empty() {
+                return;
+            }
+            Plan {
+                usage: Usage {
+                    picked: Arc::default(),
+                    others: Vec::new(),
+                    wanted: 0,
+                },
+                learned: Arc::new([]),
+                when,
+                capacity: 0,
+                versions: self.hot_versions,
+            }
         };
         match &mut self.indexer {
-            // Nothing to plan, and nothing hot to let go of.
-            _ if plan.picked.is_empty() && self.index.hot().is_empty() => {}
             Some(indexer) => indexer.plan(plan),
-            None => self.index.set_hot(plan.hot()),
+            None => {
+                let (hot, ahead) = plan.run();
+                self.index.set_hot(hot);
+                self.ahead = self.plans().then_some(ahead);
+            }
         }
+    }
+
+    /// The Items that are a query's Learned choice, strongest first, each
+    /// once. The order holds at any time: every choice's picks decay alike.
+    fn cache_learned(&mut self, at: u64) -> Arc<[Slot]> {
+        let versions = (self.index.version(), self.history.version());
+        if self.learned_versions == Some(versions) {
+            return Arc::clone(&self.learned);
+        }
+        let mut choices: Vec<(f64, Slot)> = Vec::new();
+        for (extension, id, strength) in self.history.choices(at) {
+            if extension == IDENTITIES {
+                choices.extend(self.index.identified(id).map(|slot| (strength, slot)));
+            } else if let Some(ext) = self.extension_named(extension)
+                && let Some(slot) = self.index.find(ext, id)
+            {
+                choices.push((strength, slot));
+            }
+        }
+        choices.sort_unstable_by(|a, b| b.0.total_cmp(&a.0).then(a.1.cmp(&b.1)));
+        let mut seen = HashSet::new();
+        self.learned = choices
+            .into_iter()
+            .map(|(_, slot)| slot)
+            .filter(|&slot| seen.insert(slot))
+            .collect();
+        self.learned_versions = Some(versions);
+        Arc::clone(&self.learned)
     }
 
     /// Keeps resident every Item a keyword or an Alias names, so a keyword
@@ -1168,11 +1224,14 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             Event::Config(config) => self.set_config(config),
             Event::Extensions(found) => self.set_extensions(found, now),
             Event::Indexed(indexed) => self.indexed(indexed, now),
-            Event::Kept(Kept { hot, reads }) => {
+            Event::Kept(Kept { hot, ahead, reads }) => {
                 self.index.keep(reads);
                 match hot {
                     Some(hot) => self.index.hot_read(hot),
                     None => self.index.trim(),
+                }
+                if ahead.is_some() && self.plans() {
+                    self.ahead = ahead;
                 }
             }
         }
@@ -1713,6 +1772,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
     }
 
     fn mark_late(&mut self) {
+        self.ranks_version += 1;
         for session in self.sessions.values_mut() {
             if session.searched {
                 session.update = session.update.max(Update::Late);
@@ -3189,7 +3249,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             self.send_due_live_queries(now);
         }
 
-        let versions = (self.index.version(), self.history.version());
+        let versions = self.versions();
         if versions != self.hot_versions {
             self.hot_versions = versions;
             self.hot_due = self.hot_due.min(now + HOT_SETTLE);
@@ -3654,9 +3714,10 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             let settings = *self.history.settings();
             self.cache_frecent();
             let mut frecencies = std::mem::take(&mut self.frecencies);
-            self.frecent_picks
+            self.frecent
+                .picks
                 .frecency(when, settings.time_of_day, &mut frecencies);
-            for (&(slot, counts), &frecency) in self.frecent.iter().zip(&frecencies) {
+            for (&(slot, counts), &frecency) in self.frecent.slots.iter().zip(&frecencies) {
                 if let Ok(n) =
                     candidates[..indexed].binary_search_by_key(&Source::Indexed(slot), |c| c.source)
                 {
@@ -3813,91 +3874,10 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
     }
 
     /// What the Empty query shows: the Results most used at this time of day,
-    /// then the Fixed menu, each thing once. The most used rank by their
-    /// picks near this time of day, then by all their picks; an Alias's
-    /// picks count for the Result it names. Of the Results of one Identity,
-    /// the one picked through most stands for it.
+    /// then the Fixed menu, each thing once.
     fn empty_query(&mut self, session: &Session, when: When) -> Vec<Source> {
-        let half_life = self.history.settings().half_life_secs;
-        let mut most: Vec<MostUsed> = Vec::new();
-        if self.empty_query.most_used > 0 && !self.history.is_empty() {
-            self.cache_frecent();
-            self.frecent_picks.habits(when, &mut self.habits);
-            most.reserve(self.frecent.len());
-            // In slot order, an Item's Identity's picks next to its own.
-            for (&(slot, counts), &used) in self.frecent.iter().zip(&self.habits) {
-                let source = Source::Indexed(slot);
-                if most.last().is_none_or(|last| last.source != source) {
-                    most.push(MostUsed::new(source));
-                }
-                let entry = most.last_mut().expect("just pushed");
-                if counts != Counts::Direct {
-                    entry.used = used;
-                }
-                if counts != Counts::Shared {
-                    entry.direct = used.overall;
-                }
-            }
-            for (n, own) in self.own.iter().enumerate() {
-                if let Some(picks) = self.history.picks(OWN, &own.item.id) {
-                    most.push(MostUsed {
-                        used: picks.habit(when, half_life),
-                        ..MostUsed::new(Source::Own(n as u32))
-                    });
-                }
-            }
-            let mut aliases: Vec<_> = self.keywords.aliases.iter().collect();
-            aliases.sort_unstable_by_key(|&(keyword, _)| keyword);
-            for (keyword, alias) in aliases {
-                let Some(picks) = self.history.picks(OWN, &alias_id(keyword)) else {
-                    continue;
-                };
-                let Some(source) = self.source_of(session, &alias.extension, &alias.item) else {
-                    continue;
-                };
-                let used = picks.habit(when, half_life);
-                match most.iter_mut().find(|entry| entry.source == source) {
-                    Some(entry) => entry.used = entry.used.and(used),
-                    None => most.push(MostUsed {
-                        used,
-                        ..MostUsed::new(source)
-                    }),
-                }
-            }
-        }
-
+        let mut shown = self.most_used(when);
         let identity = |source: Source| self.identity(session, source);
-        let mut stands_for: HashMap<&str, usize> = HashMap::new();
-        let mut keep = vec![true; most.len()];
-        for n in 0..most.len() {
-            let Some(id) = identity(most[n].source) else {
-                continue;
-            };
-            let Some(&other) = stands_for.get(id) else {
-                stands_for.insert(id, n);
-                continue;
-            };
-            let (best, rest) = if most[n].direct > most[other].direct {
-                (n, other)
-            } else {
-                (other, n)
-            };
-            // They share their Identity's picks, but an Alias may name one.
-            most[best].used = most[best].used.max(most[rest].used);
-            keep[rest] = false;
-            stands_for.insert(id, best);
-        }
-        let mut kept = keep.iter();
-        most.retain(|_| *kept.next().expect("one per Result"));
-        let rank = |a: &MostUsed, b: &MostUsed| a.used.rank(&b.used).then(a.source.cmp(&b.source));
-        let wanted = self.empty_query.most_used;
-        if most.len() > wanted && wanted > 0 {
-            most.select_nth_unstable_by(wanted - 1, rank);
-        }
-        most.truncate(wanted);
-        most.sort_unstable_by(rank);
-
-        let mut shown: Vec<Source> = most.into_iter().map(|entry| entry.source).collect();
         for (extension, id) in &self.empty_query.menu {
             if shown.len() >= MAX_RESULTS {
                 break;
@@ -3915,37 +3895,107 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
         shown
     }
 
+    /// The Results most used at `when`, as [`Usage::rank`] ranks them: as
+    /// they were ranked ahead, when that ranking stands for `when`, or else
+    /// ranked here and now.
+    fn most_used(&mut self, when: When) -> Vec<Source> {
+        let versions = self.versions();
+        if let Some(ahead) = &self.ahead
+            && let Some(ranked) = ahead.at(versions, when, HOT_EVERY.as_secs())
+        {
+            return ranked.to_vec();
+        }
+        if self.empty_query.most_used == 0 || self.history.is_empty() {
+            return Vec::new();
+        }
+        self.ranked_here += 1;
+        let usage = self.usage();
+        usage.rank(when, &mut self.habits)
+    }
+
+    /// What the Empty query's most used Results rank by now: the picked
+    /// Indexed items, then the Daemon's own Items and the Results the
+    /// Aliases name. A Live query result is never among them: the Empty
+    /// query asks no Live query.
+    fn usage(&mut self) -> Usage {
+        self.cache_frecent();
+        let mut others = Vec::new();
+        for (n, own) in self.own.iter().enumerate() {
+            if let Some(&picks) = self.history.picks(OWN, &own.item.id) {
+                others.push(Other {
+                    source: Source::Own(n as u32),
+                    group: None,
+                    picks,
+                    alias: false,
+                });
+            }
+        }
+        let mut aliases: Vec<_> = self.keywords.aliases.iter().collect();
+        aliases.sort_unstable_by_key(|&(keyword, _)| keyword);
+        for (keyword, alias) in aliases {
+            let Some(&picks) = self.history.picks(OWN, &alias_id(keyword)) else {
+                continue;
+            };
+            let Some(source) = self.held_source(&alias.extension, &alias.item) else {
+                continue;
+            };
+            let group = match source {
+                Source::Indexed(slot) => self.group(slot),
+                _ => None,
+            };
+            others.push(Other {
+                source,
+                group,
+                picks,
+                alias: true,
+            });
+        }
+        Usage {
+            picked: Arc::clone(&self.frecent),
+            others,
+            wanted: self.empty_query.most_used,
+        }
+    }
+
+    /// The first Item in slot order with the Identity of the Item in
+    /// `slot`, which stands for that Identity; `None` without one.
+    fn group(&self, slot: Slot) -> Option<Slot> {
+        self.index.identified(self.index.identity(slot)?).min()
+    }
+
     /// Rebuilds the list of picked Indexed items if the index or the History
     /// changed since it was built, or the half-life their picks decay at.
     fn cache_frecent(&mut self) {
         let versions = (self.index.version(), self.history.version());
         let half_life = self.history.settings().half_life_secs;
-        if self.frecent_versions == Some(versions) && self.frecent_picks.half_life() == half_life {
+        if self.frecent_versions == Some(versions) && self.frecent.picks.half_life() == half_life {
             return;
         }
-        let mut frecent = Vec::with_capacity(self.frecent.len());
+        let mut frecent = Vec::with_capacity(self.frecent.slots.len());
         for (extension, id, picks) in self.history.picked() {
             if extension == IDENTITIES {
+                let group = self.index.identified(id).min();
                 let slots = self.index.identified(id);
-                frecent.extend(slots.map(|slot| (slot, picks, Counts::Shared)));
+                frecent.extend(slots.map(|slot| (slot, picks, Counts::Shared, group)));
             } else if let Some(ext) = self.extension_named(extension)
                 && let Some(slot) = self.index.find(ext, id)
             {
-                let identified = self.index.identity(slot).is_some();
-                let counts = if identified {
+                let group = self.group(slot);
+                let counts = if group.is_some() {
                     Counts::Direct
                 } else {
                     Counts::Both
                 };
-                frecent.push((slot, picks, counts));
+                frecent.push((slot, picks, counts, group));
             }
         }
         frecent.sort_unstable_by_key(|&(slot, ..)| slot);
-        let picks: Vec<Picks> = frecent.iter().map(|&(_, picks, _)| picks).collect();
-        self.frecent_picks = Frecent::new(&picks, half_life);
-        self.frecent.clear();
-        self.frecent
-            .extend(frecent.iter().map(|&(slot, _, counts)| (slot, counts)));
+        let picks: Vec<Picks> = frecent.iter().map(|&(_, picks, ..)| picks).collect();
+        self.frecent = Arc::new(Picked {
+            slots: frecent.iter().map(|&(slot, _, counts, _)| (slot, counts)).collect(),
+            groups: frecent.iter().map(|&(.., group)| group).collect(),
+            picks: Frecent::new(&picks, half_life),
+        });
         self.frecent_versions = Some(versions);
     }
 
@@ -3973,11 +4023,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
     /// in this session, if it is there.
     fn source_of(&self, session: &Session, extension: &str, id: &str) -> Option<Source> {
         if extension == OWN {
-            return self
-                .own
-                .iter()
-                .position(|own| own.item.id == id)
-                .map(|n| Source::Own(n as u32));
+            return self.own_source(id);
         }
         let ext = self.extension_named(extension)?;
         if let Some(slot) = self.index.find(ext, id) {
@@ -3988,6 +4034,24 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             .iter()
             .position(|live| live.item.id == id)
             .map(|n| Source::Live(ext, n as u32))
+    }
+
+    /// Where the Result named by an Extension's name and an Item id comes
+    /// from, if the Daemon or the Index holds it: the same in every session.
+    fn held_source(&self, extension: &str, id: &str) -> Option<Source> {
+        if extension == OWN {
+            return self.own_source(id);
+        }
+        let ext = self.extension_named(extension)?;
+        self.index.find(ext, id).map(Source::Indexed)
+    }
+
+    /// The Daemon's own Result with the id `id`, if there is one.
+    fn own_source(&self, id: &str) -> Option<Source> {
+        self.own
+            .iter()
+            .position(|own| own.item.id == id)
+            .map(|n| Source::Own(n as u32))
     }
 
     /// Where the Results the History keeps under `extension` and `id` come
