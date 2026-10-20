@@ -365,13 +365,26 @@ PanelWindow {
                     if (currentIndex < 0 && count > 0)
                         currentIndex = 0;
                 }
-                // A list View's filter keeps the selected Item selected.
+                // A list View's filter keeps the selected Item selected. In the
+                // search, moving off the top row stops late Results reranking
+                // the rows.
                 onCurrentIndexChanged: search.select(currentIndex)
 
-                // Late Results go below the rows on screen (ADR 0003), so the
-                // Daemon is told which those are.
+                // Once the rerank after a keystroke is over, late Results go
+                // below the rows on screen, so the Daemon is told which those
+                // are.
                 readonly property int firstRow: Math.floor(contentY / menu.rowHeight)
                 onFirstRowChanged: search.viewport(firstRow, menu.maxRows)
+
+                // A run names the Results of the last frame on screen, so the
+                // Daemon refuses a late Result the user hasn't seen yet. The
+                // signal comes from the render thread, queued.
+                Connections {
+                    target: list.Window.window
+                    function onFrameSwapped() {
+                        search.painted();
+                    }
+                }
 
                 delegate: Item {
                     id: row

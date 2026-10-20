@@ -139,6 +139,10 @@ pub enum Event {
 pub const MAX_RESULTS: usize = 50;
 /// How many rows a Front end shows until it says otherwise.
 const DEFAULT_ROWS: usize = 10;
+/// How long after a keystroke Results that arrive late may still rerank the
+/// rows on screen, unless the selection moves first. Most Live queries answer
+/// within it, and the eye has barely found the top row by then.
+pub const RERANK_FOR: Duration = Duration::from_millis(150);
 /// How long to wait for Front ends to close before typing anyway.
 const CLOSE_TIMEOUT: Duration = Duration::from_millis(500);
 /// How long `kotodama open --view` waits for its View before opening the
@@ -416,7 +420,8 @@ impl Live {
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 enum Update {
     None,
-    /// Results changed under an unchanged query: the visible rows stay put.
+    /// Results changed under an unchanged query: ranked from scratch while
+    /// [`Session::reranks`], and otherwise below the rows on screen.
     Late,
     /// The query changed: rank from scratch.
     Fresh,
@@ -437,14 +442,23 @@ struct Session {
     /// What a perfect match of the query scores, which Live query scores are
     /// scaled to.
     max_score: u32,
-    /// How many rows, from the first, late Results may not move: those on
-    /// screen and those scrolled past.
+    /// How many rows, from the first, late Results may not move once the
+    /// rerank is over: those on screen and those scrolled past.
     rows: usize,
+    /// When the query last changed.
+    typed: Instant,
+    /// Whether the user moved the selection since the query last changed.
+    selection_moved: bool,
     narrowing: Narrowing,
     /// By Extension.
     live: Vec<Live>,
     /// The Results last sent, in order, and whether each is an answer.
     shown: Vec<(Source, bool)>,
+    /// The version of the Results last sent.
+    version: u32,
+    /// The Results that came late for this query, each with the version it
+    /// was first sent in. A run confirmed in an earlier version is refused.
+    late: Vec<(Source, u32)>,
     /// The Result an Alias named, and the Alias: picking it counts for the
     /// Alias alone.
     via_alias: Option<(Source, String)>,
@@ -463,6 +477,34 @@ impl Session {
         if let Err(TrySendError::Full(_)) = self.sender.try_send(message) {
             self.hung.set(true);
         }
+    }
+
+    /// Whether Results that arrive late at `now` rank with the rest, the rows
+    /// on screen included: until the selection moves or [`RERANK_FOR`] after
+    /// the keystroke.
+    fn reranks(&self, now: Instant) -> bool {
+        !self.selection_moved && now < self.typed + RERANK_FOR
+    }
+
+    /// Sends `results`, the rows of `shown`, as the next version. A late
+    /// update notes each Result it adds as first sent in that version.
+    fn send_results(&mut self, shown: Vec<(Source, bool)>, results: Vec<ShownResult>, fresh: bool) {
+        self.version = self.version.wrapping_add(1);
+        if fresh {
+            self.late.clear();
+        } else {
+            for &(source, _) in &shown {
+                let was_shown = self.shown.iter().any(|&(old, _)| old == source);
+                if !was_shown && !self.late.iter().any(|&(late, _)| late == source) {
+                    self.late.push((source, self.version));
+                }
+            }
+        }
+        self.shown = shown;
+        self.send(ToFrontEnd::Results {
+            version: self.version,
+            results,
+        });
     }
 
     /// The filter typed into a list View, if any.
@@ -1785,9 +1827,13 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             pattern: Pattern::default(),
             max_score: 0,
             rows: DEFAULT_ROWS,
+            typed: self.started,
+            selection_moved: false,
             narrowing: Narrowing::default(),
             live: self.extensions.iter().map(|_| Live::default()).collect(),
             shown: Vec::new(),
+            version: 0,
+            late: Vec::new(),
             via_alias: None,
             searched: false,
             update: Update::None,
@@ -1843,13 +1889,21 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
                     session.rows = top as usize + rows as usize;
                 }
             }
+            FromFrontEnd::SelectionMoved => {
+                if let Some(session) = self.sessions.get_mut(&id) {
+                    session.selection_moved = true;
+                }
+            }
             FromFrontEnd::RunAction {
                 result,
+                shown,
                 action,
                 arguments,
             } => {
                 let daemons = action.extension == OWN;
-                let run = if daemons && action.id == FORGET {
+                let run = if self.unseen(id, &result, shown) {
+                    Err("that Result wasn't on screen yet".to_owned())
+                } else if daemons && action.id == FORGET {
                     self.forget_result(id, &result, now)
                 } else if daemons && action.id == CLEAR_EXTENSION_HISTORY {
                     self.clear_extension_history(id, &result, now)
@@ -1902,6 +1956,21 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
                 self.ask_menus(id, ToFrontEnd::Toggle);
             }
         }
+    }
+
+    /// Whether `result` came late, in a later version of the Results than
+    /// `shown`, the one on screen when the user chose it.
+    fn unseen(&self, front_end: FrontEndId, result: &ResultRef, shown: u32) -> bool {
+        let Some(session) = self.sessions.get(&front_end) else {
+            return false;
+        };
+        let Some(source) = self.source_of(session, &result.extension, &result.id) else {
+            return false;
+        };
+        session
+            .late
+            .iter()
+            .any(|&(late, version)| late == source && version > shown)
     }
 
     /// Tells the Front end why an Action it asked for didn't run.
@@ -2201,6 +2270,8 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
         session.query = text;
         session.searched = true;
         session.update = Update::Fresh;
+        session.typed = now;
+        session.selection_moved = false;
         for (ext_id, ext) in self.extensions.iter().enumerate() {
             let live = &mut session.live[ext_id];
             if let Some(query) = live.sent.take() {
@@ -2823,20 +2894,21 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
     }
 
     /// Ranks one session's Results and sends them. Results that come late
-    /// never move the rows on screen (ADR 0003): those stay where they are,
-    /// and everything new goes below them, except an answer, which takes the
-    /// top row.
+    /// rank with the rest while [`Session::reranks`]. After that the rows on
+    /// screen stay where they are, and everything new goes below them, except
+    /// an answer, which takes the top row.
     fn refresh(&mut self, id: FrontEndId, now: Instant) {
         let Some(mut session) = self.sessions.remove(&id) else {
             return;
         };
         let fresh = session.update == Update::Fresh;
+        let keep = !fresh && !session.reranks(now);
         session.update = Update::None;
 
         if session.query.is_empty() {
             session.narrowing.forget();
             let mut ranked = self.empty_query(&session, now);
-            if !fresh {
+            if keep {
                 // The rows on screen stay put, as for any query.
                 let visible: Vec<Source> = session
                     .shown
@@ -2849,12 +2921,12 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
                 ranked.splice(0..0, visible);
             }
             session.via_alias = None;
-            session.shown = ranked.iter().map(|&source| (source, false)).collect();
             let results = ranked
                 .iter()
                 .filter_map(|&source| self.row(&session, source, None))
                 .collect();
-            session.send(ToFrontEnd::Results { results });
+            let shown = ranked.into_iter().map(|source| (source, false)).collect();
+            session.send_results(shown, results, fresh);
             self.sessions.insert(id, session);
             return;
         }
@@ -2978,7 +3050,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
         answers.sort_unstable_by(Candidate::rank);
 
         let mut kept: Vec<Candidate> = Vec::new();
-        if !fresh {
+        if keep {
             let visible = session.shown.iter().take(session.rows);
             // A fallback on screen moves down for a real match come late: it
             // never ranks above one.
@@ -3001,11 +3073,6 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
         self.lead_with_direct_picks(&session, &mut candidates);
 
         let ranked: Vec<Candidate> = answers.into_iter().chain(kept).chain(candidates).collect();
-        session.shown = ranked
-            .iter()
-            .map(|candidate| (candidate.source, candidate.standing == Standing::Answer))
-            .collect();
-
         let results = ranked
             .iter()
             .filter_map(|candidate| {
@@ -3016,7 +3083,11 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
                 self.row(&session, candidate.source, primary)
             })
             .collect();
-        session.send(ToFrontEnd::Results { results });
+        let shown = ranked
+            .iter()
+            .map(|candidate| (candidate.source, candidate.standing == Standing::Answer))
+            .collect();
+        session.send_results(shown, results, fresh);
         self.sessions.insert(id, session);
     }
 
@@ -3058,7 +3129,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
     /// Adds the near misses of the session's query, Indexed items and the
     /// Daemon's own, to `candidates`, unless the real matches already fill the
     /// rows: near misses rank below every real match, so they would never be
-    /// seen, except those on screen when the query hasn't changed (ADR 0003).
+    /// seen, except those on screen when the query hasn't changed.
     /// `narrowed` is whether this search narrowed the last one's matches;
     /// then near misses are looked for among the last one's, if it looked for
     /// them and allowed as many typos. The candidates before `indexed` are the

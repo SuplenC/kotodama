@@ -357,6 +357,7 @@ const FROM_EXTENSION_VARIANTS: usize = 10;
 fn to_front_end_messages() -> Vec<ToFrontEnd> {
     vec![
         ToFrontEnd::Results {
+            version: 1,
             results: vec![ShownResult {
                 extension: "projects".into(),
                 item: items()[2].clone(),
@@ -367,7 +368,10 @@ fn to_front_end_messages() -> Vec<ToFrontEnd> {
                 highlights: vec![0, 1, 4],
             }],
         },
-        ToFrontEnd::Results { results: vec![] },
+        ToFrontEnd::Results {
+            version: 2,
+            results: vec![],
+        },
         ToFrontEnd::Status {
             down: vec!["calculator".into()],
         },
@@ -447,11 +451,13 @@ fn from_front_end_messages() -> Vec<FromFrontEnd> {
     vec![
         FromFrontEnd::Query { text: "fir".into() },
         FromFrontEnd::Viewport { top: 3, rows: 8 },
+        FromFrontEnd::SelectionMoved,
         FromFrontEnd::RunAction {
             result: ResultRef {
                 extension: "projects".into(),
                 id: "kotodama".into(),
             },
+            shown: 12,
             action: ActionRef {
                 extension: "kubaos".into(),
                 id: "pin-version".into(),
@@ -503,16 +509,17 @@ fn from_front_end_variant(message: &FromFrontEnd) -> usize {
     match message {
         FromFrontEnd::Query { .. } => 0,
         FromFrontEnd::Viewport { .. } => 1,
-        FromFrontEnd::RunAction { .. } => 2,
-        FromFrontEnd::SubmitForm { .. } => 3,
-        FromFrontEnd::ViewPopped { .. } => 4,
-        FromFrontEnd::FilterView { .. } => 5,
-        FromFrontEnd::Closed => 6,
-        FromFrontEnd::Open { .. } => 7,
-        FromFrontEnd::Toggle => 8,
+        FromFrontEnd::SelectionMoved => 2,
+        FromFrontEnd::RunAction { .. } => 3,
+        FromFrontEnd::SubmitForm { .. } => 4,
+        FromFrontEnd::ViewPopped { .. } => 5,
+        FromFrontEnd::FilterView { .. } => 6,
+        FromFrontEnd::Closed => 7,
+        FromFrontEnd::Open { .. } => 8,
+        FromFrontEnd::Toggle => 9,
     }
 }
-const FROM_FRONT_END_VARIANTS: usize = 9;
+const FROM_FRONT_END_VARIANTS: usize = 10;
 
 #[test]
 fn every_message_to_a_front_end_survives_every_wire_format() {

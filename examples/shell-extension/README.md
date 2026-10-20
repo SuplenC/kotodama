@@ -32,7 +32,7 @@ The Daemon starts `command` from `manifest.toml`, in this directory, and talks t
 {"remove_items":{"ids":["a"]}}
 ```
 
-**Handshake.** Each side sends a hello first, always in JSON: `{"version":4,"formats":["json"]}`. `version` is the protocol version, `PROTOCOL_VERSION` in `crates/kotodama-protocol`; the Daemon turns away a hello with any other. List the Wire formats you support, from `postcard`, `msgpack` and `json`. Both sides then use the fastest they share. JSON is required, so offering only JSON is enough.
+**Handshake.** Each side sends a hello first, always in JSON: `{"version":5,"formats":["json"]}`. `version` is the protocol version, `PROTOCOL_VERSION` in `crates/kotodama-protocol`; the Daemon turns away a hello with any other. List the Wire formats you support, from `postcard`, `msgpack` and `json`. Both sides then use the fastest they share. JSON is required, so offering only JSON is enough.
 
 **Messages.** A message is an object with one key, its name, holding its fields: `{"add_items": {"items": [...]}}`. A message without fields is just its name as a string: `"request_action_catalog"`. Optional fields can be left out.
 

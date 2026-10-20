@@ -12,7 +12,7 @@ use std::time::Duration;
 use common::*;
 use kotodama_protocol::*;
 use kotodamad::daemon::{
-    Event, ExtensionId, FrontEndId, HANDSHAKE_TIMEOUT, MAX_LIVE_RESULTS, Output,
+    Event, ExtensionId, FrontEndId, HANDSHAKE_TIMEOUT, MAX_LIVE_RESULTS, Output, RERANK_FOR,
 };
 use kotodamad::discovery::Found;
 use kotodamad::usage::Used;
@@ -196,7 +196,7 @@ fn a_late_result_goes_below_the_visible_rows_however_well_it_scores() {
     h.front_end_sends(&ui, FromFrontEnd::Viewport { top: 0, rows: 2 });
 
     let shown = titles(&h.query(&ui, "g rust")).join(",");
-    h.advance(Duration::from_millis(100));
+    h.advance(RERANK_FOR);
     let (id, ..) = live_queries(&web)[0].clone();
     h.send(
         &web,
@@ -229,7 +229,7 @@ fn late_results_keep_a_near_miss_on_screen_though_real_matches_now_fill_the_rows
         titles(&h.query(&ui, "g stream")),
         ["G Stream Deck", "G Steam"]
     );
-    h.advance(Duration::from_millis(100));
+    h.advance(RERANK_FOR);
     let (id, ..) = live_queries(&web)[0].clone();
     h.send(
         &web,
@@ -264,7 +264,7 @@ fn below_the_visible_rows_live_results_compete_with_indexed_items_on_score() {
     h.front_end_sends(&ui, FromFrontEnd::Viewport { top: 0, rows: 1 });
 
     assert_eq!(titles(&h.query(&ui, "g rust")), ["g rust", "g xrxuxsxt"]);
-    h.advance(Duration::from_millis(100));
+    h.advance(RERANK_FOR);
     let (id, ..) = live_queries(&web)[0].clone();
     h.send(
         &web,
@@ -278,6 +278,164 @@ fn below_the_visible_rows_live_results_compete_with_indexed_items_on_score() {
         titles(&ui.results().unwrap()),
         ["g rust", "perfect", "g xrxuxsxt", "poor"]
     );
+}
+
+/// `g rust` on two rows on screen, three apps matching it, and web search
+/// asked: the Harness, apps, web search, the Front end and the titles shown.
+fn rust_on_screen() -> (Harness, Ext, Ext, FrontEnd, Vec<String>) {
+    let mut h = Harness::new(vec![plain("apps"), web()]);
+    let apps = h.up(0);
+    let web = h.up(1);
+    h.add(
+        &apps,
+        vec![app("g rust one"), app("g rust two"), app("g rust three")],
+    );
+    let ui = h.front_end();
+    h.front_end_sends(&ui, FromFrontEnd::Viewport { top: 0, rows: 2 });
+    let shown = titles(&h.query(&ui, "g rust"))
+        .into_iter()
+        .map(String::from)
+        .collect();
+    (h, apps, web, ui, shown)
+}
+
+/// Web search answers `rust`, a better match than any app, `after` the
+/// keystroke.
+fn web_answers_rust(h: &mut Harness, web: &Ext, after: Duration) {
+    h.advance(after);
+    let (id, ..) = live_queries(web)[0].clone();
+    h.send(
+        web,
+        FromExtension::LiveResults {
+            live_query: id,
+            results: vec![live("rust", 1.0, false)],
+            done: true,
+        },
+    );
+}
+
+fn late_titles(ui: &FrontEnd) -> Vec<String> {
+    let rows = ui.results().expect("late Results are sent");
+    titles(&rows).into_iter().map(String::from).collect()
+}
+
+#[test]
+fn a_late_result_that_ranks_first_takes_the_top_row_until_the_rerank_is_over() {
+    let (mut h, _apps, web, ui, shown) = rust_on_screen();
+
+    web_answers_rust(&mut h, &web, RERANK_FOR - Duration::from_millis(1));
+
+    let rows = late_titles(&ui);
+    assert_eq!(rows[0], "rust");
+    assert_eq!(rows[1..3], shown[..2]);
+}
+
+#[test]
+fn once_the_selection_moves_a_late_result_goes_below_the_rows_on_screen() {
+    let (mut h, _apps, web, ui, shown) = rust_on_screen();
+    h.front_end_sends(&ui, FromFrontEnd::SelectionMoved);
+
+    web_answers_rust(&mut h, &web, Duration::from_millis(100));
+
+    let rows = late_titles(&ui);
+    assert_eq!(rows[..2], shown[..2]);
+    assert_eq!(rows[2], "rust");
+}
+
+#[test]
+fn a_new_query_reranks_again_though_the_selection_moved_for_the_last_one() {
+    let (mut h, _apps, web, ui, _) = rust_on_screen();
+    h.front_end_sends(&ui, FromFrontEnd::SelectionMoved);
+    h.query(&ui, "g rust");
+
+    web_answers_rust(&mut h, &web, Duration::from_millis(100));
+
+    assert_eq!(late_titles(&ui)[0], "rust");
+}
+
+#[test]
+fn an_answer_keeps_the_top_row_above_a_late_result_that_reranks() {
+    let notes = manifest(
+        "name = \"notes\"\ncommand = [\"x\"]\n[live_query]\ntriggers = ['^[0-9]']\ndebounce_ms = 50",
+    );
+    let mut h = Harness::new(vec![plain("apps"), calculator(), notes]);
+    let apps = h.up(0);
+    let calc = h.up(1);
+    let notes = h.up(2);
+    h.add(&apps, vec![app("42 game")]);
+    let ui = h.front_end();
+    h.query(&ui, "42");
+    let (id, ..) = live_queries(&calc)[0].clone();
+    h.send(
+        &calc,
+        FromExtension::LiveResults {
+            live_query: id,
+            results: vec![live("= 42", 0.1, true)],
+            done: true,
+        },
+    );
+    assert_eq!(titles(&ui.results().unwrap()), ["= 42", "42 game"]);
+
+    h.advance(Duration::from_millis(50));
+    let (id, ..) = live_queries(&notes)[0].clone();
+    h.send(
+        &notes,
+        FromExtension::LiveResults {
+            live_query: id,
+            results: vec![live("42", 1.0, false)],
+            done: true,
+        },
+    );
+
+    assert_eq!(titles(&ui.results().unwrap()), ["= 42", "42", "42 game"]);
+}
+
+#[test]
+fn enter_after_a_rerank_runs_the_result_that_was_on_screen() {
+    let (mut h, apps, web, ui, shown) = rust_on_screen();
+    apps.drain();
+    // The rerank is sent, but the Front end hasn't shown it yet.
+    web_answers_rust(&mut h, &web, Duration::from_millis(100));
+
+    let top = shown[0].replace(' ', "-");
+    run(&mut h, &ui, "apps", &top, "apps", "open");
+
+    let ran: Vec<String> = runs(&apps)
+        .into_iter()
+        .map(|(_, _, item)| item.id)
+        .collect();
+    assert_eq!(ran, [top]);
+    assert_eq!(runs(&web), []);
+}
+
+#[test]
+fn enter_on_a_late_result_before_its_list_is_on_screen_runs_nothing() {
+    let (mut h, _apps, web, ui, _) = rust_on_screen();
+    let before = ui.shown.get();
+    web_answers_rust(&mut h, &web, Duration::from_millis(100));
+    assert_eq!(late_titles(&ui)[0], "rust");
+    ui.shown.set(before);
+
+    run(&mut h, &ui, "web", "rust", "web", "open");
+
+    assert_eq!(runs(&web), []);
+    let failed = ui
+        .drain()
+        .into_iter()
+        .any(|message| matches!(message, ToFrontEnd::ActionFailed { .. }));
+    assert!(failed, "the Front end is told why nothing ran");
+}
+
+#[test]
+fn a_late_result_runs_once_its_list_is_on_screen() {
+    let (mut h, _apps, web, ui, _) = rust_on_screen();
+    web_answers_rust(&mut h, &web, Duration::from_millis(100));
+    assert_eq!(late_titles(&ui)[0], "rust");
+
+    run(&mut h, &ui, "web", "rust", "web", "open");
+
+    let ran: Vec<String> = runs(&web).into_iter().map(|(_, _, item)| item.id).collect();
+    assert_eq!(ran, ["rust"]);
 }
 
 #[test]
@@ -705,7 +863,9 @@ fn a_stopped_extensions_results_disappear_and_a_marker_shows_it_is_down() {
 
     h.down(&apps);
     let messages = ui.drain();
-    assert!(messages.contains(&ToFrontEnd::Results { results: vec![] }));
+    assert!(messages.iter().any(
+        |message| matches!(message, ToFrontEnd::Results { results, .. } if results.is_empty())
+    ));
     assert!(messages.contains(&ToFrontEnd::Status {
         down: vec!["apps".into()]
     }));
@@ -938,7 +1098,7 @@ fn a_bigger_viewport_protects_the_rows_it_shows_at_once() {
     assert_eq!(titles(&h.query(&ui, "g rust")), ["g rust a", "g rust bb"]);
 
     h.front_end_sends(&ui, FromFrontEnd::Viewport { top: 0, rows: 2 });
-    h.advance(Duration::from_millis(100));
+    h.advance(RERANK_FOR);
     let (id, ..) = live_queries(&web)[0].clone();
     h.send(
         &web,
@@ -1086,7 +1246,7 @@ fn rows_scrolled_past_are_protected_like_the_ones_on_screen() {
 
     // Scrolled so the second row is the one on screen.
     h.front_end_sends(&ui, FromFrontEnd::Viewport { top: 1, rows: 1 });
-    h.advance(Duration::from_millis(100));
+    h.advance(RERANK_FOR);
     let (id, ..) = live_queries(&web)[0].clone();
     h.send(
         &web,
@@ -1515,6 +1675,7 @@ fn a_pick_of_a_live_query_result_raises_the_same_thing_indexed() {
             done: true,
         },
     );
+    ui.drain();
     run(&mut h, &ui, "web", "r1", "web", "open");
     ui.drain();
 

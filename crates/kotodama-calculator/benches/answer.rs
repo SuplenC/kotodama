@@ -54,7 +54,7 @@ fn main() {
             let Ok(Some(message)) = ui.recv::<ToFrontEnd>() else {
                 return false;
             };
-            if let ToFrontEnd::Results { results } = message
+            if let ToFrontEnd::Results { results, .. } = message
                 && results
                     .first()
                     .is_some_and(|row| row.extension == "calculator")

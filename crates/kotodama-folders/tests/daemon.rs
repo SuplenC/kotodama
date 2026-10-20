@@ -98,6 +98,7 @@ fn start(root: &Path) -> Client {
 
     let mut client = Client {
         channel: testing::connect(&socket, TIMEOUT),
+        shown: 0,
     };
     client.settle();
     client
@@ -105,6 +106,8 @@ fn start(root: &Path) -> Client {
 
 struct Client {
     channel: Channel<UnixStream, UnixStream>,
+    /// The version of the last Results read.
+    shown: u32,
 }
 
 impl Client {
@@ -117,8 +120,9 @@ impl Client {
     }
 
     /// Results for `query`, once they are `done`. The Daemon sends Late
-    /// Results whenever an Extension comes up or sends Items, and they keep
-    /// the Results on screen in the order they were (ADR 0003). So the
+    /// Results whenever an Extension comes up or sends Items, and once the
+    /// rerank after a keystroke is over they keep the Results on screen in
+    /// the order they were. So the
     /// Results read after a Query can be Late Results sent before the Daemon
     /// got the Query, and only what `done` checks can be relied on.
     fn search(&mut self, query: &str, done: impl Fn(&[ShownResult]) -> bool) -> Vec<ShownResult> {
@@ -126,7 +130,8 @@ impl Client {
         loop {
             self.send(FromFrontEnd::Query { text: query.into() });
             let results = loop {
-                if let ToFrontEnd::Results { results } = self.recv() {
+                if let ToFrontEnd::Results { version, results } = self.recv() {
+                    self.shown = version;
                     break results;
                 }
             };
@@ -171,6 +176,7 @@ impl Client {
                 extension: "folders".into(),
                 id: id.into(),
             },
+            shown: self.shown,
             action: ActionRef {
                 extension: extension.into(),
                 id: action.into(),

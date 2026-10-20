@@ -17,6 +17,8 @@ use tempfile::TempDir;
 pub struct Menu {
     _dir: TempDir,
     ui: Channel<UnixStream, UnixStream>,
+    /// The version of the last Results read.
+    shown: u32,
 }
 
 impl Menu {
@@ -49,7 +51,11 @@ impl Menu {
         thread::spawn(move || kotodamad::run(&paths));
 
         let ui = testing::connect(&socket, Duration::from_secs(1));
-        let mut menu = Menu { _dir: dir, ui };
+        let mut menu = Menu {
+            _dir: dir,
+            ui,
+            shown: 0,
+        };
         // The Results change once the Items are indexed; from then on each
         // query has one answer.
         let started = Instant::now();
@@ -76,7 +82,10 @@ impl Menu {
     fn results(&mut self) -> Vec<ShownResult> {
         loop {
             match self.ui.recv::<ToFrontEnd>() {
-                Ok(Some(ToFrontEnd::Results { results })) => return results,
+                Ok(Some(ToFrontEnd::Results { version, results })) => {
+                    self.shown = version;
+                    return results;
+                }
                 Ok(Some(_)) => {}
                 other => panic!("expected Results, got {other:?}"),
             }
@@ -100,6 +109,7 @@ impl Menu {
                     extension: "emoji".into(),
                     id: id.into(),
                 },
+                shown: self.shown,
                 action: ActionRef {
                     extension: "emoji".into(),
                     id: "type".into(),
