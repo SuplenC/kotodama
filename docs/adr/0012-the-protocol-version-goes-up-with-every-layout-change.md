@@ -1,6 +1,6 @@
 # 12. The protocol version goes up with every change to a message's layout
 
-Status: accepted (2026-10-20)
+Status: accepted (2026-10-20), amended by ADR 0018 (one version for every Wire format)
 
 Both sides of a connection send `PROTOCOL_VERSION` in their hello, and the handshake fails unless the two are equal. That only protects a peer if the version changes whenever a message does. Postcard encodes a struct's fields by position and an enum's variants by index, so a peer built before a field was added misreads everything after it: it passes the handshake and then fails at some later decode, or decodes garbage.
 
