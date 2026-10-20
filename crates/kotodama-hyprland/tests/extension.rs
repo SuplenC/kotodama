@@ -125,6 +125,12 @@ impl FakeHyprland {
     }
 }
 
+/// The Items sent at start: the Shortcuts Item and the binds, then the
+/// windows.
+fn started(extension: &Spawned) -> Vec<Item> {
+    [extension.added(), extension.added()].concat()
+}
+
 fn ids(items: &[Item]) -> Vec<&str> {
     items.iter().map(|item| item.id.as_str()).collect()
 }
@@ -185,7 +191,7 @@ fn open_shortcuts(extension: &mut Spawned, invocation: u64) -> Vec<Item> {
 fn the_windows_the_shortcuts_item_and_the_described_binds_are_sent_at_start() {
     let hyprland = FakeHyprland::start();
     let extension = hyprland.extension();
-    let items = extension.added();
+    let items = started(&extension);
     let ids = ids(&items);
     assert_eq!(ids[0], "shortcuts");
     assert!(ids.contains(&FIREFOX) && ids.contains(&FOOT));
@@ -204,7 +210,7 @@ fn the_windows_the_shortcuts_item_and_the_described_binds_are_sent_at_start() {
 fn only_the_windows_an_event_changes_are_sent_again() {
     let hyprland = FakeHyprland::start();
     let extension = hyprland.extension();
-    extension.added();
+    started(&extension);
 
     hyprland.emit("openwindow>>55d0c6c2a4e0,3,org.gnome.Nautilus,Home");
     let opened = extension.added();
@@ -229,7 +235,7 @@ fn only_the_windows_an_event_changes_are_sent_again() {
 fn a_windows_actions_dispatch_on_it_and_close_the_menu() {
     let hyprland = FakeHyprland::start();
     let mut extension = hyprland.extension();
-    extension.added();
+    started(&extension);
 
     assert_eq!(
         run(&mut extension, 1, "focus", window(FIREFOX)),
@@ -263,7 +269,7 @@ fn a_windows_actions_dispatch_on_it_and_close_the_menu() {
 fn a_binds_item_runs_its_dispatcher() {
     let hyprland = FakeHyprland::start();
     let mut extension = hyprland.extension();
-    let items = extension.added();
+    let items = started(&extension);
     let close = items
         .iter()
         .find(|item| item.title == "Close the window")
@@ -276,10 +282,27 @@ fn a_binds_item_runs_its_dispatcher() {
 }
 
 #[test]
+fn a_mouse_bind_in_the_shortcuts_view_isnt_run_from_the_menu() {
+    let hyprland = FakeHyprland::start();
+    let mut extension = hyprland.extension();
+    started(&extension);
+    let view = open_shortcuts(&mut extension, 1);
+    let drag = view
+        .iter()
+        .find(|item| item.title == "SUPER + mouse:272")
+        .unwrap();
+    assert!(matches!(
+        run(&mut extension, 2, "run", drag.to_ref()),
+        Outcome::Failed { .. }
+    ));
+    assert!(hyprland.dispatched().is_empty());
+}
+
+#[test]
 fn a_bind_added_at_runtime_is_in_the_shortcuts_view_when_it_next_opens() {
     let hyprland = FakeHyprland::start();
     let mut extension = hyprland.extension();
-    extension.added();
+    started(&extension);
 
     let first = open_shortcuts(&mut extension, 1);
     assert_eq!(first.len(), 10);
@@ -309,7 +332,7 @@ fn a_bind_added_at_runtime_is_in_the_shortcuts_view_when_it_next_opens() {
 fn a_config_reload_sends_the_binds_that_changed() {
     let hyprland = FakeHyprland::start();
     let extension = hyprland.extension();
-    extension.added();
+    started(&extension);
 
     let added = BINDS.replacen(
         '[',
@@ -386,10 +409,11 @@ fn a_hyprland_gone_before_the_extension_started_leaves_it_quiet() {
 fn hyprland_exiting_takes_its_windows_away() {
     let hyprland = FakeHyprland::start();
     let extension = hyprland.extension();
-    extension.added();
+    started(&extension);
     hyprland.exit();
-    let removed = extension.removed();
-    assert_eq!(removed.len(), 1 + 2 + 5);
+    // The binds and the windows go, each sent as they came.
+    let removed = [extension.removed(), extension.removed()].concat();
+    assert_eq!(removed.len(), 1 + 5 + 2);
     assert!(removed.contains(&FIREFOX.to_owned()));
     extension.quiet();
 }

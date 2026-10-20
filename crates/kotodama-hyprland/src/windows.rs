@@ -157,6 +157,9 @@ pub fn dispatch(action: &str, address: &str, workspace: Option<&str>) -> Result<
                 .map(str::trim)
                 .filter(|workspace| !workspace.is_empty())
                 .ok_or("Name a workspace to move the window to")?;
+            if workspace.contains(',') {
+                return Err(format!("`{workspace}` isn't a workspace: it has a comma"));
+            }
             format!("movetoworkspacesilent {workspace},address:{address}")
         }
         _ => return Err(format!("A window has no Action `{action}`")),

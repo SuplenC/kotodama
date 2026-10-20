@@ -1,6 +1,6 @@
 # kotodama-hyprland code map
 
-A Bundled extension. Maintained by hand: fix stale lines when you find them, and update this map in the PR that adds, moves or renames a module here. Paths are relative to `src/`. `manifest.toml` declares it; `src/main.rs` runs the protocol loop on `kotodama-extension`: an `events` thread follows Hyprland's event socket, and every change goes out through `SentItems::publish`. Outside Hyprland it sends nothing. See also the [root map](../../CODEMAP.md) and [GLOSSARY.md](../../GLOSSARY.md).
+A Bundled extension. Maintained by hand: fix stale lines when you find them, and update this map in the PR that adds, moves or renames a module here. Paths are relative to `src/`. `manifest.toml` declares it; `src/main.rs` runs the protocol loop on `kotodama-extension`: an `events` thread follows Hyprland's event socket, and the windows and the binds each go out through a `SentItems::publish` of their own, so a window event sends only that window. Outside Hyprland it sends nothing. See also the [root map](../../CODEMAP.md) and [GLOSSARY.md](../../GLOSSARY.md).
 
 - `hyprland.rs`: `Hyprland::from_env` (the socket directory), `request` (one `.socket.sock` request, as `hyprctl` writes it), `dispatch`, `events`; `Events::next_change` (`.socket2.sock` lines).
 - `events.rs`: `Change::parse` (the events that change an Item: `openwindow`, `closewindow`, `movewindowv2`, `windowtitlev2`, `configreloaded`).

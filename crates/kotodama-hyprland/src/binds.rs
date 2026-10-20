@@ -11,8 +11,10 @@ use serde::Deserialize;
 pub const RUN: &str = "run";
 /// The Shortcuts View's id.
 pub const VIEW: &str = "shortcuts";
-/// The id of the Item that opens the Shortcuts View, and its one Action.
+/// The id of the Item that opens the Shortcuts View: `--view
+/// hyprland/shortcuts`. The View has the same id, but they are two things.
 pub const SHORTCUTS: &str = "shortcuts";
+/// The Shortcuts Item's one Action, which pushes the View.
 pub const OPEN: &str = "open";
 /// A bind's Item kind.
 pub const KIND: &str = "hyprland.shortcut";
@@ -97,7 +99,7 @@ impl Bind {
     }
 
     /// What the bind does, in words: its description, or else its dispatch.
-    fn what(&self) -> String {
+    fn summary(&self) -> String {
         if self.description.is_empty() {
             self.dispatch()
         } else {
@@ -220,7 +222,7 @@ pub fn view(binds: &[Bind]) -> View {
                 .filter(|word| !word.is_empty())
                 .cloned()
                 .collect();
-            bind.item(id, bind.keys(), bind.in_submap(bind.what()), keywords)
+            bind.item(id, bind.keys(), bind.in_submap(bind.summary()), keywords)
         })
         .collect();
     View {

@@ -73,11 +73,13 @@ pkgs.testers.runNixOSTest {
     def user(command):
         return machine.succeed(as_alice(command))
 
-    def hyprctl(command):
-        return user(f"hyprctl -i 0 {command}")
-
     def active_window():
         return as_alice("hyprctl -i 0 activewindow -j")
+
+    def window(title, seconds):
+        # Started straight on Hyprland's Wayland socket: a `hyprctl dispatch
+        # exec` can time out while Hyprland is busy, and isn't safe to retry.
+        user(f"{wayland} nohup foot --title {title} sleep {seconds} >/dev/null 2>&1 &")
 
     machine.wait_for_unit("multi-user.target")
     machine.wait_for_unit("home-manager-alice.service")
@@ -92,6 +94,7 @@ pkgs.testers.runNixOSTest {
         )
     finally:
         print(machine.execute("cat /tmp/hyprland.log")[1])
+    wayland = user("systemctl --user show-environment | grep ^WAYLAND_DISPLAY=").strip()
 
     with subtest("the Daemon starts inside Hyprland, and finds its binds"):
         user("kotodama toggle")
@@ -102,21 +105,26 @@ pkgs.testers.runNixOSTest {
         )
 
     with subtest("an opened window appears as an Item, and its focus Action works"):
-        # `--` ends hyprctl's own flags, so foot's are passed on.
-        hyprctl("-- dispatch exec foot --title vm-one sleep 1001")
+        window("vm-one", 1001)
         machine.wait_until_succeeds(
             as_alice(f"{front_end} vm-one") + " | grep -P '^hyprland\t0x[0-9a-f]+\tvm-one$'"
         )
-        hyprctl("-- dispatch exec foot --title vm-two sleep 1002")
+        window("vm-two", 1002)
         machine.wait_until_succeeds(
             as_alice(f"{front_end} vm-two") + " | grep -P '^hyprland\t0x[0-9a-f]+\tvm-two$'"
         )
         machine.wait_until_succeeds(active_window() + " | grep -q '\"title\": \"vm-two\"'")
-        user(f"{front_end} --run vm-one")
-        machine.wait_until_succeeds(active_window() + " | grep -q '\"title\": \"vm-one\"'")
+        # Focusing is safe to retry, should Hyprland be slow to answer.
+        machine.wait_until_succeeds(
+            as_alice(f"{front_end} --run vm-one")
+            + " && "
+            + active_window()
+            + " | grep -q '\"title\": \"vm-one\"'"
+        )
 
     with subtest("a closed window is gone"):
-        hyprctl("dispatch closewindow title:vm-two")
+        # foot closes its window once the program in it exits.
+        machine.succeed("pkill -u alice -f '^sleep 1002$'")
         machine.wait_until_succeeds(
             as_alice(f"{front_end} vm-two") + " | (! grep -q vm-two)"
         )
@@ -130,7 +138,9 @@ pkgs.testers.runNixOSTest {
         machine.succeed("grep -qP '^SUPER \\+ F1\tShow the keyboard shortcuts$' /tmp/menu")
         machine.fail("grep -qP '^SUPER \\+ F9\t' /tmp/menu")
 
-        hyprctl("keyword bind SUPER, F9, exec, true")
+        # Retried if Hyprland is slow to answer; a second copy of the bind
+        # changes nothing here.
+        machine.wait_until_succeeds(as_alice("hyprctl -i 0 keyword bind SUPER, F9, exec, true"))
         user("kotodama open --view hyprland/shortcuts")
         machine.wait_until_succeeds("grep -qP '^SUPER \\+ F9\texec true$' /tmp/menu")
   '';

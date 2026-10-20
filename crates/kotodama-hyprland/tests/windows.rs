@@ -145,5 +145,7 @@ fn an_action_is_the_dispatch_it_runs_on_its_window() {
         "movetoworkspacesilent 3,address:0x55d0c6a1b2c0"
     );
     assert!(windows::dispatch(windows::MOVE, address, Some(" ")).is_err());
+    // A comma would end the workspace and start the window's selector.
+    assert!(windows::dispatch(windows::MOVE, address, Some("1,address:0x1")).is_err());
     assert!(windows::dispatch("dance", address, None).is_err());
 }

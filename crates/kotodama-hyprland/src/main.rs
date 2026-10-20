@@ -36,12 +36,13 @@ fn run() -> Result<(), Error> {
     } = kotodama_extension::connect::<Own>()?;
     let mut extension = Extension {
         writer,
-        sent: SentItems::default(),
         hyprland: None,
         windows: Windows::default(),
+        sent_windows: SentItems::default(),
+        windows_changed: false,
         binds: Vec::new(),
+        sent_binds: SentItems::default(),
         view_open: false,
-        changed: false,
     };
     // Outside Hyprland there is nothing to follow: only the Daemon's messages
     // wake the Extension.
@@ -62,9 +63,12 @@ fn run() -> Result<(), Error> {
                         let _ = events.send(Event::Own(Own::Lost));
                     })?;
                 extension.hyprland = Some(hyprland);
-                extension.read_windows();
                 extension.read_binds();
-                extension.publish()?;
+                extension.publish_binds()?;
+                if let Some(windows) = extension.read("j/clients", Windows::from_clients) {
+                    extension.windows = windows;
+                }
+                extension.publish_windows()?;
             }
             Err(err) => log!("not following Hyprland: {err}"),
         }
@@ -82,24 +86,28 @@ fn run() -> Result<(), Error> {
                 Err(_) => break,
             }
         }
-        if extension.changed {
-            extension.publish()?;
+        if extension.windows_changed {
+            extension.publish_windows()?;
         }
     }
     Ok(())
 }
 
+/// The windows and the binds are sent apart, each as what changed since it
+/// was last sent, so a window event never makes the binds' Items again.
 struct Extension {
     writer: Writer,
-    sent: SentItems,
     /// `None` outside Hyprland, and once it exits.
     hyprland: Option<Hyprland>,
     windows: Windows,
+    sent_windows: SentItems,
+    /// Whether a window changed since the windows were last sent.
+    windows_changed: bool,
     binds: Vec<Bind>,
+    /// The Shortcuts Item and the binds' Items.
+    sent_binds: SentItems,
     /// Whether the Shortcuts View is open, so a config reload updates it.
     view_open: bool,
-    /// Whether an Item changed since the last publish.
-    changed: bool,
 }
 
 impl Extension {
@@ -126,19 +134,22 @@ impl Extension {
             Event::Message(_) => {}
             Event::Own(Own::Change(Change::ConfigReloaded)) => {
                 self.read_binds();
-                self.changed = true;
+                self.publish_binds()?;
                 if self.view_open {
                     self.writer
                         .send(&FromExtension::UpdateView(binds::view(&self.binds)))?;
                 }
             }
-            Event::Own(Own::Change(change)) => self.changed |= self.windows.apply(&change),
+            Event::Own(Own::Change(change)) => {
+                self.windows_changed |= self.windows.apply(&change);
+            }
             Event::Own(Own::Lost) => {
                 log!("Hyprland exited");
                 self.hyprland = None;
                 self.windows = Windows::default();
                 self.binds = Vec::new();
-                self.changed = true;
+                self.publish_binds()?;
+                self.windows_changed = true;
             }
             Event::Hangup => return Ok(false),
         }
@@ -161,6 +172,9 @@ impl Extension {
             kind if kind.name() == binds::KIND && action == RUN => {
                 let bind = binds::find(&self.binds, &item.id)
                     .ok_or("That shortcut is no longer bound in Hyprland")?;
+                if bind.mouse {
+                    return Err("A mouse bind only runs with the mouse".into());
+                }
                 hyprland.dispatch(&bind.dispatch())?;
                 Ok(Outcome::Close)
             }
@@ -168,7 +182,7 @@ impl Extension {
                 // Read afresh, so a bind added at runtime is there: Hyprland
                 // sends no event for one.
                 self.read_binds();
-                self.publish().map_err(|err| err.to_string())?;
+                self.publish_binds().map_err(|err| err.to_string())?;
                 self.writer
                     .send(&FromExtension::PushView(binds::view(&self.binds)))
                     .map_err(|err| err.to_string())?;
@@ -179,44 +193,39 @@ impl Extension {
         }
     }
 
-    fn read_windows(&mut self) {
-        let Some(hyprland) = &self.hyprland else {
-            return;
-        };
-        match hyprland
-            .request("j/clients")
+    /// Sends `request` and reads the answer with `parse`; `None`, logged,
+    /// if either fails.
+    fn read<T>(&self, request: &str, parse: impl FnOnce(&str) -> Result<T, String>) -> Option<T> {
+        let answer = self.hyprland.as_ref()?.request(request);
+        answer
             .map_err(|err| err.to_string())
-            .and_then(|json| Windows::from_clients(&json))
-        {
-            Ok(windows) => self.windows = windows,
-            Err(err) => log!("couldn't read the windows: {err}"),
-        }
+            .and_then(|json| parse(&json))
+            .map_err(|err| log!("{request}: {err}"))
+            .ok()
     }
 
+    /// Reads the binds again; keeps the last ones if they can't be read.
     fn read_binds(&mut self) {
-        let Some(hyprland) = &self.hyprland else {
-            return;
-        };
-        match hyprland
-            .request("j/binds")
-            .map_err(|err| err.to_string())
-            .and_then(|json| binds::parse(&json))
-        {
-            Ok(binds) => self.binds = binds,
-            Err(err) => log!("couldn't read the binds: {err}"),
+        if let Some(binds) = self.read("j/binds", binds::parse) {
+            self.binds = binds;
         }
     }
 
-    /// Sends what changed since the last time: nothing at all outside
-    /// Hyprland.
-    fn publish(&mut self) -> Result<(), Error> {
-        self.changed = false;
-        let items = self.hyprland.is_some().then(|| {
-            std::iter::once(binds::shortcuts_item())
-                .chain(binds::items(&self.binds))
-                .chain(self.windows.items())
-        });
-        self.sent
+    /// Sends the Shortcuts Item and the binds' Items that changed: all gone
+    /// outside Hyprland.
+    fn publish_binds(&mut self) -> Result<(), Error> {
+        let items = self
+            .hyprland
+            .is_some()
+            .then(|| std::iter::once(binds::shortcuts_item()).chain(binds::items(&self.binds)));
+        self.sent_binds
             .publish(&mut self.writer, items.into_iter().flatten())
+    }
+
+    /// Sends the windows that changed.
+    fn publish_windows(&mut self) -> Result<(), Error> {
+        self.windows_changed = false;
+        self.sent_windows
+            .publish(&mut self.writer, self.windows.items())
     }
 }

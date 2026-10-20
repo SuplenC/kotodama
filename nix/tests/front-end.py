@@ -59,6 +59,7 @@ def main():
     send(sock, {"version": 3, "formats": ["json"]})
     recv(reader)
     if args == ["--listen"]:
+        # Runs until the test ends it; it never searches.
         sock.settimeout(None)
         listen(sock, reader)
 

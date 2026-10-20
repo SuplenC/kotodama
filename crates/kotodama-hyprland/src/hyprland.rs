@@ -11,8 +11,8 @@ use std::time::Duration;
 use crate::events::Change;
 
 /// How long a request may take before it counts as failed, so a hung
-/// Hyprland can't hang the Extension.
-const TIMEOUT: Duration = Duration::from_secs(2);
+/// Hyprland can't hang the Extension; `hyprctl` waits as long.
+const TIMEOUT: Duration = Duration::from_secs(5);
 
 /// The Hyprland instance the Extension runs in.
 #[derive(Clone, Debug)]
