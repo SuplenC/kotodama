@@ -32,6 +32,8 @@ kotodama-web-search = { path = "../kotodama-web-search" }
 # The memory bench counts what the Daemon keeps for every emoji.
 kotodama-emoji = { path = "../kotodama-emoji" }
 criterion = { version = "0.8.2", default-features = false, features = ["cargo_bench_support"] }
+# Exactly the version of the gungraun-runner in the dev shell (nix/gungraun-runner.nix).
+gungraun = "=0.20.0"
 tempfile = "3.27.0"
 
 [[bench]]
@@ -44,4 +46,10 @@ harness = false
 
 [[bench]]
 name = "memory"
+harness = false
+
+# gungraun, not criterion: scripts/bench-run leaves out every bench target of
+# this name, and CI's `instructions` job runs them.
+[[bench]]
+name = "instructions"
 harness = false
