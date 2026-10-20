@@ -36,12 +36,15 @@ wait_for_result() {
     return 1
 }
 # copy_as <name> <mime>...: copies stdin as the given types, and keeps
-# serving it in the background, as an app that copied would.
+# serving it in the background, as an app that copied would. Returns once it
+# is on the clipboard, so the next copy comes after it.
 copy_as() {
-    local name=$1
+    local name=$1 mark
     shift
     cat >"$home/$name"
+    mark=$(log_lines copy.log)
     spawn "$copy" "$home/$name" "$@"
+    wait_for_log copy.log "copy: copied" "$mark"
 }
 
 spawn "$target/debug/kotodamad"
