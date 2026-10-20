@@ -501,6 +501,97 @@ struct Learned {
 }
 
 impl Learned {
+    fn empty(at: u64) -> Learned {
+        Learned {
+            choice: None,
+            strength: 0.0,
+            passed_over: Vec::new(),
+            contenders: Vec::new(),
+            at,
+        }
+    }
+
+    /// Counts a pick of `picked` at `at`, with `above` the Results ranked
+    /// above it, nearest first: towards the choice's strength, or towards
+    /// `picked` learning or taking over, as [`History::pick`] describes.
+    fn add(&mut self, picked: &ResultKey, above: &[ResultKey], at: u64, settings: &Settings) {
+        let half_life = settings.half_life_secs;
+        if self.choice.as_ref() == Some(picked) {
+            self.strength = (decay(self.strength.into(), self.at, at, half_life) + 1.0) as f32;
+            self.contenders.clear();
+            for key in above.iter().rev() {
+                self.passed_over.retain(|old| old != key);
+                self.passed_over.insert(0, key.clone());
+            }
+            self.passed_over.truncate(PASSED_OVER);
+        } else {
+            let count = match self.contenders.iter().position(|(key, _)| key == picked) {
+                Some(n) => self.contenders.remove(n).1 + 1,
+                None => 1,
+            };
+            let needed = if self.choice.is_some() {
+                settings.picks_to_take_over
+            } else {
+                settings.picks_to_learn
+            };
+            if count >= needed {
+                self.choice = Some(picked.clone());
+                self.strength = f32::from(count);
+                self.passed_over = above.iter().take(PASSED_OVER).cloned().collect();
+                self.contenders.clear();
+            } else {
+                self.strength = decay(self.strength.into(), self.at, at, half_life) as f32;
+                self.contenders.truncate(CONTENDERS - 1);
+                self.contenders.insert(0, (picked.clone(), count));
+            }
+        }
+        self.at = at;
+    }
+
+    /// Withdraws one pick of `picked` made at `when` from this entry, which
+    /// changed since the pick turned `before` into `after`. When that pick
+    /// made `picked` the choice and it still is, `before` comes back with
+    /// the picks made since counted on it again, so the choice it replaced
+    /// is the choice again. Otherwise the pick comes off as
+    /// [`take_off`](Self::take_off) takes it. `None` once nothing is left.
+    fn withdraw(
+        &self,
+        before: Option<&Learned>,
+        after: &Learned,
+        picked: &ResultKey,
+        when: When,
+        settings: &Settings,
+    ) -> Option<Learned> {
+        let made_choice = after.choice.as_ref() == Some(picked)
+            && before.and_then(|before| before.choice.as_ref()) != Some(picked);
+        if !made_choice || self.choice.as_ref() != Some(picked) {
+            return self.clone().take_off(picked, when, settings.half_life_secs);
+        }
+        let mut restored = before.cloned().unwrap_or_else(|| Learned::empty(after.at));
+        // The picks of `picked` since, as its strength grew past the pick's.
+        let grown = f64::from(self.strength)
+            - decay(
+                after.strength.into(),
+                after.at,
+                self.at,
+                settings.half_life_secs,
+            );
+        for _ in 0..grown.round().max(0.0) as u32 {
+            restored.add(picked, &[], self.at, settings);
+        }
+        // Then the picks of others since `picked` was last picked, oldest
+        // first.
+        for (key, count) in self.contenders.iter().rev() {
+            for _ in 0..*count {
+                restored.add(key, &[], self.at, settings);
+            }
+        }
+        if restored.choice == self.choice {
+            restored.passed_over.clone_from(&self.passed_over);
+        }
+        (restored.choice.is_some() || !restored.contenders.is_empty()).then_some(restored)
+    }
+
     /// Takes off one pick of `picked` made at `when`, as it counted towards
     /// this query's Learned choice: from the choice's strength, or from its
     /// count as a contender. A choice the pick made stays the choice. `None`
@@ -581,56 +672,18 @@ impl History {
         let at = when.at;
 
         let key = query_key(query);
-        let Settings {
-            half_life_secs: half_life,
-            picks_to_learn,
-            picks_to_take_over,
-            ..
-        } = self.settings;
         if !key.is_empty() {
             let before = self.learned.get(&key).cloned();
-            let learned = self.learned.entry(key.clone()).or_insert_with(|| Learned {
-                choice: None,
-                strength: 0.0,
-                passed_over: Vec::new(),
-                contenders: Vec::new(),
+            let learned = self
+                .learned
+                .entry(key.clone())
+                .or_insert_with(|| Learned::empty(at));
+            learned.add(
+                &(extension.to_owned(), id.to_owned()),
+                above,
                 at,
-            });
-            let picked = |key: &ResultKey| key.0 == extension && key.1 == id;
-            if learned.choice.as_ref().is_some_and(picked) {
-                learned.strength =
-                    (decay(learned.strength.into(), learned.at, at, half_life) + 1.0) as f32;
-                learned.contenders.clear();
-                for key in above.iter().rev() {
-                    learned.passed_over.retain(|old| old != key);
-                    learned.passed_over.insert(0, key.clone());
-                }
-                learned.passed_over.truncate(PASSED_OVER);
-            } else {
-                let count = match learned.contenders.iter().position(|(key, _)| picked(key)) {
-                    Some(n) => learned.contenders.remove(n).1 + 1,
-                    None => 1,
-                };
-                let needed = if learned.choice.is_some() {
-                    picks_to_take_over
-                } else {
-                    picks_to_learn
-                };
-                if count >= needed {
-                    learned.choice = Some((extension.to_owned(), id.to_owned()));
-                    learned.strength = f32::from(count);
-                    learned.passed_over = above.iter().take(PASSED_OVER).cloned().collect();
-                    learned.contenders.clear();
-                } else {
-                    learned.strength =
-                        decay(learned.strength.into(), learned.at, at, half_life) as f32;
-                    learned.contenders.truncate(CONTENDERS - 1);
-                    learned
-                        .contenders
-                        .insert(0, ((extension.to_owned(), id.to_owned()), count));
-                }
-            }
-            learned.at = at;
+                &self.settings,
+            );
             let after = Some(learned.clone());
             change.learned.push(Replaced { key, before, after });
             if let Some(pick) = &mut change.pick {
@@ -769,11 +822,11 @@ impl History {
                     when,
                     learned: Some(picked),
                 }),
-                Some(_),
+                Some(after),
                 Some(now),
             ) = (&pick, after, now)
             {
-                match now.clone().take_off(picked, *when, half_life) {
+                match now.withdraw(before.as_ref(), &after, picked, *when, &self.settings) {
                     Some(learned) => self.learned.insert(query, learned),
                     None => self.learned.remove(&query),
                 };
@@ -1409,6 +1462,35 @@ mod tests {
         let before = kept(&history);
         history.undo(change);
         assert_eq!(kept(&history), before);
+    }
+
+    #[test]
+    fn undoing_a_pick_that_took_over_brings_back_the_choice_it_replaced() {
+        let picks = |history: &mut History, mistaken: bool| {
+            history.pick("apps", "fish", "fi", &[], when(5, 9 * HOUR));
+            let change =
+                mistaken.then(|| history.pick("apps", "fish", "fi", &[], when(5, 9 * HOUR + 1)));
+            // The app the user meant, picked right after.
+            history.pick(IDENTITIES, "app:firefox", "fi", &[], when(5, 9 * HOUR + 2));
+            change
+        };
+        let mut withdrawn = used();
+        let took_over = picks(&mut withdrawn, true).unwrap();
+        assert_eq!(withdrawn.learned("fi", when(5, 9 * HOUR).at)[0].id, "fish");
+        withdrawn.undo(took_over);
+        let mut never = used();
+        picks(&mut never, false);
+
+        let (got, want) = (&withdrawn.learned["fi"], &never.learned["fi"]);
+        assert_eq!(got.choice, want.choice);
+        assert_eq!(got.contenders, want.contenders);
+        assert_eq!(got.passed_over, want.passed_over);
+        assert!(
+            (got.strength - want.strength).abs() < 1e-3,
+            "{} for {}",
+            got.strength,
+            want.strength
+        );
     }
 
     #[test]
