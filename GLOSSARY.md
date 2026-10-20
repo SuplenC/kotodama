@@ -85,8 +85,12 @@ A Result the user repeatedly picked for a given query, which that query, and the
 _Avoid_: Pin, favorite
 
 **Tier**:
-How well a Result matches a query, ranked before anything else: exact, initials or word start, inside a word, or letters scattered.
+How well a Result matches a query, ranked before anything else: exact, initials or word start, inside a word, letters scattered, or a Near miss.
 _Avoid_: Match quality, bucket
+
+**Near miss**:
+A Result that matches the query only with typos in it, at most one per 4 letters of each word; it ranks below every real match.
+_Avoid_: Fuzzy match, typo match
 
 **Usage log**:
 An opt-in record, kept on the user's machine, of the queries typed and the Results picked, for tuning ranking from real use.
