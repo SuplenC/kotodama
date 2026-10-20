@@ -31,9 +31,15 @@ struct Calculator {
 impl Calculator {
     /// Starts the Extension with its cache in `cache` and sends it `config`.
     fn start(cache: TempDir, config: Table) -> Self {
+        Self::start_in(cache, config, "C")
+    }
+
+    /// Like `start`, with the user's locale `locale`.
+    fn start_in(cache: TempDir, config: Table, locale: &str) -> Self {
         let mut extension = Spawned::start(
             Command::new(env!("CARGO_BIN_EXE_kotodama-calculator"))
-                .env("XDG_CACHE_HOME", cache.path()),
+                .env("XDG_CACHE_HOME", cache.path())
+                .env("LC_ALL", locale),
             WAIT,
         );
         extension.send(ToExtension::Config(config));
@@ -172,6 +178,35 @@ fn cached(age: Duration) -> TempDir {
         .set_modified(SystemTime::now() - age)
         .unwrap();
     cache
+}
+
+#[test]
+fn a_decimal_comma_locale_reads_and_writes_decimals_with_a_comma() {
+    let mut calc = Calculator::start_in(tempfile::tempdir().unwrap(), Table::new(), "de_DE.UTF-8");
+
+    assert_eq!(calc.answer("3,5 * 2").as_deref(), Some("7"));
+    assert_eq!(calc.answer("10 / 4").as_deref(), Some("2,5"));
+    assert_eq!(calc.answer("1.000 + 1").as_deref(), Some("1001"));
+    assert_eq!(calc.answer("3.5 * 2"), None);
+}
+
+#[test]
+fn the_config_overrides_the_locales_decimal_separator() {
+    let comma = config(&[("decimal_separator", Value::String("comma".into()))]);
+    let mut calc = Calculator::start_in(tempfile::tempdir().unwrap(), comma, "en_US.UTF-8");
+    assert_eq!(calc.answer("3,5 * 2").as_deref(), Some("7"));
+
+    let dot = config(&[("decimal_separator", Value::String("dot".into()))]);
+    calc.send(ToExtension::Config(dot));
+    assert_eq!(calc.answer("3,5 * 2"), None);
+    assert_eq!(calc.answer("1,000 * 2").as_deref(), Some("2000"));
+
+    calc.send(ToExtension::Config(Table::new()));
+    assert_eq!(
+        calc.answer("10 / 4").as_deref(),
+        Some("2.5"),
+        "the locale's again"
+    );
 }
 
 #[test]

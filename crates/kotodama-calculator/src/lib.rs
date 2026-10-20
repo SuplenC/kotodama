@@ -3,12 +3,14 @@
 //! [`dates`]). `main.rs` speaks the protocol around it.
 
 mod dates;
+mod locale;
 mod math;
 pub mod rates;
 
 pub use jiff::Zoned;
 use kotodama_protocol::{Action, Fraction, Item, ItemKind, LiveResult, NamespacedKind};
 
+pub use locale::DecimalSeparator;
 pub use rates::Rates;
 
 /// The primary Action: copies the result.
@@ -31,7 +33,9 @@ pub enum Evaluation {
 pub struct Answer {
     /// The query, trimmed.
     pub expression: String,
-    /// What the query comes to, as it is shown and copied: `84`, `3.1068559612 mi`.
+    /// What the query comes to, as it is shown and copied: `84`,
+    /// `3.1068559612 mi`. An approximate number has at most 12 significant
+    /// digits and no trailing zeros.
     pub value: String,
 }
 
@@ -45,6 +49,15 @@ impl Calculator {
         Calculator {
             math: math::Math::new(rates),
         }
+    }
+
+    /// Reads and writes decimals with `separator` from now on: `3,5` is three
+    /// and a half with [`DecimalSeparator::Comma`], and a thousands
+    /// separator anywhere but between groups of a thousand (`3,5` with
+    /// [`DecimalSeparator::Dot`]) leaves a query unanswered. A new
+    /// `Calculator` uses [`DecimalSeparator::Dot`].
+    pub fn set_decimal_separator(&mut self, separator: DecimalSeparator) {
+        self.math.set_decimal_separator(separator);
     }
 
     /// Evaluates `query` as of `now`. `routed` says the user asked for the
