@@ -236,6 +236,68 @@ fn typing_on_or_back_matches_what_the_same_text_typed_afresh_does() {
 }
 
 #[test]
+fn typing_on_narrows_a_list_views_matches_as_it_narrows_the_searchs() {
+    // `reading b` has no Tier for `Reading Abacus`, where a one-letter word
+    // only matches at a word start, but `reading ba` does, inside a word.
+    let items = vec![
+        file("abacus", "Reading Abacus"),
+        file("list", "Reading list"),
+        file("thread", "thread"),
+        file("downloads", "Downloads"),
+        file("readme", "readme.md"),
+    ];
+    let typing = |texts: &[&str]| {
+        let mut h = Harness::new(vec![plain("files")]);
+        let files = h.up(0);
+        let ui = h.front_end();
+        h.add(&files, items.clone());
+        h.send(
+            &files,
+            FromExtension::PushView(list("recent", items.clone())),
+        );
+        ui.drain();
+        let (mut searched, mut filtered) = (Vec::new(), Vec::new());
+        for text in texts {
+            searched = h
+                .query(&ui, text)
+                .into_iter()
+                .map(|row| row.item.id)
+                .collect();
+            filter(&mut h, &ui, "recent", text);
+            filtered = matches(&sent(&ui)[0])
+                .1
+                .into_iter()
+                .map(|(n, _)| items[n as usize].id.clone())
+                .collect();
+        }
+        searched.sort();
+        filtered.sort();
+        (searched, filtered)
+    };
+    let typed = [
+        "r",
+        "re",
+        "reading",
+        "reading ",
+        "reading b",
+        "reading ba",
+        "reading b",
+        "reading bac",
+    ];
+
+    for n in 1..=typed.len() {
+        let (searched, filtered) = typing(&typed[..n]);
+        assert_eq!(filtered, searched, "after typing {:?}", &typed[..n]);
+        assert_eq!(
+            (searched, filtered),
+            typing(&typed[n - 1..n]),
+            "after typing {:?}",
+            &typed[..n]
+        );
+    }
+}
+
+#[test]
 fn only_the_first_256_matches_of_a_long_list_have_highlights() {
     let mut h = Harness::new(vec![plain("files")]);
     let files = h.up(0);
