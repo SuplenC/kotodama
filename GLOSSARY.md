@@ -5,7 +5,7 @@ A command menu for Wayland: one search box that finds and does anything, extende
 ## Language
 
 **Daemon**:
-The long-running Kotodama process that owns the index, ranking, history and Extensions; every front end talks to it.
+The long-running Kotodama process that owns the index, ranking, History and Extensions; every front end talks to it.
 _Avoid_: Server, backend, core
 
 **Front end**:
@@ -68,6 +68,10 @@ _Avoid_: Foreign action, plugin action, extension action
 The description of every Action on offer (its title, Item kind, Arguments and Extension) that an Extension may ask to read; it never includes the Items themselves.
 _Avoid_: Action registry, action list
 
+**Proposal**:
+An Action from the Action catalog that the AI Extension suggests for a request in plain words, with any Arguments it could fill in; nothing runs until the user confirms it.
+_Avoid_: Suggestion, AI action, recommendation
+
 **Action panel**:
 The list of all Actions available for the selected Result.
 _Avoid_: Context menu, actions menu
@@ -84,6 +88,10 @@ _Avoid_: Parameter, input
 Long work an Extension reports on while it runs, such as an install; a progress View follows it, it keeps running when the menu closes, and the desktop is notified when it ends.
 _Avoid_: Task, operation, process
 
+**History**:
+What the Daemon keeps of the user's picks, per Result and per Identity, kept on disk between runs; Frecency and Learned choices are read from it.
+_Avoid_: History file, frecency store, usage data
+
 **Frecency**:
 The score that combines how often and how recently the user picked a Result, and how usual this time of day is for picking it.
 _Avoid_: Popularity, history score
@@ -91,6 +99,14 @@ _Avoid_: Popularity, history score
 **Learned choice**:
 A Result the user repeatedly picked for a given query, which that query, and the queries that extend it or that it extends, then rank first, over the Results it was picked over.
 _Avoid_: Pin, favorite
+
+**Empty query**:
+The search with nothing typed, and what the menu shows for it: the Results most used at this time of day, then the Fixed menu.
+_Avoid_: Blank query, empty search, home screen
+
+**Fixed menu**:
+The Results the user lists in the config for the Empty query to show after the most used ones, in that order.
+_Avoid_: Pinned menu, favorites, default list
 
 **Tier**:
 How well a Result matches a query, ranked before anything else: exact, initials or word start, inside a word, letters scattered, or a Near miss.

@@ -538,7 +538,7 @@ impl Narrowing {
         self.by_letter = folded.filter().by_letter();
     }
 
-    /// Forgets the last search, as the empty query does: the next one starts
+    /// Forgets the last search, as the Empty query does: the next one starts
     /// from every Item.
     fn forget(&mut self) {
         self.matched.clear();
@@ -631,7 +631,7 @@ struct Undoable {
     until: Instant,
 }
 
-/// A Result the empty query may show as one of the most used.
+/// A Result the Empty query may show as one of the most used.
 struct MostUsed {
     source: Source,
     used: Habit,
@@ -1553,7 +1553,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
         }
     }
 
-    /// Ranks the empty query again in every session showing it but `except`,
+    /// Ranks the Empty query again in every session showing it but `except`,
     /// for what the History learned or the time of day now: from scratch
     /// for a menu opening, and otherwise as a late update, which keeps the
     /// rows on screen where they are.
@@ -1645,7 +1645,88 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             Outcome::Type { text } => self.output(Output::Type(text), now),
             Outcome::Paste(clipboard) => self.output(Output::Paste(clipboard), now),
             Outcome::Copy(clipboard) => self.copy(clipboard),
+            Outcome::RunCatalogAction {
+                extension,
+                kind,
+                action,
+                arguments,
+            } => {
+                let action = ActionRef {
+                    extension,
+                    id: action,
+                };
+                let run = self.run_catalog_action(front_end, id, &kind, action, arguments, now);
+                self.failed(front_end, run);
+            }
         }
+    }
+
+    /// Runs an Action from the Action catalog that `proposer` proposed and the
+    /// user confirmed, on the one Indexed item of its kind that
+    /// offers it, as if the user had picked that Item's Action.
+    fn run_catalog_action(
+        &mut self,
+        front_end: FrontEndId,
+        proposer: ExtensionId,
+        kind: &KindName,
+        action: ActionRef,
+        arguments: BTreeMap<String, String>,
+        now: Instant,
+    ) -> Result<(), String> {
+        let asking = &self.extensions[proposer.0];
+        if !asking.found.manifest.action_catalog {
+            return Err(format!(
+                "{} may not run Actions from the Action catalog",
+                asking.name()
+            ));
+        }
+        let target = self
+            .extension_named(&action.extension)
+            .filter(|&target| target != proposer && self.extensions[target.0].sender().is_some())
+            .ok_or_else(|| format!("{} isn't running", action.extension))?;
+        // Two are enough to know it isn't one.
+        let mut offering: Vec<String> = self
+            .index
+            .offering(target, kind.as_str(), &action.id)
+            .take(2)
+            .filter_map(|slot| self.index.id(slot).map(str::to_owned))
+            .collect();
+        let id = match offering.len() {
+            1 => offering.swap_remove(0),
+            2 => {
+                return Err(format!(
+                    "several {kind} Items offer `{}`; pick one in the search",
+                    action.id
+                ));
+            }
+            _ => {
+                let contributed = self.extensions[target.0]
+                    .found
+                    .manifest
+                    .contributed_actions
+                    .iter()
+                    .find(|offered| offered.kind == *kind && offered.action.id == action.id);
+                return Err(match contributed {
+                    Some(offered) => format!(
+                        "pick a {kind} in the search, then “{}” in its Action panel",
+                        offered.action.title
+                    ),
+                    None => format!("no {kind} Item offers `{}`", action.id),
+                });
+            }
+        };
+        let result = ResultRef {
+            extension: action.extension.clone(),
+            id,
+        };
+        self.run_action(
+            front_end,
+            &result,
+            &action,
+            arguments,
+            Missing::AskInForm,
+            now,
+        )
     }
 
     /// Nothing goes into a window, so there is no waiting for the menus to
@@ -1819,7 +1900,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
                 text,
             } => self.filter_view(id, &extension, &view, text),
             FromFrontEnd::Closed => self.closed(Some(id)),
-            // The menu may open on the empty query, which may have been
+            // The menu may open on the Empty query, which may have been
             // ranked hours ago.
             FromFrontEnd::Open { query, view } => {
                 self.warm = true;
@@ -2455,10 +2536,10 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
     }
 
     /// Adds the Actions the Daemon offers on a Result the History keeps
-    /// anything for: Forget, and clearing its Extension's history. They go
+    /// anything for: Forget, and clearing its Extension's History. They go
     /// with the Item's own Actions on the Daemon's own Results (ADR 0005),
     /// and after the Contributed actions on the rest. Only Results with
-    /// history get them, so a row costs nothing more until something is
+    /// a History get them, so a row costs nothing more until something is
     /// picked through it.
     fn offer_forgetting(
         &self,
@@ -3276,8 +3357,8 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
         primary
     }
 
-    /// What the empty query shows: the Results most used at this time of day,
-    /// then the config's menu, each thing once. The most used rank by their
+    /// What the Empty query shows: the Results most used at this time of day,
+    /// then the Fixed menu, each thing once. The most used rank by their
     /// picks near this time of day, then by all their picks; an Alias's
     /// picks count for the Result it names. Of the Results of one Identity,
     /// the one picked through most stands for it.

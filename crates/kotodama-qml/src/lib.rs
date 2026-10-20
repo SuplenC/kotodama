@@ -533,7 +533,7 @@ impl KotodamaSearch {
                 this.asked = None;
                 self.as_mut().set_connected(true);
                 // A Daemon that restarted has no idea what is typed. Even
-                // nothing typed has Results: those of the empty query.
+                // nothing typed has Results: those of the Empty query.
                 let text = String::from(&self.query);
                 self.as_mut().send_query(text);
                 Shown::Same

@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/kotodama", "crates/kotodama-apps", "crates/kotodama-calculator", "crates/kotodama-clipboard", "crates/kotodama-emoji", "crates/kotodama-extension", "crates/kotodama-folders", "crates/kotodama-hyprland", "crates/kotodama-protocol", "crates/kotodama-qml", "crates/kotodama-web-search", "crates/kotodamad"]
+members = ["crates/kotodama", "crates/kotodama-ai", "crates/kotodama-apps", "crates/kotodama-calculator", "crates/kotodama-clipboard", "crates/kotodama-emoji", "crates/kotodama-extension", "crates/kotodama-folders", "crates/kotodama-hyprland", "crates/kotodama-protocol", "crates/kotodama-qml", "crates/kotodama-web-search", "crates/kotodamad"]
 
 [workspace.package]
 version = "0.1.0"

@@ -526,6 +526,165 @@ fn an_extension_whose_manifest_does_not_ask_never_receives_the_catalog() {
     assert!(!catalogs(&pinner).is_empty());
 }
 
+fn suite() -> Item {
+    let mut suite = item(
+        "go",
+        "Go Suite",
+        ItemKind::Namespaced(NamespacedKind::new("suites.suite").expect("a valid kind")),
+    );
+    suite.actions.push(
+        Action::new("new-go-project", "New Go project").arguments(vec![Argument {
+            name: "name".into(),
+            placeholder: None,
+            optional: false,
+        }]),
+    );
+    suite
+}
+
+/// `proposer`'s Item `ask` run by the user, answered with `outcome`.
+fn confirm(h: &mut Harness, ui: &FrontEnd, proposer: &Ext, name: &str, outcome: Outcome) {
+    h.add(
+        proposer,
+        vec![item(
+            "ask",
+            "Ask",
+            ItemKind::Namespaced(
+                NamespacedKind::new(format!("{name}.proposal")).expect("a valid kind"),
+            ),
+        )],
+    );
+    h.query(ui, "ask");
+    run(h, ui, name, "ask", name, "open");
+    let invocation = runs(proposer)[0].0;
+    h.send(
+        proposer,
+        FromExtension::ActionDone {
+            invocation,
+            outcome,
+        },
+    );
+}
+
+fn new_go_project(arguments: &[(&str, &str)]) -> Outcome {
+    Outcome::RunCatalogAction {
+        extension: "suites".into(),
+        kind: KindName::new("suites.suite").expect("a valid kind"),
+        action: "new-go-project".into(),
+        arguments: arguments
+            .iter()
+            .map(|&(name, value)| (name.into(), value.into()))
+            .collect(),
+    }
+}
+
+#[test]
+fn a_confirmed_proposal_runs_the_catalog_action_on_the_item_that_offers_it() {
+    let mut h = Harness::new(vec![pinner(), plain("suites")]);
+    let pinner = h.up(0);
+    let suites = h.up(1);
+    h.add(&suites, vec![suite()]);
+    let ui = h.front_end();
+    suites.drain();
+
+    confirm(
+        &mut h,
+        &ui,
+        &pinner,
+        "pinner",
+        new_go_project(&[("name", "demo")]),
+    );
+    let sent: Vec<_> = suites
+        .drain()
+        .into_iter()
+        .filter_map(|message| match message {
+            ToExtension::RunAction {
+                action,
+                item,
+                arguments,
+                ..
+            } => Some((action, item, arguments)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        sent,
+        [(
+            "new-go-project".to_owned(),
+            suite().to_ref(),
+            BTreeMap::from([("name".to_owned(), "demo".to_owned())])
+        )]
+    );
+}
+
+#[test]
+fn a_confirmed_proposal_missing_an_argument_asks_for_it_first() {
+    let mut h = Harness::new(vec![pinner(), plain("suites")]);
+    let pinner = h.up(0);
+    let suites = h.up(1);
+    h.add(&suites, vec![suite()]);
+    let ui = h.front_end();
+    suites.drain();
+
+    confirm(&mut h, &ui, &pinner, "pinner", new_go_project(&[]));
+    assert_eq!(runs(&suites), []);
+    assert!(
+        ui.drain()
+            .iter()
+            .any(|m| matches!(m, ToFrontEnd::PushView { .. }))
+    );
+}
+
+#[test]
+fn only_an_extension_that_reads_the_catalog_may_run_from_it() {
+    let mut h = Harness::new(vec![plain("guesser"), plain("suites")]);
+    let guesser = h.up(0);
+    let suites = h.up(1);
+    h.add(&suites, vec![suite()]);
+    let ui = h.front_end();
+    suites.drain();
+
+    confirm(
+        &mut h,
+        &ui,
+        &guesser,
+        "guesser",
+        new_go_project(&[("name", "demo")]),
+    );
+    assert_eq!(runs(&suites), []);
+    assert!(
+        ui.drain()
+            .iter()
+            .any(|m| matches!(m, ToFrontEnd::ActionFailed { .. }))
+    );
+}
+
+#[test]
+fn a_catalog_action_several_items_offer_is_not_guessed() {
+    let mut h = Harness::new(vec![pinner(), plain("suites")]);
+    let pinner = h.up(0);
+    let suites = h.up(1);
+    let mut other = suite();
+    other.id = "go-2".into();
+    h.add(&suites, vec![suite(), other]);
+    let ui = h.front_end();
+    suites.drain();
+
+    confirm(
+        &mut h,
+        &ui,
+        &pinner,
+        "pinner",
+        new_go_project(&[("name", "demo")]),
+    );
+    assert_eq!(runs(&suites), []);
+    assert!(
+        ui.drain()
+            .iter()
+            .any(|m| matches!(m, ToFrontEnd::ActionFailed { .. }))
+    );
+}
+
 fn statuses(ui: &FrontEnd) -> Vec<Vec<String>> {
     ui.drain()
         .into_iter()

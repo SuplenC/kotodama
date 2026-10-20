@@ -8,7 +8,7 @@ Kotodama is a command menu for Wayland desktops. You type, and it finds and does
 - **A Quickshell QML module** written in Rust (cxx-qt) gives QML a native result model. QML only draws the results.
 - **Extensions** are separate processes in any language. They speak a protocol whose wire format is negotiated (JSON, MessagePack or postcard), so a crashing Extension never takes down the menu.
 
-Status: early. The protocol, the Daemon, the Quickshell Front end and the apps, clipboard history, calculator, emoji, folders, Hyprland and web search Bundled extensions work; Views, the Action panel and the other Bundled extensions are next. See `docs/adr/0001-architecture.md` and the issues.
+Status: early. The protocol, the Daemon, the Quickshell Front end and the apps, clipboard history, calculator, emoji, folders, Hyprland, web search and AI Bundled extensions work; Views, the Action panel and the other Bundled extensions are next. See `docs/adr/0001-architecture.md` and the issues.
 
 ## Installing
 
@@ -67,9 +67,9 @@ Results rank by how well they match before anything else, in tiers: the whole ti
 
 A query with a typo still finds what was meant: `fierfox`, `firfox` and `firefx` find Firefox. Each word of the query may have one typo per 4 letters (a letter missing, extra or wrong, or two letters swapped), but never in its first letter. A Result found only with typos is a near miss, the tier below scattered letters. Use never lifts it, so every real match ranks above it. Near misses are looked for only when the real matches leave rows on screen empty.
 
-Every Action the user runs is recorded in `$XDG_STATE_HOME/kotodama/history.json` (by default `~/.local/state/kotodama/`). A picked Result gets a Frecency boost, which halves every 14 days but never quite reaches zero. Frecency also learns the time of day: picks count in full at the times of day the Result is usually picked, and half as much at a time of day it never is, so something used every morning ranks higher in the morning. A Result used about daily for a week ranks one tier higher, but never above an exact title. When the user picks the same Result 3 times for one query, it becomes that query's Learned choice: it ranks first for that query and for the queries that extend it or that it extends (`fi`, `fir`, `fire`), but only over the Results that ranked above it when it was picked, so a new app with exactly that title still wins. Two picks of another Result since the Learned choice was last picked take over from it. Learning fades with Frecency's half-life; when two Learned choices apply, the one picked more often wins, then the one learned for the closer query. Both apply to Indexed items and Live query results. Items that several Extensions offer with the same Identity (a page from bookmarks and from browser history) share their Frecency and Learned choices: picking one raises the others. Each still shows as a Result of its own, and the one the user picks through most takes the best place any of them ranks in. The "Clear history" Result empties the history.
+Every Action the user runs is recorded in the History, `$XDG_STATE_HOME/kotodama/history.json` (by default `~/.local/state/kotodama/`). A picked Result gets a Frecency boost, which halves every 14 days but never quite reaches zero. Frecency also learns the time of day: picks count in full at the times of day the Result is usually picked, and half as much at a time of day it never is, so something used every morning ranks higher in the morning. A Result used about daily for a week ranks one tier higher, but never above an exact title. When the user picks the same Result 3 times for one query, it becomes that query's Learned choice: it ranks first for that query and for the queries that extend it or that it extends (`fi`, `fir`, `fire`), but only over the Results that ranked above it when it was picked, so a new app with exactly that title still wins. Two picks of another Result since the Learned choice was last picked take over from it. Learning fades with Frecency's half-life; when two Learned choices apply, the one picked more often wins, then the one learned for the closer query. Both apply to Indexed items and Live query results. Items that several Extensions offer with the same Identity (a page from bookmarks and from browser history) share their Frecency and Learned choices: picking one raises the others. Each still shows as a Result of its own, and the one the user picks through most takes the best place any of them ranks in. The "Clear history" Result empties the History.
 
-The Action panel of a Result the history keeps anything for offers "Forget", which drops its Frecency, every Learned choice for it, the picks of the Aliases that name it and, for a Result with an Identity, the history of that thing from every Extension. It also offers "Clear the history of" its Extension, which forgets every Result of that Extension, the Aliases that name them, and the shared history of the Identities its Items carry, though another Extension offers them too: the history doesn't know which Extension a pick of a shared thing came through. Another Extension's Result of such a thing keeps only its own picks, which decide its place among the Results of that thing. For a minute after Forget, clearing an Extension's history or "Clear history", typing `undo` finds a Result that puts back what was forgotten, latest first; anything picked since stays as it is.
+The Action panel of a Result the History keeps anything for offers "Forget", which drops its Frecency, every Learned choice for it, the picks of the Aliases that name it and, for a Result with an Identity, the History of that thing from every Extension. It also offers "Clear the history of" its Extension, which forgets every Result of that Extension, the Aliases that name them, and the shared History of the Identities its Items carry, though another Extension offers them too: the History doesn't know which Extension a pick of a shared thing came through. Another Extension's Result of such a thing keeps only its own picks, which decide its place among the Results of that thing. For a minute after Forget, clearing an Extension's History or "Clear history", typing `undo` finds a Result that puts back what was forgotten, latest first; anything picked since stays as it is.
 
 These numbers are settings in the config's `[history]` table, which reloads with the config. The values shown are the defaults:
 
@@ -90,9 +90,9 @@ A setting that doesn't parse is logged and keeps its default. With `usage_log = 
 {"at":1760870401,"kind":"pick","query":"fi","extension":"apps","id":"firefox","action":"open","row":1}
 ```
 
-`at` is seconds since the Unix epoch; a pick's `extension` and `id` name the Result, `action` the Action run, and `row` where the Result was in the list (from 0), or `null` if it wasn't in it. Emptying the search box isn't logged as a query, but a pick made with nothing typed is, with `"query":""`. When the file would pass 4 MiB it becomes `usage.jsonl.1`, replacing the older one, so the log never takes more than 8 MiB. Turning it off keeps what was written; delete the files to forget it. "Clear history" deletes both files, and clearing one Extension's history drops the picks of its Results from them. Forgetting one Result leaves the log as it is, and Undo puts back the history, never the log.
+`at` is seconds since the Unix epoch; a pick's `extension` and `id` name the Result, `action` the Action run, and `row` where the Result was in the list (from 0), or `null` if it wasn't in it. Emptying the search box isn't logged as a query, but a pick made from the Empty query is, with `"query":""`. When the file would pass 4 MiB it becomes `usage.jsonl.1`, replacing the older one, so the log never takes more than 8 MiB. Turning it off keeps what was written; delete the files to forget it. "Clear history" deletes both files, and clearing one Extension's History drops the picks of its Results from them. Forgetting one Result leaves the log as it is, and Undo puts back the History, never the log.
 
-With nothing typed, the menu shows the 3 Results most used at this time of day, by their picks within a few hours of now, then by all their picks. An Alias's picks count for the Result it names, and a thing that several Extensions offer shows once, as the Result picked through most. A fixed menu follows them, set in the config:
+With nothing typed, the menu shows the Empty query: the 3 Results most used at this time of day, by their picks within a few hours of now, then by all their picks. An Alias's picks count for the Result it names, and a thing that several Extensions offer shows once, as the Result picked through most. The Fixed menu follows them, set in the config:
 
 ```toml
 [empty_query]
@@ -134,7 +134,7 @@ url = "https://www.youtube.com/results?search_query={query}"
 command = ["foot", "journalctl", "--user", "-fu", "{query}"]
 ```
 
-Typing an Alias puts its Result first, ahead of a Learned choice, and what follows it is the Result's Argument; part of an Alias does nothing. Picks through an Alias count for the Alias, not for the Result's own Frecency. Typing a Quicklink's keyword ranks it as an exact match, with Frecency deciding between equals; its row reads `Search YouTube for “cats”`, the keyword alone opens it with an empty query, and words after a keyword whose template has no `{query}` are ignored. A URL opens with `xdg-open`, and a command runs without a shell. The Daemon's own Results, the Quicklinks, "Clear history" and the Undo Result, belong to the reserved Extension name `kotodama`, and so do the Actions it offers on every Result, `forget` and `clear-extension-history`.
+Typing an Alias puts its Result first, ahead of a Learned choice, and what follows it is the Result's Argument; part of an Alias does nothing. Picks through an Alias count for the Alias, not for the Result's own Frecency. Typing a Quicklink's keyword ranks it as an exact match, with Frecency deciding between equals; its row reads `Search YouTube for “cats”`, the keyword alone opens it with an empty `{query}`, and words after a keyword whose template has no `{query}` are ignored. A URL opens with `xdg-open`, and a command runs without a shell. The Daemon's own Results, the Quicklinks, "Clear history" and the Undo Result, belong to the reserved Extension name `kotodama`, and so do the Actions it offers on every Result, `forget` and `clear-extension-history`.
 
 ### Trying it
 
@@ -274,6 +274,30 @@ engines = [
 ```
 
 It is a Live query Extension whose `manifest.toml` sets `fallback = true` under `[live_query]`, with a debounce of 0 so it may answer with an address. Its triggers send it what may be an address on any keystroke; anything else it is sent only when the rows aren't full, so a keystroke whose real matches fill the rows costs nothing. It does no network calls. Its `manifest.toml` runs `./kotodama-web-search`, so a package installs the binary next to it in `$XDG_DATA_DIRS/kotodama/extensions/web-search/`.
+
+### AI
+
+`kotodama-ai` (`crates/kotodama-ai`, Extension name `ai`) turns a request in plain words into Actions that other Extensions already offer. Type `?` and the request, `?set up a go project`, and once the query has been still for `debounce_ms` the model's proposals show as Results: "Install Go Suite", "New Go project (name: demo)". Each is a Proposal; Enter confirms it, and only then does the Daemon run the Action, as if you had picked it yourself, asking for any Argument the model left out. Nothing runs before you confirm, and the model never runs anything. A query that real matches leave rows empty for also gets an "Ask AI" row at the bottom, which asks nothing until picked; picking it opens a View that lists the proposals.
+
+It is off until configured. With neither `api_key_command` nor `url` set it adds no rows, asks for nothing and makes no network calls.
+
+```toml
+[extensions.ai]
+# Prints the API key. Its output is kept in memory only: never logged, never
+# written to disk, and handed to curl on stdin, never on its command line.
+api_key_command = ["pass", "show", "anthropic"]
+# The Messages API endpoint. A local server that speaks the same API, such
+# as Ollama (`http://localhost:11434/v1/messages`), works too, with no key.
+url = "https://api.anthropic.com/v1/messages"
+# The default is the fastest Claude model, as you wait on it with the menu open.
+model = "claude-haiku-5-5"
+# `output_config.effort`; "" leaves it out, for a server that doesn't take it.
+effort = "low"
+# How long a `?` query must be still before it is sent.
+debounce_ms = 600
+```
+
+What goes to the model is the query and the Action catalog (each Action's title, Item kind, Arguments and Extension), never Items, the clipboard, file paths or anything else the menu shows. Its Manifest sets `action_catalog = true`, the only way it learns which Actions exist, as for any Extension. A query that changes, or a View left, kills the request in flight. Requests go through `curl`, so the Extension carries no TLS stack; it idles at 2.5 MiB resident. A proposal runs on the one Indexed item of its kind that offers the Action; when several do, or the Action is a Contributed action that needs an Item, the menu says to pick one in the search. Its `manifest.toml` runs `./kotodama-ai`, so a package installs the binary next to it in `$XDG_DATA_DIRS/kotodama/extensions/ai/`.
 
 ### Folder sources
 

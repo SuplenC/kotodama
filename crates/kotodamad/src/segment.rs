@@ -625,6 +625,16 @@ impl Segment {
         })
     }
 
+    /// The rows whose Item, of kind `kind`, offers the Action `action`, in row order.
+    pub fn offering<'a>(&'a self, kind: &str, action: &str) -> impl Iterator<Item = Row> + 'a {
+        let offered = self.offered.iter().find(|offered| {
+            self.kinds[offered.kind as usize] == kind && *offered.action == *action
+        });
+        offered
+            .into_iter()
+            .flat_map(|offered| offered.rows.iter().copied())
+    }
+
     /// Scores the Item in `row`, if there is one, as [`Texts::score`] does,
     /// with `filter`'s letter already known to start one of its words. Reads
     /// only its title and keywords unless it matches, or its subtitle is

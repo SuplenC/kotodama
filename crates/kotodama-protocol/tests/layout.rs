@@ -568,6 +568,12 @@ fn outcomes() -> Vec<Outcome> {
         Outcome::Failed {
             message: "no".into(),
         },
+        Outcome::RunCatalogAction {
+            extension: "kubaos".into(),
+            kind: KindName::new("kubaos.suite").expect("a valid kind"),
+            action: "new-project".into(),
+            arguments: BTreeMap::from([("name".into(), "demo".into())]),
+        },
     ]
 }
 

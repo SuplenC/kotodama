@@ -219,6 +219,15 @@ fn from_extension_messages() -> Vec<FromExtension> {
                 message: "no network".into(),
             },
         },
+        FromExtension::ActionDone {
+            invocation: 8,
+            outcome: Outcome::RunCatalogAction {
+                extension: "kubaos".into(),
+                kind: KindName::new("kubaos.suite").expect("a valid kind"),
+                action: "new-project".into(),
+                arguments: BTreeMap::from([("name".into(), "demo".into())]),
+            },
+        },
         FromExtension::PushView(view(ViewContent::List {
             items: items(),
             filters_itself: false,

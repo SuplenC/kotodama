@@ -3,9 +3,9 @@
 The shared protocol. Maintained by hand: fix stale lines when you find them, and update this map in the PR that adds, moves or renames a module here. Paths are relative to `src/`. Layout changes follow ADR 0012: see `tests/layout.rs`. See also the [root map](../../CODEMAP.md) and [GLOSSARY.md](../../GLOSSARY.md).
 
 - `lib.rs`: re-exports; `Error`.
-- `message.rs`: Daemon and Extension messages, `ToExtension`, `FromExtension`, `LiveResult`, `Outcome`, `Clipboard`, `CatalogEntry`.
+- `message.rs`: Daemon and Extension messages, `ToExtension`, `FromExtension`, `LiveResult`, `Outcome` (with `RunCatalogAction`, a confirmed Proposal the Daemon runs), `Clipboard`, `CatalogEntry`.
 - `front_end.rs`: Daemon and Front end messages, `FromFrontEnd` (incl. `Query`, `Viewport`, `Open`, `Toggle`), `ToFrontEnd` (incl. `ReplaceView`, `FilteredView`), `ShownResult`, `ListMatch`, `socket_path`.
-- `item.rs`: `Item` (incl. `hidden`, ADR 0015), `ItemRef`, `Action` (`Action::new` with `shortcut` and `arguments` setters), `ItemKind`, `SHARED_KINDS`, `NamespacedKind`, `KindName`.
+- `item.rs`: `Item` (incl. `hidden`, ADR 0015), `ItemRef`, `Action` (`Action::new` with `shortcut` and `arguments` setters), `ItemKind` (`ItemKind::shared_index`, its place in `SHARED_KINDS`), `SHARED_KINDS`, `NamespacedKind`, `KindName`.
 - `view.rs`: `View`, `ViewContent` (a list's `filters_itself`), forms (`FormField`, `FormInput`), `Job`, `JobState`.
 - `value.rs`: `Value`, `Table`, `Bytes`, `Fraction`.
 - `manifest.rs`: `Manifest::from_toml`, `LiveQueries` (`fallback`), `ContributedAction` (ADR 0002).
@@ -14,3 +14,4 @@ The shared protocol. Maintained by hand: fix stale lines when you find them, and
 - `wire.rs`: `WireFormat` (postcard, JSON, MessagePack) `encode`/`decode`.
 - `channel.rs`: `Channel::handshake`, `send`, `recv`, `split`; `ChannelReader::has_buffered` (what came with the last message).
 - `launch.rs:launch_command`: detached program start, `KOTODAMA_LAUNCH_PREFIX`.
+- `../benches/batch.rs`: encoding and decoding 10k Indexed items in each Wire format.

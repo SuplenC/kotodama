@@ -1,4 +1,4 @@
-protocol version 3
+protocol version 4
 ToExtension::config postcard 00 02 07 65 6e 61 62 6c 65 64 00 01 05 6c 69 6d 69 74 01 0e
 ToExtension::config json {"config":{"enabled":true,"limit":7}}
 ToExtension::live_query postcard 01 03 03 31 2b 31 01 01 3d
@@ -89,6 +89,8 @@ Outcome::copy postcard 04 00 06 63 6f 70 69 65 64
 Outcome::copy json {"copy":{"text":"copied"}}
 Outcome::failed postcard 05 02 6e 6f
 Outcome::failed json {"failed":{"message":"no"}}
+Outcome::run_catalog_action postcard 06 06 6b 75 62 61 6f 73 0c 6b 75 62 61 6f 73 2e 73 75 69 74 65 0b 6e 65 77 2d 70 72 6f 6a 65 63 74 01 04 6e 61 6d 65 04 64 65 6d 6f
+Outcome::run_catalog_action json {"run_catalog_action":{"extension":"kubaos","kind":"kubaos.suite","action":"new-project","arguments":{"name":"demo"}}}
 Clipboard::text postcard 00 04 74 65 78 74
 Clipboard::text json {"text":"text"}
 Clipboard::image postcard 01 09 69 6d 61 67 65 2f 70 6e 67 02 89 50

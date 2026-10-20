@@ -479,6 +479,19 @@ impl Index {
             .collect()
     }
 
+    /// The slots of one Extension's Items of kind `kind` that offer the Action `action`.
+    pub fn offering<'a>(
+        &'a self,
+        extension: ExtensionId,
+        kind: &str,
+        action: &str,
+    ) -> impl Iterator<Item = Slot> + 'a {
+        let segment = extension.0 as u32;
+        self.segments[extension.0]
+            .offering(kind, action)
+            .map(move |row| Slot { segment, row })
+    }
+
     /// Scores every Item against `pattern`, or only the slots in `within` when
     /// the caller knows nothing else can match. Calls `found` with each
     /// match's slot, what ranking reads of it, its score and what matched.

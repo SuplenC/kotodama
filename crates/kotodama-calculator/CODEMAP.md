@@ -6,3 +6,4 @@ A Bundled extension. Maintained by hand: fix stale lines when you find them, and
 - `math.rs` (fend)
 - `dates.rs` (dates, time zones)
 - `rates.rs` (ECB rates fetch and cache, in `dirs::cache("calculator")`)
+- `../benches/answer.rs`: arithmetic answered through the real Daemon over its socket; the p99 must stay under 8 ms.
