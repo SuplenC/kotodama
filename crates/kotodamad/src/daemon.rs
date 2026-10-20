@@ -710,18 +710,35 @@ fn action_titled(id: &str, title: String) -> Action {
 /// undone by id, so one can be undone whatever changed after it.
 struct Undoable {
     id: u64,
-    done: Done,
+    by: UndoneBy,
     change: Change,
     until: Instant,
 }
 
+/// Who may undo a change to the History.
+enum UndoneBy {
+    /// The user, who is offered it in these words.
+    User(Done),
+    /// The Extension that ran an Action, whose pick the change is, by
+    /// withdrawing the pick. The user is never offered it.
+    Extension(ExtensionId),
+}
+
 impl Undoable {
-    /// Offers a Front end to undo it.
-    fn offer(&self) -> ToFrontEnd {
-        ToFrontEnd::OfferUndo {
-            change: self.id,
-            title: self.done.offer.clone(),
+    /// What it did in words, if the user may undo it.
+    fn done(&self) -> Option<&Done> {
+        match &self.by {
+            UndoneBy::User(done) => Some(done),
+            UndoneBy::Extension(_) => None,
         }
+    }
+
+    /// Offers a Front end to undo it, if the user may.
+    fn offer(&self) -> Option<ToFrontEnd> {
+        self.done().map(|done| ToFrontEnd::OfferUndo {
+            change: self.id,
+            title: done.offer.clone(),
+        })
     }
 }
 
@@ -1490,6 +1507,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
                 invocation,
                 outcome,
             } => self.action_done(id, invocation, outcome, now),
+            FromExtension::WithdrawPick { invocation } => self.withdraw_pick(id, invocation),
             FromExtension::PushView(view) => {
                 let contributed = self.view_contributed(id, &view);
                 self.forget_filters(id, &view.id);
@@ -1951,8 +1969,8 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
         session.send(ToFrontEnd::Status {
             down: self.down.clone(),
         });
-        if let Some(latest) = self.undos.last() {
-            session.send(latest.offer());
+        if let Some(offer) = self.latest_undo().and_then(Undoable::offer) {
+            session.send(offer);
         }
         for ((ext, _), job) in &self.jobs {
             session.send(ToFrontEnd::JobProgress {
@@ -2517,7 +2535,17 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             return Err(format!("{} stopped answering", ext.name()));
         }
         self.invocations.insert(invocation, (front_end, target));
-        self.picked(front_end, result, action, now);
+        let change = self.picked(front_end, result, action, now);
+        if !change.is_empty() {
+            // Kept by the invocation's number, which the Extension withdraws
+            // the pick by.
+            self.undos.push(Undoable {
+                id: invocation,
+                by: UndoneBy::Extension(target),
+                change,
+                until: now + UNDO_FOR,
+            });
+        }
         Ok(())
     }
 
@@ -2560,7 +2588,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
                 self.changed(done, change, now);
             }
             OwnAction::Undo => {
-                if let Some(latest) = self.undos.last().map(|undo| undo.id) {
+                if let Some(latest) = self.latest_undo().map(|undo| undo.id) {
                     self.undo(latest);
                 }
             }
@@ -2693,18 +2721,29 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
         self.next_id += 1;
         let undoable = Undoable {
             id,
-            done,
+            by: UndoneBy::User(done),
             change,
             until: now + UNDO_FOR,
         };
-        self.broadcast(|| undoable.offer());
+        if let Some(offer) = undoable.offer() {
+            self.broadcast(|| offer.clone());
+        }
         self.undos.push(undoable);
         self.load_undo_item();
     }
 
-    /// Undoes the change `id` to the History, if it can still be undone.
+    /// The latest change to the History the user may still undo.
+    fn latest_undo(&self) -> Option<&Undoable> {
+        self.undos.iter().rev().find(|undo| undo.done().is_some())
+    }
+
+    /// Undoes the change `id` to the History, if the user may still undo it.
     fn undo(&mut self, id: u64) {
-        let Some(n) = self.undos.iter().position(|undo| undo.id == id) else {
+        let Some(n) = self
+            .undos
+            .iter()
+            .position(|undo| undo.id == id && undo.done().is_some())
+        else {
             return;
         };
         let undo = self.undos.remove(n);
@@ -2712,6 +2751,24 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
         self.store.save(&self.history);
         self.broadcast(|| ToFrontEnd::WithdrawUndo { change: id });
         self.load_undo_item();
+    }
+
+    /// Withdraws the pick that running the Action `invocation` made, if
+    /// `ext` ran it and it can still be undone.
+    fn withdraw_pick(&mut self, ext: ExtensionId, invocation: u64) {
+        let Some(n) = self.undos.iter().position(|undo| {
+            undo.id == invocation && matches!(undo.by, UndoneBy::Extension(by) if by == ext)
+        }) else {
+            log::debug!(
+                "{}: no pick of run {invocation} to withdraw",
+                self.extensions[ext.0].name()
+            );
+            return;
+        };
+        let undo = self.undos.remove(n);
+        self.history.undo(undo.change);
+        self.store.save(&self.history);
+        self.refresh_empty(Update::Late, None);
     }
 
     /// Lets go of the changes to the History whose time to be undone ran
@@ -2724,10 +2781,14 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             .into_iter()
             .partition(|undo| undo.until <= now);
         self.undos = kept;
-        for undo in expired {
+        let mut offered = false;
+        for undo in expired.iter().filter(|undo| undo.done().is_some()) {
             self.broadcast(|| ToFrontEnd::WithdrawUndo { change: undo.id });
+            offered = true;
         }
-        self.load_undo_item();
+        if offered {
+            self.load_undo_item();
+        }
     }
 
     /// Shows the Undo Item for the latest change to the History, or hides it
@@ -2740,9 +2801,8 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
         {
             self.own.pop();
         }
-        if let Some(latest) = self.undos.last() {
-            self.own
-                .push(Own::new(undo_item(&latest.done.undo), OwnAction::Undo));
+        if let Some(done) = self.latest_undo().and_then(Undoable::done) {
+            self.own.push(Own::new(undo_item(&done.undo), OwnAction::Undo));
         }
         self.mark_late();
     }
@@ -2795,18 +2855,18 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
     /// running `action`. A Result an Alias named counts for the Alias alone.
     /// An answer goes in the Usage log only: neither Frecency nor Learned
     /// choices count it, and a Result picked below one isn't learned as
-    /// picked over it.
+    /// picked over it. Returns the change to the History, to undo it.
     fn picked(
         &mut self,
         front_end: FrontEndId,
         result: &ResultRef,
         action: &ActionRef,
         now: Instant,
-    ) {
+    ) -> Change {
         let when = self.when(now);
         let at = when.at;
         let Some(session) = self.sessions.get(&front_end) else {
-            return;
+            return Change::default();
         };
         let source = self.source_of(session, &result.extension, &result.id);
         let row = session
@@ -2825,24 +2885,24 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
                 },
             });
         }
-        if let Some((_, alias)) = session
+        let change = if let Some((_, alias)) = session
             .via_alias
             .as_ref()
             .filter(|(named, _)| Some(*named) == source)
         {
-            self.history.touch(OWN, &alias_id(alias), when);
+            self.history.touch(OWN, &alias_id(alias), when)
         } else if source.is_some_and(|source| session.is_answer(source)) {
             // An answer is the query worked out, a new Result for every
             // expression, and takes the top row whatever its Frecency: the
             // History would only fill up with it.
-            return;
+            return Change::default();
         } else if let Some(Source::Live(ext, _)) = source
             && self.extensions[ext.0].fallback()
         {
             // Frecency orders the fallbacks among themselves, but a fallback
             // is never a Learned choice, which would take over from the one
             // among the real matches.
-            self.history.touch(&result.extension, &result.id, when);
+            self.history.touch(&result.extension, &result.id, when)
         } else {
             let key = source
                 .and_then(|source| self.history_key(session, source))
@@ -2863,15 +2923,17 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
                 .unwrap_or_default();
             let (extension, id) = (key.0.to_owned(), key.1.to_owned());
             let query = session.key.clone();
-            self.history.pick(&extension, &id, &query, &above, when);
+            let mut change = self.history.pick(&extension, &id, &query, &above, when);
             if extension == IDENTITIES {
                 // The Result itself too, so it goes ahead of the same thing
                 // from other Extensions.
-                self.history.touch(&result.extension, &result.id, when);
+                change.and(self.history.touch(&result.extension, &result.id, when));
             }
-        }
+            change
+        };
         self.store.save(&self.history);
         self.refresh_empty(Update::Late, None);
+        change
     }
 
     fn set_config(&mut self, config: Table) {

@@ -20,7 +20,7 @@ let
       export LC_ALL=C
       send() { printf '%d\n%s' "''${#1}" "$1"; }
       read_frame() { IFS= read -r len && IFS= read -r -N "$len" frame; }
-      send '{"version":8,"formats":["json"]}'
+      send '{"version":9,"formats":["json"]}'
       read_frame # the Daemon's hello
       read_frame # the config
       send '{"job_progress":{"id":"${name}","title":"${title}","state":"succeeded"}}'

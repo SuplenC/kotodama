@@ -318,6 +318,7 @@ fn from_extension_messages() -> Vec<FromExtension> {
             message: Some("disk full".into()),
         }),
         FromExtension::RequestActionCatalog,
+        FromExtension::WithdrawPick { invocation: 7 },
     ]
 }
 
@@ -350,9 +351,10 @@ fn from_extension_variant(message: &FromExtension) -> usize {
         FromExtension::ReplaceView { .. } => 7,
         FromExtension::JobProgress(_) => 8,
         FromExtension::RequestActionCatalog => 9,
+        FromExtension::WithdrawPick { .. } => 10,
     }
 }
-const FROM_EXTENSION_VARIANTS: usize = 10;
+const FROM_EXTENSION_VARIANTS: usize = 11;
 
 fn to_front_end_messages() -> Vec<ToFrontEnd> {
     vec![

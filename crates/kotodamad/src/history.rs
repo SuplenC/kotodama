@@ -323,6 +323,35 @@ impl Picks {
         self.at = when.at;
         self.parts = counts.map(|count| (count / score * SHARES).round() as u16);
     }
+
+    /// Takes off one pick made at `when`, as [`add`](Self::add) counted it:
+    /// its weight, decayed to the latest pick, comes off the score and off
+    /// the parts of the day it went to. `None` once nothing is left.
+    fn take_off(mut self, when: When, half_life: f64) -> Option<Picks> {
+        let score = f64::from(self.score);
+        let weight = decay(1.0, when.at, self.at, half_life);
+        let left = score - weight;
+        if left <= 0.0 {
+            return None;
+        }
+        let total: f64 = self.parts.iter().copied().map(f64::from).sum();
+        let mut counts = self.parts.map(|share| {
+            if total > 0.0 {
+                score * f64::from(share) / total
+            } else {
+                score / PARTS as f64
+            }
+        });
+        for (part, near) in parts(when.time_of_day) {
+            counts[part] = (counts[part] - weight * near).max(0.0);
+        }
+        // Not `left`: a part the pick went to may have held less than it,
+        // say after the picks of an older History were spread evenly.
+        let counted: f64 = counts.iter().sum();
+        self.score = left as f32;
+        self.parts = counts.map(|count| (count / counted * SHARES).round() as u16);
+        Some(self)
+    }
 }
 
 /// The Picks of many Results, as a struct of arrays, so their Habits or
@@ -465,6 +494,25 @@ struct Learned {
     at: u64,
 }
 
+impl Learned {
+    /// Takes off one pick of `picked` made at `when`, as it counted towards
+    /// this query's Learned choice: from the choice's strength, or from its
+    /// count as a contender. A choice the pick made stays the choice. `None`
+    /// once nothing is left.
+    fn take_off(mut self, picked: &ResultKey, when: When, half_life: f64) -> Option<Learned> {
+        if self.choice.as_ref() == Some(picked) {
+            let weight = decay(1.0, when.at, self.at, half_life);
+            self.strength = (f64::from(self.strength) - weight).max(0.0) as f32;
+        } else if let Some(n) = self.contenders.iter().position(|(key, _)| key == picked) {
+            self.contenders[n].1 -= 1;
+            if self.contenders[n].1 == 0 {
+                self.contenders.remove(n);
+            }
+        }
+        (self.choice.is_some() || !self.contenders.is_empty()).then_some(self)
+    }
+}
+
 /// A Learned choice that applies to a query.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Choice<'a> {
@@ -579,6 +627,9 @@ impl History {
             learned.at = at;
             let after = Some(learned.clone());
             change.learned.push(Replaced { key, before, after });
+            if let Some(pick) = &mut change.pick {
+                pick.learned = Some((extension.to_owned(), id.to_owned()));
+            }
         }
         self.trim(&mut change);
         change
@@ -606,6 +657,10 @@ impl History {
                 after: Some(picks),
             }],
             learned: Vec::new(),
+            pick: Some(Pick {
+                when,
+                learned: None,
+            }),
         }
     }
 
@@ -676,12 +731,19 @@ impl History {
     }
 
     /// Undoes a change: puts back what it replaced, except where the History
-    /// changed again since, which stays as it is now.
+    /// changed again since. There, a change that records a pick takes that
+    /// one pick off, so withdrawing the first of two launches keeps the
+    /// second; any other change leaves the entry as it is now.
     pub fn undo(&mut self, change: Change) {
         self.version += 1;
+        let half_life = self.settings.half_life_secs;
+        let pick = change.pick;
         for Replaced { key, before, after } in change.picks.into_iter().rev() {
-            if self.picks(&key.0, &key.1).copied() == after {
+            let now = self.picks(&key.0, &key.1).copied();
+            if now == after {
                 self.set_picks(key, before);
+            } else if let (Some(pick), Some(_), Some(now)) = (&pick, after, now) {
+                self.set_picks(key, now.take_off(pick.when, half_life));
             }
         }
         for Replaced {
@@ -690,8 +752,16 @@ impl History {
             after,
         } in change.learned.into_iter().rev()
         {
-            if self.learned.get(&query) == after.as_ref() {
+            let now = self.learned.get(&query);
+            if now == after.as_ref() {
                 match before {
+                    Some(learned) => self.learned.insert(query, learned),
+                    None => self.learned.remove(&query),
+                };
+            } else if let (Some(Pick { when, learned: Some(picked) }), Some(_), Some(now)) =
+                (&pick, after, now)
+            {
+                match now.clone().take_off(picked, *when, half_life) {
                     Some(learned) => self.learned.insert(query, learned),
                     None => self.learned.remove(&query),
                 };
@@ -827,6 +897,18 @@ pub struct Change {
     picks: Vec<Replaced<ResultKey, Picks>>,
     /// By query, as [`query_key`] gives it.
     learned: Vec<Replaced<String, Learned>>,
+    /// The pick it records, for a change that records one.
+    pick: Option<Pick>,
+}
+
+/// A pick a [`Change`] records, so undoing it can take that one pick off an
+/// entry that changed since.
+#[derive(Clone, Debug, PartialEq)]
+struct Pick {
+    when: When,
+    /// The Result it counted towards the query's Learned choice for, if the
+    /// query wasn't empty.
+    learned: Option<ResultKey>,
 }
 
 /// What the History kept under one key before and after a change; `None`
@@ -859,6 +941,11 @@ impl Change {
     pub fn and(&mut self, later: Change) {
         self.picks.extend(later.picks);
         self.learned.extend(later.learned);
+        match (&mut self.pick, later.pick) {
+            (Some(pick), Some(later)) if pick.learned.is_none() => pick.learned = later.learned,
+            (pick @ None, later) => *pick = later,
+            _ => {}
+        }
     }
 }
 
@@ -1244,6 +1331,60 @@ mod tests {
         let before = kept(&history);
         let change = history.touch("apps", "new", when(1, 9 * HOUR));
         assert_eq!(history.picked().count(), MAX_RESULTS);
+        history.undo(change);
+        assert_eq!(kept(&history), before);
+    }
+
+    #[test]
+    fn undoing_the_first_of_two_picks_takes_off_that_pick_alone() {
+        let above = [key("apps", "files")];
+        let mut withdrawn = used();
+        let first = withdrawn.pick(IDENTITIES, "app:firefox", "fi", &above, when(4, 9 * HOUR));
+        withdrawn.pick(IDENTITIES, "app:firefox", "fi", &above, when(4, 21 * HOUR));
+        let first_fish = withdrawn.pick("apps", "fish", "sh", &[], when(4, 10 * HOUR));
+        withdrawn.pick("apps", "fish", "sh", &[], when(5, 10 * HOUR));
+        let first_mail = withdrawn.pick("apps", "mail", "ma", &[], when(4, 9 * HOUR));
+        withdrawn.pick("apps", "mail", "ma", &[], when(5, 9 * HOUR));
+        for change in [first, first_fish, first_mail] {
+            withdrawn.undo(change);
+        }
+
+        let mut second_only = used();
+        second_only.pick(IDENTITIES, "app:firefox", "fi", &above, when(4, 21 * HOUR));
+        second_only.pick("apps", "fish", "sh", &[], when(5, 10 * HOUR));
+        second_only.pick("apps", "mail", "ma", &[], when(5, 9 * HOUR));
+        let close = |a: f64, b: f64| (a - b).abs() <= 1e-3 * b.abs().max(1.0);
+        for at in [when(5, 9 * HOUR), when(5, 21 * HOUR), when(9, 3 * HOUR)] {
+            let picked = [(IDENTITIES, "app:firefox"), ("apps", "fish"), ("apps", "mail")];
+            for (extension, id) in picked {
+                let (got, want) = (
+                    withdrawn.frecency(extension, id, at),
+                    second_only.frecency(extension, id, at),
+                );
+                assert!(close(got, want), "{id} at {at:?}: {got} for {want}");
+            }
+            for query in ["fi", "sh"] {
+                let strengths = |history: &History| -> Vec<(String, f64)> {
+                    let choices = history.learned(query, at.at);
+                    choices.iter().map(|c| (c.id.to_owned(), c.strength)).collect()
+                };
+                let (got, want) = (strengths(&withdrawn), strengths(&second_only));
+                assert_eq!(got.len(), want.len(), "{query}: {got:?} for {want:?}");
+                for ((got_id, got), (want_id, want)) in got.iter().zip(&want) {
+                    assert_eq!(got_id, want_id);
+                    assert!(close(*got, *want), "{query}: {got} for {want}");
+                }
+            }
+        }
+        assert_eq!(withdrawn.learned["ma"].contenders, second_only.learned["ma"].contenders);
+    }
+
+    #[test]
+    fn undoing_a_pick_that_was_forgotten_since_leaves_the_history_alone() {
+        let mut history = used();
+        let change = history.pick("apps", "mail", "ma", &[], when(4, 9 * HOUR));
+        history.forget(&[key("apps", "mail")]);
+        let before = kept(&history);
         history.undo(change);
         assert_eq!(kept(&history), before);
     }
