@@ -1,5 +1,5 @@
 //! Pins the encoding of every message, so a change to it can't ship without a
-//! new `PROTOCOL_VERSION` (ADR 0011).
+//! new `PROTOCOL_VERSION` (ADR 0012).
 //!
 //! `layout.txt` holds the postcard and JSON encodings of a sample of every
 //! message, every variant of every enum in one, and every field set to a value
@@ -74,7 +74,7 @@ fn check(pinned: &str, actual: &str, version: u32, bless: bool) -> Verdict {
             "The protocol's encoding changed, but PROTOCOL_VERSION is still {version}. \
              A peer built before this change would pass the handshake and then misread \
              messages. Bump PROTOCOL_VERSION in crates/kotodama-protocol/src/handshake.rs \
-             (ADR 0011), then rerun with {BLESS}=1 to pin the new layout.\n\
+             (ADR 0012), then rerun with {BLESS}=1 to pin the new layout.\n\
              First changed lines:\n{}",
             changed.join("\n")
         ));
@@ -189,7 +189,7 @@ fn record_enum<T: Serialize + DeserializeOwned + PartialEq + Debug>(
         assert!(
             covered.contains(&variant),
             "{name}::{variant} has no sample in tests/layout.rs; add one, \
-             and bump PROTOCOL_VERSION if the variant is new (ADR 0011)"
+             and bump PROTOCOL_VERSION if the variant is new (ADR 0012)"
         );
     }
 }

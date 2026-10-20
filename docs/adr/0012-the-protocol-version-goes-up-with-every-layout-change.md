@@ -1,4 +1,4 @@
-# 11. The protocol version goes up with every change to a message's layout
+# 12. The protocol version goes up with every change to a message's layout
 
 Status: accepted (2026-10-20)
 

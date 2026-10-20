@@ -18,7 +18,7 @@
 //! and no skipped fields.
 //!
 //! Any change to how a message encodes, in any Wire format, needs a new
-//! [`PROTOCOL_VERSION`] (ADR 0011), so the handshake turns away a peer that
+//! [`PROTOCOL_VERSION`] (ADR 0012), so the handshake turns away a peer that
 //! would misread it. `tests/layout.rs` fails until the version goes up.
 
 mod channel;

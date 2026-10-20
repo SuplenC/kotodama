@@ -10,7 +10,7 @@ use crate::{Error, WireFormat};
 /// turned away at the handshake rather than failing at some later decode.
 ///
 /// It goes up by one with every change an older peer can't read in some Wire
-/// format; see `docs/adr/0011-the-protocol-version-goes-up-with-every-layout-change.md`.
+/// format; see `docs/adr/0012-the-protocol-version-goes-up-with-every-layout-change.md`.
 /// The `layout` test fails until it does.
 pub const PROTOCOL_VERSION: u32 = 2;
 
