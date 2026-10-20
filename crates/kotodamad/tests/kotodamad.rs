@@ -72,7 +72,7 @@ impl Daemon {
             &Hello::new(&WireFormat::ALL),
         )
         .unwrap();
-        Client { channel }
+        Client { channel, shown: 0 }
     }
 }
 
@@ -165,6 +165,8 @@ fn wait_for<T>(what: &str, mut check: impl FnMut() -> Option<T>) -> T {
 
 struct Client {
     channel: Channel<UnixStream, UnixStream>,
+    /// The version of the last Results read.
+    shown: u32,
 }
 
 impl Client {
@@ -187,12 +189,15 @@ impl Client {
 
     fn titles(&mut self, query: &str) -> Vec<String> {
         self.send(FromFrontEnd::Query { text: query.into() });
-        self.until(|message| match message {
-            ToFrontEnd::Results { results } => {
-                Some(results.into_iter().map(|row| row.item.title).collect())
-            }
+        let (version, titles) = self.until(|message| match message {
+            ToFrontEnd::Results { version, results } => Some((
+                version,
+                results.into_iter().map(|row| row.item.title).collect(),
+            )),
             _ => None,
-        })
+        });
+        self.shown = version;
+        titles
     }
 
     fn run(&mut self, extension: &str, id: &str, action: &str) {
@@ -201,6 +206,7 @@ impl Client {
                 extension: extension.into(),
                 id: id.into(),
             },
+            shown: self.shown,
             action: ActionRef {
                 extension: extension.into(),
                 id: action.into(),
@@ -655,7 +661,7 @@ fn under_socket_activation_the_daemon_serves_the_socket_it_is_handed_and_the_nex
         &Hello::new(&WireFormat::ALL),
     )
     .unwrap();
-    let mut ui = Client { channel };
+    let mut ui = Client { channel, shown: 0 };
     ui.wait_for_titles("kotodama", &["Kotodama"]);
     assert!(socket.exists(), "the Daemon left systemd's socket in place");
 }

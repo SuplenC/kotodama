@@ -4,6 +4,7 @@
 
 #![allow(dead_code)]
 
+use std::cell::Cell;
 use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -110,6 +111,8 @@ pub struct FrontEnd {
     pub rx: Receiver<ToFrontEnd>,
     /// Set once the Daemon cuts this Front end off.
     pub closed: Arc<AtomicBool>,
+    /// The version of the last Results drained, which it confirms a run in.
+    pub shown: Cell<u32>,
 }
 
 pub fn manifest(toml: &str) -> Found {
@@ -283,7 +286,12 @@ impl Harness {
             sender: tx,
             disconnect: Box::new(move || flag.store(true, Ordering::SeqCst)),
         });
-        let front_end = FrontEnd { id, rx, closed };
+        let front_end = FrontEnd {
+            id,
+            rx,
+            closed,
+            shown: Cell::new(0),
+        };
         front_end.drain();
         front_end
     }
@@ -309,7 +317,13 @@ impl Ext {
 
 impl FrontEnd {
     pub fn drain(&self) -> Vec<ToFrontEnd> {
-        self.rx.try_iter().collect()
+        let drained: Vec<ToFrontEnd> = self.rx.try_iter().collect();
+        for message in &drained {
+            if let ToFrontEnd::Results { version, .. } = message {
+                self.shown.set(*version);
+            }
+        }
+        drained
     }
 
     /// The latest Results sent, if any were.
@@ -318,7 +332,7 @@ impl FrontEnd {
             .into_iter()
             .rev()
             .find_map(|message| match message {
-                ToFrontEnd::Results { results } => Some(results),
+                ToFrontEnd::Results { results, .. } => Some(results),
                 _ => None,
             })
     }
@@ -336,6 +350,7 @@ pub fn run(h: &mut Harness, ui: &FrontEnd, owner: &str, id: &str, by: &str, acti
                 extension: owner.into(),
                 id: id.into(),
             },
+            shown: ui.shown.get(),
             action: ActionRef {
                 extension: by.into(),
                 id: action.into(),

@@ -110,7 +110,7 @@ pub enum FromExtension {
 pub struct LiveResult {
     pub item: Item,
     /// How well the result matches the query, from 0 to 1. The Daemon maps it
-    /// onto the scale it ranks Indexed items on (ADR 0003).
+    /// onto the scale it ranks Indexed items on.
     pub score: Fraction,
     /// Marks the one result that answers the query outright, such as a
     /// calculator's sum. The Daemon puts it in the top row. Only an Extension

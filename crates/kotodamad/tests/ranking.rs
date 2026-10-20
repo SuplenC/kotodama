@@ -1337,7 +1337,7 @@ fn web_search_up_after_the_query_is_typed_is_asked_it() {
     assert_eq!(asked, ["weather"]);
 }
 
-/// V3, ADR 0003: a real match arriving late, from a slower Live query, goes
+/// V3: a real match arriving late, from a slower Live query, goes
 /// above the searches already on screen.
 #[test]
 fn a_late_real_match_goes_above_web_search_on_screen() {

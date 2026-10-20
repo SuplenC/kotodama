@@ -465,6 +465,7 @@ fn connects(h: &mut Harness) -> FrontEnd {
         id,
         rx,
         closed: Default::default(),
+        shown: Default::default(),
     }
 }
 

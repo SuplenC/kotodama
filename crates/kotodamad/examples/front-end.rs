@@ -42,9 +42,9 @@ fn front_end(query: &str, run: bool) -> Result<(), Box<dyn std::error::Error>> {
         Channel::handshake(stream.try_clone()?, stream, &Hello::new(&WireFormat::ALL))?;
 
     channel.send(&FromFrontEnd::Query { text: query.into() })?;
-    let results = loop {
+    let (shown, results) = loop {
         match channel.recv()?.ok_or("the Daemon hung up")? {
-            ToFrontEnd::Results { results } => break results,
+            ToFrontEnd::Results { version, results } => break (version, results),
             ToFrontEnd::Status { down } if !down.is_empty() => {
                 eprintln!("down: {}", down.join(", "))
             }
@@ -64,6 +64,7 @@ fn front_end(query: &str, run: bool) -> Result<(), Box<dyn std::error::Error>> {
             extension: top.extension.clone(),
             id: top.item.id.clone(),
         },
+        shown,
         action: ActionRef {
             extension: top.extension.clone(),
             id: top.item.actions[0].id.clone(),

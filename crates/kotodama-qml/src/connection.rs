@@ -30,7 +30,8 @@ const PUSH_AFTER_POP: Duration = Duration::from_millis(16);
 /// What the connection hands the Qt thread.
 pub enum Update {
     Connected(Writer),
-    Rows(Vec<Row>),
+    /// The Results, and their version.
+    Rows(u32, Vec<Row>),
     Down(Vec<String>),
     Close,
     Open {
@@ -227,8 +228,8 @@ fn read(
 
 fn update(message: ToFrontEnd) -> Update {
     match message {
-        ToFrontEnd::Results { results } => {
-            Update::Rows(results.into_iter().map(Row::from).collect())
+        ToFrontEnd::Results { version, results } => {
+            Update::Rows(version, results.into_iter().map(Row::from).collect())
         }
         ToFrontEnd::Status { down } => Update::Down(down),
         ToFrontEnd::Close => Update::Close,
