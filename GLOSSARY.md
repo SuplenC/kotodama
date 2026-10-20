@@ -44,6 +44,10 @@ _Avoid_: Match, hit, row
 An Item the Extension sends ahead of time and keeps up to date, so the Daemon searches it without asking the Extension while the user types.
 _Avoid_: Static item, cached item
 
+**Hidden item**:
+An Item an Extension sends ahead of time that the search never shows; only `kotodama open --view` reaches it, to run its primary Action, which usually pushes a View.
+_Avoid_: Private item, internal item
+
 **Live query**:
 A query the Daemon forwards to an Extension as the user types, for sources that can't be indexed ahead of time, such as a calculator or web search.
 _Avoid_: Dynamic search, remote query
@@ -65,7 +69,7 @@ The list of all Actions available for the selected Result.
 _Avoid_: Context menu, actions menu
 
 **View**:
-A screen pushed on top of the search, such as a list, a form, a detail pane or a progress display; Esc pops it.
+A screen pushed on top of the search, such as a list, a form, a detail pane or a progress display; Esc pops it. Typing into a list filters it.
 _Avoid_: Page, panel, mode, screen
 
 **Argument**:

@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # A test Extension: writes its pid to ./pid, appends every frame it receives to
 # ./received, sends the Items in ./items.json after each config, and answers
-# every Action with the outcome in ./outcome.json (default "close").
+# every Action with the outcome in ./outcome.json (default "close"), after the
+# messages in ./replies-<action id>.json if there are any.
 set -euo pipefail
 export LC_ALL=C
 
@@ -19,7 +20,7 @@ send() {
 }
 
 echo $$ >pid
-send '{"version":2,"formats":["json"]}'
+send '{"version":3,"formats":["json"]}'
 read_frame
 
 while read_frame; do
@@ -27,10 +28,18 @@ while read_frame; do
     if [[ $frame == '{"config":'* ]] && [ -f items.json ]; then
         send "{\"add_items\":{\"items\":$(<items.json)}}"
     elif [[ $frame =~ \"invocation\":([0-9]+) ]]; then
+        invocation=${BASH_REMATCH[1]}
+        # Before it answers, the messages in ./replies-<action>.json, one per
+        # line, all in one reply.
+        if [[ $frame =~ \"action\":\"([^\"]+)\" ]] && [ -f "replies-${BASH_REMATCH[1]}.json" ]; then
+            while IFS= read -r reply; do
+                send "$reply"
+            done <"replies-${BASH_REMATCH[1]}.json"
+        fi
         outcome='"close"'
         if [ -f outcome.json ]; then
             outcome=$(<outcome.json)
         fi
-        send "{\"action_done\":{\"invocation\":${BASH_REMATCH[1]},\"outcome\":$outcome}}"
+        send "{\"action_done\":{\"invocation\":$invocation,\"outcome\":$outcome}}"
     fi
 done

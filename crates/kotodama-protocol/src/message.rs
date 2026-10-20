@@ -50,6 +50,10 @@ pub enum ToExtension {
     /// menu doesn't send this: the View is still open, and shows again when
     /// the menu does, so an Extension may take this as "cancel".
     ViewPopped { view: String },
+    /// The user typed into a list View whose `filters_itself` is set:
+    /// `text` is the whole filter, empty once cleared. Answer with an
+    /// `update_view` holding the Items that match.
+    FilterView { view: String, text: String },
     /// The whole Action catalog, sent after
     /// [`FromExtension::RequestActionCatalog`] and again whenever it changes.
     /// Only Extensions whose Manifest asks for it receive it.
@@ -88,6 +92,13 @@ pub enum FromExtension {
     UpdateView(View),
     PopView {
         view: String,
+    },
+    /// Pops the open View `view` and pushes `with` in one step, as a wizard
+    /// goes from one step to the next: the search never shows in between.
+    /// Pushes `with` alone if `view` isn't open.
+    ReplaceView {
+        view: String,
+        with: View,
     },
     JobProgress(Job),
     /// Asks for the Action catalog; allowed only if the Manifest says so.

@@ -46,6 +46,18 @@ timer='{
     ]
 }'
 
+# The bookmarks as a list View, which typing filters. Its Item is hidden: the
+# search never shows it, and `kotodama open --view shell-example/bookmarks`
+# reaches it, as a keybind would. An Extension with only Live queries names
+# its Views this way.
+bookmarks_item='{
+    "id": "bookmarks",
+    "kind": "shell-example.bookmarks",
+    "title": "Bookmarks",
+    "hidden": true,
+    "actions": [{"id": "list-bookmarks", "title": "List bookmarks"}]
+}'
+
 # Sends the timer's progress: job id, title, seconds done, seconds in all.
 progress() {
     send "$(jq -cn --arg id "$1" --arg title "$2" --argjson elapsed "$3" --argjson all "$4" '{
@@ -61,16 +73,20 @@ progress() {
 # Starts a timer: a progress View to follow it, and a background process that
 # reports on it each second. Closing the menu leaves the View open, so the
 # timer runs on, and the Daemon sends a desktop notification when it is done.
-# Esc on the View cancels it (see view_popped below).
+# Esc on the View cancels it (see view_popped below). Given a third argument,
+# the progress View replaces that open View in one step, so the menu never
+# shows the search in between, as a pop_view then a push_view could.
 timers=0
 # The background process and title of each timer, by job id.
 declare -A timer_pids=() timer_titles=()
 start_timer() {
-    local title=$1 seconds=$((10#$2)) id
+    local title=$1 seconds=$((10#$2)) replaces=${3:-} id
     timers=$((timers + 1))
     id="timer-$timers"
-    send "$(jq -cn --arg id "$id" --arg title "$title" \
-        '{push_view: {id: $id, title: $title, content: {progress: {job: $id}}}}')"
+    send "$(jq -cn --arg id "$id" --arg title "$title" --arg replaces "$replaces" '
+        {id: $id, title: $title, content: {progress: {job: $id}}} as $view
+        | if $replaces == "" then {push_view: $view}
+          else {replace_view: {view: $replaces, with: $view}} end')"
     progress "$id" "$title" 0 "$seconds"
     (
         for ((elapsed = 1; elapsed < seconds; elapsed++)); do
@@ -108,7 +124,7 @@ done_with() {
 # The handshake is always JSON. Both sides send a hello; this script offers JSON
 # only, so JSON is what the connection uses from here on. Both must speak the
 # same protocol version, which goes up whenever a message changes.
-version=2
+version=3
 send "{\"version\":$version,\"formats\":[\"json\"]}"
 read_frame
 if ! jq -e --argjson version "$version" '.version == $version' <<<"$frame" >/dev/null; then
@@ -137,11 +153,19 @@ while read_frame; do
             actions: [{id: "open", title: "Open in browser"}]
         }]' <<<"$frame")
         ids=$(jq -c 'map(.id)' <<<"$items")
-        # Adding the timer again just replaces it, so it is never removed.
-        send "$(jq -c --argjson timer "$timer" '{add_items: {items: (. + [$timer])}}' <<<"$items")"
+        # Adding the timer and the bookmarks list again just replaces them,
+        # so they are never removed.
+        send "$(jq -c --argjson timer "$timer" --argjson list "$bookmarks_item" \
+            '{add_items: {items: (. + [$timer, $list])}}' <<<"$items")"
         ;;
     run_action)
         case $(jq -r '.run_action.action' <<<"$frame") in
+        list-bookmarks)
+            # Typing filters the list in the Daemon, so we never hear of it.
+            send "$(jq -cn --argjson items "$items" \
+                '{push_view: {id: "bookmarks", title: "Bookmarks", content: {list: {items: $items}}}}')"
+            done_with "$(jq -r '.run_action.invocation' <<<"$frame")" '"keep_open"'
+            ;;
         open)
             xdg-open "$(jq -r '.run_action.item.url' <<<"$frame")" </dev/null >/dev/null 2>&1 &
             send "$(jq -c '{action_done: {invocation: .run_action.invocation, outcome: "close"}}' <<<"$frame")"
@@ -177,14 +201,13 @@ while read_frame; do
         esac
         ;;
     submit_form)
-        # Our labelled timer's form. The form goes, and the timer's progress
-        # View takes its place.
+        # Our labelled timer's form. The timer's progress View takes the
+        # form's place.
         if [ "$(jq -r '.submit_form.view' <<<"$frame")" = timer-form ]; then
             label=$(jq -r '.submit_form.values.label // "" | if . == "" then "Timer" else . end' <<<"$frame")
             seconds=$(jq -r '.submit_form.values.seconds // ""' <<<"$frame")
             if valid_seconds "$seconds"; then
-                send '{"pop_view":{"view":"timer-form"}}'
-                start_timer "$label" "$seconds"
+                start_timer "$label" "$seconds" timer-form
             fi
         fi
         ;;

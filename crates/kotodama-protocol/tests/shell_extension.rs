@@ -132,8 +132,13 @@ fn the_shell_example_replaces_its_items_when_the_config_reloads() {
     let FromExtension::RemoveItems { ids } = extension.recv() else {
         panic!("expected remove_items")
     };
-    // The timer is added again, which replaces it, so it is never removed.
-    assert_eq!(first.len(), 3, "the bookmarks and the timer");
+    // The timer and the bookmarks list are added again, which replaces them,
+    // so they are never removed.
+    assert_eq!(
+        first.len(),
+        4,
+        "the bookmarks, the timer and the bookmarks list"
+    );
     assert_eq!(ids, ["https://a.example", "https://b.example"]);
     let FromExtension::AddItems { items } = extension.recv() else {
         panic!("expected add_items")
@@ -143,7 +148,59 @@ fn the_shell_example_replaces_its_items_when_the_config_reloads() {
             .iter()
             .map(|item| item.title.as_str())
             .collect::<Vec<_>>(),
-        ["C", "Timer"]
+        ["C", "Timer", "Bookmarks"]
+    );
+}
+
+#[test]
+fn the_shell_examples_hidden_bookmarks_item_lists_them_in_a_view_it_leaves_the_daemon_to_filter() {
+    let mut extension = Extension::start();
+    extension.send(bookmarks(&[
+        ("Kotodama", "https://github.com/SuplenC/kotodama"),
+        ("Wayland", "https://wayland.freedesktop.org"),
+    ]));
+    let FromExtension::AddItems { items } = extension.recv() else {
+        panic!("expected add_items")
+    };
+    let list = items
+        .iter()
+        .find(|item| item.id == "bookmarks")
+        .expect("the bookmarks Item");
+    assert!(list.hidden, "only `kotodama open --view` reaches it");
+    assert!(
+        items
+            .iter()
+            .all(|item| item.hidden == (item.id == "bookmarks"))
+    );
+
+    extension.send(ToExtension::RunAction {
+        invocation: 9,
+        action: list.actions[0].id.clone(),
+        item: ItemRef {
+            id: list.id.clone(),
+            kind: list.kind.clone(),
+        },
+        arguments: BTreeMap::new(),
+    });
+    let FromExtension::PushView(view) = extension.recv() else {
+        panic!("expected push_view")
+    };
+    let ViewContent::List {
+        items: listed,
+        filters_itself,
+    } = view.content
+    else {
+        panic!("expected a list View")
+    };
+    assert!(!filters_itself);
+    let titles: Vec<_> = listed.iter().map(|item| item.title.as_str()).collect();
+    assert_eq!(titles, ["Kotodama", "Wayland"]);
+    assert_eq!(
+        extension.recv(),
+        FromExtension::ActionDone {
+            invocation: 9,
+            outcome: Outcome::KeepOpen,
+        }
     );
 }
 
@@ -331,15 +388,16 @@ fn the_shell_examples_labelled_timer_asks_in_a_form_then_times_what_was_submitte
             ("seconds".into(), Value::String("1".into())),
         ]),
     });
-    assert_eq!(
-        extension.recv(),
-        FromExtension::PopView {
-            view: form.id.clone()
-        }
-    );
-    let FromExtension::PushView(progress) = extension.recv() else {
-        panic!("expected push_view")
+    // The progress View takes the form's place in one step, so the menu never
+    // shows the search in between.
+    let FromExtension::ReplaceView {
+        view: replaced,
+        with: progress,
+    } = extension.recv()
+    else {
+        panic!("expected replace_view")
     };
+    assert_eq!(replaced, form.id);
     assert_eq!(progress.title, "Tea");
     let ViewContent::Progress { job } = progress.content else {
         panic!("expected a progress View")

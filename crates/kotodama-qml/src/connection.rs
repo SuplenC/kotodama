@@ -8,11 +8,12 @@ use std::os::unix::net::UnixStream;
 use std::time::Duration;
 
 use kotodama_protocol::{
-    Channel, ChannelWriter, Error, FromFrontEnd, Hello, Job, ToFrontEnd, View, WireFormat,
-    socket_path,
+    Channel, ChannelWriter, Error, FromFrontEnd, Hello, Job, ListMatch, ToFrontEnd, View,
+    WireFormat, socket_path,
 };
 
 use crate::rows::Row;
+use crate::views::Contributed;
 
 const FIRST_RETRY: Duration = Duration::from_millis(100);
 const MAX_RETRY: Duration = Duration::from_secs(2);
@@ -20,6 +21,11 @@ const MAX_RETRY: Duration = Duration::from_secs(2);
 /// thread gives up on the write rather than freeze the menu.
 const WRITE_TIMEOUT: Duration = Duration::from_millis(100);
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(5);
+/// The most messages handed over at once.
+const MAX_BATCH: usize = 64;
+/// How long a View an Extension popped waits for the one it pushes next, so
+/// the search doesn't show between them: about a frame.
+const PUSH_AFTER_POP: Duration = Duration::from_millis(16);
 
 /// What the connection hands the Qt thread.
 pub enum Update {
@@ -36,11 +42,27 @@ pub enum Update {
     PushView {
         extension: String,
         view: View,
+        contributed: Contributed,
     },
-    /// The protocol's `UpdateView`: the open View with the same id changes.
-    ReplaceView {
+    /// The open View with the same id changes.
+    ViewUpdated {
         extension: String,
         view: View,
+        contributed: Contributed,
+    },
+    /// `with` takes the place of the open View `view`.
+    ReplaceView {
+        extension: String,
+        view: String,
+        with: View,
+        contributed: Contributed,
+    },
+    /// The Daemon's matches for what is typed into a list View.
+    FilteredView {
+        extension: String,
+        view: String,
+        text: String,
+        matches: Vec<ListMatch>,
     },
     PopView {
         extension: String,
@@ -51,6 +73,17 @@ pub enum Update {
         job: Job,
     },
     Disconnected,
+}
+
+impl Update {
+    /// Whether it asks QML to act, by a signal, rather than changes what
+    /// the menu shows.
+    pub fn signals(&self) -> bool {
+        matches!(
+            self,
+            Update::Close | Update::Open { .. } | Update::Toggle | Update::ActionFailed(_)
+        )
+    }
 }
 
 /// The Qt thread's half of the connection.
@@ -72,9 +105,12 @@ impl Drop for Writer {
     }
 }
 
-/// Starts the connection thread. `deliver` hands an update to the Qt thread
-/// and returns false once there is no one to hand it to, which ends the thread.
-pub fn spawn(deliver: impl Fn(Update) -> bool + Send + 'static) {
+/// Starts the connection thread. `deliver` hands updates to the Qt thread, in
+/// order, and returns false once there is no one to hand them to, which ends
+/// the thread. Messages the Daemon sent together come in one batch, so the
+/// menu draws what they add up to: a View popped and another pushed in one
+/// reply never shows the search between them.
+pub fn spawn(deliver: impl Fn(Vec<Update>) -> bool + Send + 'static) {
     let started = std::thread::Builder::new()
         .name("kotodama".into())
         .stack_size(256 * 1024)
@@ -84,19 +120,19 @@ pub fn spawn(deliver: impl Fn(Update) -> bool + Send + 'static) {
     }
 }
 
-fn run(deliver: &impl Fn(Update) -> bool) {
+fn run(deliver: &impl Fn(Vec<Update>) -> bool) {
     let mut retry = FIRST_RETRY;
     loop {
         match connect() {
-            Ok((reader, writer)) => {
+            Ok((reader, probe, writer)) => {
                 retry = FIRST_RETRY;
-                if !deliver(Update::Connected(writer)) {
+                if !deliver(vec![Update::Connected(writer)]) {
                     return;
                 }
-                if let Err(err) = read(reader, deliver) {
+                if let Err(err) = read(reader, &probe, deliver) {
                     eprintln!("kotodama: lost the Daemon: {err}");
                 }
-                if !deliver(Update::Disconnected) {
+                if !deliver(vec![Update::Disconnected]) {
                     return;
                 }
             }
@@ -113,7 +149,8 @@ fn run(deliver: &impl Fn(Update) -> bool) {
 
 type Reader = kotodama_protocol::ChannelReader<UnixStream>;
 
-fn connect() -> Result<(Reader, Writer), Error> {
+/// The reader, the socket again for [`more_within`], and the writer.
+fn connect() -> Result<(Reader, UnixStream, Writer), Error> {
     let socket = socket_path().ok_or_else(|| {
         Error::Io(std::io::Error::new(
             std::io::ErrorKind::NotFound,
@@ -130,37 +167,117 @@ fn connect() -> Result<(Reader, Writer), Error> {
     stream.set_read_timeout(None)?;
     stream.set_write_timeout(Some(WRITE_TIMEOUT))?;
     let (reader, channel) = channel.split();
-    Ok((reader, Writer { channel, stream }))
+    Ok((reader, stream.try_clone()?, Writer { channel, stream }))
 }
 
-/// Reads until the Daemon hangs up or the model is gone.
-fn read(mut reader: Reader, deliver: &impl Fn(Update) -> bool) -> Result<(), Error> {
+/// Reads until the Daemon hangs up or the model is gone. What has arrived
+/// already goes over with the message before it, up to [`MAX_BATCH`].
+///
+/// A View the Extension popped waits [`PUSH_AFTER_POP`] for more, as the
+/// Extension may push the next one in the same reply.
+fn read(
+    mut reader: Reader,
+    probe: &UnixStream,
+    deliver: &impl Fn(Vec<Update>) -> bool,
+) -> Result<(), Error> {
+    let mut batch = Vec::new();
     loop {
         let message = match reader.recv::<ToFrontEnd>() {
-            Ok(Some(message)) => message,
-            Ok(None) => return Ok(()),
+            Ok(Some(message)) => Some(message),
+            Ok(None) => {
+                if !batch.is_empty() {
+                    deliver(batch);
+                }
+                return Ok(());
+            }
             Err(err @ Error::Decode { .. }) => {
                 eprintln!("kotodama: skipped a message: {err}");
-                continue;
+                None
             }
-            Err(err) => return Err(err),
-        };
-        let update = match message {
-            ToFrontEnd::Results { results } => {
-                Update::Rows(results.into_iter().map(Row::from).collect())
+            Err(err) => {
+                if !batch.is_empty() {
+                    deliver(batch);
+                }
+                return Err(err);
             }
-            ToFrontEnd::Status { down } => Update::Down(down),
-            ToFrontEnd::Close => Update::Close,
-            ToFrontEnd::ActionFailed { message } => Update::ActionFailed(message),
-            ToFrontEnd::Open { query, view } => Update::Open { query, view },
-            ToFrontEnd::Toggle => Update::Toggle,
-            ToFrontEnd::PushView { extension, view } => Update::PushView { extension, view },
-            ToFrontEnd::UpdateView { extension, view } => Update::ReplaceView { extension, view },
-            ToFrontEnd::PopView { extension, view } => Update::PopView { extension, view },
-            ToFrontEnd::JobProgress { extension, job } => Update::JobProgress { extension, job },
         };
-        if !deliver(update) {
+        if let Some(message) = message {
+            batch.push(update(message));
+        }
+        let popped = matches!(batch.last(), Some(Update::PopView { .. }));
+        let more =
+            reader.has_buffered() || (popped && more_within(&mut reader, probe, PUSH_AFTER_POP));
+        if batch.is_empty() || (more && batch.len() < MAX_BATCH) {
+            continue;
+        }
+        if !deliver(std::mem::take(&mut batch)) {
             return Ok(());
         }
     }
+}
+
+fn update(message: ToFrontEnd) -> Update {
+    match message {
+        ToFrontEnd::Results { results } => {
+            Update::Rows(results.into_iter().map(Row::from).collect())
+        }
+        ToFrontEnd::Status { down } => Update::Down(down),
+        ToFrontEnd::Close => Update::Close,
+        ToFrontEnd::ActionFailed { message } => Update::ActionFailed(message),
+        ToFrontEnd::Open { query, view } => Update::Open { query, view },
+        ToFrontEnd::Toggle => Update::Toggle,
+        ToFrontEnd::PushView {
+            extension,
+            view,
+            contributed,
+        } => Update::PushView {
+            extension,
+            view,
+            contributed,
+        },
+        ToFrontEnd::UpdateView {
+            extension,
+            view,
+            contributed,
+        } => Update::ViewUpdated {
+            extension,
+            view,
+            contributed,
+        },
+        ToFrontEnd::ReplaceView {
+            extension,
+            view,
+            with,
+            contributed,
+        } => Update::ReplaceView {
+            extension,
+            view,
+            with,
+            contributed,
+        },
+        ToFrontEnd::PopView { extension, view } => Update::PopView { extension, view },
+        ToFrontEnd::FilteredView {
+            extension,
+            view,
+            text,
+            matches,
+        } => Update::FilteredView {
+            extension,
+            view,
+            text,
+            matches,
+        },
+        ToFrontEnd::JobProgress { extension, job } => Update::JobProgress { extension, job },
+    }
+}
+
+/// Whether the Daemon sends something within `wait`, or hangs up. The
+/// reader is between messages, so the socket's timeout is free to set.
+fn more_within(reader: &mut Reader, probe: &UnixStream, wait: Duration) -> bool {
+    if probe.set_read_timeout(Some(wait)).is_err() {
+        return false;
+    }
+    let more = reader.wait_for_more();
+    let _ = probe.set_read_timeout(None);
+    more
 }

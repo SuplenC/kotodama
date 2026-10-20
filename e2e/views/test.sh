@@ -3,7 +3,10 @@
 # its keyword, the form the Daemon opens for a missing one, the Action panel,
 # the Extension's own form, a progress View that updates, Esc cancelling a job
 # that takes it as "cancel", the same job running on after the menu closes,
-# and the desktop notification when it is done.
+# and the desktop notification when it is done. Then its bookmarks list View:
+# typing narrows the rows, Ctrl+K lists what another Extension contributes to
+# them, and Esc clears the filter before it pops the View. Last, a test
+# Extension that pops one View and pushes the next in one reply.
 root=$(cd ../.. && pwd)
 target=$(cargo metadata --format-version 1 --no-deps --manifest-path "$root/Cargo.toml" | jq -r .target_directory)
 cargo build --quiet --manifest-path "$root/Cargo.toml" -p kotodamad -p kotodama --bin kotodamad --bin kotodama
@@ -26,6 +29,33 @@ command = ["extension.sh"]
 kind = "shell-example.timer"
 id = "share"
 title = "Share timer"
+
+[[contributed_actions]]
+kind = "url"
+id = "copy-link"
+title = "Copy link"
+TOML
+# Its Wizard pops its first step and pushes the next in one reply, as an
+# Extension that predates replace_view would.
+cat >"$extensions/extras/items.json" <<'JSON'
+[{"id": "wizard", "kind": "extras.wizard", "title": "Wizard", "actions": [{"id": "begin", "title": "Begin"}]}]
+JSON
+echo '"keep_open"' >"$extensions/extras/outcome.json"
+cat >"$extensions/extras/replies-begin.json" <<'JSON'
+{"push_view": {"id": "step-1", "title": "Step one", "content": {"list": {"items": [{"id": "next", "kind": "extras.step", "title": "Next step", "actions": [{"id": "next", "title": "Next"}]}]}}}}
+JSON
+cat >"$extensions/extras/replies-next.json" <<'JSON'
+{"pop_view": {"view": "step-1"}}
+{"push_view": {"id": "step-2", "title": "Step two", "content": {"detail": {"markdown": "Done"}}}}
+JSON
+# Bookmarks for the shell example's list View.
+cat >"$XDG_CONFIG_HOME/kotodama/bookmarks.toml" <<'TOML'
+[extensions.shell-example]
+bookmarks = [
+    { title = "Kotodama", url = "https://github.com/SuplenC/kotodama" },
+    { title = "Wayland", url = "https://wayland.freedesktop.org" },
+    { title = "Quickshell", url = "https://quickshell.org" },
+]
 TOML
 
 # A session bus of our own, where the shell below stands in for the desktop's
@@ -91,6 +121,12 @@ press -k Down -k Return "view: form Labelled timer"
 mark=$(log_lines quickshell.log)
 press Tea -k Tab -k BackSpace 5 -k Return "view: progress Tea running 0%"
 wait_for_log quickshell.log "view: progress Tea running 20%" "$mark"
+# The progress View replaces the form in one step: the search never shows
+# between them.
+if tail -n "+$((mark + 1))" "$E2E_OUT/quickshell.log" | grep -qF "view: search"; then
+    echo "the search showed between the form and its progress View" >&2
+    exit 1
+fi
 
 # Closing the menu isn't Esc: the timer isn't told, so it runs on, and the
 # menu opens again on its progress View.
@@ -109,3 +145,34 @@ wait_for_log quickshell.log "notification: Tea: Time is up" "$mark"
 press -k Escape "view: search"
 press -M ctrl -k l -m ctrl "view: form Labelled timer"
 press -k Escape "view: search"
+
+# The bookmarks list View, behind a hidden Item that `open --view` reaches as
+# a keybind would. Typing narrows its rows as the search would.
+mark=$(log_lines quickshell.log)
+"$kotodama" toggle
+wait_for_log quickshell.log "hidden" "$mark"
+mark=$(log_lines quickshell.log)
+"$kotodama" open --view shell-example/bookmarks
+wait_for_log quickshell.log "opened on: list Bookmarks" "$mark"
+wait_for_log quickshell.log "focused: true" "$mark"
+press way "rows: 1"
+# Ctrl+K on a bookmark lists the Action extras contributes to every `url`.
+press -M ctrl -k k -m ctrl "actions: Open in browser, extras/Copy link"
+press -k Escape "actions closed"
+# Esc clears the filter first, so every bookmark shows again, then pops.
+press -k Escape "rows: 3"
+press -k Escape "view: search"
+
+# The Wizard's next step pops one View and pushes another in one reply: the
+# search never shows between them.
+mark=$(log_lines quickshell.log)
+"$kotodama" toggle
+wait_for_log quickshell.log "hidden" "$mark"
+open --query Wizard
+press -k Return "view: list Step one"
+mark=$(log_lines quickshell.log)
+press -k Return "view: detail Step two"
+if tail -n "+$((mark + 1))" "$E2E_OUT/quickshell.log" | grep -qF "view: search"; then
+    echo "the search showed between the Wizard's steps" >&2
+    exit 1
+fi

@@ -65,6 +65,7 @@ pub fn jobs(views: &Views) -> List {
 /// The top View, or an empty map at the search. `kind` is `list`, `form`,
 /// `detail` or `progress`; the other keys depend on it:
 ///
+/// - a list has `filter`, what is typed to filter it;
 /// - a form has `fields`, each `{label, kind, placeholder, secret, options,
 ///   value}` with `kind` `text`, `checkbox` or `select`, and `submit`;
 /// - a detail has `markdown` and `metadata`, each `{label, value}`;
@@ -80,7 +81,10 @@ pub fn view(views: &Views) -> Map {
     ]);
     let mut put = |key: &str, value: QVariant| out.insert_clone(&QString::from(key), &value);
     match &open.view.content {
-        ViewContent::List { .. } => put("kind", text("list")),
+        ViewContent::List { .. } => {
+            put("kind", text("list"));
+            put("filter", text(&open.filter));
+        }
         ViewContent::Form { fields, submit } => {
             put("kind", text("form"));
             put("submit", text(submit));
@@ -153,10 +157,7 @@ pub fn actions(row: &Row) -> List {
         map([
             ("title", text(&entry.action.title)),
             ("group", text(entry.group.unwrap_or_default())),
-            (
-                "shortcut",
-                text(entry.action.shortcut.as_deref().unwrap_or_default()),
-            ),
+            ("shortcut", text(entry.shortcut.unwrap_or_default())),
         ])
     }))
 }

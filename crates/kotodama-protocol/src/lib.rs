@@ -35,7 +35,8 @@ mod wire;
 
 pub use channel::{Channel, ChannelReader, ChannelWriter};
 pub use front_end::{
-    ActionRef, FromFrontEnd, OfferedAction, ResultRef, ShownResult, ToFrontEnd, socket_path,
+    ActionRef, FromFrontEnd, ListMatch, OfferedAction, ResultRef, ShownResult, ToFrontEnd,
+    socket_path,
 };
 pub use handshake::{Hello, PROTOCOL_VERSION};
 pub use item::{

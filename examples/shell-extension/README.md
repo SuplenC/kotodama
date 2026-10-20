@@ -1,11 +1,12 @@
 # A Kotodama Extension in bash and jq
 
-`extension.sh` is a complete Extension in under 200 lines of bash and jq. Start here if you are writing your own, in any language. It needs bash 4 or later and jq.
+`extension.sh` is a complete Extension in a little over 200 lines of bash and jq. Start here if you are writing your own, in any language. It needs bash 4 or later and jq.
 
-It does four things:
+It does five things:
 
 - turns the bookmarks in its config table into `url` Items;
 - opens a bookmark when you pick it;
+- lists the bookmarks in a View that typing filters, which `kotodama open --view shell-example/bookmarks` opens;
 - offers **Paste path** on every `project` Item, whichever Extension added it;
 - adds a **Timer**. Type `timer 5` and press Enter to count down five seconds in a progress View. Press Enter on plain `timer` and the Daemon asks for the seconds in a form. Its second Action, **Start a labelled timer** (Ctrl+L, or pick it from the Ctrl+K Action panel), asks for a label too, in the Extension's own form. Esc on its progress View cancels it. Closing the menu leaves it running, and a desktop notification says when it's done.
 
@@ -31,7 +32,7 @@ The Daemon starts `command` from `manifest.toml`, in this directory, and talks t
 {"remove_items":{"ids":["a"]}}
 ```
 
-**Handshake.** Each side sends a hello first, always in JSON: `{"version":2,"formats":["json"]}`. `version` is the protocol version, `PROTOCOL_VERSION` in `crates/kotodama-protocol`; the Daemon turns away a hello with any other. List the Wire formats you support, from `postcard`, `msgpack` and `json`. Both sides then use the fastest they share. JSON is required, so offering only JSON is enough.
+**Handshake.** Each side sends a hello first, always in JSON: `{"version":3,"formats":["json"]}`. `version` is the protocol version, `PROTOCOL_VERSION` in `crates/kotodama-protocol`; the Daemon turns away a hello with any other. List the Wire formats you support, from `postcard`, `msgpack` and `json`. Both sides then use the fastest they share. JSON is required, so offering only JSON is enough.
 
 **Messages.** A message is an object with one key, its name, holding its fields: `{"add_items": {"items": [...]}}`. A message without fields is just its name as a string: `"request_action_catalog"`. Optional fields can be left out.
 
@@ -44,7 +45,7 @@ The Daemon starts `command` from `manifest.toml`, in this directory, and talks t
  "title": "Kotodama", "actions": [{"id": "open", "title": "Open in browser"}]}
 ```
 
-Adding an Item whose id you already sent replaces it. `remove_items` takes the ids to drop.
+Adding an Item whose id you already sent replaces it. `remove_items` takes the ids to drop. An Item with `"hidden": true` never shows in the search: only `kotodama open --view <extension>/<item id>` reaches it, as a keybind would, and runs its primary Action. That is how an Extension with only Live queries makes a View reachable.
 
 **Identity.** When your Item is something another Extension may offer too, such as an app, a file or a web page, give it an `identity`: a string naming the thing itself, which every Extension that offers it spells the same way. Items with the same identity share their History, so picking one raises the others. Each still shows as a Result of its own, and the one the user picks through most comes first. For a shared kind, use the kind and its field, as in `app:firefox.desktop`, `file:/etc/hosts` or `url:https://github.com/SuplenC/kotodama`. Leave it out for anything only your Extension offers. An empty identity is rejected.
 
@@ -52,7 +53,9 @@ Adding an Item whose id you already sent replaces it. `remove_items` takes the i
 
 **Arguments and shortcuts.** An Action can list `arguments`, each with a `name`, an optional `placeholder`, and `optional: true` if it may be left out. With an Item `keyword`, the user types them after it: `timer 5` gives `{"seconds": "5"}`. Each Argument takes one word, and the last takes the rest. The Daemon asks for a required one that wasn't typed in a form of its own, so `run_action` always has them. A `shortcut` such as `"ctrl+l"` runs the Action from the menu; it needs Ctrl, Alt or Super, since a bare key types into the search.
 
-**Views.** `push_view` puts a View on top of the menu: a `list` of Items, a `form`, a Markdown `detail`, or a `progress` View that follows a job. `update_view` replaces it, and `pop_view` takes it away. When the user leaves one with Esc, you get `view_popped`; treat it as "cancel" if that suits you. Closing the menu pops nothing and sends nothing: your Views are still there when it opens again. Submitting a form sends you `submit_form` with its values. Answer an Action that pushed a View with `"keep_open"`.
+**Views.** `push_view` puts a View on top of the menu: a `list` of Items, a `form`, a Markdown `detail`, or a `progress` View that follows a job. `update_view` replaces it, and `pop_view` takes it away. To go from one View to the next, as from a form to its progress, send `{"replace_view": {"view": "<open view id>", "with": {...}}}`: a `pop_view` then a `push_view` may show the search in between. When the user leaves one with Esc, you get `view_popped`; treat it as "cancel" if that suits you.
+
+Typing into a `list` filters it. The Daemon matches the Items as it does the search, best first and in your order within each Tier, and never asks you. To filter it yourself, as for results from a web service, set `"filters_itself": true` in the list: you then get `{"filter_view": {"view": "...", "text": "..."}}` with the whole text on each keystroke, empty once cleared, and answer with an `update_view` holding the Items to show. Contributed actions are offered on a list's Items by their kind, as on Results. Closing the menu pops nothing and sends nothing: your Views are still there when it opens again. Submitting a form sends you `submit_form` with its values. Answer an Action that pushed a View with `"keep_open"`.
 
 **Jobs.** Report long work with `job_progress`: an `id`, a `title`, a `state` (`running`, `succeeded` or `failed`), and optionally a `progress` from 0 to 1 and a `message`. A job runs on when the menu closes. The menu lists running jobs when it opens again, and when one finishes, the Daemon sends a desktop notification with its title and message.
 

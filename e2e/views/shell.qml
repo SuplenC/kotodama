@@ -25,11 +25,15 @@ ShellRoot {
                 console.log("opened on: " + (view.kind ?? "search") + " " + (view.title ?? ""));
                 for (const job of menu.search.jobs)
                     console.log("opened with job: " + job.title);
+            } else {
+                console.log("hidden");
             }
         }
         onActionsChanged: {
             if (menu.actions.length > 0)
                 console.log("actions: " + menu.actions.map(action => (action.group !== "" ? action.group + "/" : "") + action.title).join(", "));
+            else
+                console.log("actions closed");
         }
         onFailureChanged: {
             if (failure !== "")
@@ -42,6 +46,9 @@ ShellRoot {
                 console.log("connected: " + menu.search.connected);
             }
             function onRowsInserted() {
+                console.log("rows: " + menu.search.rowCount());
+            }
+            function onRowsRemoved() {
                 console.log("rows: " + menu.search.rowCount());
             }
             function onViewChanged() {

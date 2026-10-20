@@ -34,6 +34,7 @@ use crate::kind_order::KindOrder;
 use crate::open_view::{Opening, ViewName};
 use crate::rank::{self, Haystack, Matched, Tier, Tiers};
 use crate::usage::{Entry, Used};
+use crate::views::{Open, Views};
 
 /// The name the Daemon's own Results go by: Quicklinks and the Action that
 /// clears the History. No Extension may take it.
@@ -385,6 +386,9 @@ struct Session {
     /// never does, and gets no Results.
     searched: bool,
     update: Update,
+    /// What is typed into each open list View the Daemon filters, by its
+    /// Extension and id; never empty.
+    filters: Vec<(ExtensionId, String, String)>,
 }
 
 impl Session {
@@ -392,6 +396,22 @@ impl Session {
     fn send(&self, message: ToFrontEnd) {
         if let Err(TrySendError::Full(_)) = self.sender.try_send(message) {
             self.hung.set(true);
+        }
+    }
+
+    /// The filter typed into a list View, if any.
+    fn filter(&self, extension: ExtensionId, view: &str) -> Option<&str> {
+        self.filters
+            .iter()
+            .find(|(ext, id, _)| *ext == extension && id == view)
+            .map(|(_, _, text)| text.as_str())
+    }
+
+    fn set_filter(&mut self, extension: ExtensionId, view: &str, text: String) {
+        self.filters
+            .retain(|(ext, id, _)| !(*ext == extension && id == view));
+        if !text.is_empty() {
+            self.filters.push((extension, view.to_owned(), text));
         }
     }
 }
@@ -499,6 +519,7 @@ fn clear_history() -> Item {
         keyword: None,
         identity: None,
         keywords: Vec::new(),
+        hidden: false,
         actions: vec![Action {
             id: "run".into(),
             title: "Clear".into(),
@@ -519,6 +540,7 @@ fn undo_item(title: &str) -> Item {
         keyword: None,
         identity: None,
         keywords: Vec::new(),
+        hidden: false,
         actions: vec![action_titled("run", "Undo".into())],
     }
 }
@@ -653,8 +675,11 @@ pub struct Daemon<L, D, S> {
     catalog_dirty: bool,
     down: Vec<String>,
     jobs: BTreeMap<(ExtensionId, String), Job>,
-    /// The Views each Extension has open, with a list View's Items.
-    views: BTreeMap<(ExtensionId, String), Vec<Item>>,
+    /// The Views Extensions have open, as the menus stack them.
+    views: Views,
+    /// Hidden Items, by Extension and id: kept out of the index, so out of
+    /// the search, and reached only by `kotodama open --view`.
+    hidden: HashMap<ExtensionId, HashMap<String, Item>>,
     pending_output: Option<PendingOutput>,
     openings: Vec<Opening>,
     /// What other Front ends asked the menus while an Opening was awaited,
@@ -713,7 +738,8 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             catalog_dirty: false,
             down: Vec::new(),
             jobs: BTreeMap::new(),
-            views: BTreeMap::new(),
+            views: Views::default(),
+            hidden: HashMap::new(),
             pending_output: None,
             openings: Vec::new(),
             held: Vec::new(),
@@ -986,15 +1012,12 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
                 self.job_progress(id, &name, job);
             }
         }
+        self.hidden.remove(&id);
         // Its Views can't be answered any more.
-        let views: Vec<String> = self
-            .views
-            .keys()
-            .filter(|(ext, _)| *ext == id)
-            .map(|(_, view)| view.clone())
-            .collect();
-        for view in views {
-            self.views.remove(&(id, view.clone()));
+        for session in self.sessions.values_mut() {
+            session.filters.retain(|(ext, _, _)| *ext != id);
+        }
+        for view in self.views.pop_all(id) {
             self.broadcast(|| ToFrontEnd::PopView {
                 extension: name.clone(),
                 view: view.clone(),
@@ -1038,6 +1061,17 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
 
     /// The set of running Extensions changed.
     fn extensions_changed(&mut self) {
+        // The Contributed actions on the open list Views, to tell the menus
+        // of those that change.
+        let before: Vec<_> = self
+            .views
+            .iter()
+            .filter(|open| matches!(open.view.content, ViewContent::List { .. }))
+            .map(|open| {
+                let contributed = self.view_contributed(open.extension, &open.view);
+                (open.extension, open.view.id.clone(), contributed)
+            })
+            .collect();
         self.contributed.clear();
         for (id, ext) in self.extensions.iter().enumerate() {
             if ext.sender().is_none() {
@@ -1052,6 +1086,16 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
         }
         self.catalog_dirty = true;
         self.mark_late();
+        for (id, view_id, contributed) in before {
+            let Some(open) = self.views.get(id, &view_id) else {
+                continue;
+            };
+            if self.view_contributed(id, &open.view) != contributed {
+                let view = open.view.clone();
+                let name = self.extensions[id.0].name().to_owned();
+                self.update_view(id, &name, view);
+            }
+        }
     }
 
     fn extension_message(&mut self, id: ExtensionId, message: FromExtension, now: Instant) {
@@ -1067,13 +1111,24 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
                         );
                         continue;
                     }
-                    self.index.add(id, item);
+                    let hidden = self.hidden.entry(id).or_default();
+                    if item.hidden {
+                        self.index.remove(id, &item.id);
+                        hidden.insert(item.id.clone(), item);
+                    } else {
+                        hidden.remove(&item.id);
+                        self.index.add(id, item);
+                    }
                 }
                 self.items_changed();
                 self.run_openings(now);
             }
             FromExtension::RemoveItems { ids } => {
+                let mut hidden = self.hidden.get_mut(&id);
                 for item in ids {
+                    if let Some(hidden) = hidden.as_mut() {
+                        hidden.remove(&item);
+                    }
                     self.index.remove(id, &item);
                 }
                 self.items_changed();
@@ -1088,24 +1143,35 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
                 outcome,
             } => self.action_done(id, invocation, outcome, now),
             FromExtension::PushView(view) => {
-                self.open_view(id, &view);
+                let contributed = self.view_contributed(id, &view);
+                self.forget_filters(id, &view.id);
+                self.views.push(id, view.clone());
                 self.broadcast(|| ToFrontEnd::PushView {
                     extension: name.clone(),
                     view: view.clone(),
+                    contributed: contributed.clone(),
                 });
             }
-            FromExtension::UpdateView(view) => {
-                self.open_view(id, &view);
-                self.broadcast(|| ToFrontEnd::UpdateView {
-                    extension: name.clone(),
-                    view: view.clone(),
-                });
-            }
+            FromExtension::UpdateView(view) => self.update_view(id, &name, view),
             FromExtension::PopView { view } => {
-                self.views.remove(&(id, view.clone()));
+                self.forget_filters(id, &view);
+                self.views.pop(id, &view);
                 self.broadcast(|| ToFrontEnd::PopView {
                     extension: name.clone(),
                     view: view.clone(),
+                });
+            }
+            FromExtension::ReplaceView { view, with } => {
+                let contributed = self.view_contributed(id, &with);
+                self.forget_filters(id, &view);
+                self.forget_filters(id, &with.id);
+                self.views.pop(id, &view);
+                self.views.push(id, with.clone());
+                self.broadcast(|| ToFrontEnd::ReplaceView {
+                    extension: name.clone(),
+                    view: view.clone(),
+                    with: with.clone(),
+                    contributed: contributed.clone(),
                 });
             }
             FromExtension::JobProgress(job) => self.job_progress(id, &name, job),
@@ -1125,13 +1191,106 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
         }
     }
 
-    /// Keeps a list View's Items, so their Actions can run.
-    fn open_view(&mut self, id: ExtensionId, view: &View) {
-        let items = match &view.content {
-            ViewContent::List { items } => items.clone(),
-            _ => Vec::new(),
+    /// Replaces an open View. Each menu filtering a list View is sent the
+    /// new Items that match its filter along with it.
+    fn update_view(&mut self, id: ExtensionId, name: &str, view: View) {
+        let contributed = self.view_contributed(id, &view);
+        let view_id = view.id.clone();
+        let filtered = self.views.update(id, view.clone())
+            && self
+                .views
+                .get(id, &view_id)
+                .is_some_and(Open::filtered_here);
+        if !filtered {
+            self.forget_filters(id, &view_id);
+        }
+        let ids: Vec<FrontEndId> = self.sessions.keys().copied().collect();
+        for front_end in ids {
+            let Some(session) = self.sessions.get(&front_end) else {
+                continue;
+            };
+            session.send(ToFrontEnd::UpdateView {
+                extension: name.to_owned(),
+                view: view.clone(),
+                contributed: contributed.clone(),
+            });
+            if let Some(text) = session.filter(id, &view_id).map(str::to_owned) {
+                self.send_filtered(front_end, id, &view_id, text);
+            }
+        }
+    }
+
+    /// No menu filters the View any more: it was pushed afresh or popped.
+    fn forget_filters(&mut self, id: ExtensionId, view: &str) {
+        for session in self.sessions.values_mut() {
+            session.set_filter(id, view, String::new());
+        }
+    }
+
+    /// A menu typed `text` into one of an Extension's list Views. The Daemon
+    /// filters it and answers, unless the Extension filters it itself.
+    fn filter_view(&mut self, front_end: FrontEndId, extension: &str, view: &str, text: String) {
+        let Some(id) = self.extension_named(extension) else {
+            return;
         };
-        self.views.insert((id, view.id.clone()), items);
+        let Some(open) = self.views.get(id, view) else {
+            return;
+        };
+        if !matches!(open.view.content, ViewContent::List { .. }) {
+            return;
+        }
+        if open.filters_itself() {
+            self.extensions[id.0].send(ToExtension::FilterView {
+                view: view.to_owned(),
+                text,
+            });
+            return;
+        }
+        let Some(session) = self.sessions.get_mut(&front_end) else {
+            return;
+        };
+        session.set_filter(id, view, text.clone());
+        if !text.is_empty() {
+            self.send_filtered(front_end, id, view, text);
+        }
+    }
+
+    fn send_filtered(&mut self, front_end: FrontEndId, id: ExtensionId, view: &str, text: String) {
+        let matches = self
+            .views
+            .filter(id, view, &text, &mut self.matcher, &mut self.tiers);
+        if let Some(session) = self.sessions.get(&front_end) {
+            session.send(ToFrontEnd::FilteredView {
+                extension: self.extensions[id.0].name().to_owned(),
+                view: view.to_owned(),
+                text,
+                matches,
+            });
+        }
+    }
+
+    /// The Contributed actions on a list View's Items, by the Item kinds it
+    /// has. Other Views have none.
+    fn view_contributed(
+        &self,
+        owner: ExtensionId,
+        view: &View,
+    ) -> BTreeMap<String, Vec<OfferedAction>> {
+        let mut by_kind = BTreeMap::new();
+        let ViewContent::List { items, .. } = &view.content else {
+            return by_kind;
+        };
+        let mut seen: HashSet<&str> = HashSet::new();
+        for item in items {
+            let kind = item.kind.name();
+            if seen.insert(kind) {
+                let offered = self.contributed_for(owner, kind, &[]);
+                if !offered.is_empty() {
+                    by_kind.insert(kind.to_owned(), offered);
+                }
+            }
+        }
+        by_kind
     }
 
     fn items_changed(&mut self) {
@@ -1318,6 +1477,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             via_alias: None,
             searched: false,
             update: Update::None,
+            filters: Vec::new(),
         };
         session.send(ToFrontEnd::Status {
             down: self.down.clone(),
@@ -1326,6 +1486,22 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             session.send(ToFrontEnd::JobProgress {
                 extension: self.extensions[ext.0].name().to_owned(),
                 job: job.clone(),
+            });
+        }
+        // A menu that restarted shows the Views it had, bottom first, with
+        // nothing typed into them: a list that filters itself lists every
+        // Item again.
+        for open in self.views.iter() {
+            if open.filters_itself() {
+                self.extensions[open.extension.0].send(ToExtension::FilterView {
+                    view: open.view.id.clone(),
+                    text: String::new(),
+                });
+            }
+            session.send(ToFrontEnd::PushView {
+                extension: self.extensions[open.extension.0].name().to_owned(),
+                view: open.view.clone(),
+                contributed: self.view_contributed(open.extension, &open.view),
             });
         }
         self.sessions.insert(id, session);
@@ -1385,10 +1561,16 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
                 if extension == OWN {
                     self.take_argument_form(id, &view);
                 } else if let Some(ext) = self.extension_named(&extension) {
-                    self.views.remove(&(ext, view.clone()));
+                    self.forget_filters(ext, &view);
+                    self.views.pop(ext, &view);
                     self.extensions[ext.0].send(ToExtension::ViewPopped { view });
                 }
             }
+            FromFrontEnd::FilterView {
+                extension,
+                view,
+                text,
+            } => self.filter_view(id, &extension, &view, text),
             FromFrontEnd::Closed => self.closed(Some(id)),
             // The menu may open on the empty query, which may have been
             // ranked hours ago.
@@ -1538,6 +1720,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             .find(ext_id, &view.item)
             .and_then(|slot| self.index.entry(slot))
             .map(|entry| &entry.item)
+            .or_else(|| self.hidden.get(&ext_id)?.get(&view.item))
         else {
             return if now.duration_since(since) < OPEN_VIEW_TIMEOUT {
                 Ok(None)
@@ -1745,13 +1928,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
                 .map(|live| &live.item),
         };
         // Or an Item of one of the owner's list Views.
-        let in_view = || {
-            self.views
-                .iter()
-                .filter(|((ext, _), _)| *ext == owner)
-                .flat_map(|(_, items)| items)
-                .find(|item| item.id == result.id)
-        };
+        let in_view = || self.views.item(owner, &result.id);
         let item = searched.or_else(in_view).ok_or_else(gone)?;
 
         let own = (action.extension == result.extension)
@@ -1788,6 +1965,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             session.send(ToFrontEnd::PushView {
                 extension: OWN.to_owned(),
                 view: arguments::form(id.clone(), &wanted.title, &wanted.arguments, &arguments),
+                contributed: BTreeMap::new(),
             });
             self.argument_forms.insert(
                 id,
@@ -3061,7 +3239,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
         let (extension, mut contributed) = match owner {
             Some(owner) => (
                 self.extensions[owner.0].name().to_owned(),
-                self.contributed_for(owner, &item),
+                self.contributed_for(owner, item.kind.name(), &item.actions),
             ),
             None => (OWN.to_owned(), Vec::new()),
         };
@@ -3074,15 +3252,19 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
         })
     }
 
-    /// Other running Extensions' Actions for `item`'s kind, in Extension order.
-    /// When a shortcut clashes, the owner's binding wins, then the earlier
-    /// Extension's.
-    fn contributed_for(&self, owner: ExtensionId, item: &Item) -> Vec<OfferedAction> {
-        let Some(offered) = self.contributed.get(item.kind.name()) else {
+    /// Other running Extensions' Actions for Items of `kind`, in Extension
+    /// order. When a shortcut clashes, the owner's binding in `own` wins, then
+    /// the earlier Extension's.
+    fn contributed_for(
+        &self,
+        owner: ExtensionId,
+        kind: &str,
+        own: &[Action],
+    ) -> Vec<OfferedAction> {
+        let Some(offered) = self.contributed.get(kind) else {
             return Vec::new();
         };
-        let mut taken: Vec<&str> = item
-            .actions
+        let mut taken: Vec<&str> = own
             .iter()
             .filter_map(|action| action.shortcut.as_deref())
             .collect();

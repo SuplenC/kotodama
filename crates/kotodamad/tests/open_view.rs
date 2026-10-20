@@ -4,6 +4,7 @@
 
 mod common;
 
+use std::collections::BTreeMap;
 use std::time::Duration;
 
 use common::*;
@@ -110,6 +111,7 @@ fn the_menu_opens_once_the_view_the_items_primary_action_pushes_is_there() {
             ToFrontEnd::PushView {
                 extension: "git".into(),
                 view: branches_view(),
+                contributed: BTreeMap::new(),
             },
             opened("git/branches"),
         ]
@@ -230,6 +232,7 @@ fn a_view_that_takes_too_long_opens_the_search_and_may_still_come() {
         [ToFrontEnd::PushView {
             extension: "git".into(),
             view: branches_view(),
+            contributed: BTreeMap::new(),
         }],
         "pushed over the search, and not opened twice"
     );
@@ -311,6 +314,7 @@ fn a_toggle_or_open_while_a_view_is_awaited_waits_for_it_so_the_search_never_sho
             ToFrontEnd::PushView {
                 extension: "git".into(),
                 view: branches_view(),
+                contributed: BTreeMap::new(),
             },
             opened("git/branches"),
             ToFrontEnd::Toggle,
@@ -344,4 +348,79 @@ fn a_toggle_held_back_goes_through_once_the_menus_open_on_the_search_without_the
 
     h.advance(Duration::from_secs(1));
     assert_eq!(sent(&menu), [opened("git/branches"), ToFrontEnd::Toggle]);
+}
+
+/// The calculator's `history` Item, hidden or not, whose primary Action
+/// shows its history.
+fn calculator_history(hidden: bool) -> Item {
+    let mut history = item(
+        "history",
+        "Calculator history",
+        ItemKind::Url {
+            url: "calc:history".into(),
+        },
+    );
+    history.actions = vec![action("show-history")];
+    history.hidden = hidden;
+    history
+}
+
+#[test]
+fn a_hidden_item_never_shows_in_the_search_but_opens_its_view() {
+    // An Extension with only Live queries names its View with a hidden Item.
+    let mut h = Harness::new(vec![plain("calc")]);
+    let calc = h.up(0);
+    h.add(&calc, vec![calculator_history(true)]);
+    h.advance(Duration::from_secs(10));
+    let menu = h.front_end();
+    let command = h.front_end();
+    calc.drain();
+
+    assert_eq!(titles(&h.query(&menu, "calculator history")), [""; 0]);
+    assert_eq!(titles(&h.query(&menu, "")), [""; 0]);
+
+    open_on(&mut h, &command, "calc/history");
+    ran(&calc, "show-history", "history");
+}
+
+#[test]
+fn an_item_shows_in_the_search_only_while_it_isnt_hidden() {
+    let mut h = Harness::new(vec![plain("calc")]);
+    let calc = h.up(0);
+    let menu = h.front_end();
+    h.add(&calc, vec![calculator_history(true)]);
+    h.add(&calc, vec![calculator_history(false)]);
+    assert_eq!(
+        titles(&h.query(&menu, "calculator history")),
+        ["Calculator history"]
+    );
+
+    h.add(&calc, vec![calculator_history(true)]);
+    assert_eq!(titles(&h.query(&menu, "calculator history")), [""; 0]);
+}
+
+#[test]
+fn a_removed_hidden_item_no_longer_opens_its_view() {
+    let mut h = Harness::new(vec![plain("calc")]);
+    let calc = h.up(0);
+    h.add(&calc, vec![calculator_history(true)]);
+    h.send(
+        &calc,
+        FromExtension::RemoveItems {
+            ids: vec!["history".into()],
+        },
+    );
+    h.advance(Duration::from_secs(10));
+    let menu = h.front_end();
+    let command = h.front_end();
+    calc.drain();
+
+    open_on(&mut h, &command, "calc/history");
+    assert_eq!(calc.drain(), [], "nothing runs");
+    assert!(
+        sent(&menu)
+            .iter()
+            .any(|message| matches!(message, ToFrontEnd::ActionFailed { .. })),
+        "the menus open on the search and say why"
+    );
 }

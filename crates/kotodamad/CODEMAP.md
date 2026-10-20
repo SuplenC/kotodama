@@ -6,7 +6,8 @@ The Daemon. Maintained by hand: fix stale lines when you find them, and update t
 - `main.rs`: binary entry; calls `run`.
 - `daemon.rs`: the state machine. `Daemon::handle(Event)` is the one entry point; `Event`, `Output`, `Launcher`/`Desktop` traits.
   - `Candidate` and `Candidate::rank`: the full Result order (Tier, then Learned choices/Frecency, then kind order; ADR 0006, 0011).
-  - `Session`: per-Front-end state (query, shown Results, open Views); `FromFrontEnd::Viewport` handling keeps visible rows stable (ADR 0003).
+  - `Session`: per-Front-end state (query, shown Results, list View filters); `FromFrontEnd::Viewport` handling keeps visible rows stable (ADR 0003).
+  - Views: `Daemon::filter_view` and `send_filtered` (a list View's filter, or `ToExtension::FilterView` when it filters itself), `view_contributed` (Contributed actions by Item kind), `front_end_up` re-sends the open Views to a Front end that connects. Hidden Items (ADR 0015) live in `Daemon::hidden`, outside the Index, for `--view` alone.
   - `Daemon::query`, `Daemon::empty_query`: searching, and what shows before typing. `Daemon::refresh` narrows a search to the last one's matches (`Narrowing`, forgotten on the empty query); `Daemon::add_near_misses` adds Near misses when real matches leave rows empty (ADR 0013).
   - Own Results under `OWN = "kotodama"` (ADR 0005): `FORGET`, `CLEAR_HISTORY`, `UNDO` (ADR 0010). Limits `MAX_RESULTS`, `MAX_LIVE_RESULTS`.
 - `rank.rs`: match quality. `Tier`, `Query` (folding, `searches_subtitles`), `Letters` (character sets as bits), `Filter` (what lets a search skip Items before nucleo), `Haystack`, `fold_text`. `Tiers::near_miss`, `Tiers::near_miss_highlights` and `LETTERS_PER_TYPO`: typo tolerance (ADR 0013).
@@ -17,6 +18,7 @@ The Daemon. Maintained by hand: fix stale lines when you find them, and update t
 - `empty_query.rs`: `EmptyQuery::from_config`, the empty-query menu.
 - `keywords.rs`: Aliases and Quicklinks from config (`Keywords`, `Quicklink::command`, `percent_encode`).
 - `open_view.rs`: `kotodama open --view` (ADR 0014): `ViewName` (`<extension>/<item>`), `Opening`. The Daemon side is `daemon.rs:Daemon::open_on_view` (runs the Item's primary Action, holds `Open`/`Toggle` back until the View is there, `OPEN_VIEW_TIMEOUT`).
+- `views.rs`: `Views`, every View Extensions have open, the top last; `Views::filter` matches a list View's Items with the search's matcher and Tiers, narrowing as the user types on (`Narrowing`), highlights for the first `HIGHLIGHTED`.
 - `arguments.rs`: text after a keyword filling an Action's Arguments, and the form for missing ones.
 - `config.rs`: `load` (merge every `*.toml` in config dirs), `watch` (a `kotodama_extension::watch::Watcher` on thread `config`), `extension_table` (`[extensions.<name>]`).
 - `discovery.rs`: `discover` (`<dir>/*/manifest.toml`), `watch` for Extension dirs (a `Watcher` on thread `extensions`); `Found`.

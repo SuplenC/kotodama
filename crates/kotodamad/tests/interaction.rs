@@ -70,7 +70,9 @@ fn pushed(ui: &FrontEnd) -> Vec<(String, View)> {
     ui.drain()
         .into_iter()
         .filter_map(|message| match message {
-            ToFrontEnd::PushView { extension, view } => Some((extension, view)),
+            ToFrontEnd::PushView {
+                extension, view, ..
+            } => Some((extension, view)),
             _ => None,
         })
         .collect()
@@ -206,6 +208,7 @@ fn branches() -> View {
                     url: "https://git/main".into(),
                 },
             )],
+            filters_itself: false,
         },
     }
 }
