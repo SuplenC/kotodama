@@ -7,12 +7,9 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
+kotodama-extension = { path = "../kotodama-extension", features = ["watch"] }
 kotodama-protocol = { path = "../kotodama-protocol" }
-notify = "8"
 shlex = "2"
-
-[target.'cfg(target_os = "linux")'.dependencies]
-libc = "0.2"
 
 [dev-dependencies]
 kotodamad = { path = "../kotodamad" }

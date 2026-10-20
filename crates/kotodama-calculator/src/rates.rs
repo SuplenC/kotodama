@@ -117,8 +117,8 @@ pub fn fetch(curl: &str, url: &str, cache: Option<&Path>) -> Result<Table, Strin
     if let Some(cache) = cache
         && let Err(err) = save(cache, &output.stdout)
     {
-        eprintln!(
-            "kotodama-calculator: couldn't cache the exchange rates in {}: {err}",
+        kotodama_extension::log!(
+            "couldn't cache the exchange rates in {}: {err}",
             cache.display()
         );
     }

@@ -8,15 +8,14 @@
 //! meaning, and subdirectories (such as `extensions/`) are ignored.
 
 use std::path::{Path, PathBuf};
-use std::sync::mpsc::{self, RecvTimeoutError, Sender};
+use std::sync::mpsc::Sender;
 use std::time::Duration;
 use std::{fmt, fs, io};
 
+use kotodama_extension::watch::{RecursiveMode, Watcher, notify};
 use kotodama_protocol::{Table, Value};
-use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 
 use crate::daemon::Event;
-use crate::host::spawn;
 
 /// How long the files must stay still before a reload, so an editor's save,
 /// often several writes and a rename, is read once and whole.
@@ -61,38 +60,23 @@ pub fn load(dirs: &[PathBuf]) -> Result<Table, Error> {
 /// Watches `dirs` and sends [`Event::Config`] with the reloaded config after
 /// each change. A load that fails is logged and sends nothing, so the Daemon
 /// keeps the last good config. Watching stops when the watcher is dropped.
-pub fn watch(dirs: Vec<PathBuf>, events: Sender<Event>) -> notify::Result<RecommendedWatcher> {
-    let (changed, changes) = mpsc::channel::<()>();
+pub fn watch(dirs: Vec<PathBuf>, events: Sender<Event>) -> notify::Result<Watcher> {
     let filter = dirs.clone();
-    let mut watcher = notify::recommended_watcher(move |event: notify::Result<notify::Event>| {
-        if let Ok(event) = event
-            && event.paths.iter().any(|path| is_config_file(&filter, path))
+    let watcher = Watcher::start(
+        RecursiveMode::NonRecursive,
+        SETTLE,
+        move |event, _| event.paths.iter().any(|path| is_config_file(&filter, path)),
         {
-            let _ = changed.send(());
-        }
-    })?;
-    for dir in &dirs {
-        if let Err(err) = watcher.watch(dir, RecursiveMode::NonRecursive) {
-            log::debug!("not watching {}: {err}", dir.display());
-        }
-    }
-    spawn("config".into(), move || {
-        while changes.recv().is_ok() {
-            loop {
-                match changes.recv_timeout(SETTLE) {
-                    Ok(()) => continue,
-                    Err(RecvTimeoutError::Timeout) => break,
-                    Err(RecvTimeoutError::Disconnected) => return,
-                }
-            }
-            match load(&dirs) {
+            let dirs = dirs.clone();
+            move |_| match load(&dirs) {
                 Ok(config) => {
                     let _ = events.send(Event::Config(config));
                 }
                 Err(err) => log::error!("keeping the last good config: {err}"),
             }
-        }
-    });
+        },
+    )?;
+    watcher.watch(dirs);
     Ok(watcher)
 }
 

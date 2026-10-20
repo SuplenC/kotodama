@@ -4,52 +4,22 @@
 //! them all, newest first, and clears them. What a password manager marks
 //! sensitive is never kept. See `items.rs` for the config table.
 
-use std::io::{self, Stdout};
 use std::path::PathBuf;
 use std::process::ExitCode;
-use std::sync::mpsc::{self, RecvTimeoutError};
-use std::thread;
+use std::sync::mpsc::RecvTimeoutError;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use kotodama_clipboard::copied::{self, Copied};
 use kotodama_clipboard::history::{Content, History, Limits};
 use kotodama_clipboard::items::{self, CLEAR, COPY, DELETE, DETAIL_VIEW, HISTORY, LIST_VIEW};
 use kotodama_clipboard::wayland::{Change, Clipboard};
-use kotodama_protocol::{
-    Bytes, Channel, ChannelWriter, Clipboard as Paste, FromExtension, Hello, Outcome, ToExtension,
-    WireFormat,
-};
+use kotodama_extension::{Connection, Event, Writer};
+use kotodama_protocol::{Bytes, Clipboard as Paste, FromExtension, Outcome, ToExtension};
 
 const GONE: &str = "That clip is no longer in the clipboard history";
 
-enum Event {
-    Message(ToExtension),
-    Clipboard(Change),
-    /// The Daemon hung up, or its messages can't be read any more.
-    Hangup,
-}
-
-/// Keeps resident memory down, as the Daemon does: one malloc arena, and no
-/// transparent huge pages.
-fn lean_memory() {
-    #[cfg(target_os = "linux")]
-    // SAFETY: both calls only set process-wide flags, before any thread starts.
-    unsafe {
-        libc::prctl(libc::PR_SET_THP_DISABLE, 1, 0, 0, 0);
-        #[cfg(target_env = "gnu")]
-        libc::mallopt(libc::M_ARENA_MAX, 1);
-    }
-}
-
 fn main() -> ExitCode {
-    lean_memory();
-    match run() {
-        Ok(()) => ExitCode::SUCCESS,
-        Err(err) => {
-            eprintln!("kotodama-clipboard: {err}");
-            ExitCode::FAILURE
-        }
-    }
+    kotodama_extension::main("kotodama-clipboard", run)
 }
 
 /// `$XDG_STATE_HOME/kotodama/clipboard`.
@@ -71,36 +41,11 @@ fn now() -> u64 {
 
 fn run() -> Result<(), String> {
     let history = History::open(&state_dir()?);
-    let channel = Channel::handshake(io::stdin(), io::stdout(), &Hello::new(&WireFormat::ALL))
-        .map_err(|err| err.to_string())?;
-    let (mut reader, writer) = channel.split();
-    let (events, received) = mpsc::channel();
-
-    let messages = events.clone();
-    thread::Builder::new()
-        .name("protocol".into())
-        .stack_size(256 * 1024)
-        .spawn(move || {
-            loop {
-                match reader.recv::<ToExtension>() {
-                    Ok(Some(message)) => {
-                        if messages.send(Event::Message(message)).is_err() {
-                            return;
-                        }
-                    }
-                    Ok(None) => break,
-                    Err(err @ kotodama_protocol::Error::Decode { .. }) => {
-                        eprintln!("kotodama-clipboard: skipped a message: {err}");
-                    }
-                    Err(err) => {
-                        eprintln!("kotodama-clipboard: {err}");
-                        break;
-                    }
-                }
-            }
-            let _ = messages.send(Event::Hangup);
-        })
-        .map_err(|err| err.to_string())?;
+    let Connection {
+        writer,
+        events,
+        received,
+    } = kotodama_extension::connect::<Change>().map_err(|err| err.to_string())?;
 
     let mut extension = Extension {
         writer,
@@ -135,17 +80,15 @@ fn run() -> Result<(), String> {
                 if first && extension.configured {
                     let events = events.clone();
                     extension.clipboard = Clipboard::watch(move |change| {
-                        let _ = events.send(Event::Clipboard(change));
+                        let _ = events.send(Event::Own(change));
                     })
-                    .map_err(|err| {
-                        eprintln!("kotodama-clipboard: not watching the clipboard: {err}")
-                    })
+                    .map_err(|err| kotodama_extension::log!("not watching the clipboard: {err}"))
                     .ok();
                 }
             }
-            Event::Clipboard(Change::Copied(copied)) => extension.copied(copied)?,
+            Event::Own(Change::Copied(copied)) => extension.copied(copied)?,
             // The Daemon starts the Extension again, which connects again.
-            Event::Clipboard(Change::Lost) => return Err("lost the Wayland connection".into()),
+            Event::Own(Change::Lost) => return Err("lost the Wayland connection".into()),
             Event::Hangup => break,
         }
     }
@@ -153,7 +96,7 @@ fn run() -> Result<(), String> {
 }
 
 struct Extension {
-    writer: ChannelWriter<Stdout>,
+    writer: Writer,
     history: History,
     limits: Limits,
     clipboard: Option<Clipboard>,
@@ -218,7 +161,7 @@ impl Extension {
         let recorded = match self.history.record(copied, now(), &self.limits) {
             Ok(recorded) => recorded,
             Err(err) => {
-                eprintln!("kotodama-clipboard: couldn't keep what was copied: {err}");
+                kotodama_extension::log!("couldn't keep what was copied: {err}");
                 return Ok(());
             }
         };

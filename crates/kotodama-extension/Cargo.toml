@@ -1,0 +1,21 @@
+[package]
+name = "kotodama-extension"
+version.workspace = true
+description = "What every Rust Extension of Kotodama needs: the protocol over stdio, lean memory, config readers, sending only changed Items, starting programs and watching directories"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[features]
+# The directory watcher, which brings in `notify`. Off unless asked for.
+watch = ["dep:notify"]
+
+[dependencies]
+kotodama-protocol = { path = "../kotodama-protocol" }
+notify = { version = "8", optional = true }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+libc = "0.2"
+
+[dev-dependencies]
+tempfile = "3.27.0"

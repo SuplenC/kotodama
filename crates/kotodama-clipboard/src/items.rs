@@ -67,7 +67,7 @@ pub fn limits(config: &Table) -> Limits {
             _ => Err("isn't a setting"),
         };
         if let Err(err) = set {
-            eprintln!("kotodama-clipboard: config: `{key}` {err}");
+            kotodama_extension::config::warn(format_args!("`{key}` {err}"));
         }
     }
     limits

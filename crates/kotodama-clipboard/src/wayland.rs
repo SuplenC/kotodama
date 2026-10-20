@@ -192,7 +192,7 @@ mod linux {
             };
             if readable {
                 if guard.read().is_err() {
-                    eprintln!("kotodama-clipboard: lost the Wayland connection");
+                    kotodama_extension::log!("lost the Wayland connection");
                     return;
                 }
             } else {
@@ -216,7 +216,7 @@ mod linux {
         for (mime, fd) in to_read {
             match read(fd).and_then(|data| Copied::read(&mime, data)) {
                 Ok(copied) => changed(Change::Copied(copied)),
-                Err(err) => eprintln!("kotodama-clipboard: not kept: {err}"),
+                Err(err) => kotodama_extension::log!("not kept: {err}"),
             }
         }
     }
@@ -336,7 +336,7 @@ mod linux {
                         drop(write);
                         let _ = self.reads.send((mime, read));
                     }
-                    Err(err) => eprintln!("kotodama-clipboard: no pipe to read through: {err}"),
+                    Err(err) => kotodama_extension::log!("no pipe to read through: {err}"),
                 },
                 Choice::Sensitive | Choice::Nothing => {}
             }

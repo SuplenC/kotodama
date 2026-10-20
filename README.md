@@ -155,6 +155,8 @@ The `latency` e2e test types into the real menu with 10k Indexed items and fails
 
 ## Bundled extensions
 
+The Bundled extensions are written in Rust on `kotodama-extension` (`crates/kotodama-extension`), which any Rust Extension can use too. It does the handshake on stdio and reads the Daemon's messages on a thread of its own into one channel, which the Extension's own threads send to as well. It keeps resident memory down, sends Indexed items as changes, reads config settings and logs the ones of the wrong shape, starts programs through the launch prefix, detached from the Extension, and, with its `watch` feature, watches directories and acts once they settle after a change. Its crate docs show a whole Extension.
+
 ### Apps
 
 `kotodama-apps` (`crates/kotodama-apps`) makes every desktop application an Item of kind `app`. It reads the `.desktop` files in the `applications` directory of `$XDG_DATA_HOME` and each of `$XDG_DATA_DIRS`, and watches them, so an app installed, changed or removed while it runs shows up, changes or goes within a moment. It follows the Desktop Entry Specification: a file in a more important directory replaces one with the same desktop id, `Hidden`, `NoDisplay`, `OnlyShowIn`, `NotShowIn` and `TryExec` leave entries out, and names, generic names, comments and keywords are read in the user's language.

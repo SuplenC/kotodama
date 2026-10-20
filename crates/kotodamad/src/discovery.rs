@@ -3,16 +3,14 @@
 
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::mpsc::{self, RecvTimeoutError, Sender};
-use std::sync::{Arc, Mutex};
+use std::sync::mpsc::Sender;
 use std::time::Duration;
 
+use kotodama_extension::watch::{RecursiveMode, Watcher, notify};
 use kotodama_protocol::Manifest;
-use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use regex::Regex;
 
 use crate::daemon::{Event, OWN};
-use crate::host::spawn;
 
 /// How long the Extension directories must stay still before they are read
 /// again, so a package install that writes many files is read once, whole.
@@ -97,57 +95,36 @@ fn load(dir: &Path, manifest_path: &Path) -> Result<Found, String> {
 /// change: an Extension directory added, removed or renamed, or a
 /// `manifest.toml` written. Files an Extension writes in its own directory
 /// are ignored. Watching stops when the watcher is dropped.
-pub fn watch(
-    dirs: Vec<PathBuf>,
-    events: Sender<Event>,
-) -> notify::Result<Arc<Mutex<RecommendedWatcher>>> {
-    let (changed, changes) = mpsc::channel::<()>();
+pub fn watch(dirs: Vec<PathBuf>, events: Sender<Event>) -> notify::Result<Watcher> {
     let filter = dirs.clone();
-    let watcher = Arc::new(Mutex::new(notify::recommended_watcher(
-        move |event: notify::Result<notify::Event>| {
-            if let Ok(event) = event
-                && event.paths.iter().any(|path| is_relevant(&filter, path))
-            {
-                let _ = changed.send(());
-            }
-        },
-    )?));
-    watch_all(&watcher, &dirs);
-
-    let watching = Arc::clone(&watcher);
-    spawn("extensions".into(), move || {
-        while changes.recv().is_ok() {
-            loop {
-                match changes.recv_timeout(SETTLE) {
-                    Ok(()) => continue,
-                    Err(RecvTimeoutError::Timeout) => break,
-                    Err(RecvTimeoutError::Disconnected) => return,
-                }
-            }
+    let first = watched(&dirs);
+    let watcher = Watcher::start(
+        RecursiveMode::NonRecursive,
+        SETTLE,
+        move |event, _| event.paths.iter().any(|path| is_relevant(&filter, path)),
+        move |watcher| {
             // New Extension directories need watching for their Manifests.
-            watch_all(&watching, &dirs);
+            watcher.watch(watched(&dirs));
             let _ = events.send(Event::Extensions(discover(&dirs)));
-        }
-    });
+        },
+    )?;
+    watcher.watch(first);
     Ok(watcher)
 }
 
-/// Watches each Extension directory and each Extension in it, without
+/// Each Extension directory and each Extension in it, to watch without
 /// recursing: deeper changes are an Extension's own business.
-fn watch_all(watcher: &Mutex<RecommendedWatcher>, dirs: &[PathBuf]) {
-    let mut watcher = watcher.lock().unwrap_or_else(|poison| poison.into_inner());
+fn watched(dirs: &[PathBuf]) -> Vec<PathBuf> {
+    let mut watched = dirs.to_vec();
     for dir in dirs {
-        if let Err(err) = watcher.watch(dir, RecursiveMode::NonRecursive) {
-            log::debug!("not watching {}: {err}", dir.display());
-            continue;
-        }
         for entry in fs::read_dir(dir).into_iter().flatten().flatten() {
             let path = entry.path();
             if path.is_dir() {
-                let _ = watcher.watch(&path, RecursiveMode::NonRecursive);
+                watched.push(path);
             }
         }
     }
+    watched
 }
 
 /// An Extension directory itself, or a Manifest in one.

@@ -12,11 +12,9 @@ fend-core = "1.5.8"
 # Dates and time zones, which fend can't do. The time zone database is the
 # system's (`/usr/share/zoneinfo`, or `$TZDIR`), never bundled.
 jiff = { version = "0.2.38", default-features = false, features = ["std", "tz-system", "tzdb-zoneinfo"] }
+kotodama-extension = { path = "../kotodama-extension" }
 kotodama-protocol = { path = "../kotodama-protocol" }
 serde_json = "1.0.154"
-
-[target.'cfg(target_os = "linux")'.dependencies]
-libc = "0.2"
 
 [dev-dependencies]
 # The answer benchmark runs the real Daemon in process.

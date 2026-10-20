@@ -213,7 +213,7 @@ impl History {
         // What was copied is kept on disk and in memory either way, so the
         // Extension still shows it; a stale index only loses it on restart.
         if let Err(err) = self.save() {
-            eprintln!("kotodama-clipboard: couldn't save the history index: {err}");
+            kotodama_extension::log!("couldn't save the history index: {err}");
         }
         Ok(Recorded { id, removed })
     }
@@ -423,5 +423,5 @@ fn fnv1a(data: &[u8]) -> u64 {
 }
 
 fn warn(message: &str) {
-    eprintln!("kotodama-clipboard: {message}");
+    kotodama_extension::log!("{message}");
 }
