@@ -270,6 +270,12 @@ pub const SUBTITLE_LETTERS: usize = 3;
 /// Text folded, character for character, for nucleo to match: lowercase and
 /// without accents.
 pub fn fold_text(text: &str) -> String {
+    if text.is_ascii() {
+        // HAZARD: one pass over the bytes, vectorised: an ASCII character
+        // folds to its lowercase, and nearly every text is ASCII. Folding
+        // it a character at a time was 40% of indexing a batch.
+        return text.to_ascii_lowercase();
+    }
     text.chars().map(fold).collect()
 }
 
@@ -346,19 +352,23 @@ impl Folded {
         let title = fold_text(&item.title);
         let words = fold_text(&words);
         let subtitle = fold_text(item.subtitle.as_deref().unwrap_or(""));
-        let subtitle_initials = initials(&subtitle, None);
-        let initials = initials(&title, Some(&item.title)) | initials(&words, None);
-        let letters = Letters::in_text(title.chars().chain(words.chars()));
+        let mut title_starts = Vec::new();
+        let mut words_starts = Vec::new();
+        let initials = starts_and_initials(&title, Some(&item.title), &mut title_starts)
+            | starts_and_initials(&words, None, &mut words_starts);
+        // Where the subtitle's words start isn't kept.
+        let subtitle_initials = if subtitle.is_ascii() {
+            ascii_starts(subtitle.as_bytes(), None, |_| {})
+        } else {
+            self::initials(&subtitle, None)
+        };
+        let letters = Letters::in_str(&title) | Letters::in_str(&words);
+        let every_letter = letters | Letters::in_str(&subtitle);
         let (title, words, subtitle) = (
             Utf32String::from(title),
             Utf32String::from(words),
             Utf32String::from(subtitle),
         );
-        let every_letter = letters | Letters::in_text(subtitle.slice(..).chars());
-        let mut title_starts = Vec::new();
-        word_starts(title.slice(..), Some(&item.title), &mut title_starts);
-        let mut words_starts = Vec::new();
-        word_starts(words.slice(..), None, &mut words_starts);
         Folded {
             title,
             words,
@@ -421,6 +431,26 @@ impl Letters {
     /// Every character of a text, and [`Letters::OTHER`].
     fn in_text(chars: impl Iterator<Item = char>) -> Letters {
         chars.map(Letters::of).fold(Letters::OTHER, BitOr::bitor)
+    }
+
+    /// Every character of `text`, and [`Letters::OTHER`], as
+    /// [`Letters::in_text`] gives them.
+    fn in_str(text: &str) -> Letters {
+        if !text.is_ascii() {
+            return Letters::in_text(text.chars());
+        }
+        // Letters and digits each fit 32 bits, so four bytes' bits go in a
+        // 128-bit register.
+        let (mut letters, mut digits) = (0u32, 0u32);
+        // HAZARD: vectorised: no branch, call or early exit in this loop. It
+        // runs over every text an Extension sends.
+        for &byte in text.as_bytes() {
+            let letter = byte.wrapping_sub(b'a');
+            letters |= u32::from(letter < 26) << (letter & 31);
+            let digit = byte.wrapping_sub(b'0');
+            digits |= u32::from(digit < 10) << (digit & 31);
+        }
+        Letters(u64::from(letters) | u64::from(digits) << 26 | Letters::OTHER.0)
     }
 
     #[inline]
@@ -496,6 +526,79 @@ fn initials(folded: &str, original: Option<&str>) -> Letters {
         prev_lower = lower.is_some_and(|(lower, _)| lower);
     }
     set
+}
+
+/// Appends to `starts` where each word of `folded` starts, as [`word_starts`]
+/// finds them, and gives the letters they start with, as [`initials`] does.
+fn starts_and_initials(folded: &str, original: Option<&str>, starts: &mut Vec<u32>) -> Letters {
+    if folded.is_ascii() {
+        let original = original
+            .map(str::as_bytes)
+            .filter(|original| original.len() == folded.len());
+        return ascii_starts(folded.as_bytes(), original, |at| starts.push(at));
+    }
+    let chars: Vec<char> = folded.chars().collect();
+    word_starts(Utf32Str::Unicode(&chars), original, starts);
+    initials(folded, original)
+}
+
+/// Calls `start` with where each word of an ASCII folded text starts, as
+/// [`word_starts`] finds them, and gives the letters they start with, as
+/// [`initials`] does. `original` gives the case, a byte a character.
+fn ascii_starts(folded: &[u8], original: Option<&[u8]>, mut start: impl FnMut(u32)) -> Letters {
+    let mut set = Letters::OTHER;
+    // Whether the byte before this block's first is a letter or digit, and
+    // small in `original`.
+    let (mut alnum_before, mut lower_before) = (0, 0);
+    for (n, chunk) in folded.chunks(BYTES).enumerate() {
+        let first = n * BYTES;
+        let alnum = byte_mask(chunk, |byte| byte.is_ascii_alphanumeric());
+        let (upper, lower) = match original {
+            Some(original) => {
+                let original = &original[first..first + chunk.len()];
+                (
+                    byte_mask(original, |byte| byte.is_ascii_uppercase()),
+                    byte_mask(original, |byte| byte.is_ascii_lowercase()),
+                )
+            }
+            None => (0, 0),
+        };
+        // A word starts at a letter or digit after anything else, or at a
+        // capital after a small letter.
+        let camel = (lower << 1 | lower_before) & upper;
+        let mut starts = alnum & (!(alnum << 1 | alnum_before) | camel);
+        alnum_before = alnum >> (BYTES - 1);
+        lower_before = lower >> (BYTES - 1);
+        while starts != 0 {
+            let at = starts.trailing_zeros() as usize;
+            start((first + at) as u32);
+            set |= Letters::of(char::from(chunk[at]));
+            starts &= starts - 1;
+        }
+    }
+    set
+}
+
+/// How many bytes [`byte_mask`] tests at once: one 128-bit register.
+const BYTES: usize = 16;
+
+/// A bit for each byte of a block: as narrow as the block, so the vectorised
+/// loop widens each byte's test to 16 bits and no further.
+type ByteMask = u16;
+
+/// Bit `k` set where `test` holds for `bytes[k]`, for up to [`BYTES`] bytes.
+/// The bytes past the end are zero, which no caller's `test` passes.
+#[inline]
+fn byte_mask(bytes: &[u8], test: impl Fn(u8) -> bool) -> ByteMask {
+    let mut block = [0; BYTES];
+    block[..bytes.len()].copy_from_slice(bytes);
+    let mut bits = 0;
+    // HAZARD: vectorised: no branch, call or early exit in this loop. It
+    // runs over every text an Extension sends.
+    for (k, &byte) in block.iter().enumerate() {
+        bits |= ByteMask::from(test(byte)) << k;
+    }
+    bits
 }
 
 /// Appends to `starts` where each word of a folded text starts: at a letter
@@ -1070,6 +1173,35 @@ fn one_letter(letter: char, text: Text) -> Option<Tier> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn ascii_text_is_folded_and_split_as_a_character_at_a_time() {
+        for c in (0..128u8).map(char::from) {
+            assert_eq!(fold_text(&c.to_string()), fold(c).to_string(), "{c:?}");
+        }
+        let words = [
+            "getUserName", "VSCode", "a", "x1", "-", "Files", "web-Storm", "HTTPServer", "", " ",
+        ];
+        // Texts across a block of bytes, too.
+        for n in 0..400usize {
+            let text: String = (0..n % 37)
+                .map(|k| words[(n * 7 + k * 3) % words.len()])
+                .collect::<Vec<_>>()
+                .join(["", " ", "_", "\u{1f}"][n % 4]);
+            let folded = fold_text(&text);
+            assert_eq!(folded, text.chars().map(fold).collect::<String>());
+            assert_eq!(Letters::in_str(&folded), Letters::in_text(folded.chars()));
+            for original in [Some(text.as_str()), None] {
+                let mut starts = Vec::new();
+                let initials = starts_and_initials(&folded, original, &mut starts);
+                let chars: Vec<char> = folded.chars().collect();
+                let mut expected = Vec::new();
+                word_starts(Utf32Str::Unicode(&chars), original, &mut expected);
+                assert_eq!(starts, expected, "{text:?}");
+                assert_eq!(initials, self::initials(&folded, original), "{text:?}");
+            }
+        }
+    }
 
     fn tier(text: &str, query: &str) -> Option<Tier> {
         let chars = folded(text);
