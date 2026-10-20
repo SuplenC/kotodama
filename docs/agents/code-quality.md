@@ -4,7 +4,13 @@ How Kotodama's Rust is written. Each rule names its source: Microsoft's Pragmati
 
 New code follows every rule here. Code written before this guide is being brought in line crate by crate (#108); until a crate's turn, edit it in the new style where you touch it, without restyling the rest of the file in the same PR. The mechanical rules are not yet enforced by `rustfmt.toml`, `clippy.toml` or `[workspace.lints]`: they arrive with that rewrite, because turning them on reformats every file. Until then, follow them by hand.
 
-Speed and memory come first (`CLAUDE.md`). Where a rule here costs a measurable amount on the keystroke path or in resident memory, the measurement wins: say so in a comment and in the PR.
+## Performance comes before style
+
+Speed and memory come first (`CLAUDE.md`). On a hot path (anything between a keystroke and the pixels, the index's memory layout, and anything that runs per Item), performance wins over every rule in this guide, readability included. Write the fast version: a hand-rolled loop instead of an iterator chain, `unsafe`-free index tricks, a struct of arrays, a duplicated branch, a long function the optimiser handles better than three small ones. Three conditions keep it honest:
+
+- **It is measured.** The PR shows the instruction count or the benchmark the faster version wins on; a guess at speed does not override a rule.
+- **It says why, once.** A comment above the code names what it is optimising and the number, so the next reader does not "clean it up": `// HAZARD: one pass over the keys, no iterator adapters. This loop is 40% of first_keystroke's instructions.`
+- **It stays on the hot path.** Everything around it (setup, config, errors, tests) still follows the guide.
 
 ## Formatting and layout
 
