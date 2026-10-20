@@ -1673,6 +1673,151 @@ fn an_alias_for_an_action_makes_it_primary() {
 }
 
 #[test]
+fn a_result_reached_through_an_alias_carries_a_badge_naming_it() {
+    let mut h = Harness::with_config(
+        vec![plain("apps")],
+        config("[aliases]\nweb = { extension = \"apps\", item = \"firefox\" }"),
+    );
+    let apps = h.up(0);
+    h.add(&apps, launcher_apps());
+    let ui = h.front_end();
+
+    let by_alias = h.query(&ui, "web private")[0].clone();
+    let by_title = h.query(&ui, "firefox")[0].clone();
+
+    assert_eq!(by_alias.item.title, "Firefox");
+    assert_eq!(by_alias.alias.as_deref(), Some("web"));
+    assert_eq!(by_alias.unavailable, None);
+    assert_eq!(by_title.item.title, "Firefox");
+    assert_eq!(by_title.alias, None, "only a Result the Alias named");
+}
+
+#[test]
+fn an_alias_whose_item_is_gone_shows_a_row_saying_so() {
+    let mut h = Harness::with_config(
+        vec![plain("apps")],
+        config(
+            "[aliases]\nweb = { extension = \"apps\", item = \"firefox\" }\n\
+             notes = { extension = \"notes\", item = \"todo\" }",
+        ),
+    );
+    let apps = h.up(0);
+    h.add(&apps, vec![app("Files")]);
+    let ui = h.front_end();
+
+    let gone = h.query(&ui, "web")[0].clone();
+    let no_extension = h.query(&ui, "notes")[0].clone();
+
+    assert_eq!(gone.extension, "apps");
+    assert_eq!(gone.item.title, "firefox");
+    assert_eq!(gone.alias.as_deref(), Some("web"));
+    assert_eq!(gone.unavailable.as_deref(), Some("No longer in apps"));
+    assert_eq!(gone.item.actions, [], "nothing to run");
+    assert_eq!(no_extension.item.title, "todo");
+    assert_eq!(no_extension.unavailable.as_deref(), Some("No Extension notes"));
+}
+
+#[test]
+fn an_alias_whose_extension_is_down_shows_its_item_greyed_out_and_not_runnable() {
+    let mut h = Harness::with_config(
+        vec![plain("apps")],
+        config("[aliases]\nweb = { extension = \"apps\", item = \"firefox\" }"),
+    );
+    let apps = h.up(0);
+    h.add(&apps, launcher_apps());
+    let ui = h.front_end();
+
+    h.down(&apps);
+    let row = h.query(&ui, "web")[0].clone();
+    run(&mut h, &ui, "apps", "firefox", "apps", "open");
+
+    assert_eq!(row.item.title, "Firefox", "as last seen");
+    assert_eq!(row.alias.as_deref(), Some("web"));
+    assert_eq!(row.unavailable.as_deref(), Some("apps isn't running"));
+    assert_eq!(row.item.actions, []);
+    assert_eq!(row.contributed, []);
+    assert!(
+        ui.drain()
+            .iter()
+            .any(|message| matches!(message, ToFrontEnd::ActionFailed { .. })),
+        "running it anyway fails"
+    );
+}
+
+#[test]
+fn an_alias_runs_again_once_its_extension_is_back() {
+    let mut h = Harness::with_config(
+        vec![plain("apps")],
+        config("[aliases]\nweb = { extension = \"apps\", item = \"firefox\" }"),
+    );
+    let apps = h.up(0);
+    h.add(&apps, launcher_apps());
+    let ui = h.front_end();
+    h.down(&apps);
+    h.advance(Duration::from_secs(60));
+
+    let apps = h.up(0);
+    h.add(&apps, launcher_apps());
+    let row = h.query(&ui, "web")[0].clone();
+
+    assert_eq!(row.item.title, "Firefox");
+    assert_eq!(row.unavailable, None);
+    assert_eq!(row.item.actions[0].id, "open");
+}
+
+#[test]
+fn a_quicklink_opens_with_its_own_opener_or_else_the_default() {
+    let mut h = Harness::with_config(
+        vec![],
+        config(
+            "[quicklink_defaults]\nopener = [\"firefox\", \"--new-tab\"]\n\
+             [quicklinks.yt]\ntitle = \"Search YouTube\"\n\
+             url = \"https://www.youtube.com/results?search_query={query}\"\n\
+             [quicklinks.mail]\nurl = \"https://mail.example.com\"\n\
+             opener = [\"firefox\", \"-P\", \"work\"]",
+        ),
+    );
+    let ui = h.front_end();
+
+    h.query(&ui, "yt cats");
+    run(&mut h, &ui, "kotodama", "quicklink:yt", "kotodama", "open");
+    h.query(&ui, "mail");
+    run(&mut h, &ui, "kotodama", "quicklink:mail", "kotodama", "open");
+
+    assert_eq!(
+        *h.outputs.1.borrow(),
+        [
+            vec![
+                "firefox".to_owned(),
+                "--new-tab".into(),
+                "https://www.youtube.com/results?search_query=cats".into()
+            ],
+            vec![
+                "firefox".into(),
+                "-P".into(),
+                "work".into(),
+                "https://mail.example.com".into()
+            ],
+        ]
+    );
+}
+
+#[test]
+fn a_quicklink_command_with_an_opener_is_skipped_and_the_rest_still_apply() {
+    let mut h = Harness::with_config(
+        vec![],
+        config(
+            "[quicklinks.logs]\ncommand = [\"journalctl\"]\nopener = [\"foot\"]\n\
+             [quicklinks.gh]\ntitle = \"GitHub\"\nurl = \"https://github.com\"",
+        ),
+    );
+    let ui = h.front_end();
+
+    assert_eq!(titles(&h.query(&ui, "logs")), Vec::<&str>::new());
+    assert_eq!(titles(&h.query(&ui, "gh")), ["GitHub"]);
+}
+
+#[test]
 fn a_quicklink_keyword_takes_the_rest_of_the_query_into_its_template() {
     let mut h = Harness::with_config(
         vec![plain("apps")],

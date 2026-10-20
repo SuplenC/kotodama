@@ -132,6 +132,14 @@ _Avoid_: Shortcut, abbreviation
 A user-defined, possibly templated, URL or command opened by a keyword, such as `yt <query>`.
 _Avoid_: Bookmark, web shortcut
 
+**Opener**:
+The program, with its first arguments, that a Quicklink's URL opens with, such as a browser with a profile; `xdg-open` unless the Quicklink or the config names one.
+_Avoid_: Browser, handler
+
+**Unavailable Result**:
+A Result shown greyed out that can't run, with the reason: an Alias whose Item is gone, or whose Extension is down.
+_Avoid_: Broken result, disabled item
+
 **Folder source**:
 A Bundled extension configured with a folder whose contents become Items, such as projects or scripts.
 _Avoid_: Directory scanner, path provider

@@ -132,9 +132,21 @@ url = "https://www.youtube.com/results?search_query={query}"
 
 [quicklinks.logs]
 command = ["foot", "journalctl", "--user", "-fu", "{query}"]
+
+# The opener: the program, and its first arguments, that a URL opens with.
+[quicklinks.mail]
+title = "Work mail"
+url = "https://mail.example.com"
+opener = ["firefox", "-P", "work"]
+
+# The opener of every URL Quicklink that names none.
+[quicklink_defaults]
+opener = ["firefox", "--new-tab"]
 ```
 
-Typing an Alias puts its Result first, ahead of a Learned choice, and what follows it is the Result's Argument; part of an Alias does nothing. Picks through an Alias count for the Alias, not for the Result's own Frecency. Typing a Quicklink's keyword ranks it as an exact match, with Frecency deciding between equals; its row reads `Search YouTube for “cats”`, the keyword alone opens it with an empty `{query}`, and words after a keyword whose template has no `{query}` are ignored. A URL opens with `xdg-open`, and a command runs without a shell. The Daemon's own Results, the Quicklinks, "Clear history" and the Undo Result, belong to the reserved Extension name `kotodama`, and so do the Actions it offers on every Result, `forget` and `clear-extension-history`.
+Typing an Alias puts its Result first, ahead of a Learned choice, and what follows it is the Result's Argument; part of an Alias does nothing. Picks through an Alias count for the Alias, not for the Result's own Frecency. A Result reached through an Alias carries a badge naming it. An Alias whose Item is gone still shows a row, greyed out, saying so, and one whose Extension is down shows its Item as last seen, greyed out; neither runs.
+
+Typing a Quicklink's keyword ranks it as an exact match, with Frecency deciding between equals; its row reads `Search YouTube for “cats”`, the keyword alone opens it with an empty `{query}`, and words after a keyword whose template has no `{query}` are ignored. A Quicklink is also found by its title, ranked like any other title: `youtube` finds "Search YouTube". A URL opens with the Quicklink's `opener`, the URL its last argument, else with the `opener` of `[quicklink_defaults]`, else with `xdg-open`; a browser and a profile, such as `["chromium", "--profile-directory=Work"]`, or any command will do. A Quicklink with a `command` takes no opener. A command runs without a shell. The Daemon's own Results, the Quicklinks, "Clear history" and the Undo Result, belong to the reserved Extension name `kotodama`, and so do the Actions it offers on every Result, `forget` and `clear-extension-history`.
 
 ### Trying it
 
