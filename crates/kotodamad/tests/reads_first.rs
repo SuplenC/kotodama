@@ -22,12 +22,31 @@ fn indexing(extensions: Vec<kotodamad::discovery::Found>) -> (Harness, Receiver<
     (h, indexed)
 }
 
-/// Waits for the indexing thread's next version and hands it to the Daemon.
+/// Waits for the indexing thread's next version and hands it to the Daemon,
+/// with the hot Items it sent before it.
 fn next_version(h: &mut Harness, indexed: &Receiver<Event>) {
-    let event = indexed
-        .recv_timeout(Duration::from_secs(5))
-        .expect("the indexing thread sent nothing");
-    h.event(event);
+    next(h, indexed, |event| matches!(event, Event::Indexed(_)));
+}
+
+/// Waits for the hot Items the indexing thread plans next, and hands them
+/// to the Daemon, with the versions it sent before them.
+fn next_hot(h: &mut Harness, indexed: &Receiver<Event>) {
+    next(h, indexed, |event| matches!(event, Event::Kept(_)));
+}
+
+/// Hands the Daemon what the indexing thread sends, up to the first event
+/// that is `awaited`.
+fn next(h: &mut Harness, indexed: &Receiver<Event>, awaited: fn(&Event) -> bool) {
+    loop {
+        let event = indexed
+            .recv_timeout(Duration::from_secs(5))
+            .expect("the indexing thread sent nothing");
+        let done = awaited(&event);
+        h.event(event);
+        if done {
+            return;
+        }
+    }
 }
 
 fn clip(id: &str, text: &str) -> Item {
@@ -185,6 +204,47 @@ fn an_item_picked_at_half_past_eight_is_hot_by_twenty_past_and_cold_again_later(
             );
         }
     }
+}
+
+#[test]
+fn the_hot_items_are_planned_and_read_on_the_indexing_thread() {
+    let (mut h, indexed) = indexing(vec![plain("apps")]);
+    let apps = h.up(0);
+    let titles = ["Firefox", "Fire Alarm", "Mail"];
+    h.add(&apps, titles.map(app).into());
+    next_version(&mut h, &indexed);
+    let ui = h.front_end();
+    for _ in 0..5 {
+        h.advance_to(8);
+        h.advance(Duration::from_secs(30 * 60));
+        pick(&mut h, &ui, &apps, "fire", "firefox");
+    }
+    // Plans asked for while picking.
+    while let Ok(event) = indexed.recv_timeout(Duration::from_millis(200)) {
+        h.event(event);
+    }
+    advance_to(&mut h, 2, 0);
+    next_hot(&mut h, &indexed);
+    assert_eq!(h.daemon.hot(), []);
+    advance_to(&mut h, 8, 20);
+    assert_eq!(h.daemon.hot(), [], "planned on the Daemon's own thread");
+    next_hot(&mut h, &indexed);
+    let firefox = ("apps".to_owned(), "firefox".to_owned());
+    assert_eq!(h.daemon.hot(), [firefox]);
+}
+
+#[test]
+fn an_item_with_a_keyword_is_read_before_the_keyword_is_typed() {
+    let (mut h, indexed) = indexing(vec![plain("apps")]);
+    let apps = h.up(0);
+    let mut firefox = app("Firefox");
+    firefox.keyword = Some("ff".into());
+    h.add(&apps, vec![firefox, app("Mail")]);
+    next_version(&mut h, &indexed);
+    let firefox = ("apps".to_owned(), "firefox".to_owned());
+    assert_eq!(h.daemon.pinned(), [firefox]);
+    let ui = h.front_end();
+    assert_eq!(titles(&h.query(&ui, "ff")), ["Firefox"]);
 }
 
 #[test]

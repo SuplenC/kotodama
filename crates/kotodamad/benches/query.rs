@@ -166,9 +166,11 @@ impl Setup {
     /// Waits for each batch sent to be indexed, and puts it in.
     fn settle(&mut self) {
         while self.pending > 0 {
-            let indexed = self.indexed.recv().unwrap();
-            self.daemon.handle(indexed, Instant::now());
-            self.pending -= 1;
+            let event = self.indexed.recv().unwrap();
+            if matches!(event, Event::Indexed(_)) {
+                self.pending -= 1;
+            }
+            self.daemon.handle(event, Instant::now());
         }
         self.results.try_iter().for_each(drop);
     }

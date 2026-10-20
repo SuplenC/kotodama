@@ -583,6 +583,11 @@ impl Segment {
         self.keywords.get(keyword).map_or(&[], Vec::as_slice)
     }
 
+    /// The rows of every Item with a keyword.
+    pub fn keyed_rows(&self) -> impl Iterator<Item = &Row> {
+        self.keywords.values().flatten()
+    }
+
     /// The rows whose Item's Identity is `identity`.
     pub fn identified(&self, identity: &str) -> &[Row] {
         self.identities.get(identity).map_or(&[], Vec::as_slice)

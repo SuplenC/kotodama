@@ -62,6 +62,40 @@ struct Resident {
     read: u64,
 }
 
+/// An Item read off its Shelf on another thread, for an [`Index`] holding
+/// the same version of its Segment to keep resident.
+pub struct Read {
+    pub slot: Slot,
+    shelf: u64,
+    at: u64,
+    item: Arc<Item>,
+}
+
+impl Read {
+    /// Where it was read from: its Shelf's id and its place there.
+    pub fn from(&self) -> (u64, u64) {
+        (self.shelf, self.at)
+    }
+}
+
+/// Where the Item in `row` of `segment` is now: its Shelf's id and its place
+/// there.
+pub fn place_of(segment: &Segment, row: Row) -> Option<(u64, u64)> {
+    let (shelf, place) = segment.payload(row)?;
+    Some((shelf.id(), place.at))
+}
+
+/// Reads the Item in `slot` of `segments`, by Extension, off its Shelf.
+pub fn read(segments: &[Arc<Segment>], slot: Slot) -> Option<Read> {
+    let (shelf, place) = segments.get(slot.segment as usize)?.payload(slot.row)?;
+    Some(Read {
+        slot,
+        shelf: shelf.id(),
+        at: place.at,
+        item: Arc::new(shelf.get(place)?),
+    })
+}
+
 /// How many Items that aren't hot stay resident after they were shown: the
 /// Results of a few keystrokes.
 pub const SHOWN_RESIDENT: usize = 256;
@@ -82,6 +116,9 @@ pub struct Index {
     reads: Cell<u64>,
     /// The Items expected to be shown soon, in slot order, kept resident.
     hot: Vec<Slot>,
+    /// The Items a keyword or an Alias names, in slot order, kept resident
+    /// so a keyword typed never waits for a read.
+    pinned: Vec<Slot>,
 }
 
 impl Index {
@@ -258,6 +295,69 @@ impl Index {
         self.trim();
     }
 
+    /// Makes `hot`, in slot order, the Items kept resident whatever is shown,
+    /// without reading them: they were read elsewhere, and kept.
+    pub fn hot_read(&mut self, hot: Vec<Slot>) {
+        self.hot = hot;
+        self.trim();
+    }
+
+    /// Keeps Items read on another thread from the version of their Segment
+    /// this Index holds. One read from another version is never used.
+    pub fn keep(&mut self, reads: Vec<Read>) {
+        let resident = self.resident.get_mut();
+        for Read {
+            slot,
+            shelf,
+            at,
+            item,
+        } in reads
+        {
+            let read = self.reads.get() + 1;
+            self.reads.set(read);
+            resident.insert(
+                slot,
+                Resident {
+                    shelf,
+                    at,
+                    item,
+                    read,
+                },
+            );
+        }
+    }
+
+    /// Every Item with a keyword, in slot order.
+    pub fn keyed_all(&self) -> Vec<Slot> {
+        let mut keyed: Vec<Slot> = self
+            .segments
+            .iter()
+            .enumerate()
+            .flat_map(|(n, segment)| self.slots(n, segment.keyed_rows()))
+            .collect();
+        keyed.sort_unstable();
+        keyed.dedup();
+        keyed
+    }
+
+    /// Makes `pinned`, in slot order, Items kept resident whatever is shown.
+    /// Reads none of them.
+    pub fn pin(&mut self, pinned: Vec<Slot>) {
+        self.pinned = pinned;
+    }
+
+    /// The Items a keyword or an Alias names, kept resident.
+    pub fn pinned(&self) -> &[Slot] {
+        &self.pinned
+    }
+
+    /// Reads back the pinned Items that aren't resident.
+    pub fn read_pinned(&self) {
+        for &slot in &self.pinned {
+            self.item(slot);
+        }
+    }
+
     /// The Items kept resident whatever is shown.
     pub fn hot(&self) -> &[Slot] {
         &self.hot
@@ -267,13 +367,15 @@ impl Index {
     /// [`SHOWN_RESIDENT`] read last, and of those replaced since.
     pub fn trim(&mut self) {
         let resident = self.resident.get_mut();
-        if resident.len() <= self.hot.len() + SHOWN_RESIDENT {
+        if resident.len() <= self.hot.len() + self.pinned.len() + SHOWN_RESIDENT {
             return;
         }
-        let hot = &self.hot;
+        let (hot, pinned) = (&self.hot, &self.pinned);
+        let kept =
+            |slot: &Slot| hot.binary_search(slot).is_ok() || pinned.binary_search(slot).is_ok();
         let mut reads: Vec<u64> = resident
             .iter()
-            .filter(|(slot, _)| hot.binary_search(slot).is_err())
+            .filter(|(slot, _)| !kept(slot))
             .map(|(_, kept)| kept.read)
             .collect();
         let keep_from = if reads.len() > SHOWN_RESIDENT {
@@ -283,12 +385,13 @@ impl Index {
             0
         };
         let segments = &self.segments;
+        let kept_slot = kept;
         resident.retain(|slot, kept| {
             let current = segments
                 .get(slot.segment as usize)
                 .and_then(|segment| segment.payload(slot.row))
                 .is_some_and(|(shelf, place)| kept.shelf == shelf.id() && kept.at == place.at);
-            current && (kept.read >= keep_from || hot.binary_search(slot).is_ok())
+            current && (kept.read >= keep_from || kept_slot(slot))
         });
     }
 

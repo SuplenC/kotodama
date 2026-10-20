@@ -22,7 +22,7 @@ use nucleo_matcher::pattern::{CaseMatching, Normalization, Pattern};
 use nucleo_matcher::{Config, Matcher};
 
 use crate::arguments;
-use crate::clock::{Clock, DAY_SECS, When};
+use crate::clock::{Clock, When};
 use crate::config::extension_table;
 use crate::discovery::Found;
 use crate::empty_query::EmptyQuery;
@@ -30,7 +30,7 @@ use crate::history::{
     Change, Habit, History, IDENTITIES, Picks, ResultKey, Settings, Store, query_key,
 };
 use crate::index::{Index, ItemRef, Slot};
-use crate::indexer::{Indexed, Indexer};
+use crate::indexer::{Indexed, Indexer, Kept, Plan};
 use crate::keywords::{self, Keywords};
 use crate::kind_order::KindOrder;
 use crate::open_view::{Opening, ViewName};
@@ -130,6 +130,9 @@ pub enum Event {
     /// A new version of an Extension's Items, indexed off the keystroke path
     /// (see [`Daemon::index_in_background`]).
     Indexed(Indexed),
+    /// Items to keep resident, read on the indexing thread: the hot ones,
+    /// planned there, and those a keyword or an Alias names.
+    Kept(Kept),
 }
 
 /// How many Results a Front end gets for one query.
@@ -156,10 +159,6 @@ pub const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(5);
 /// How many Items are hot at most: kept resident, and read when the menu
 /// opens (ADR 0017).
 pub const HOT_CAPACITY: usize = 256;
-/// How far ahead of a time of day the Items picked then turn hot.
-const HOT_LEAD_SECS: i64 = 15 * 60;
-/// How long after a time of day the Items picked then stay hot.
-const HOT_GRACE_SECS: i64 = 30 * 60;
 /// How often the hot Items are worked out again, ahead of the time of day.
 const HOT_EVERY: Duration = Duration::from_secs(5 * 60);
 /// How soon after the Index or the History changes they are, once it
@@ -859,6 +858,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
     /// then, and in tests, a change to them is made as its event is handled.
     pub fn index_in_background(&mut self, events: Sender<Event>) {
         self.indexer = Some(Indexer::start(events, self.index.payload_dir()));
+        self.repin();
     }
 
     /// Keeps what a search doesn't read of Indexed items in files in `dir`
@@ -875,8 +875,18 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
 
     /// The hot Items, by Extension name and id, each resident.
     pub fn hot(&self) -> Vec<(String, String)> {
-        self.index
-            .hot()
+        self.resident(self.index.hot())
+    }
+
+    /// The Items a keyword or an Alias names, by Extension name and id, that
+    /// are resident.
+    pub fn pinned(&self) -> Vec<(String, String)> {
+        self.resident(self.index.pinned())
+    }
+
+    /// Those of `slots` that are resident, by Extension name and id.
+    fn resident(&self, slots: &[Slot]) -> Vec<(String, String)> {
+        slots
             .iter()
             .filter(|&&slot| self.index.is_resident(slot))
             .filter_map(|&slot| {
@@ -887,42 +897,65 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
     }
 
     /// Works out the hot Items: those picked most near this time of day,
-    /// from a little before it to a little after, up to the hot capacity.
-    /// Their payloads are read now, so the menu shows them without waiting.
+    /// from a little before it to a little after, up to the hot capacity,
+    /// and reads their payloads, so the menu shows them without waiting. Both
+    /// happen on the indexing thread, when there is one.
     fn plan_hot(&mut self, now: Instant) {
         self.hot_due = now + HOT_EVERY;
         self.hot_versions = (self.index.version(), self.history.version());
-        let mut hot: Vec<(f64, Slot)> = Vec::new();
+        let mut picked = Vec::new();
         if self.hot_capacity > 0 && !self.history.is_empty() {
             self.cache_frecent();
-            let half_life = self.history.settings().half_life_secs;
-            let when = self.when(now);
-            let around = [-HOT_GRACE_SECS, 0, HOT_LEAD_SECS].map(|by| When {
-                at: when.at.saturating_add_signed(by),
-                time_of_day: (i64::from(when.time_of_day) + by).rem_euclid(DAY_SECS as i64) as u32,
-            });
-            for &(slot, picks, _) in &self.frecent {
-                let near = around
-                    .iter()
-                    .map(|&when| picks.habit(when, half_life).near_now)
-                    .fold(0.0, f64::max);
-                if near > 0.0 {
-                    hot.push((near, slot));
-                }
-            }
+            picked.extend(self.frecent.iter().map(|&(slot, picks, _)| (slot, picks)));
         }
-        hot.sort_unstable_by(|a, b| b.0.total_cmp(&a.0).then(a.1.cmp(&b.1)));
-        let mut slots: Vec<Slot> = Vec::with_capacity(self.hot_capacity);
-        for (_, slot) in hot {
-            if slots.len() == self.hot_capacity {
-                break;
-            }
-            if !slots.contains(&slot) {
-                slots.push(slot);
-            }
+        let plan = Plan {
+            picked,
+            when: self.when(now),
+            half_life: self.history.settings().half_life_secs,
+            capacity: self.hot_capacity,
+        };
+        match &mut self.indexer {
+            // Nothing to plan, and nothing hot to let go of.
+            _ if plan.picked.is_empty() && self.index.hot().is_empty() => {}
+            Some(indexer) => indexer.plan(plan),
+            None => self.index.set_hot(plan.hot()),
         }
-        slots.sort_unstable();
-        self.index.set_hot(slots);
+    }
+
+    /// Keeps resident every Item a keyword or an Alias names, so a keyword
+    /// typed never waits for a read. The indexing thread reads them, when
+    /// there is one; otherwise they are read now.
+    fn repin(&mut self) {
+        let aliases = self.aliased();
+        if let Some(indexer) = &mut self.indexer {
+            indexer.pin(aliases);
+        }
+        self.repin_index();
+    }
+
+    /// The Items the Aliases name, by Extension and id.
+    fn aliased(&self) -> Vec<(ExtensionId, String)> {
+        self.keywords
+            .aliases
+            .values()
+            .filter_map(|alias| Some((self.extension_named(&alias.extension)?, alias.item.clone())))
+            .collect()
+    }
+
+    /// Works out again which Items the Index keeps resident for a keyword or
+    /// an Alias, after the Items or the Aliases changed. Reads those that
+    /// aren't resident only when there is no indexing thread to.
+    fn repin_index(&mut self) {
+        let mut pinned = self.index.keyed_all();
+        for (ext, id) in self.aliased() {
+            pinned.extend(self.index.find(ext, &id));
+        }
+        pinned.sort_unstable();
+        pinned.dedup();
+        self.index.pin(pinned);
+        if self.indexer.is_none() {
+            self.index.read_pinned();
+        }
     }
 
     /// Replaces the wall clock, which starts as the system's.
@@ -979,6 +1012,13 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             Event::Config(config) => self.set_config(config),
             Event::Extensions(found) => self.set_extensions(found, now),
             Event::Indexed(indexed) => self.indexed(indexed, now),
+            Event::Kept(Kept { hot, reads }) => {
+                self.index.keep(reads);
+                match hot {
+                    Some(hot) => self.index.hot_read(hot),
+                    None => self.index.trim(),
+                }
+            }
         }
         self.release_held();
         self.flush(now);
@@ -1145,6 +1185,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
     fn forget_run(&mut self, id: ExtensionId) {
         let name = self.extensions[id.0].name().to_owned();
         if self.index.clear(id) {
+            self.repin_index();
             self.mark_late();
         }
         if let Some(indexer) = &mut self.indexer {
@@ -1353,6 +1394,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             }
             None => {
                 self.index.edit(id, edit);
+                self.repin_index();
                 self.items_changed();
                 self.run_openings(now);
             }
@@ -1366,11 +1408,14 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             extension,
             change,
             segment,
+            reads,
         } = indexed;
         if change <= self.stale[extension.0] {
             return;
         }
         self.index.replace(extension, segment);
+        self.index.keep(reads);
+        self.repin_index();
         self.items_changed();
         self.run_openings(now);
     }
@@ -2568,6 +2613,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             .chain([Own::new(clear_history(), OwnAction::ClearHistory)])
             .collect();
         self.keywords = keywords;
+        self.repin();
         self.load_undo_item();
         // The own Items' positions changed, so rows showing them can't be
         // kept where they are.

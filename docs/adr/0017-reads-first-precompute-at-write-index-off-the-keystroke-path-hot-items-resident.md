@@ -14,9 +14,9 @@ The Daemon and the thread share the Segments by `Arc`. Only the Segment being ch
 
 **Hot and cold Items.** A Segment keeps in memory only what a search and ranking read: the search keys above, and each Item's id, Identity, keyword and the Actions it offers. The whole Item is encoded with postcard onto a Shelf. A Shelf is an unlinked file in `$XDG_CACHE_HOME/kotodama` that only its user can read, or memory when there is no file to use (in tests, or after a failed write).
 
-A Shelf is only ever appended to, so a later version never overwrites what an earlier version still reads. Each change writes its Items in one write. When at least half of a Shelf is garbage, the live payloads move to a new Shelf in one read and one write. An Item is read back off the Shelf when a Result shows it. It stays resident while it is hot, or while it is among the 256 Items read last. Every other Item is cold.
+A Shelf is only ever appended to, so a later version never overwrites what an earlier version still reads. Each change writes its Items in one write. When at least half of a Shelf is garbage, the live payloads move to a new Shelf in one read and one write. An Item is read back off the Shelf when a Result shows it. It stays resident while it is hot, while a keyword or an Alias names it, or while it is among the 256 Items read last. Every other Item is cold. The indexing thread reads the Items a keyword or an Alias names when it builds the version holding them, and sends them along with it, so a keyword typed never waits for a read.
 
-The hot Items are the ones the History predicts. The Daemon works them out every 5 minutes, and a second after the Index or the History changes. It looks at the picked Items whose time-of-day habit (ADR 0009) is above zero anywhere from 30 minutes before now to 15 minutes after, and takes the 256 with the strongest habit. It reads their payloads in, so an app picked at 8:30 every morning is resident by 8:15 and goes back to cold in the afternoon.
+The hot Items are the ones the History predicts. They are worked out every 5 minutes, and a second after the Index or the History changes. The Daemon sends the indexing thread a copy of the picked Items' picks; the thread looks at those whose time-of-day habit (ADR 0009) is above zero anywhere from 30 minutes before now to 15 minutes after, and takes the 256 with the strongest habit. It reads their payloads off the Segments the Daemon holds, and sends them back for the Daemon to keep, so an app picked at 8:30 every morning is resident by 8:15 and goes back to cold in the afternoon. Neither the planning nor the reads run on the thread that answers keystrokes.
 
 When the menu opens, the Daemon reads one element per cache line of each Segment's arrays, and reads the hot Items. That way the first keystroke doesn't find the CPU cache taken by other programs.
 
@@ -32,7 +32,7 @@ A list View's filter (ADR 0015) uses the same matcher, but runs on the View's ow
 - Showing a cold row costs a `pread` and a decode, a few microseconds. A keystroke shows at most 50 rows, and the ones it showed last stay resident.
 - A Learned choice, an Alias's keyword, Identity grouping and the catalog of Actions by kind all read only what the Segment keeps in memory. For each kind and Action id, the catalog offers the Action of the first row whose Item has it.
 - A batch takes longer to index, because each Item is also encoded and written once.
-- The hot set comes only from the time-of-day habit. Learned choices and Aliases' targets aren't hot unless they were shown lately. The History has no weekday, so weekdays and weekends share one routine. The empty query's rows are still ranked when the menu opens, not ahead of each window. Each of these is left for later.
+- The hot set comes only from the time-of-day habit. Learned choices aren't hot unless they were shown lately. The History has no weekday, so weekdays and weekends share one routine. The empty query's rows are still ranked when the menu opens, not ahead of each window. Each of these is left for later.
 
 ## Considered options
 
