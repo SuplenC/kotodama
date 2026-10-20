@@ -168,7 +168,11 @@ impl Query {
                 .map(|word| Letters::of(word[0]))
                 .fold(Letters::NONE, BitOr::bitor)
         });
-        let letters = self.letters.iter().copied().fold(Letters::NONE, BitOr::bitor);
+        let letters = self
+            .letters
+            .iter()
+            .copied()
+            .fold(Letters::NONE, BitOr::bitor);
         Filter {
             letter,
             subtitles,

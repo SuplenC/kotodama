@@ -389,7 +389,6 @@ impl Session {
             self.hung.set(true);
         }
     }
-
 }
 
 /// What a Session's last search of the Index found. A query that only adds
