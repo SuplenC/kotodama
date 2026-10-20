@@ -9,9 +9,13 @@
 //! hidden = ["qt5ct", "qt6ct"]
 //! # Names to show instead of the app's own, by desktop id.
 //! names = { nvim = "Neovim" }
+//! # An app that exits within this many seconds of starting was picked by
+//! # mistake: its pick is withdrawn. 0 never withdraws one; at most 60.
+//! withdraw_within = 5
 //! ```
 
 use std::collections::{BTreeMap, HashMap, HashSet};
+use std::time::Duration;
 
 use kotodama_extension::config;
 use kotodama_protocol::{Action, Item, ItemKind, Table, Value};
@@ -27,6 +31,15 @@ pub const DESKTOP_ACTION: &str = "desktop-action:";
 /// launcher, which starts the user's preferred terminal.
 const DEFAULT_TERMINAL: &str = "xdg-terminal-exec";
 
+/// How soon after starting an app may exit for its pick to be withdrawn, when
+/// the config says nothing: long enough to see the wrong app open and close
+/// it, short enough that an app closed after real use still counts.
+pub const DEFAULT_WITHDRAW_WITHIN: Duration = Duration::from_secs(5);
+
+/// The longest `withdraw_within` the config may set, in seconds: the Daemon
+/// withdraws a pick only for a minute after the run.
+const MAX_WITHDRAW_WITHIN: f64 = 60.0;
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct Settings {
     pub terminal: Vec<String>,
@@ -34,6 +47,9 @@ pub struct Settings {
     pub hidden: HashSet<String>,
     /// Names by app id, without `.desktop`.
     pub names: HashMap<String, String>,
+    /// An app that exits this soon after it starts has its pick withdrawn.
+    /// Zero never withdraws one.
+    pub withdraw_within: Duration,
 }
 
 impl Default for Settings {
@@ -42,6 +58,7 @@ impl Default for Settings {
             terminal: vec![DEFAULT_TERMINAL.to_owned()],
             hidden: HashSet::new(),
             names: HashMap::new(),
+            withdraw_within: DEFAULT_WITHDRAW_WITHIN,
         }
     }
 }
@@ -73,6 +90,14 @@ impl Settings {
             }
             Some(_) => config::warn("`names` should be a table of names by desktop id"),
             None => {}
+        }
+        if let Some(value) = config.get("withdraw_within") {
+            match seconds(value) {
+                Some(within) => settings.withdraw_within = within,
+                None => {
+                    config::warn("`withdraw_within` should be a number of seconds from 0 to 60")
+                }
+            }
         }
         settings
     }
@@ -122,6 +147,18 @@ impl Settings {
             actions,
         }
     }
+}
+
+/// `value` as a number of seconds, from 0 to [`MAX_WITHDRAW_WITHIN`].
+fn seconds(value: &Value) -> Option<Duration> {
+    let seconds = match value {
+        Value::Integer(seconds) => *seconds as f64,
+        Value::Float(seconds) => *seconds,
+        _ => return None,
+    };
+    (0.0..=MAX_WITHDRAW_WITHIN)
+        .contains(&seconds)
+        .then(|| Duration::from_secs_f64(seconds))
 }
 
 /// The command an Action of `app` runs: [`OPEN`] or one of its desktop

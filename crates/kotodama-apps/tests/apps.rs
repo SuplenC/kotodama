@@ -53,7 +53,8 @@ impl Apps {
                 .env("LANG", "pl_PL.UTF-8")
                 .env_remove("LC_ALL")
                 .env_remove("LC_MESSAGES")
-                .env_remove("KOTODAMA_LAUNCH_PREFIX")
+                // Started directly, not in a scope of the user's systemd.
+                .env("KOTODAMA_LAUNCH_PREFIX", "")
                 .envs(env.iter().copied()),
             WAIT,
         );
@@ -71,16 +72,24 @@ impl Apps {
         self.dir.path()
     }
 
-    /// Runs `action` on the app `id` and returns the outcome.
+    /// Runs `action` on the app `id` and returns the outcome. The withdrawal
+    /// of an earlier run's pick, from an app that exited, may come first.
     fn run(&mut self, id: &str, action: &str) -> Outcome {
+        self.run_as(7, id, action)
+    }
+
+    /// Runs `action` on the app `id` as `invocation`.
+    fn run_as(&mut self, invocation: u64, id: &str, action: &str) -> Outcome {
         let item = ItemRef {
             id: id.into(),
             kind: ItemKind::App {
                 desktop_id: format!("{id}.desktop"),
             },
         };
-        self.start_run(7, action, item, BTreeMap::new());
-        self.outcome(7, |_| false)
+        self.start_run(invocation, action, item, BTreeMap::new());
+        self.outcome(invocation, |message| {
+            matches!(message, FromExtension::WithdrawPick { .. })
+        })
     }
 }
 
@@ -606,6 +615,80 @@ fn apps_start_through_the_launch_prefix_and_a_missing_program_still_fails() {
     }
     assert!(ran.exists(), "the app ran");
     assert!(matches!(apps.run("broken", "open"), Outcome::Failed { .. }));
+}
+
+#[test]
+fn an_app_that_exits_right_after_it_starts_has_its_pick_withdrawn() {
+    let dir = data_dirs();
+    install(dir.path(), "system", "oops.desktop", &app("Oops", "true"));
+    let mut apps = Apps::configured(dir, Table::new());
+    apps.added();
+
+    assert_eq!(apps.run_as(41, "oops", "open"), Outcome::Close);
+    assert_eq!(
+        apps.recv_timeout(WAIT),
+        Ok(FromExtension::WithdrawPick { invocation: 41 })
+    );
+}
+
+#[test]
+fn an_app_that_runs_longer_than_withdraw_within_keeps_its_pick() {
+    let dir = data_dirs();
+    install(
+        dir.path(),
+        "system",
+        "slow.desktop",
+        &app("Slow", "sleep 0.6"),
+    );
+    install(dir.path(), "system", "quick.desktop", &app("Quick", "true"));
+    let mut apps = Apps::configured(
+        dir,
+        Table::from([("withdraw_within".into(), Value::Float(0.3))]),
+    );
+    apps.added();
+
+    assert_eq!(apps.run_as(1, "slow", "open"), Outcome::Close);
+    // Long enough for `sleep` to have exited and been reaped.
+    thread::sleep(Duration::from_millis(900));
+    apps.quiet();
+    // The quick app, run after under the same setting, has its pick
+    // withdrawn.
+    assert_eq!(apps.run_as(2, "quick", "open"), Outcome::Close);
+    assert_eq!(
+        apps.recv_timeout(WAIT),
+        Ok(FromExtension::WithdrawPick { invocation: 2 })
+    );
+    apps.quiet();
+}
+
+#[test]
+fn an_app_still_running_keeps_its_pick() {
+    let dir = data_dirs();
+    install(
+        dir.path(),
+        "system",
+        "long.desktop",
+        &app("Long", "sleep 3"),
+    );
+    let mut apps = Apps::configured(dir, Table::new());
+    apps.added();
+
+    assert_eq!(apps.run_as(5, "long", "open"), Outcome::Close);
+    apps.quiet();
+}
+
+#[test]
+fn a_withdraw_within_of_zero_never_withdraws_a_pick() {
+    let dir = data_dirs();
+    install(dir.path(), "system", "oops.desktop", &app("Oops", "true"));
+    let mut apps = Apps::configured(
+        dir,
+        Table::from([("withdraw_within".into(), Value::Integer(0))]),
+    );
+    apps.added();
+
+    assert_eq!(apps.run_as(3, "oops", "open"), Outcome::Close);
+    apps.quiet();
 }
 
 #[test]
