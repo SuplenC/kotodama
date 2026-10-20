@@ -1,0 +1,38 @@
+#!/usr/bin/env bash
+# Formats the crates scripts/restyled-crates lists, with the nightly rustfmt
+# and .config/rustfmt.toml. It never touches the other crates.
+# With --check, rewrites nothing: it checks the restyled crates the same way,
+# and the other crates against stable rustfmt's defaults, as they are written
+# until their restyle (#108).
+# The nightly rustfmt is the flake's `rustfmt-nightly`, built (or fetched from
+# the cache) the first time a restyled crate needs it.
+# Usage: fmt [--check]
+set -euo pipefail
+
+root=$(cd "$(dirname "$0")/.." && pwd)
+cd "$root"
+check=()
+if [ "${1:-}" = --check ]; then
+    check=(--check)
+fi
+
+packages() {
+    while read -r crate; do
+        printf -- '-p\n%s\n' "$crate"
+    done
+}
+
+mapfile -t restyled < <(scripts/restyled-crates | packages)
+mapfile -t others < <(scripts/restyled-crates --others | packages)
+
+if [ ${#check[@]} -gt 0 ] && [ ${#others[@]} -gt 0 ]; then
+    cargo fmt --check "${others[@]}"
+fi
+
+if [ ${#restyled[@]} -eq 0 ]; then
+    echo "fmt: no crate is restyled yet (scripts/restyled-crates); nothing to format with the nightly rustfmt." >&2
+    exit 0
+fi
+nightly=$(nix build --no-link --print-out-paths "$root#rustfmt-nightly")
+nightly=${nightly%%$'\n'*}
+RUSTFMT=$nightly/bin/rustfmt cargo fmt ${check[@]+"${check[@]}"} "${restyled[@]}" -- --config-path .config/rustfmt.toml

@@ -1,0 +1,183 @@
+#!/usr/bin/env bash
+# Checks the comment rules of docs/agents/code-quality.md that a tool can see,
+# in the Rust files under each PATH (a file or a directory), and prints each
+# breach as `file:line: what`. It fails on:
+# - `FIXME` or `XXX`;
+# - a `TODO` not written `TODO(#n):`;
+# - a comment after code on the same line, including a label on a closing brace;
+# - a `/* */` comment;
+# - change narration: "now", "previously", "no longer".
+# Comments are found with a small lexer, so `//` inside a string, a raw string
+# or a char literal is not a comment. Text in backticks and URLs is not read
+# for narration or markers, so `Instant::now` is fine.
+# `just comments` runs it on the crates scripts/restyled-crates lists.
+# Usage: comments PATH...
+set -euo pipefail
+
+files=()
+for path in "$@"; do
+    if [ -d "$path" ]; then
+        while IFS= read -r file; do
+            files+=("$file")
+        done < <(find "$path" -name '*.rs' -type f | LC_ALL=C sort)
+    else
+        files+=("$path")
+    fi
+done
+if [ ${#files[@]} -eq 0 ]; then
+    exit 0
+fi
+
+awk -v q="'" '
+function report(what) {
+    printf "%s:%d: %s\n", FILENAME, FNR, what
+    failed = 1
+}
+
+function is_ident(ch) {
+    return ch ~ /[A-Za-z0-9_]/
+}
+
+# The text of one `//` comment, without the `/` or `!` of a doc comment.
+function check_text(text,    t, lower, rest, at) {
+    if (text ~ /^[\/!]/) {
+        text = substr(text, 2)
+    }
+    t = text
+    gsub(/`[^`]*`/, "", t)
+    gsub(/https?:\/\/[^ ]*/, "", t)
+    if (t ~ /(^|[^A-Za-z0-9_])(FIXME|XXX)([^A-Za-z0-9_]|$)/) {
+        report("FIXME and XXX are not used; write a TODO(#n): with an issue")
+    }
+    rest = t
+    while ((at = index(rest, "TODO")) > 0) {
+        if ((at == 1 || !is_ident(substr(rest, at - 1, 1))) && !is_ident(substr(rest, at + 4, 1)) \
+            && substr(rest, at + 4) !~ /^\(#[0-9]+\):/) {
+            report("a TODO is written TODO(#n): with an open issue")
+        }
+        rest = substr(rest, at + 4)
+    }
+    lower = tolower(t)
+    if (lower ~ /(^|[^a-z0-9_])(now|previously|no longer)([^a-z0-9_]|$)/) {
+        report("a comment describes the code as it is, without narrating a change (now, previously, no longer)")
+    }
+}
+
+FNR == 1 {
+    block = 0
+    in_string = 0
+}
+
+{
+    line = $0
+    n = length(line)
+    code = 0
+    i = 1
+    while (i <= n) {
+        c = substr(line, i, 1)
+        two = substr(line, i, 2)
+        if (block > 0) {
+            if (two == "/*") {
+                block++
+                i += 2
+            } else if (two == "*/") {
+                block--
+                i += 2
+            } else {
+                i++
+            }
+            continue
+        }
+        if (in_string == 1) {
+            if (c == "\\") {
+                i += 2
+            } else {
+                if (c == "\"") {
+                    in_string = 0
+                }
+                i++
+            }
+            continue
+        }
+        if (in_string == 2) {
+            if (c == "\"" && substr(line, i + 1, length(hashes)) == hashes) {
+                in_string = 0
+                i += 1 + length(hashes)
+            } else {
+                i++
+            }
+            continue
+        }
+        if (two == "//") {
+            if (code) {
+                before = substr(line, 1, i - 1)
+                gsub(/[ \t]/, "", before)
+                if (before ~ /^}[});,]*$/) {
+                    report("no labels on closing braces")
+                } else {
+                    report("a comment goes above the code, never after it on the same line")
+                }
+            }
+            check_text(substr(line, i + 2))
+            break
+        }
+        if (two == "/*") {
+            report("comments are written with //, never /* */")
+            block = 1
+            i += 2
+            continue
+        }
+        if (c == "\"") {
+            in_string = 1
+            code = 1
+            i++
+            continue
+        }
+        # A raw string: r"…", r#"…"#, and the same after b or c.
+        if (c == "r") {
+            start = i
+            if (i > 1 && substr(line, i - 1, 1) ~ /[bc]/) {
+                start = i - 1
+            }
+            if (start == 1 || !is_ident(substr(line, start - 1, 1))) {
+                j = i + 1
+                while (substr(line, j, 1) == "#") {
+                    j++
+                }
+                if (substr(line, j, 1) == "\"") {
+                    hashes = substr(line, i + 1, j - i - 1)
+                    in_string = 2
+                    code = 1
+                    i = j + 1
+                    continue
+                }
+            }
+        }
+        # A char literal, or else a lifetime or a label.
+        if (c == q) {
+            code = 1
+            next_c = substr(line, i + 1, 1)
+            if (next_c == "\\") {
+                j = index(substr(line, i + 3), q)
+                i += (j > 0) ? 3 + j : 1
+            } else if (substr(line, i + 2, 1) == q) {
+                i += 3
+            } else if (next_c > "~" && (j = index(substr(line, i + 1, 5), q)) > 0) {
+                # A multi-byte character, where awk reads bytes.
+                i += 1 + j
+            } else {
+                i++
+            }
+            continue
+        }
+        if (c !~ /[ \t]/) {
+            code = 1
+        }
+        i++
+    }
+}
+
+END {
+    exit failed
+}
+' "${files[@]}"

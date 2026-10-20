@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+# Prints the crates brought in line with docs/agents/code-quality.md, one
+# directory name under crates/ per line. A crate opts in with
+# `[lints] workspace = true` in its Cargo.toml; that one line turns on the
+# workspace lints, and through this script the nightly rustfmt check and the
+# comment check (`just check`, `just fmt`, `just comments`). The other crates
+# keep stable rustfmt's defaults until their restyle (#108).
+# With --others, prints the crates that have not opted in instead.
+# Usage: restyled-crates [--others]
+set -euo pipefail
+
+cd "$(dirname "$0")/.."
+want=restyled
+if [ "${1:-}" = --others ]; then
+    want=others
+fi
+for manifest in crates/*/Cargo.toml; do
+    crate=${manifest#crates/}
+    crate=${crate%/Cargo.toml}
+    # The `workspace = true` line inside the `[lints]` table, not the one of a
+    # `version.workspace`-style key or another table.
+    if awk '/^\[/ { in_lints = ($0 == "[lints]") } in_lints && /^workspace *= *true *$/ { found = 1 } END { exit !found }' "$manifest"; then
+        opted=restyled
+    else
+        opted=others
+    fi
+    if [ "$opted" = "$want" ]; then
+        echo "$crate"
+    fi
+done

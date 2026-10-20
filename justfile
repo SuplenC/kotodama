@@ -15,9 +15,17 @@ default:
 shell:
     @{{ dev }} bash
 
-# Check formatting and lints
+# Check formatting, lints and comments
 check:
     @{{ dev }} just _check
+
+# Format the restyled crates (scripts/restyled-crates) with the nightly rustfmt; the others are left alone
+fmt:
+    @{{ dev }} just _fmt
+
+# Check the comment rules of docs/agents/code-quality.md in the restyled crates
+comments:
+    @{{ dev }} just _comments
 
 # Run the tests; arguments go to `cargo nextest run`
 test *args:
@@ -41,8 +49,19 @@ _check:
     git ls-files scripts e2e/run '*.sh' | xargs shellcheck
     just --fmt --check --unstable
     actionlint
-    if scripts/has-crates; then cargo fmt --all --check; fi
+    # Stable rustfmt's defaults for most crates, the nightly rustfmt for the restyled ones.
+    if scripts/has-crates; then scripts/fmt --check; fi
+    just _comments
+    # The restyled crates opt into [workspace.lints], so this lints them harder.
     if scripts/has-crates; then cargo clippy --workspace --all-targets -- -D warnings; fi
+
+[private]
+_fmt:
+    if scripts/has-crates; then scripts/fmt; fi
+
+[private]
+_comments:
+    scripts/restyled-crates | sed 's|^|crates/|' | xargs -r scripts/comments
 
 [private]
 _test *args:
