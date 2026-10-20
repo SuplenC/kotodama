@@ -87,7 +87,11 @@ jobs:
             target
           key: cargo-e2e-${{ matrix.runner }}-${{ hashFiles('Cargo.lock', 'flake.lock') }}
           restore-keys: cargo-e2e-${{ matrix.runner }}-
+      # The latency test needs a release build of the workspace, which no cache
+      # can skip (the PR changes the crates), so it runs only on main.
       - run: nix develop --command just e2e
+        env:
+          E2E_SKIP: ${{ github.event_name == 'pull_request' && 'latency' || '' }}
       - if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.cargo-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@v6
         with:
@@ -129,6 +133,19 @@ jobs:
           git fetch --no-tags --depth=1 origin "$BASE"
           git worktree add "$RUNNER_TEMP/base" "$BASE"
           echo "dir=$RUNNER_TEMP/base" >> "$GITHUB_OUTPUT"
+      # Restored after the base checkout, so both builds start from main's
+      # dependencies; bench-run touches each checkout's sources, so the
+      # workspace's own crates always rebuild.
+      - id: cargo-cache
+        uses: actions/cache/restore@v6
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            ${{ runner.temp }}/target
+          key: cargo-bench-${{ hashFiles('Cargo.lock', 'flake.lock') }}
+          restore-keys: cargo-bench-
       - name: Run the base commit's benchmarks
         if: steps.base.outputs.dir
         run: scripts/bench-run "${{ steps.base.outputs.dir }}" bench-base.txt
@@ -139,11 +156,23 @@ jobs:
         run: |
           scripts/bench-compare bench-base.txt bench-current.txt 50
           scripts/bench-compare bench-base.txt bench-current.txt 10 bytes
+      - if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.cargo-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            ${{ runner.temp }}/target
+          key: ${{ steps.cargo-cache.outputs.cache-primary-key }}
 
   # Builds the package and runs it in a NixOS VM: socket activation and the
   # home-manager module now, the live Hyprland tests (#13) later, since Hyprland
   # needs a DRM device.
+  # Only on main for now: the Nix build compiles the whole package from source
+  # on every PR (about 8 minutes), with no cargo cache.
   nixos-vm:
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
