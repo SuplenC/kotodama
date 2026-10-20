@@ -1,8 +1,9 @@
 # A NixOS VM with Kotodama installed through the home-manager module, for a
 # user whose systemd user manager runs from boot. It checks that the socket
 # starts the Daemon, that home-manager's settings reach it, that it reaches
-# the session bus and finds apps wherever NixOS installs them, and that the
-# programs it starts outlive it.
+# the session bus and finds apps wherever NixOS installs them, that the
+# Folder source lists projects and scripts, and that the programs it starts
+# outlive it.
 {
   pkgs,
   self,
@@ -46,6 +47,28 @@ pkgs.testers.runNixOSTest {
             "1001"
           ];
         };
+        settings.extensions.folders.folders = [
+          {
+            path = "~/Projects";
+            kind = "projects";
+          }
+          {
+            path = "~/Scripts";
+            kind = "scripts";
+          }
+        ];
+      };
+      # A project for the Folder source: a folder with a `.git` is a
+      # repository.
+      home.file."Projects/demo/.git/HEAD".text = "ref: refs/heads/main\n";
+      # A script it runs in the background, which notifies when it is done.
+      home.file."Scripts/vm-sync.sh" = {
+        executable = true;
+        text = ''
+          #!/bin/sh
+          # kotodama: terminal=false name=VM sync
+          echo synced
+        '';
       };
       # An app in the user's own data directory, which the apps Extension
       # reads whatever XDG_DATA_DIRS holds.
@@ -126,6 +149,18 @@ pkgs.testers.runNixOSTest {
         machine.wait_until_succeeds(
             as_alice(f"{front_end} --wait 6\\*7") + " | grep -P '^calculator\t6\\*7\t42$'"
         )
+
+    with subtest("the Folder source lists the configured projects and scripts"):
+        machine.wait_until_succeeds(
+            as_alice(f"{front_end} demo") + " | grep -P '^folders\t/home/alice/Projects/demo\tdemo$'"
+        )
+        machine.wait_until_succeeds(
+            as_alice(f"{front_end} vm sync") + " | grep -P '^folders\t/home/alice/Scripts/vm-sync.sh\tVM sync$'"
+        )
+
+    with subtest("a background script notifies the desktop when it is done"):
+        user(f"{front_end} --run vm sync")
+        machine.wait_until_succeeds("grep -q 'string \"VM sync\"' /tmp/notifications")
 
     with subtest("programs started from the menu get scopes of their own"):
         user(f"{front_end} --run nap")

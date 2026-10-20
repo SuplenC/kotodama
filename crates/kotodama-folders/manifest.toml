@@ -1,0 +1,6 @@
+# The Folder source Bundled extension. A package installs this directory as
+# `$XDG_DATA_DIRS/kotodama/extensions/folders/`, with the `kotodama-folders`
+# binary next to this file (or `command` rewritten to its absolute path).
+name = "folders"
+description = "Projects and scripts, from the folders named in the config"
+command = ["./kotodama-folders"]

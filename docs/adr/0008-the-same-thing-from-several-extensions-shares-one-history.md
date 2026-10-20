@@ -8,6 +8,15 @@ Each Item still shows as a Result of its own: Kotodama doesn't merge them, becau
 
 Picks made before an Extension set an Identity, or under an Identity it later changes, stay where they were kept, and count only for that Item's place among its Identity's Results.
 
+Extensions spell Identities with these prefixes, each followed by the thing's name:
+
+- `app:` and the desktop id, for an application (`app:firefox.desktop`).
+- `url:` and the URL, for a web page (`url:https://example.org`).
+- `folder:` and the absolute path, for a folder, such as a project (`folder:/home/me/Projects/kotodama`).
+- `file:` and the absolute path, for a file, such as a script or a `.desktop` file kept as one (`file:/home/me/Scripts/backup.sh`).
+
+An Extension offering a thing of one of these kinds uses its prefix, and a new kind adds its prefix here.
+
 ## Considered options
 
 - **The Daemon derives the Identity from the Item kind's field** (`desktop_id`, `path`, `url`). Rejected for now: an app and the `.desktop` file a Folder source lists are different kinds, two Extensions may spell one URL differently, and a namespaced kind has no field at all. Only the Extension knows what its Item stands for.

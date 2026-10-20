@@ -58,7 +58,7 @@ Apps, Quicklinks and every other program started for the user run after the word
 
 Results rank by how well they match before anything else, in tiers: the whole title (or one of the Item's keywords) is the query, then the query is the initials of consecutive words (`vsc` for Visual Studio Code) or a word starts with it, then the query is inside a word, then its letters are scattered. Within a tier, Frecency decides, then nucleo's score, then the shorter title. Neither case nor accents matter (`zolw` finds Żółw), every word of the query must match in any order, a single letter matches only at the start of a word, and a trailing space makes the last word a whole word. A subtitle is searched once the query has 3 letters, and only at word starts.
 
-Every Action the user runs is recorded in `$XDG_STATE_HOME/kotodama/history.json` (by default `~/.local/state/kotodama/`). A picked Result gets a Frecency boost, which halves every 14 days but never quite reaches zero. Frecency also learns the time of day: picks count in full at the times of day the Result is usually picked, and half as much at a time of day it never is, so something used every morning ranks higher in the morning. A Result used about daily for a week ranks one tier higher, but never above an exact title. When the user picks the same Result 3 times for one query, it becomes that query's Learned choice: it ranks first for that query and for the queries that extend it or that it extends (`fi`, `fir`, `fire`), but only over the Results that ranked above it when it was picked, so a new app with exactly that title still wins. Two picks of another Result since the Learned choice was last picked take over from it. Learning fades with Frecency's half-life; when two Learned choices apply, the one picked more often wins, then the one learned for the closer query. Both apply to Indexed items and Live query results. Items that several Extensions offer with the same Identity (an app from the apps Extension and from a Folder source, a page from bookmarks and from browser history) share their Frecency and Learned choices: picking one raises the others. Each still shows as a Result of its own, and the one the user picks through most takes the best place any of them ranks in. The "Clear history" Result empties the history.
+Every Action the user runs is recorded in `$XDG_STATE_HOME/kotodama/history.json` (by default `~/.local/state/kotodama/`). A picked Result gets a Frecency boost, which halves every 14 days but never quite reaches zero. Frecency also learns the time of day: picks count in full at the times of day the Result is usually picked, and half as much at a time of day it never is, so something used every morning ranks higher in the morning. A Result used about daily for a week ranks one tier higher, but never above an exact title. When the user picks the same Result 3 times for one query, it becomes that query's Learned choice: it ranks first for that query and for the queries that extend it or that it extends (`fi`, `fir`, `fire`), but only over the Results that ranked above it when it was picked, so a new app with exactly that title still wins. Two picks of another Result since the Learned choice was last picked take over from it. Learning fades with Frecency's half-life; when two Learned choices apply, the one picked more often wins, then the one learned for the closer query. Both apply to Indexed items and Live query results. Items that several Extensions offer with the same Identity (a page from bookmarks and from browser history) share their Frecency and Learned choices: picking one raises the others. Each still shows as a Result of its own, and the one the user picks through most takes the best place any of them ranks in. The "Clear history" Result empties the history.
 
 The Action panel of a Result the history keeps anything for offers "Forget", which drops its Frecency, every Learned choice for it, the picks of the Aliases that name it and, for a Result with an Identity, the history of that thing from every Extension. It also offers "Clear the history of" its Extension, which forgets every Result of that Extension, the Aliases that name them, and the shared history of the Identities its Items carry, though another Extension offers them too: the history doesn't know which Extension a pick of a shared thing came through. Another Extension's Result of such a thing keeps only its own picks, which decide its place among the Results of that thing. For a minute after Forget, clearing an Extension's history or "Clear history", typing `undo` finds a Result that puts back what was forgotten, latest first; anything picked since stays as it is.
 
@@ -101,7 +101,7 @@ Aliases and Quicklinks live in the config directory and reload with it:
 [aliases]
 ff = { extension = "apps", item = "firefox" }
 # An Alias for one of the Item's own Actions makes that Action primary.
-code = { extension = "projects", item = "kotodama", action = "open-editor" }
+term = { extension = "folders", item = "/home/me/Projects/kotodama", action = "shell" }
 
 [quicklinks.gh]
 title = "GitHub"
@@ -212,6 +212,43 @@ network = true
 # Where the rates come from: frankfurter's API, or anything answering like it.
 rates_url = "https://api.frankfurter.app/latest"
 ```
+
+### Folder sources
+
+`kotodama-folders` (`crates/kotodama-folders`, Extension name `folders`) turns the contents of the folders named in its config into Items, in two kinds of folder: projects and scripts. It watches them, so a project cloned or a script added, renamed or removed while it runs shows up or goes within a moment. It watches only the folders it searched, each on its own, never the files inside a project, so a large projects folder costs no more than its repositories. Saving files inside a project searches nothing again.
+
+**Projects** are the git repositories found down to the folder's `depth` (3 if not given), with their worktrees and checked-out submodules. A repository stops the search: nothing inside it is searched. Each is an Item of kind `project` with its path, titled with the name `tms` (tmux-sessionizer) gives it, so the menu and `tms` land in the same tmux sessions: the folder's name; `<repository>#<worktree>` for a worktree; `<repository>>`, then the folder's name, for a submodule; and, for a name found more than once, as many parent folders as tell them apart (`work/api`, `home/api`). The tmux session is that name with every `.` made `_`. Its primary Action, "Open", opens the session in a terminal, with the editor in it. "Open Terminal Here", "Open in Lazygit", "Open in File Manager" and "Copy Path" follow, then other Extensions' Contributed actions for `project`.
+
+**Scripts** are every executable file in the folder and its subfolders, down to 4 deep, except hidden ones. Each is an Item of kind `file` with its path, titled with its name without the extension, after its subfolders (`work/backup.sh` shows as "work › backup"). Its primary Action runs it in a terminal that stays open after it exits. A comment among its first 10 lines can change that:
+
+```sh
+#!/bin/sh
+# kotodama: name=Deploy staging terminal=false args=prompt
+```
+
+`name=` is shown instead of the file's name, which still finds it. `terminal=false` runs it in the background as a job, whose end notifies the desktop with the script's last line of output. `args=prompt` asks for its arguments in a form first, split as a shell would split them.
+
+Each Item's id is its path. A project's Identity is `folder:` and its path (`folder:/home/me/Projects/kotodama`), and a script's, `.desktop` files included, is `file:` and its path (`file:/home/me/Scripts/backup.sh`).
+
+```toml
+[extensions.folders]
+folders = [
+  { path = "~/Projects", kind = "projects", depth = 2 },
+  { path = "~/Scripts", kind = "scripts" },
+]
+# What a script runs in; the script and its arguments follow. It should keep
+# the window open once the script exits.
+terminal = ["ghostty", "--wait-after-command=true", "-e"]
+# The commands a project's Actions run, in the project's folder: `{path}` is
+# the folder and `{session}` its tmux session. These are the defaults.
+open = ["ghostty", "-e", "tmux", "new-session", "-A", "-s", "{session}", "-c", "{path}", "nvim"]
+shell = ["ghostty", "--working-directory={path}"]
+lazygit = ["ghostty", "-e", "lazygit", "--path", "{path}"]
+file_manager = ["xdg-open", "{path}"]
+copy_path = ["wl-copy", "{path}"]
+```
+
+Its `manifest.toml` runs `./kotodama-folders`, so a package installs the binary next to it in `$XDG_DATA_DIRS/kotodama/extensions/folders/`.
 
 ## The Quickshell Front end
 

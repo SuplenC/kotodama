@@ -65,7 +65,7 @@ rustPlatform.buildRustPackage {
     rmdir $out/lib
 
     # Each Bundled extension's manifest runs its binary, beside it.
-    for name in apps calculator clipboard; do
+    for name in apps calculator clipboard folders; do
       dir=$extensions/share/kotodama/extensions/$name
       mkdir -p $dir
       cp crates/kotodama-$name/manifest.toml $dir/
