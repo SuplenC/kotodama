@@ -166,9 +166,9 @@ jobs:
             ${{ runner.temp }}/target
           key: ${{ steps.cargo-cache.outputs.cache-primary-key }}
 
-  # Builds the package and runs it in a NixOS VM: socket activation and the
-  # home-manager module now, the live Hyprland tests (#13) later, since Hyprland
-  # needs a DRM device.
+  # Builds the package, loads its QML module in Quickshell, and runs it in a
+  # NixOS VM: socket activation and the home-manager module now, the live
+  # Hyprland tests (#13) later, since Hyprland needs a DRM device.
   # Only on main for now: the Nix build compiles the whole package from source
   # on every PR (about 8 minutes), with no cargo cache.
   nixos-vm:
@@ -179,7 +179,7 @@ jobs:
       - uses: ./.github/actions/setup-nix
         with:
           cachix-auth-token: ${{ secrets.CACHIX_AUTH_TOKEN }}
-      - run: nix build -L .#checks.x86_64-linux.nixos-vm
+      - run: nix build -L .#checks.x86_64-linux.nixos-vm .#checks.x86_64-linux.qml-module
 
   # The image only copies files onto nixos/nix, so both platforms build without emulation.
   image:
