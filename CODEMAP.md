@@ -12,6 +12,7 @@ are in [docs/adr/](docs/adr/).
 - [`crates/kotodama-protocol/`](crates/kotodama-protocol/CODEMAP.md): messages, framing, handshake and Wire formats shared by everything.
 - [`crates/kotodama/`](crates/kotodama/CODEMAP.md): the `kotodama` CLI (`toggle`, `open`) that a compositor keybind runs.
 - [`crates/kotodama-qml/`](crates/kotodama-qml/CODEMAP.md): the Quickshell Front end, a Rust cdylib QML module (`Kotodama`) plus `qml/KotodamaMenu.qml`.
+- [`crates/kotodama-extension/`](crates/kotodama-extension/CODEMAP.md): the runtime Rust Extensions are built on (handshake, reader thread, `SentItems`, config, launch, XDG dirs, directory watcher). The Daemon uses its watcher.
 - [`crates/kotodama-apps/`](crates/kotodama-apps/CODEMAP.md): Bundled extension, desktop apps from `.desktop` files.
 - [`crates/kotodama-calculator/`](crates/kotodama-calculator/CODEMAP.md): Bundled extension, math, units, currency, dates.
 - [`crates/kotodama-clipboard/`](crates/kotodama-clipboard/CODEMAP.md): Bundled extension, clipboard history.
@@ -28,7 +29,7 @@ are in [docs/adr/](docs/adr/).
 
 - **Protocol message or field**: `kotodama-protocol/src/{message,front_end,item,view}.rs`. Bump `handshake.rs:PROTOCOL_VERSION` per ADR 0012, then rerun `tests/layout.rs` with `KOTODAMA_BLESS_LAYOUT=1` to rewrite `tests/layout.txt`. Update both ends: `kotodamad/src/daemon.rs`, `kotodama-qml/src/connection.rs`, the Extensions.
 - **Ranking rule**: `kotodamad/src/daemon.rs:Candidate::rank`, `rank.rs` (Tiers), `history.rs` (Frecency, Learned choices), `kind_order.rs`. Add cases to `kotodamad/tests/ranking.rs`; add an ADR if it changes the order of precedence.
-- **Bundled extension**: new `crates/kotodama-<name>/` with `manifest.toml`; add `<name>` to the loop in `nix/package.nix`; add the crate to the `Cargo.lock` jsonpath in `release-please-config.json`; give it a `CODEMAP.md` and a line in the layout above.
+- **Bundled extension**: new `crates/kotodama-<name>/` with `manifest.toml`, built on `kotodama-extension`; add `<name>` to the loop in `nix/package.nix`; add the crate to the `Cargo.lock` jsonpath in `release-please-config.json`; give it a `CODEMAP.md` and a line in the layout above.
 - **e2e test**: new `e2e/<name>/test.sh` (plus `shell.qml`, reference `.png` if visual) using `e2e/lib.sh`; `just e2e <name>`, `just e2e --update` for images.
 - **Bench**: `crates/<crate>/benches/*.rs` with a `[[bench]] harness = false` entry in its `Cargo.toml` (criterion). CI compares against the base commit.
 - **Config key**: the `from_config` of the owner (`kotodamad/src/{history,empty_query,kind_order,keywords}.rs`), or an Extension's settings module for `[extensions.<name>]`; test in `kotodamad/tests/config.rs`. Home Manager options: `nix/home-manager.nix`.
