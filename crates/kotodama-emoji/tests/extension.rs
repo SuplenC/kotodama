@@ -14,10 +14,7 @@ struct Emoji(Spawned);
 impl Emoji {
     /// Starts the Extension and sends it `config`, as the Daemon does.
     fn start(config: Table) -> Self {
-        let mut extension = Spawned::start(
-            &mut Command::new(env!("CARGO_BIN_EXE_kotodama-emoji")),
-            WAIT,
-        );
+        let mut extension = Spawned::start(&mut Command::new(env!("CARGO_BIN_EXE_kotodama-emoji")), WAIT);
         extension.send(ToExtension::Config(config));
         Emoji(extension)
     }
@@ -30,12 +27,11 @@ impl Emoji {
     fn run(&mut self, id: &str, action: &str) -> Outcome {
         let item = ItemRef {
             id: id.into(),
-            kind: ItemKind::Namespaced(NamespacedKind::new("emoji.character").unwrap()),
+            kind: ItemKind::Namespaced(NamespacedKind::new("emoji.character").expect("a valid kind")),
         };
         self.0.start_run(3, action, item, BTreeMap::new());
-        self.0.outcome(3, |message| {
-            matches!(message, FromExtension::AddItems { .. })
-        })
+        self.0
+            .outcome(3, |message| matches!(message, FromExtension::AddItems { .. }))
     }
 }
 
@@ -50,10 +46,7 @@ fn tone(name: &str) -> Table {
 }
 
 fn action_ids(item: &Item) -> Vec<&str> {
-    item.actions
-        .iter()
-        .map(|action| action.id.as_str())
-        .collect()
+    item.actions.iter().map(|action| action.id.as_str()).collect()
 }
 
 #[test]
@@ -105,10 +98,7 @@ fn the_primary_action_types_the_character_and_the_second_copies_it() {
     let mut emoji = Emoji::start(Table::new());
     emoji.items();
     assert_eq!(emoji.run("👍", "type"), typed("👍"));
-    assert_eq!(
-        emoji.run("→", "copy"),
-        Outcome::Copy(Clipboard::Text("→".into()))
-    );
+    assert_eq!(emoji.run("→", "copy"), Outcome::Copy(Clipboard::Text("→".into())));
 }
 
 #[test]
@@ -126,10 +116,7 @@ fn the_configured_skin_tone_is_what_the_primary_and_copy_actions_use() {
     let mut emoji = Emoji::start(tone("medium"));
     emoji.items();
     assert_eq!(emoji.run("👍", "type"), typed("👍🏽"));
-    assert_eq!(
-        emoji.run("👍", "copy"),
-        Outcome::Copy(Clipboard::Text("👍🏽".into()))
-    );
+    assert_eq!(emoji.run("👍", "copy"), Outcome::Copy(Clipboard::Text("👍🏽".into())));
     // Without skin tones, the emoji is itself.
     assert_eq!(emoji.run("🔥", "type"), typed("🔥"));
     // An explicit tone still wins.
@@ -148,9 +135,6 @@ fn an_action_on_something_unknown_fails() {
     let mut emoji = Emoji::start(Table::new());
     emoji.items();
     assert!(matches!(emoji.run("nope", "type"), Outcome::Failed { .. }));
-    assert!(matches!(
-        emoji.run("🔥", "type-dark"),
-        Outcome::Failed { .. }
-    ));
+    assert!(matches!(emoji.run("🔥", "type-dark"), Outcome::Failed { .. }));
     assert!(matches!(emoji.run("👍", "dance"), Outcome::Failed { .. }));
 }

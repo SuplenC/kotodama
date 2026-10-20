@@ -1,16 +1,22 @@
 //! A Front end on the real Daemon, run in this process, with the real emoji
 //! Extension as its only Extension. Shared by the search tests and the
-//! benchmark.
+//! benchmark, each of which includes it with `#[path]`: a file under `tests/` would be a test
+//! target of its own, and a `mod.rs` is not used.
 
-#![allow(dead_code)]
-
+use std::collections::BTreeMap;
 use std::fs;
 use std::os::unix::net::UnixStream;
 use std::thread;
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use std::time::Instant;
 
 use kotodama_extension::testing;
-use kotodama_protocol::{ActionRef, Channel, FromFrontEnd, ResultRef, ShownResult, ToFrontEnd};
+use kotodama_protocol::ActionRef;
+use kotodama_protocol::Channel;
+use kotodama_protocol::FromFrontEnd;
+use kotodama_protocol::ResultRef;
+use kotodama_protocol::ShownResult;
+use kotodama_protocol::ToFrontEnd;
 use kotodamad::paths::Paths;
 use tempfile::TempDir;
 
@@ -25,10 +31,10 @@ impl Menu {
     /// Starts the Daemon and waits until the emoji Extension's Items are
     /// indexed. `config` is written as the Daemon's config file.
     pub fn start(config: &str) -> Self {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = tempfile::tempdir().expect("make the Daemon's dir");
         let path = |sub: &str| dir.path().join(sub);
-        fs::create_dir_all(path("config")).unwrap();
-        fs::write(path("config/config.toml"), config).unwrap();
+        fs::create_dir_all(path("config")).expect("make the config dir");
+        fs::write(path("config/config.toml"), config).expect("write the config");
         // The Bundled extension's own Manifest, run from where cargo built it.
         testing::install(
             &path("extensions"),
@@ -74,7 +80,7 @@ impl Menu {
     pub fn search(&mut self, query: &str) -> Vec<ShownResult> {
         self.ui
             .send(&FromFrontEnd::Query { text: query.into() })
-            .unwrap();
+            .expect("send the query");
         self.results()
     }
 
@@ -94,10 +100,7 @@ impl Menu {
 
     /// The ids of `query`'s Results, best first.
     pub fn ids(&mut self, query: &str) -> Vec<String> {
-        self.search(query)
-            .into_iter()
-            .map(|result| result.item.id)
-            .collect()
+        self.search(query).into_iter().map(|result| result.item.id).collect()
     }
 
     /// Runs the primary Action of the Result `id`, which must close the menu,
@@ -114,9 +117,9 @@ impl Menu {
                     extension: "emoji".into(),
                     id: "type".into(),
                 },
-                arguments: Default::default(),
+                arguments: BTreeMap::default(),
             })
-            .unwrap();
+            .expect("run the Action");
         loop {
             match self.ui.recv::<ToFrontEnd>() {
                 Ok(Some(ToFrontEnd::Close)) => break,
@@ -124,6 +127,6 @@ impl Menu {
                 other => panic!("expected Close, got {other:?}"),
             }
         }
-        self.ui.send(&FromFrontEnd::Closed).unwrap();
+        self.ui.send(&FromFrontEnd::Closed).expect("say the menu closed");
     }
 }

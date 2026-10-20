@@ -6,9 +6,11 @@
 //! memory.
 
 use std::fs;
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use std::time::Instant;
 
-#[path = "../tests/menu/mod.rs"]
+#[expect(dead_code, reason = "the benchmark only starts the menu and searches")]
+#[path = "../tests/support/menu.rs"]
 mod menu;
 
 const QUERIES: usize = 2_000;
@@ -45,10 +47,7 @@ fn main() {
     );
     match emoji_resident() {
         Some(bytes) => {
-            println!(
-                "emoji Extension: {:.1} MiB resident",
-                bytes as f64 / (1 << 20) as f64
-            );
+            println!("emoji Extension: {:.1} MiB resident", bytes as f64 / f64::from(1 << 20));
             println!("test emoji/resident ... bench: {bytes} bytes (+/- 0)");
         }
         None => println!("resident memory is only measured on Linux"),
@@ -67,15 +66,9 @@ fn emoji_resident() -> Option<u64> {
     let pid = tasks
         .flatten()
         .filter_map(|task| fs::read_to_string(task.path().join("children")).ok())
-        .flat_map(|children| {
-            children
-                .split_whitespace()
-                .map(str::to_owned)
-                .collect::<Vec<_>>()
-        })
+        .flat_map(|children| children.split_whitespace().map(str::to_owned).collect::<Vec<_>>())
         .find(|pid| {
-            fs::read_to_string(format!("/proc/{pid}/comm"))
-                .is_ok_and(|comm| comm.trim() == "kotodama-emoji")
+            fs::read_to_string(format!("/proc/{pid}/comm")).is_ok_and(|comm| comm.trim() == "kotodama-emoji")
         })?;
     let status = fs::read_to_string(format!("/proc/{pid}/status")).ok()?;
     let line = status.lines().find(|line| line.starts_with("VmRSS:"))?;
