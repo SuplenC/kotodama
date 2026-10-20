@@ -21,7 +21,7 @@ use nucleo_matcher::pattern::Pattern;
 use nucleo_matcher::{Matcher, Utf32Str, Utf32String};
 
 use crate::payload::{Place, Shelf, encode};
-use crate::rank::{Filter, Folded, Letters, Matched, Searched, Text, Texts};
+use crate::rank::{BLOCK, Filter, Mask, Folded, Letters, Matched, Searched, Text, Texts};
 
 /// Where an Item lives in its Segment. Stable until the Item is removed, and
 /// not taken by another Item until the change after that.
@@ -570,6 +570,31 @@ impl Segment {
         &self.initials
     }
 
+    /// Calls `found` with each row, in order, whose bit `test` sets. `test`
+    /// reads the rows' letters and initials, as [`Segment::every_letter`] and
+    /// [`Segment::initials`] give them, a [`BLOCK`] at a time, so it can test
+    /// a block in one vectorised loop; past the last row they are empty, and
+    /// never found. Only the rows found are read further.
+    #[inline]
+    pub fn rows_where(
+        &self,
+        test: impl Fn(&[Letters; BLOCK], &[Letters; BLOCK]) -> Mask,
+        mut found: impl FnMut(Row),
+    ) {
+        let (letters, letters_left) = self.every_letter.as_chunks::<BLOCK>();
+        let (initials, initials_left) = self.initials.as_chunks::<BLOCK>();
+        for (n, (letters, initials)) in letters.iter().zip(initials).enumerate() {
+            each_bit(test(letters, initials), n * BLOCK, &mut found);
+        }
+        if !letters_left.is_empty() {
+            let mut last = ([Letters::NONE; BLOCK], [Letters::NONE; BLOCK]);
+            last.0[..letters_left.len()].copy_from_slice(letters_left);
+            last.1[..initials_left.len()].copy_from_slice(initials_left);
+            let filled = (1 << letters_left.len()) - 1;
+            each_bit(test(&last.0, &last.1) & filled, letters.len() * BLOCK, &mut found);
+        }
+    }
+
     /// Where the whole Item in `row` is.
     pub fn payload(&self, row: Row) -> Option<(&Arc<Shelf>, Place)> {
         let place = self.held(row)?.place;
@@ -679,6 +704,16 @@ impl Segment {
             ^ lines(&self.ascii, |&byte| u64::from(byte))
             ^ lines(&self.wide, |&char| u64::from(char))
             ^ lines(&self.starts, |&start| u64::from(start))
+    }
+}
+
+/// Calls `found` with `first` plus the place of each bit set in `bits`,
+/// lowest first.
+#[inline]
+fn each_bit(mut bits: Mask, first: usize, found: &mut impl FnMut(Row)) {
+    while bits != 0 {
+        found((first + bits.trailing_zeros() as usize) as Row);
+        bits &= bits - 1;
     }
 }
 

@@ -229,7 +229,39 @@ impl Filter {
     pub fn may_match(&self, letters: Letters, initials: Letters) -> bool {
         letters.contains(self.letters) && self.letter.is_none_or(|letter| initials.meets(letter))
     }
+
+    /// [`Filter::may_match`] for a block of rows at once: bit `k` is set
+    /// where row `k`, with `letters[k]` and `initials[k]`, may match.
+    #[inline]
+    pub fn may_match_block(&self, letters: &[Letters; BLOCK], initials: &[Letters; BLOCK]) -> Mask {
+        match self.letter {
+            // A one-letter query's letters are its letter and
+            // `Letters::OTHER`, which every filled row has, and a row's
+            // initials are among its letters: the letter starting a word
+            // decides. An empty row has no initials.
+            Some(letter) => Letters::meet_block(initials, letter),
+            None => {
+                let wanted = self.letters.0;
+                let mut bits = 0;
+                // HAZARD: vectorised (NEON `cmeq`/`and`, SSE2
+                // `pcmpeqd`/`pand`): no branch, call or early exit here. It
+                // is the first pass of every search over all the rows; see
+                // `Index::search`.
+                for k in 0..BLOCK {
+                    bits |= Mask::from(letters[k].0 & wanted == wanted) << k;
+                }
+                bits
+            }
+        }
+    }
 }
+
+/// How many rows a dense pass over a Segment's letters looks at at once: a
+/// bit each of a [`Mask`].
+pub const BLOCK: usize = 64;
+
+/// A bit for each row of a block.
+pub type Mask = u64;
 
 /// The fewest letters a query needs for subtitles to be searched: fewer find
 /// too much.
@@ -406,6 +438,18 @@ impl Letters {
     #[inline]
     pub fn meets(self, other: Letters) -> bool {
         self.0 & other.0 != 0
+    }
+
+    /// [`Letters::meets`] for a block of sets at once: bit `k` is set where
+    /// `sets[k]` meets `other`.
+    #[inline]
+    pub fn meet_block(sets: &[Letters; BLOCK], other: Letters) -> Mask {
+        let mut bits = 0;
+        // HAZARD: vectorised, as in `Filter::may_match_block`.
+        for k in 0..BLOCK {
+            bits |= Mask::from(sets[k].0 & other.0 != 0) << k;
+        }
+        bits
     }
 
     /// How many of `other` this set lacks.
