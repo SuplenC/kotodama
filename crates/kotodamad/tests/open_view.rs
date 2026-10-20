@@ -75,12 +75,13 @@ fn ran(ext: &Ext, action: &str, item: &str) -> u64 {
     }
 }
 
-/// A Daemon with git up and its `branches` Item indexed, a menu, and the
-/// `kotodama` command connected.
+/// A Daemon with git up for a while and its `branches` Item indexed, a menu,
+/// and the `kotodama` command connected.
 fn git() -> (Harness, Ext, FrontEnd, FrontEnd) {
     let mut h = Harness::new(vec![plain("git")]);
     let git = h.up(0);
     h.add(&git, vec![branches_item()]);
+    h.advance(Duration::from_secs(10));
     let menu = h.front_end();
     let command = h.front_end();
     git.drain();
@@ -169,13 +170,13 @@ fn an_action_that_fails_opens_the_search_with_its_message() {
 }
 
 #[test]
-fn an_action_that_closes_the_menu_leaves_it_closed() {
+fn an_action_that_closes_the_menu_closes_it_rather_than_opening_it() {
     let (mut h, git, menu, command) = git();
     open_on(&mut h, &command, "git/branches");
     let invocation = ran(&git, "list", "branches");
 
     done(&mut h, &git, invocation, Outcome::Close);
-    assert_eq!(sent(&menu), []);
+    assert_eq!(sent(&menu), [ToFrontEnd::Close], "it may have been open");
 }
 
 #[test]
@@ -194,6 +195,21 @@ fn a_starting_extension_is_waited_for_until_it_has_indexed_its_items() {
     h.send(&git, FromExtension::PushView(branches_view()));
     done(&mut h, &git, invocation, Outcome::KeepOpen);
     assert_eq!(sent(&menu).last(), Some(&opened("git/branches")));
+}
+
+#[test]
+fn an_item_an_extension_that_just_started_has_yet_to_send_is_waited_for() {
+    let mut h = Harness::new(vec![plain("git")]);
+    let git = h.up(0);
+    h.add(&git, vec![project("kotodama")]);
+    let menu = h.front_end();
+    let command = h.front_end();
+    git.drain();
+
+    open_on(&mut h, &command, "git/branches");
+    assert_eq!(sent(&menu), [], "its Items may come in more than one batch");
+    h.add(&git, vec![branches_item()]);
+    ran(&git, "list", "branches");
 }
 
 #[test]
@@ -217,6 +233,20 @@ fn a_view_that_takes_too_long_opens_the_search_and_may_still_come() {
         }],
         "pushed over the search, and not opened twice"
     );
+}
+
+#[test]
+fn an_action_that_fails_after_the_menu_opened_without_it_still_says_why() {
+    let (mut h, git, menu, command) = git();
+    open_on(&mut h, &command, "git/branches");
+    let invocation = ran(&git, "list", "branches");
+    h.advance(Duration::from_secs(1));
+    assert_eq!(sent(&menu), [opened("git/branches")]);
+    assert_eq!(h.daemon.next_deadline(), None, "nothing more to wait for");
+
+    let message = "not a repository".to_owned();
+    done(&mut h, &git, invocation, Outcome::Failed { message });
+    assert_eq!(sent(&menu), [failed("not a repository")]);
 }
 
 #[test]

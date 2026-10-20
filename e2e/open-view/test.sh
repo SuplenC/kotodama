@@ -12,11 +12,18 @@ imports=$("$root/scripts/qml-module")
 home=$(mktemp -d)
 export XDG_CONFIG_HOME="$home/config" XDG_CONFIG_DIRS="$home/etc" XDG_DATA_DIRS="$home/share" XDG_STATE_HOME="$home/state"
 
-# Installed as a package installs it: the binary next to its Manifest.
+# Installed as a package installs it, next to its Manifest, but held back
+# from starting until the test says so, as an Extension still starting when
+# the keypress arrives.
 ext="$XDG_DATA_DIRS/kotodama/extensions/clipboard"
 mkdir -p "$ext"
 cp "$root/crates/kotodama-clipboard/manifest.toml" "$ext/"
-ln -s "$target/debug/kotodama-clipboard" "$ext/kotodama-clipboard"
+cat >"$ext/kotodama-clipboard" <<SH
+#!/bin/sh
+while [ ! -e "$home/start" ]; do sleep 0.05; done
+exec "$target/debug/kotodama-clipboard"
+SH
+chmod +x "$ext/kotodama-clipboard"
 
 kotodama="$target/debug/kotodama"
 spawn "$target/debug/kotodamad"
@@ -49,9 +56,22 @@ open_on() {
     fi
 }
 
-# Right after the Daemon starts, as under socket activation, the clipboard
-# Extension may still be starting: the menu waits for its View.
-open_on clipboard/history "list Clipboard History"
+# While the clipboard Extension is still starting, the menu waits for its
+# View rather than open on the search.
+mark=$(log_lines quickshell.log)
+"$kotodama" open --view clipboard/history
+sleep 0.3
+if tail -n "+$((mark + 1))" "$E2E_OUT/quickshell.log" | grep -qF "opened on: "; then
+    echo "the menu opened before the clipboard Extension was up" >&2
+    exit 1
+fi
+touch "$home/start"
+wait_for_log quickshell.log "opened on: list Clipboard History" "$mark"
+wait_for_log quickshell.log "focused: true" "$mark"
+if tail -n "+$((mark + 1))" "$E2E_OUT/quickshell.log" | grep -F "opened on: " | grep -qvF "list Clipboard History"; then
+    echo "the menu opened on something else first" >&2
+    exit 1
+fi
 # Esc pops the View to the search, and the menu stays open on it.
 press -k Escape "view: search"
 press -k Escape "visible: false"
