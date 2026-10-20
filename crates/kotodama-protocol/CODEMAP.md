@@ -5,7 +5,7 @@ The shared protocol. Maintained by hand: fix stale lines when you find them, and
 - `lib.rs`: re-exports; `Error`.
 - `message.rs`: Daemon and Extension messages, `ToExtension`, `FromExtension`, `LiveResult`, `Outcome`, `Clipboard`, `CatalogEntry`.
 - `front_end.rs`: Daemon and Front end messages, `FromFrontEnd` (incl. `Query`, `Viewport`, `Open`, `Toggle`), `ToFrontEnd` (incl. `ReplaceView`, `FilteredView`), `ShownResult`, `ListMatch`, `socket_path`.
-- `item.rs`: `Item` (incl. `hidden`, ADR 0015), `ItemRef`, `Action` (`Action::new` with `shortcut` and `arguments` setters), `ItemKind`, `SHARED_KINDS`, `NamespacedKind`, `KindName`.
+- `item.rs`: `Item` (incl. `hidden`, ADR 0015), `ItemRef`, `Action` (`Action::new` with `shortcut` and `arguments` setters), `ItemKind` (`ItemKind::shared_index`, its place in `SHARED_KINDS`), `SHARED_KINDS`, `NamespacedKind`, `KindName`.
 - `view.rs`: `View`, `ViewContent` (a list's `filters_itself`), forms (`FormField`, `FormInput`), `Job`, `JobState`.
 - `value.rs`: `Value`, `Table`, `Bytes`, `Fraction`.
 - `manifest.rs`: `Manifest::from_toml`, `LiveQueries` (`fallback`), `ContributedAction` (ADR 0002).

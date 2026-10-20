@@ -6,7 +6,7 @@ Forget, clearing one Extension's history and "Clear history" can be undone for a
 
 The user undoes through an Undo Result of the Daemon's own, found by typing `undo`, which undoes the latest change still kept. It needs nothing new from Front ends.
 
-Clearing one Extension's history also forgets the Identities of its Items, though another Extension may offer the same thing: the History doesn't record which Extension a pick of an Identity came through, and keeping it would leave the cleared Results ranked by it.
+Clearing one Extension's History also forgets the Identities of its Items, though another Extension may offer the same thing: the History doesn't record which Extension a pick of an Identity came through, and keeping it would leave the cleared Results ranked by it.
 
 ## Considered options
 

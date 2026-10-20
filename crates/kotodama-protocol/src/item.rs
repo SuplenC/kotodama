@@ -100,6 +100,20 @@ impl ItemKind {
         }
     }
 
+    /// A shared kind's index in [`SHARED_KINDS`], without comparing names;
+    /// `None` for a namespaced kind.
+    pub fn shared_index(&self) -> Option<usize> {
+        match self {
+            ItemKind::App { .. } => Some(0),
+            ItemKind::File { .. } => Some(1),
+            ItemKind::Folder { .. } => Some(2),
+            ItemKind::Project { .. } => Some(3),
+            ItemKind::Window { .. } => Some(4),
+            ItemKind::Url { .. } => Some(5),
+            ItemKind::Namespaced(_) => None,
+        }
+    }
+
     /// The Extension a namespaced kind belongs to; `None` for a shared kind.
     pub fn extension(&self) -> Option<&str> {
         match self {
@@ -485,5 +499,35 @@ impl TryFrom<ItemRefOwned> for ItemRef {
             id: wire.id,
             kind: ItemKind::from_wire(wire.kind, fields)?,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_shared_kinds_index_is_its_place_among_the_shared_kinds() {
+        let kinds = [
+            ItemKind::App {
+                desktop_id: "x".into(),
+            },
+            ItemKind::File { path: "/x".into() },
+            ItemKind::Folder { path: "/x".into() },
+            ItemKind::Project { path: "/x".into() },
+            ItemKind::Window {
+                address: "x".into(),
+            },
+            ItemKind::Url { url: "x".into() },
+        ];
+        assert_eq!(kinds.len(), SHARED_KINDS.len());
+        for kind in &kinds {
+            assert_eq!(
+                kind.shared_index().map(|n| SHARED_KINDS[n]),
+                Some(kind.name())
+            );
+        }
+        let namespaced = ItemKind::Namespaced(NamespacedKind::new("ext.thing").unwrap());
+        assert_eq!(namespaced.shared_index(), None);
     }
 }

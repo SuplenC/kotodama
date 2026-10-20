@@ -8,7 +8,7 @@ Kotodama should beat Raycast, Spotlight and Omarchy's menu at finding and doing 
 
 ## Decision
 
-**Rust, with a long-running Daemon.** `kotodamad` owns the index, the ranking, the history and the Extensions. It runs as a systemd user service started on first use of its socket, so it starts on the first keypress and stays warm after that. Front ends are thin and talk to it over a Unix socket.
+**Rust, with a long-running Daemon.** `kotodamad` owns the index, the ranking, the History and the Extensions. It runs as a systemd user service started on first use of its socket, so it starts on the first keypress and stays warm after that. Front ends are thin and talk to it over a Unix socket.
 
 **The Quickshell Front end is a Rust QML module (cxx-qt).** It speaks the fastest Wire format to the Daemon and exposes a native list model to QML, so results never pass through JavaScript. QML only draws them, which lets the menu take its look from the rest of the shell.
 
@@ -26,7 +26,7 @@ Kotodama should beat Raycast, Spotlight and Omarchy's menu at finding and doing 
 
 ## Considered options
 
-- **Everything in QML/JS inside Quickshell.** Rejected: no warm index or history across sessions, jobs die with the window, and JS-side ranking and decoding are slow.
+- **Everything in QML/JS inside Quickshell.** Rejected: no warm index or History across sessions, jobs die with the window, and JS-side ranking and decoding are slow.
 - **A process per query, as rofi scripts work.** Rejected: start-up cost on every keystroke.
 - **In-process plugins (dynamic libraries, Lua, Rhai).** Rejected: one bad plugin freezes or crashes the menu, and it limits which languages Extensions can be written in.
 - **JSON only.** Rejected: it is the slowest of the three. It is kept as the baseline so a shell-script Extension stays easy to write.

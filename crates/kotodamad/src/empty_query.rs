@@ -1,12 +1,12 @@
-//! What the menu shows before anything is typed: the Results most used at this
-//! time of day, then a fixed menu.
+//! The Empty query: the Results most used at this time of day, then the Fixed
+//! menu.
 
 use kotodama_protocol::{Table, Value};
 
 use crate::history::ResultKey;
 use crate::keywords::string;
 
-/// What the empty query shows, from the config's `[empty_query]` table:
+/// What the Empty query shows, from the config's `[empty_query]` table:
 ///
 /// ```toml
 /// [empty_query]
@@ -19,12 +19,12 @@ use crate::keywords::string;
 /// ```
 ///
 /// A setting that doesn't parse is logged and keeps its default; an Item of
-/// the menu that doesn't is logged and left out.
+/// the Fixed menu that doesn't is logged and left out.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct EmptyQuery {
     /// How many of the Results most used at this time of day come first.
     pub most_used: usize,
-    /// The Items shown after them, by the name of the Extension that owns each
+    /// The Fixed menu: the Items shown after them, by the name of the Extension that owns each
     /// and its id.
     pub menu: Vec<ResultKey>,
 }

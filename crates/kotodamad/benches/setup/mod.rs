@@ -239,7 +239,7 @@ impl Setup {
         self.buf.len()
     }
 
-    /// `kotodama toggle`: the menu opens on the empty query.
+    /// `kotodama toggle`: the menu opens on the Empty query.
     #[allow(dead_code)] // query.rs alone
     pub fn toggle(&mut self) {
         self.daemon.handle(

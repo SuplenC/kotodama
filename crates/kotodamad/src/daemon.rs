@@ -538,7 +538,7 @@ impl Narrowing {
         self.by_letter = folded.filter().by_letter();
     }
 
-    /// Forgets the last search, as the empty query does: the next one starts
+    /// Forgets the last search, as the Empty query does: the next one starts
     /// from every Item.
     fn forget(&mut self) {
         self.matched.clear();
@@ -631,7 +631,7 @@ struct Undoable {
     until: Instant,
 }
 
-/// A Result the empty query may show as one of the most used.
+/// A Result the Empty query may show as one of the most used.
 struct MostUsed {
     source: Source,
     used: Habit,
@@ -1539,7 +1539,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
         }
     }
 
-    /// Ranks the empty query again in every session showing it but `except`,
+    /// Ranks the Empty query again in every session showing it but `except`,
     /// for what the History learned or the time of day now: from scratch
     /// for a menu opening, and otherwise as a late update, which keeps the
     /// rows on screen where they are.
@@ -1805,7 +1805,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
                 text,
             } => self.filter_view(id, &extension, &view, text),
             FromFrontEnd::Closed => self.closed(Some(id)),
-            // The menu may open on the empty query, which may have been
+            // The menu may open on the Empty query, which may have been
             // ranked hours ago.
             FromFrontEnd::Open { query, view } => {
                 self.warm = true;
@@ -2441,10 +2441,10 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
     }
 
     /// Adds the Actions the Daemon offers on a Result the History keeps
-    /// anything for: Forget, and clearing its Extension's history. They go
+    /// anything for: Forget, and clearing its Extension's History. They go
     /// with the Item's own Actions on the Daemon's own Results (ADR 0005),
     /// and after the Contributed actions on the rest. Only Results with
-    /// history get them, so a row costs nothing more until something is
+    /// a History get them, so a row costs nothing more until something is
     /// picked through it.
     fn offer_forgetting(
         &self,
@@ -3259,8 +3259,8 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
         primary
     }
 
-    /// What the empty query shows: the Results most used at this time of day,
-    /// then the config's menu, each thing once. The most used rank by their
+    /// What the Empty query shows: the Results most used at this time of day,
+    /// then the Fixed menu, each thing once. The most used rank by their
     /// picks near this time of day, then by all their picks; an Alias's
     /// picks count for the Result it names. Of the Results of one Identity,
     /// the one picked through most stands for it.

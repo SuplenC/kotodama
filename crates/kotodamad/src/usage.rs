@@ -24,7 +24,7 @@
 //! `usage.jsonl.1`, replacing the one before, and a new file is started, so
 //! the log never takes more than twice that. Turning the log off keeps what
 //! was written; delete the files to forget it. Clearing the History deletes
-//! both files, and clearing one Extension's history drops the picks of its
+//! both files, and clearing one Extension's History drops the picks of its
 //! Results from them. Undoing either puts back the History, never the log.
 
 use std::fs::{self, File, OpenOptions};
