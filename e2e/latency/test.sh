@@ -31,14 +31,27 @@ kotodama="$target/release/kotodama"
 mark=$(log_lines quickshell.log)
 "$kotodama" open
 wait_for_log quickshell.log "focused: true" "$mark"
-# The Items are all in once the last one is found.
+# The Extension sends the 10k Items in one message, so they are all in once
+# "9999" finds any. The search logs only when its Results change, and opening
+# with the query already in the box changes nothing, so each try first types
+# another query. (Before, each try after the first waited out wait_for_log's
+# 10 s for a "results: 1" that never came: 8 minutes before the first key.)
+indexed=false
 for _ in $(seq 50); do
+    "$kotodama" open --query 999
     mark=$(log_lines quickshell.log)
     "$kotodama" open --query 9999
-    if wait_for_log quickshell.log "results: 1" "$mark" 2>/dev/null; then
+    wait_for_log quickshell.log "results: " "$mark" 2>/dev/null || true
+    if tail -n "+$((mark + 1))" "$E2E_OUT/quickshell.log" | grep -q 'results: [1-9]'; then
+        indexed=true
         break
     fi
+    sleep 0.1
 done
+if [ "$indexed" != true ]; then
+    echo "the Items were never indexed" >&2
+    exit 1
+fi
 
 mark=$(log_lines quickshell.log)
 # One key every 50 ms, as a quick typist would.
