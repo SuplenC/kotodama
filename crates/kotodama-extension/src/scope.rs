@@ -107,18 +107,29 @@ pub fn is_empty(cgroup: &Path) -> bool {
 #[cfg(not(target_os = "linux"))]
 pub fn spawn(
     command: &mut Command,
+    _app_id: Option<&str>,
     _unscoped: impl FnOnce(crate::dbus::Error) + Send + 'static,
 ) -> io::Result<Launched> {
     command.spawn().map(Launched::unscoped)
 }
 
-/// The unit name of the scope for the program `program` with process id
-/// `pid`, as the freedesktop desktop entry and systemd conventions name an
-/// app's scope: `app-<launcher>-<app id>-<unique>.scope`, with the app id
-/// escaped as `systemd-escape` does.
+/// What names the scope of `command`: `app_id`, the desktop id of the app it
+/// starts without `.desktop`, when known, else the file name of its program.
 #[cfg_attr(all(not(target_os = "linux"), not(test)), expect(dead_code))]
-fn unit_name(program: &str, pid: u32) -> String {
-    let name = program.rsplit('/').next().unwrap_or(program);
+fn app_name(command: &Command, app_id: Option<&str>) -> String {
+    if let Some(id) = app_id {
+        return id.to_owned();
+    }
+    let program = command.get_program().to_string_lossy();
+    program.rsplit('/').next().unwrap_or(&program).to_owned()
+}
+
+/// The unit name of the scope for the app `name` with process id `pid`, as
+/// the freedesktop desktop entry and systemd conventions name an app's scope:
+/// `app-<launcher>-<app id>-<unique>.scope`, with the app id escaped as
+/// `systemd-escape` does.
+#[cfg_attr(all(not(target_os = "linux"), not(test)), expect(dead_code))]
+fn unit_name(name: &str, pid: u32) -> String {
     let mut unit = String::from("app-kotodama-");
     for (n, byte) in name.bytes().take(MAX_NAME).enumerate() {
         let plain = byte.is_ascii_alphanumeric() || byte == b'_' || (byte == b'.' && n > 0);
@@ -132,7 +143,7 @@ fn unit_name(program: &str, pid: u32) -> String {
     unit
 }
 
-/// How much of a program's name goes in its scope's name, in bytes: a unit's
+/// How much of an app's name goes in its scope's name, in bytes: a unit's
 /// name may be 255 bytes at most, and each byte may take four escaped.
 const MAX_NAME: usize = 48;
 
@@ -149,7 +160,7 @@ mod linux {
 
     use kotodama_protocol::launch_prefix;
 
-    use super::{Launched, unit_name};
+    use super::{Launched, app_name, unit_name};
     use crate::dbus::{Bus, Call, Error, Marshal, Message};
 
     /// Small: the thread only makes one D-Bus call.
@@ -159,9 +170,11 @@ mod linux {
     const JOB_WAIT: Duration = Duration::from_secs(2);
 
     /// Spawns `command` in a scope of its own, unless a launch prefix is set
-    /// or there is no systemd user manager to make one. A program that can't
-    /// get its scope still starts, and `unscoped` hears why, possibly on
-    /// another thread.
+    /// or there is no systemd user manager to make one. The scope is named
+    /// for `app_id`, the desktop id of the app the command starts without
+    /// `.desktop`, if known, else for the command's program. A program that
+    /// can't get its scope still starts, and `unscoped` hears why, possibly
+    /// on another thread.
     ///
     /// The program is moved into its scope after the fork and before it
     /// runs, so whatever it starts at once lands in the scope too: the child
@@ -173,13 +186,14 @@ mod linux {
     /// When it can't be started, as [`Command::spawn`].
     pub fn spawn(
         command: &mut Command,
+        app_id: Option<&str>,
         unscoped: impl FnOnce(Error) + Send + 'static,
     ) -> io::Result<Launched> {
         if launch_prefix().is_some() {
             return command.spawn().map(Launched::unscoped);
         }
         match Bus::user_manager() {
-            Ok(manager) => spawn_scoped(command, manager, unscoped),
+            Ok(manager) => spawn_scoped(command, app_id, manager, unscoped),
             Err(err) if err.is_absent() => command.spawn().map(Launched::unscoped),
             Err(err) => {
                 unscoped(err);
@@ -188,13 +202,14 @@ mod linux {
         }
     }
 
-    /// Spawns `command` in a scope `manager` makes.
+    /// Spawns `command` in a scope `manager` makes, named as [`spawn`] says.
     pub(super) fn spawn_scoped(
         command: &mut Command,
+        app_id: Option<&str>,
         manager: Bus,
         unscoped: impl FnOnce(Error) + Send + 'static,
     ) -> io::Result<Launched> {
-        let program = command.get_program().to_string_lossy().into_owned();
+        let app = app_name(command, app_id);
         let description = description(command);
         let (mut pid_reader, pid_writer) = io::pipe()?;
         let (go_reader, mut go_writer) = io::pipe()?;
@@ -209,7 +224,7 @@ mod linux {
                     return;
                 }
                 let pid = u32::from_ne_bytes(pid);
-                let scoped = start_scope(manager, &unit_name(&program, pid), &description, pid);
+                let scoped = start_scope(manager, &unit_name(&app, pid), &description, pid);
                 if scoped.is_ok()
                     && let Some(dir) = cgroup_of(pid)
                 {
@@ -357,10 +372,11 @@ mod tests {
     use super::*;
 
     #[test]
-    fn a_scope_is_named_for_its_program_escaped_and_its_process() {
+    fn a_scope_is_named_for_its_app_escaped_and_its_process() {
+        assert_eq!(unit_name("firefox", 42), "app-kotodama-firefox-42.scope");
         assert_eq!(
-            unit_name("/usr/bin/firefox", 42),
-            "app-kotodama-firefox-42.scope"
+            unit_name("org.gnome.TextEditor", 3),
+            "app-kotodama-org.gnome.TextEditor-3.scope"
         );
         assert_eq!(
             unit_name("gnome-text-editor", 7),
@@ -371,6 +387,18 @@ mod tests {
             "app-kotodama-\\x2ehidden\\x20\\xc3\\xbc-1.scope"
         );
         assert!(unit_name(&"x".repeat(1000), u32::MAX).len() < 256);
+    }
+
+    #[test]
+    fn an_app_is_named_by_its_desktop_id_else_by_its_programs_file_name() {
+        let firefox = Command::new("/usr/bin/firefox");
+
+        assert_eq!(
+            app_name(&firefox, Some("org.mozilla.firefox")),
+            "org.mozilla.firefox"
+        );
+        assert_eq!(app_name(&firefox, None), "firefox");
+        assert_eq!(app_name(&Command::new("foot"), None), "foot");
     }
 
     /// The variables `command` sets.
@@ -459,7 +487,7 @@ mod tests {
             let (ours, peer) = manager(Duration::from_millis(300), "done");
             let (errors, unscoped) = mpsc::channel();
             let started = Instant::now();
-            let launched = spawn_scoped(&mut echo_pid(), bus(ours), move |err| {
+            let launched = spawn_scoped(&mut echo_pid(), None, bus(ours), move |err| {
                 let _ = errors.send(err.to_string());
             })
             .unwrap();
@@ -484,10 +512,31 @@ mod tests {
         }
 
         #[test]
+        fn an_app_launched_by_desktop_id_gets_a_scope_named_for_it() {
+            let (ours, peer) = manager(Duration::ZERO, "done");
+
+            let launched = spawn_scoped(
+                &mut echo_pid(),
+                Some("org.example.Sleeper"),
+                bus(ours),
+                |_| {},
+            )
+            .unwrap();
+            let pid = launched.child.id();
+            assert!(launched.child.wait_with_output().unwrap().status.success());
+
+            let call = peer.join().unwrap();
+            assert_eq!(
+                unit_asked(&call),
+                format!("app-kotodama-org.example.Sleeper-{pid}.scope")
+            );
+        }
+
+        #[test]
         fn a_program_whose_scope_failed_still_runs_and_says_why() {
             let (ours, peer) = manager(Duration::ZERO, "failed");
             let (errors, unscoped) = mpsc::channel();
-            let child = spawn_scoped(&mut echo_pid(), bus(ours), move |err| {
+            let child = spawn_scoped(&mut echo_pid(), None, bus(ours), move |err| {
                 let _ = errors.send(err.to_string());
             })
             .unwrap()
@@ -501,8 +550,12 @@ mod tests {
         #[test]
         fn a_program_that_cant_start_fails_without_waiting_forever() {
             let (ours, _peer) = manager(Duration::ZERO, "done");
-            let started =
-                spawn_scoped(&mut Command::new("/nonexistent/program"), bus(ours), |_| {});
+            let started = spawn_scoped(
+                &mut Command::new("/nonexistent/program"),
+                None,
+                bus(ours),
+                |_| {},
+            );
             assert!(started.is_err());
         }
     }

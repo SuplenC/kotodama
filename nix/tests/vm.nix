@@ -189,14 +189,18 @@ pkgs.testers.runNixOSTest {
         user(f"{front_end} --run vm sync")
         machine.wait_until_succeeds("grep -q 'string \"VM sync\"' /tmp/notifications")
 
-    with subtest("programs started from the menu get scopes of their own"):
+    with subtest("programs started from the menu get scopes of their own, named for the app where it has a desktop id"):
+        # The Daemon starts the Quicklink, which has no desktop id, so its
+        # scope is named for its program; the apps Extension starts
+        # sleeper.desktop.
         user(f"{front_end} --run nap")
         user(f"{front_end} --run sleeper")
-        for program in ["sleep 1001", "sleep 1002"]:
+        scopes = {"sleep 1001": "app-kotodama-sleep-", "sleep 1002": "app-kotodama-sleeper-"}
+        for program, scope in scopes.items():
             machine.wait_until_succeeds(pgrep(program))
             cgroup = cgroup_of(program)
             assert "kotodamad.service" not in cgroup, f"{program} runs in the Daemon's cgroup: {cgroup}"
-            assert "/app.slice/app-kotodama-sleep-" in cgroup, f"{program} has no scope of its own: {cgroup}"
+            assert f"/app.slice/{scope}" in cgroup, f"{program} isn't in a scope named {scope}*: {cgroup}"
 
     with subtest("stopping the Daemon leaves them running, and the next toggle brings it back"):
         user("systemctl --user stop kotodamad.service")

@@ -1,11 +1,12 @@
-//! Starting the programs Actions run, detached from the Extension, and
-//! programs in the background, reporting how they ended.
+//! Starting the programs Actions run, detached from the Extension or the
+//! Daemon that starts them, and programs in the background, reporting how
+//! they ended.
 //!
 //! Each runs through the launch prefix ([`launch_command`]) if one is set,
 //! else in a systemd scope of its own when there is a user manager to make
-//! one ([`crate::scope`]); with no stdio of the Extension's, which carries
-//! the protocol; and in a process group of its own, so a signal to the
-//! Extension's group doesn't reach it.
+//! one ([`crate::scope`]); with no stdio of its starter's, which in an
+//! Extension carries the protocol; and in a process group of its own, so a
+//! signal to its starter's group doesn't reach it.
 
 use std::io::{self, Read};
 use std::os::unix::process::CommandExt;
@@ -56,39 +57,73 @@ fn command(argv: &[String], dir: Option<&Path>) -> io::Result<Command> {
     Ok(command)
 }
 
-/// Spawns `command`, which runs `argv`, in a scope of its own if it gets one.
-/// The error says what went wrong in words for the user.
-fn spawn(command: &mut Command, argv: &[String]) -> io::Result<Launched> {
+/// Spawns `command`, which runs `argv`, in a scope of its own if it gets one,
+/// named for `app_id` if given ([`crate::scope::spawn`]). The error says what
+/// went wrong in words for the user.
+fn spawn(command: &mut Command, argv: &[String], app_id: Option<&str>) -> io::Result<Launched> {
     let program = argv.first().map_or("", String::as_str);
     let named = program.to_owned();
-    crate::scope::spawn(command, move |err| {
+    crate::scope::spawn(command, app_id, move |err| {
         crate::log!("{named} runs without a scope of its own: {}", Chain(&err));
     })
     .map_err(|err| io::Error::new(err.kind(), format!("couldn't start {program}: {err}")))
 }
 
-/// Starts `argv`, in `dir` if given, and leaves it running. A thread reaps it
-/// when it exits. The error says what went wrong in words for the user.
-pub fn launch(argv: &[String], dir: Option<&Path>) -> io::Result<()> {
-    launch_watched(argv, dir, "", Duration::ZERO, || {})
+/// The app a launch starts, as its desktop entry names it.
+#[derive(Debug, Clone, Copy)]
+pub struct App<'a> {
+    /// Its desktop id without `.desktop`, as in `firefox` or
+    /// `org.gnome.TextEditor`, which names its scope.
+    pub id: &'a str,
+    /// Its own program, not a terminal it runs in, by which a copy of it
+    /// running from before is found.
+    pub program: &'a str,
 }
 
-/// Starts `argv` as [`launch`] does, and calls `closed` on the thread that
-/// reaps it if the app it starts, the program `app`, closed within `within`:
+/// Starts `argv`, in `dir` if given, and leaves it running. A thread reaps it
+/// when it exits. Its scope is named for its program.
+///
+/// # Errors
+///
+/// When it can't be started; the error says why in words for the user.
+pub fn launch(argv: &[String], dir: Option<&Path>) -> io::Result<()> {
+    start(argv, dir, None, "", Duration::ZERO, || {})
+}
+
+/// Starts `argv` as [`launch`] does, in a scope named for `app`, and calls
+/// `closed` on the thread that reaps it if `app` closed within `within`:
 /// everything the launch started ended by then, its whole scope or process
 /// group, so a launcher that starts the app and exits doesn't count. Nor
-/// does a launch while a copy of `app` already ran, which a single-instance
-/// app hands off to and exits. A zero `within` never calls it.
+/// does a launch while a copy of `app`'s program already ran, which a
+/// single-instance app hands off to and exits. A zero `within` never calls
+/// it.
+///
+/// # Errors
+///
+/// When it can't be started; the error says why in words for the user.
 pub fn launch_watched(
     argv: &[String],
     dir: Option<&Path>,
-    app: &str,
+    app: App<'_>,
     within: Duration,
     closed: impl FnOnce() + Send + 'static,
 ) -> io::Result<()> {
-    let Launched { mut child, cgroup } = spawn(&mut command(argv, dir)?, argv)?;
+    start(argv, dir, Some(app.id), app.program, within, closed)
+}
+
+/// [`launch_watched`] for the app `app_id`, if known, whose program is
+/// `program`.
+fn start(
+    argv: &[String],
+    dir: Option<&Path>,
+    app_id: Option<&str>,
+    program: &str,
+    within: Duration,
+    closed: impl FnOnce() + Send + 'static,
+) -> io::Result<()> {
+    let Launched { mut child, cgroup } = spawn(&mut command(argv, dir)?, argv, app_id)?;
     let deadline = Instant::now() + within;
-    let app = app.to_owned();
+    let app = program.to_owned();
     // It runs either way; without the thread it stays a zombie once it exits,
     // which is better than reporting a failure.
     if let Err(err) = thread::Builder::new()
@@ -132,7 +167,7 @@ pub fn background(
     let (reader, writer) = io::pipe()?;
     let mut command = command(argv, dir)?;
     command.stdout(writer.try_clone()?).stderr(writer);
-    let mut child = spawn(&mut command, argv)?.child;
+    let mut child = spawn(&mut command, argv, None)?.child;
     // The command holds the pipe's write ends too; only the child's may
     // keep it open.
     drop(command);
