@@ -747,6 +747,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "kotodama-hyprland"
+version = "0.1.0"
+dependencies = [
+ "kotodama-extension",
+ "kotodama-protocol",
+ "serde",
+ "serde_json",
+ "tempfile",
+]
+
+[[package]]
 name = "kotodama-protocol"
 version = "0.1.0"
 dependencies = [

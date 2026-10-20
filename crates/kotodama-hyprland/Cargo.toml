@@ -1,0 +1,17 @@
+[package]
+name = "kotodama-hyprland"
+version.workspace = true
+description = "The Hyprland Bundled extension: open windows to focus, close, move or float, and the keyboard shortcuts, read from Hyprland's sockets"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+kotodama-extension = { path = "../kotodama-extension" }
+kotodama-protocol = { path = "../kotodama-protocol" }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
+
+[dev-dependencies]
+kotodama-extension = { path = "../kotodama-extension", features = ["testing"] }
+tempfile = "3.27.0"

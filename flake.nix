@@ -145,10 +145,12 @@
           inherit pkgs;
           kotodama = self.packages.${pkgs.stdenv.hostPlatform.system}.default;
         };
-        # Socket activation, the home-manager module, and later the live Hyprland
-        # tests (#13): Hyprland needs a DRM device, so they run in a NixOS VM, the
-        # way Hyprland tests itself. CI runs it on x86_64, which has KVM.
+        # Socket activation and the home-manager module, in a NixOS VM. CI runs
+        # it on x86_64, which has KVM.
         nixos-vm = import ./nix/tests/vm.nix { inherit pkgs self home-manager; };
+        # The Hyprland Extension live: Hyprland needs a DRM device, so it runs
+        # in a NixOS VM with a virtio GPU, the way Hyprland tests itself.
+        hyprland-vm = import ./nix/tests/hyprland.nix { inherit pkgs self home-manager; };
       });
     };
 }

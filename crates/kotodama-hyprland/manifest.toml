@@ -1,0 +1,6 @@
+# The Hyprland Bundled extension. A package installs this directory as
+# `$XDG_DATA_DIRS/kotodama/extensions/hyprland/`, with the `kotodama-hyprland`
+# binary next to this file (or `command` rewritten to its absolute path).
+name = "hyprland"
+description = "Hyprland's open windows, to focus, close, move or float, and its keyboard shortcuts, searchable and listed by modifier"
+command = ["./kotodama-hyprland"]
