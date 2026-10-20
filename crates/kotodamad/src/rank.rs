@@ -583,9 +583,12 @@ fn score(pattern: &Pattern, haystack: Utf32Str<'_>, matcher: &mut Matcher) -> Op
 /// of its texts only for a match.
 #[derive(Clone, Copy)]
 pub struct Searched<'a> {
+    /// The folded title.
     pub title: Utf32Str<'a>,
     /// The keyword and keywords, as [`Texts::words`] has them.
     pub words: Utf32Str<'a>,
+    /// The letters the subtitle's words start with, so the subtitle is read
+    /// only if it may match.
     pub subtitle_initials: Letters,
 }
 

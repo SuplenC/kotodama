@@ -482,10 +482,10 @@ impl Index {
 
     /// Scores every Item against `pattern`, or only the slots in `within` when
     /// the caller knows nothing else can match. Calls `found` with each
-    /// match's slot, what ranking reads of it, its score and what matched, in
-    /// slot order if `within` is: ranking reads what the scan read of a row
-    /// without looking the row up again. `filter` is as [`Texts::score`]
-    /// takes it.
+    /// match's slot, what ranking reads of it, its score and what matched.
+    /// The matches come in slot order if `within` is in it. Ranking takes the
+    /// row from the scan and doesn't look it up again. `filter` is as
+    /// [`Texts::score`] takes it.
     pub fn search(
         &self,
         pattern: &Pattern,

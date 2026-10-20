@@ -124,9 +124,9 @@ impl KindOrder {
 }
 
 /// The place of each kind every Segment of the Index names, by Segment and
-/// kind (see [`Segment::kinds`](crate::segment::Segment::kinds)): worked out
-/// once a search from the few kinds there are, so ranking looks a Result's
-/// place up rather than comparing kind names once a Result.
+/// kind (see [`Segment::kinds`](crate::segment::Segment::kinds)). Worked out
+/// per search from the few kinds there are. Ranking then looks up each
+/// Result's place, and doesn't compare kind names.
 #[derive(Default)]
 pub struct KindPlaces {
     places: Vec<Vec<u8>>,

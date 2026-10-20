@@ -18,7 +18,7 @@ The Daemon. Maintained by hand: fix stale lines when you find them, and update t
 - `payload.rs`: `Shelf`, the append-only store of encoded Items (an unlinked file in `$XDG_CACHE_HOME/kotodama`, or memory); `Place`.
 - `history.rs`: `History` on disk (`$XDG_STATE_HOME/kotodama/history.json`); `Habit::frecency`, `History::learned` (Learned choices), `Settings::from_config`.
 - `clock.rs`: `Clock`, `When` (time of day for Frecency, ADR 0009).
-- `kind_order.rs`: `KindOrder::place`, configurable kind order for equal matches; `KindPlaces`, each Segment's kinds placed once a search.
+- `kind_order.rs`: `KindOrder::place`, configurable kind order for equal matches; `KindPlaces`, the place of each Segment's kinds, worked out per search.
 - `empty_query.rs`: `EmptyQuery::from_config`, the empty-query menu.
 - `keywords.rs`: Aliases and Quicklinks from config (`Keywords`, `Quicklink::command`); URL templates and the opener are `kotodama_extension::url`.
 - `open_view.rs`: `kotodama open --view` (ADR 0014): `ViewName` (`<extension>/<item>`), `Opening`. The Daemon side is `daemon.rs:Daemon::open_on_view` (runs the Item's primary Action, holds `Open`/`Toggle` back until the View is there, `OPEN_VIEW_TIMEOUT`).

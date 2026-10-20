@@ -80,6 +80,7 @@ pub struct Ranked<'a> {
 }
 
 impl<'a> Ranked<'a> {
+    /// What a search reads of the row, as [`Segment::texts`] gives it.
     #[inline]
     pub fn texts(self) -> Texts<'a> {
         self.segment.keys_texts(self.row, self.keys)
@@ -87,7 +88,7 @@ impl<'a> Ranked<'a> {
 
     /// The title's length in characters.
     #[inline]
-    pub fn len(self) -> u32 {
+    pub fn title_len(self) -> u32 {
         self.keys.title.len() as u32
     }
 

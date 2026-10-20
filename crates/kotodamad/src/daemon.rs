@@ -2804,7 +2804,13 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
                 if let Some(tier) = tiers.texts(ranked.texts(), &session.folded, matched) {
                     let kind = kind_places.place(slot.segment, ranked.kind());
                     let source = Source::Indexed(slot);
-                    candidates.push(Candidate::new(source, tier, kind, score, ranked.len()));
+                    candidates.push(Candidate::new(
+                        source,
+                        tier,
+                        kind,
+                        score,
+                        ranked.title_len(),
+                    ));
                 }
             },
         );
@@ -3020,7 +3026,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
                         return None;
                     }
                     let kind = kind_places.place(slot.segment, ranked.kind());
-                    (ranked.texts(), ranked.len(), kind)
+                    (ranked.texts(), ranked.title_len(), kind)
                 }
                 Source::Own(n) => {
                     if known[indexed..].iter().any(|c| c.source == source) {
