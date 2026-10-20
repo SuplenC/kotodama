@@ -366,6 +366,8 @@ fn to_front_end_messages() -> Vec<ToFrontEnd> {
                     action: action("pin-version"),
                 }],
                 highlights: vec![0, 1, 4],
+                alias: Some("code".into()),
+                unavailable: None,
             }],
         },
         ToFrontEnd::Results {

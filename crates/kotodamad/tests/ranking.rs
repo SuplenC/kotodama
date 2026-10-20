@@ -793,6 +793,20 @@ fn a_quicklinks_row_shows_the_query_it_will_search_for() {
     assert_eq!(w.first("yt cats"), "Search YouTube for “cats”");
 }
 
+/// K4
+#[test]
+fn a_quicklink_is_found_by_its_title() {
+    let mut w = World::with(vec![app("Yelp")], YT);
+    assert_eq!(w.first("youtube"), "Search YouTube");
+}
+
+/// K4
+#[test]
+fn a_quicklinks_title_ranks_by_its_tier_like_any_title() {
+    let mut w = World::with(vec![app("YouTube")], YT);
+    assert_eq!(rows(&mut w, "youtube"), ["YouTube", "Search YouTube"]);
+}
+
 /// K5
 #[test]
 fn part_of_a_quicklink_keyword_shows_it_among_the_results() {

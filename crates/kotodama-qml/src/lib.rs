@@ -283,6 +283,10 @@ const ICON: i32 = 0x102;
 /// The title as StyledText, its matched characters in `highlightColor`.
 const MARKUP: i32 = 0x103;
 const EXTENSION: i32 = 0x104;
+/// The Alias the query named the Result by, or empty.
+const ALIAS: i32 = 0x105;
+/// Why the Result can't run, or empty when it can.
+const UNAVAILABLE: i32 = 0x106;
 
 pub struct SearchRust {
     query: QString,
@@ -553,6 +557,8 @@ impl KotodamaSearch {
             ICON => QString::from(&row.icon),
             MARKUP => QString::from(&row.markup(&String::from(&self.highlight_color))),
             EXTENSION => QString::from(&row.result.extension),
+            ALIAS => QString::from(row.alias.as_deref().unwrap_or_default()),
+            UNAVAILABLE => QString::from(row.unavailable.as_deref().unwrap_or_default()),
             _ => return QVariant::default(),
         };
         QVariant::from(&text)
@@ -566,6 +572,8 @@ impl KotodamaSearch {
             (ICON, "icon"),
             (MARKUP, "markup"),
             (EXTENSION, "extension"),
+            (ALIAS, "alias"),
+            (UNAVAILABLE, "unavailable"),
         ] {
             roles.insert(role, QByteArray::from(name));
         }

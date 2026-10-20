@@ -178,6 +178,13 @@ pub struct ShownResult {
     /// The positions, in characters, of the title's characters that matched the
     /// query.
     pub highlights: Vec<u32>,
+    /// The Alias the query named this Result by, which the row shows as a
+    /// badge.
+    pub alias: Option<String>,
+    /// Why the Result can't run, which the row shows greyed out in place of
+    /// its subtitle: the Item an Alias names is gone, or its Extension is
+    /// down. Such a Result carries no Actions.
+    pub unavailable: Option<String>,
 }
 
 /// One Item of a filtered list View.

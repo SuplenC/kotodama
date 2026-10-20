@@ -10,6 +10,7 @@
 use std::cell::Cell;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::Path;
+use std::sync::Arc;
 use std::sync::mpsc::{Sender, SyncSender, TrySendError};
 use std::time::{Duration, Instant};
 
@@ -31,7 +32,7 @@ use crate::history::{
 };
 use crate::index::{Index, ItemRef, Slot};
 use crate::indexer::{Indexed, Indexer, Kept, Plan};
-use crate::keywords::{self, Keywords};
+use crate::keywords::{self, Alias, Keywords};
 use crate::kind_order::{KindOrder, KindPlaces};
 use crate::open_view::{Opening, ViewName};
 use crate::rank::{self, Haystack, Matched, Text, Tier, Tiers};
@@ -299,6 +300,9 @@ enum Source {
     Live(ExtensionId, u32),
     /// The Daemon's own `n`th Item.
     Own(u32),
+    /// The Alias the query names, when its Item is gone or its Extension is
+    /// down: a row that says so and can't run.
+    Unavailable,
 }
 
 /// Where a Result ranks before how well it matches is looked at, lowest
@@ -661,6 +665,22 @@ fn undo_item(title: &str) -> Item {
     }
 }
 
+/// An Item known by its id alone, as an Alias names one the Daemon never saw.
+fn named_only(id: &str) -> Item {
+    Item {
+        id: id.to_owned(),
+        kind: ItemKind::Namespaced(NamespacedKind::new("kotodama.alias").expect("a valid kind")),
+        title: id.to_owned(),
+        subtitle: None,
+        icon: None,
+        keyword: None,
+        identity: None,
+        keywords: Vec::new(),
+        hidden: false,
+        actions: Vec::new(),
+    }
+}
+
 /// An Action that takes no Arguments and has no shortcut.
 fn action_titled(id: &str, title: String) -> Action {
     Action {
@@ -838,6 +858,10 @@ pub struct Daemon<L, D, S> {
     clock: Clock,
     started: Instant,
     keywords: Keywords,
+    /// The Items Aliases name, by Extension name and id, as they were when
+    /// their Extension last stopped, so a row can show what an Alias stands
+    /// for while it can't run.
+    last_seen: HashMap<(String, String), Arc<Item>>,
     empty_query: EmptyQuery,
     kinds: KindOrder,
     /// `kinds` for each Segment's kinds, as of the last search.
@@ -910,6 +934,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             clock: Clock::system(),
             started: now,
             keywords: Keywords::default(),
+            last_seen: HashMap::new(),
             empty_query: EmptyQuery::default(),
             kinds: KindOrder::default(),
             kind_places: KindPlaces::default(),
@@ -1277,6 +1302,15 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
 
     fn forget_run(&mut self, id: ExtensionId) {
         let name = self.extensions[id.0].name().to_owned();
+        for alias in self.keywords.aliases.values() {
+            if alias.extension == name
+                && let Some(slot) = self.index.find(id, &alias.item)
+                && let Some(item) = self.index.item(slot)
+            {
+                self.last_seen
+                    .insert((name.clone(), alias.item.clone()), item);
+            }
+        }
         if self.index.clear(id) {
             self.repin_index();
             self.mark_late();
@@ -2860,6 +2894,12 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             .chain([Own::new(clear_history(), OwnAction::ClearHistory)])
             .collect();
         self.keywords = keywords;
+        let aliases = &self.keywords.aliases;
+        self.last_seen.retain(|(extension, id), _| {
+            aliases
+                .values()
+                .any(|alias| alias.extension == *extension && alias.item == *id)
+        });
         self.repin();
         self.load_undo_item();
         // The own Items' positions changed, so rows showing them can't be
@@ -3279,7 +3319,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
                     let len = own.haystack.title.len() as u32;
                     (own.haystack.texts(), len, kinds.place(&own.item.kind))
                 }
-                Source::Live(..) => return None,
+                Source::Live(..) | Source::Unavailable => return None,
             };
             tiers
                 .near_miss_texts(texts, folded)
@@ -3392,14 +3432,16 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             .get_key_value(session.key.as_str())
             .or_else(|| self.keywords.aliases.get_key_value(first));
         if let Some((keyword, alias)) = alias
-            && let Some(source) = self.source_of(session, &alias.extension, &alias.item)
+            && let Some(source) = self.alias_source(session, alias)
         {
             named.push(Keyword {
                 source,
                 alias: true,
                 frecency: Some(self.history.frecency(OWN, &alias_id(keyword), when)),
             });
-            primary = alias.action.clone().map(|action| (source, action));
+            if source != Source::Unavailable {
+                primary = alias.action.clone().map(|action| (source, action));
+            }
             session.via_alias = Some((source, keyword.clone()));
         }
         if let Some(n) = self
@@ -3429,6 +3471,10 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
         {
             let at_n = match candidates.iter().position(|c| c.source == source) {
                 Some(n) => n,
+                None if source == Source::Unavailable => {
+                    candidates.push(Candidate::new(source, Tier::Exact, 0, 0, 0));
+                    candidates.len() - 1
+                }
                 None => {
                     let Some((extension, item)) = self.item(session, source) else {
                         continue;
@@ -3643,6 +3689,26 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
         self.frecent_versions = Some(versions);
     }
 
+    /// Where the Result `alias` names comes from in this session:
+    /// [`Source::Unavailable`] when its Item is gone or its Extension is down,
+    /// and `None` for a hidden Item, which only `kotodama open --view` reaches,
+    /// or for one a running Live query Extension may still answer with.
+    fn alias_source(&self, session: &Session, alias: &Alias) -> Option<Source> {
+        if let Some(source) = self.source_of(session, &alias.extension, &alias.item) {
+            return Some(source);
+        }
+        let Some(ext) = self.extension_named(&alias.extension) else {
+            return Some(Source::Unavailable);
+        };
+        let running = &self.extensions[ext.0];
+        let answers_live = running.sender().is_some() && running.debounce().is_some();
+        let hidden = self
+            .hidden
+            .get(&ext)
+            .is_some_and(|hidden| hidden.contains_key(&alias.item));
+        (!answers_live && !hidden).then_some(Source::Unavailable)
+    }
+
     /// Where the Result named by an Extension's name and an Item id comes from
     /// in this session, if it is there.
     fn source_of(&self, session: &Session, extension: &str, id: &str) -> Option<Source> {
@@ -3740,6 +3806,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
                 ItemRef::Borrowed(&session.live[ext.0].results.get(n as usize)?.item),
             )),
             Source::Own(n) => Some((OWN, ItemRef::Borrowed(&self.own.get(n as usize)?.item))),
+            Source::Unavailable => None,
         }
     }
 
@@ -3760,6 +3827,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             }
             Source::Live(ext, n) => &session.live[ext.0].results.get(n as usize)?.item,
             Source::Own(n) => &self.own.get(n as usize)?.item,
+            Source::Unavailable => return None,
         };
         let extension = match source {
             Source::Live(ext, _) => self.extensions[ext.0].name(),
@@ -3823,6 +3891,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
                     own.haystack.texts().title,
                 )
             }
+            Source::Unavailable => return self.unavailable_row(session),
         };
         self.highlights.clear();
         if session
@@ -3864,11 +3933,50 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             None => (OWN.to_owned(), Vec::new()),
         };
         self.offer_forgetting(&extension, &mut item, &mut contributed);
+        let alias = session
+            .via_alias
+            .as_ref()
+            .filter(|(named, _)| *named == source)
+            .map(|(_, keyword)| keyword.clone());
         Some(ShownResult {
             extension,
             item,
             contributed,
             highlights: self.highlights.clone(),
+            alias,
+            unavailable: None,
+        })
+    }
+
+    /// The row of the Alias the session's query names when it can't run: the
+    /// Item as last seen, or its id, without Actions, and why it can't run.
+    fn unavailable_row(&self, session: &Session) -> Option<ShownResult> {
+        let (_, keyword) = session
+            .via_alias
+            .as_ref()
+            .filter(|(source, _)| *source == Source::Unavailable)?;
+        let alias = self.keywords.aliases.get(keyword)?;
+        let name = &alias.extension;
+        let why = match self.extension_named(name) {
+            None => format!("No Extension {name}"),
+            Some(ext) if self.extensions[ext.0].sender().is_none() => {
+                format!("{name} isn't running")
+            }
+            Some(_) => format!("No longer in {name}"),
+        };
+        let seen = self.last_seen.get(&(name.clone(), alias.item.clone()));
+        let mut item = match seen {
+            Some(item) => Item::clone(item),
+            None => named_only(&alias.item),
+        };
+        item.actions.clear();
+        Some(ShownResult {
+            extension: name.clone(),
+            item,
+            contributed: Vec::new(),
+            highlights: Vec::new(),
+            alias: Some(keyword.clone()),
+            unavailable: Some(why),
         })
     }
 
