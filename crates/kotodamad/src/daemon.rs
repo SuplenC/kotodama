@@ -34,6 +34,7 @@ use crate::index::{Index, ItemRef, Slot};
 use crate::indexer::{Indexed, Indexer, Kept, Plan};
 use crate::keywords::{self, Alias, Keywords};
 use crate::kind_order::{KindOrder, KindPlaces};
+use crate::narrowing::Narrowing;
 use crate::open_view::{Opening, ViewName};
 use crate::rank::{self, Haystack, Matched, Text, Tier, Tiers};
 use crate::reserved;
@@ -455,7 +456,7 @@ struct Session {
     typed: Instant,
     /// Whether the user moved the selection since the query last changed.
     selection_moved: bool,
-    narrowing: Narrowing,
+    last_search: LastSearch,
     /// By Extension.
     live: Vec<Live>,
     /// The Results last sent, in order, and whether each is an answer.
@@ -552,67 +553,50 @@ impl Session {
     }
 }
 
-/// What a Session's last search of the Index found. A query that only adds
-/// to that one can only match a subset, so the next search looks at those
-/// alone.
+/// What a Session's last search of the Index found, so the next search
+/// narrows to it where it can.
 #[derive(Default)]
-struct Narrowing {
-    /// The slots that matched `query` at index version `version`, in slot
-    /// order.
-    matched: Vec<Slot>,
-    query: String,
+struct LastSearch {
+    /// The slots it matched, in slot order.
+    narrowing: Narrowing<Slot>,
+    /// The index version it searched: the slots of another version may hold
+    /// other Items.
     version: u64,
-    /// Whether `query` searched subtitles.
-    subtitles: bool,
-    /// Whether `query` was one letter, which matches only at a word start, so
-    /// `matched` lacks the Items a longer query matches inside a word.
-    by_letter: bool,
-    /// The slots that matched `query` or nearly did, in slot order, if near
-    /// misses were looked for. A query that only adds to it, with as many
-    /// typos for each word, can only nearly match these.
+    /// The slots that matched or nearly did, in slot order, if near misses
+    /// were looked for. A query that only adds to it, with as many typos for
+    /// each word, can only nearly match these.
     nearly: Vec<Slot>,
-    /// `query` as tiers are worked out from, if `nearly` is for it.
+    /// The query as tiers are worked out from, if `nearly` is for it.
     nearly_for: Option<rank::Query>,
 }
 
-impl Narrowing {
-    /// Whether `query`, folded as `folded`, need only search `matched` at
-    /// index version `version`.
-    fn narrows(&self, query: &str, folded: &rank::Query, version: u64) -> bool {
-        const SYNTAX: &[char] = &['^', '$', '!', '\'', '\\'];
-        // Subtitles are searched from a few letters on, so the matches of a
-        // query too short for them may lack some of this one's.
-        !self.query.is_empty()
-            && self.subtitles == folded.searches_subtitles()
-            && !self.by_letter
-            && self.version == version
-            && query.starts_with(&self.query)
-            && !query.contains(SYNTAX)
+impl LastSearch {
+    /// The slots `query`, folded as `folded`, need only search at index
+    /// version `version`; `None` if it must search every slot.
+    fn within(&self, query: &str, folded: &rank::Query, version: u64) -> Option<&[Slot]> {
+        if self.version != version {
+            return None;
+        }
+        self.narrowing.within(query, folded)
     }
 
-    /// Remembers what `query`, folded as `folded`, matched at index version
-    /// `version`.
+    /// Remembers that `query`, folded as `folded`, matched `matched` at index
+    /// version `version`.
     fn found(
         &mut self,
         query: &str,
         folded: &rank::Query,
         version: u64,
-        matched: impl Iterator<Item = Slot>,
+        matched: impl IntoIterator<Item = Slot>,
     ) {
-        self.matched.clear();
-        self.matched.extend(matched);
-        self.query.clear();
-        self.query.push_str(query);
+        self.narrowing.found(query, folded, matched);
         self.version = version;
-        self.subtitles = folded.searches_subtitles();
-        self.by_letter = folded.filter().by_letter();
     }
 
     /// Forgets the last search, as the Empty query does: the next one starts
     /// from every Item.
     fn forget(&mut self) {
-        self.matched.clear();
-        self.query.clear();
+        self.narrowing.forget();
         self.nearly.clear();
         self.nearly_for = None;
     }
@@ -1965,7 +1949,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             rows: DEFAULT_ROWS,
             typed: self.started,
             selection_moved: false,
-            narrowing: Narrowing::default(),
+            last_search: LastSearch::default(),
             live: self.extensions.iter().map(|_| Live::default()).collect(),
             shown: Vec::new(),
             version: 0,
@@ -3152,7 +3136,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
         session.update = Update::None;
 
         if session.query.is_empty() {
-            session.narrowing.forget();
+            session.last_search.forget();
             let when = self.when(now);
             session.empty_ranked_in = Some(history::part_of_day(when));
             let mut ranked = self.empty_query(&session, when);
@@ -3182,10 +3166,10 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
         let mut candidates = Vec::new();
         self.scored.clear();
         let version = self.index.version();
-        let narrow = session
-            .narrowing
-            .narrows(&session.query, &session.folded, version);
-        let within = narrow.then_some(session.narrowing.matched.as_slice());
+        let within = session
+            .last_search
+            .within(&session.query, &session.folded, version);
+        let narrow = within.is_some();
         self.kind_places.update(&self.kinds, self.index.kinds());
         let Daemon {
             index,
@@ -3215,7 +3199,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
                 }
             },
         );
-        session.narrowing.found(
+        session.last_search.found(
             &session.query,
             &session.folded,
             version,
@@ -3391,12 +3375,12 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
         narrowed: bool,
         fresh: bool,
     ) -> usize {
-        let last = session.narrowing.nearly_for.take();
+        let last = session.last_search.nearly_for.take();
         let narrow =
             narrowed && last.is_some_and(|last| last.narrows_near_misses_of(&session.folded));
         let typos = session.folded.tolerates_typos();
         let look = typos && candidates.len() < session.rows;
-        let mut nearly = std::mem::take(&mut session.narrowing.nearly);
+        let mut nearly = std::mem::take(&mut session.last_search.nearly);
 
         let Daemon {
             index,
@@ -3464,7 +3448,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
 
         nearly.clear();
         if look {
-            nearly.extend(&session.narrowing.matched);
+            nearly.extend(session.last_search.narrowing.matched());
             nearly.extend(found.iter().filter_map(|candidate| match candidate.source {
                 Source::Indexed(slot) => Some(slot),
                 _ => None,
@@ -3472,9 +3456,9 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             nearly.sort_unstable();
             // A slot can be both a match and a near miss of another word.
             nearly.dedup();
-            session.narrowing.nearly_for = Some(session.folded.clone());
+            session.last_search.nearly_for = Some(session.folded.clone());
         }
-        session.narrowing.nearly = nearly;
+        session.last_search.nearly = nearly;
         // The Indexed items first, in slot order, then the Daemon's own.
         found.sort_unstable_by_key(|candidate| candidate.source);
         let own = found.partition_point(|candidate| matches!(candidate.source, Source::Indexed(_)));

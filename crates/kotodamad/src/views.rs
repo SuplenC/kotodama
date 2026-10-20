@@ -8,6 +8,7 @@ use nucleo_matcher::Matcher;
 use nucleo_matcher::pattern::{CaseMatching, Normalization, Pattern};
 
 use crate::daemon::ExtensionId;
+use crate::narrowing::Narrowing;
 use crate::rank::{self, Haystack, Tiers};
 
 /// The matches past which none has highlights: they cost as much as the
@@ -21,32 +22,9 @@ pub struct Open {
     /// A list View's Items as the matcher reads them, made the first time it
     /// is filtered: most lists never are.
     haystacks: Option<Vec<Haystack>>,
-    /// What the last filter matched, so typing on searches only those.
-    narrowing: Narrowing,
-}
-
-/// The Items the last filter of a list View matched. A filter that only adds
-/// to it can only match a subset, as with the search's narrowing.
-#[derive(Default)]
-struct Narrowing {
-    text: String,
-    /// Whether `text` searched subtitles.
-    subtitles: bool,
-    /// Whether `text` matched only at word starts, as one letter does.
-    by_letter: bool,
-    /// The positions of the Items it matched, in order.
-    matched: Vec<u32>,
-}
-
-impl Narrowing {
-    fn narrows(&self, text: &str, query: &rank::Query) -> bool {
-        const SYNTAX: &[char] = &['^', '$', '!', '\'', '\\'];
-        !self.text.is_empty()
-            && self.subtitles == query.searches_subtitles()
-            && !self.by_letter
-            && text.starts_with(&self.text)
-            && !text.contains(SYNTAX)
-    }
+    /// The positions of the Items the last filter matched, so typing on
+    /// searches only those.
+    narrowing: Narrowing<u32>,
 }
 
 impl Open {
@@ -100,6 +78,9 @@ impl Open {
 #[derive(Default)]
 pub struct Views {
     stack: Vec<Open>,
+    /// The positions of the Items a filter matches as it runs, before its
+    /// View's [`Narrowing`] keeps them; kept for its capacity.
+    scored: Vec<u32>,
 }
 
 impl Views {
@@ -191,32 +172,23 @@ impl Views {
         );
         let query = rank::Query::new(text);
         let filter = query.filter();
-        let narrowed = open.narrowing.narrows(text, &query);
+        let scored = &mut self.scored;
+        scored.clear();
         let mut found: Vec<(u8, rank::Tier, u32)> = Vec::new();
         let mut consider = |n: u32| {
             let (item, haystack) = (&items[n as usize], &haystacks[n as usize]);
-            if let Some((_, matched)) = haystack.score(&pattern, matcher, filter)
-                && let Some(tier) = tiers.item(haystack, item, &query, matched)
-            {
-                found.push((tier.coarse(), tier, n));
+            if let Some((_, matched)) = haystack.score(&pattern, matcher, filter) {
+                scored.push(n);
+                if let Some(tier) = tiers.item(haystack, item, &query, matched) {
+                    found.push((tier.coarse(), tier, n));
+                }
             }
         };
-        if narrowed {
-            open.narrowing
-                .matched
-                .iter()
-                .copied()
-                .for_each(&mut consider);
-        } else {
-            (0..items.len() as u32).for_each(&mut consider);
+        match open.narrowing.within(text, &query) {
+            Some(within) => within.iter().copied().for_each(&mut consider),
+            None => (0..items.len() as u32).for_each(&mut consider),
         }
-        let last = &mut open.narrowing;
-        last.text.clear();
-        last.text.push_str(text);
-        last.subtitles = query.searches_subtitles();
-        last.by_letter = filter.by_letter();
-        last.matched.clear();
-        last.matched.extend(found.iter().map(|&(_, _, n)| n));
+        open.narrowing.found(text, &query, scored.drain(..));
         // Stable, so a Tier keeps the Extension's order.
         found.sort_by(|a, b| b.0.cmp(&a.0).then(b.1.cmp(&a.1)));
         found
