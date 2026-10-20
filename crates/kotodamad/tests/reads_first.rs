@@ -256,6 +256,35 @@ fn no_more_items_are_hot_than_there_is_room_for() {
     assert_eq!(h.daemon.hot().len(), 1);
 }
 
+#[test]
+fn the_menu_shown_by_its_own_keybind_warms_the_cache_as_the_command_does() {
+    let mut h = Harness::new(vec![plain("apps")]);
+    let apps = h.up(0);
+    h.add(&apps, vec![app("Firefox"), app("Mail")]);
+    let menu = h.front_end();
+    let command = h.front_end();
+    h.query(&menu, "");
+
+    let opened = FromFrontEnd::Open {
+        query: String::new(),
+        view: None,
+    };
+    let mut warmed = h.daemon.warmed();
+    for (front_end, message) in [
+        (&command, opened),
+        (&command, FromFrontEnd::Toggle),
+        (&menu, FromFrontEnd::Shown),
+    ] {
+        let sent = format!("{message:?}");
+        h.front_end_sends(front_end, message);
+
+        warmed += 1;
+        assert_eq!(h.daemon.warmed(), warmed, "warmed once on {sent}");
+    }
+    h.query(&menu, "f");
+    assert_eq!(h.daemon.warmed(), warmed, "a keystroke doesn't warm it");
+}
+
 /// xorshift64*: the same Items, queries and picks on every run.
 struct Random(u64);
 

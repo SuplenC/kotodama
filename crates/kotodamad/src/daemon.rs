@@ -858,6 +858,8 @@ pub struct Daemon<L, D, S> {
     hot_versions: (u64, u64),
     /// A menu is opening: read what its first keystroke will read.
     warm: bool,
+    /// How many times the CPU cache was warmed for a menu.
+    warmed: u64,
     matcher: Matcher,
     sessions: BTreeMap<FrontEndId, Session>,
     live_queries: HashMap<u64, (FrontEndId, ExtensionId)>,
@@ -939,6 +941,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             hot_due: now,
             hot_versions: (0, 0),
             warm: false,
+            warmed: 0,
             extensions: found
                 .into_iter()
                 .map(|found| Extension::new(found, now))
@@ -1019,6 +1022,12 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
     pub fn set_hot_capacity(&mut self, capacity: usize) {
         self.hot_capacity = capacity;
         self.hot_due = self.started;
+    }
+
+    /// How many times a menu opening or showing has warmed the CPU cache
+    /// with what its first keystroke reads.
+    pub fn warmed(&self) -> u64 {
+        self.warmed
     }
 
     /// The hot Items, by Extension name and id, each resident.
@@ -2091,9 +2100,11 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
         }
     }
 
-    /// A Front end's menu became visible: its Empty query is ranked again
-    /// if it was last ranked in another part of the day.
+    /// A Front end's menu became visible: the CPU cache is warmed for its
+    /// first keystroke, as when `kotodama open` opens it, and its Empty query
+    /// is ranked again if it was last ranked in another part of the day.
     fn shown(&mut self, id: FrontEndId, now: Instant) {
+        self.warm = true;
         let part = history::part_of_day(self.when(now));
         if let Some(session) = self.sessions.get_mut(&id)
             && session.searched
@@ -3047,6 +3058,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
         // it reads in the CPU's cache.
         if std::mem::take(&mut self.warm) {
             std::hint::black_box(self.index.warm());
+            self.warmed += 1;
         }
 
         if self.catalog_dirty {
