@@ -7,28 +7,64 @@
 //! the Extension sends nothing and waits, at no cost, for a Hyprland to start
 //! (in `$XDG_RUNTIME_DIR/hypr/`, see `Hyprland::wait`) or the Daemon to hang
 //! up; when Hyprland restarts it follows the new instance.
+//!
+//! # Owns
+//!
+//! - The protocol loop, and the thread that follows Hyprland.
+//! - When the windows and the binds are read and sent, and running their Actions.
+//!
+//! # Not here
+//!
+//! - Hyprland's sockets, events, windows and binds: the library's modules.
+//! - Sending only the Items that changed: `kotodama_extension::SentItems`.
 
 #![forbid(unsafe_code)]
 
 use std::collections::BTreeMap;
+#[cfg(target_os = "linux")]
+use std::io;
 use std::process::ExitCode;
+#[cfg(target_os = "linux")]
+use std::sync::mpsc::Sender;
+#[cfg(target_os = "linux")]
 use std::thread;
 
-use kotodama_extension::{Connection, Event, STACK_SIZE, SentItems, Writer, log};
-use kotodama_hyprland::binds::{self, Bind, OPEN, RUN, SHORTCUTS};
+use kotodama_extension::Chain;
+use kotodama_extension::Connection;
+use kotodama_extension::Event;
+#[cfg(target_os = "linux")]
+use kotodama_extension::STACK_SIZE;
+use kotodama_extension::SentItems;
+use kotodama_extension::Writer;
+use kotodama_extension::log;
+use kotodama_hyprland::binds;
+use kotodama_hyprland::binds::Bind;
+use kotodama_hyprland::binds::OPEN;
+use kotodama_hyprland::binds::RUN;
+use kotodama_hyprland::binds::SHORTCUTS;
 use kotodama_hyprland::events::Change;
 use kotodama_hyprland::hyprland::Hyprland;
-use kotodama_hyprland::windows::{self, WORKSPACE, Windows};
-use kotodama_protocol::{Error, FromExtension, ItemKind, ItemRef, Outcome, ToExtension};
+use kotodama_hyprland::windows;
+use kotodama_hyprland::windows::WORKSPACE;
+use kotodama_hyprland::windows::Windows;
+use kotodama_protocol::Error;
+use kotodama_protocol::FromExtension;
+use kotodama_protocol::ItemKind;
+use kotodama_protocol::ItemRef;
+use kotodama_protocol::Outcome;
+use kotodama_protocol::ToExtension;
 
 fn main() -> ExitCode {
     kotodama_extension::main("kotodama-hyprland", run)
 }
 
 /// What the event thread sends.
+#[cfg_attr(
+    not(target_os = "linux"),
+    expect(dead_code, reason = "only the event thread sends these, and it runs on Linux alone")
+)]
 enum Own {
     /// A Hyprland is running, and its events are followed.
-    #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
     Up(Hyprland),
     Change(Change),
     /// The event socket closed: Hyprland exited.
@@ -51,34 +87,8 @@ fn run() -> Result<(), Error> {
         sent_binds: SentItems::default(),
         view_open: false,
     };
-    // Waits for Hyprland, follows it, and once it exits waits for the next
-    // one: it may start after the Extension, or restart under a new
-    // signature. Waiting costs nothing, so outside Hyprland only the
-    // Daemon's messages wake the Extension.
     #[cfg(target_os = "linux")]
-    thread::Builder::new()
-        .name("events".into())
-        .stack_size(STACK_SIZE)
-        .spawn(move || {
-            loop {
-                let (hyprland, mut stream) =
-                    Hyprland::wait(|err| log!("waiting for Hyprland: {err}"));
-                // Events are followed before the windows are read, so none is
-                // missed in between; one about a window read already changes
-                // nothing.
-                if events.send(Event::Own(Own::Up(hyprland))).is_err() {
-                    return;
-                }
-                while let Some(change) = stream.next_change() {
-                    if events.send(Event::Own(Own::Change(change))).is_err() {
-                        return;
-                    }
-                }
-                if events.send(Event::Own(Own::Lost)).is_err() {
-                    return;
-                }
-            }
-        })?;
+    follow_hyprland(events)?;
     #[cfg(not(target_os = "linux"))]
     drop(events);
 
@@ -98,6 +108,36 @@ fn run() -> Result<(), Error> {
             extension.publish_windows()?;
         }
     }
+    Ok(())
+}
+
+/// Starts the thread that waits for Hyprland, follows its events, and once it exits waits for the
+/// next one: it may start after the Extension, or restart under a new signature. Waiting costs
+/// nothing, so outside Hyprland only the Daemon's messages wake the Extension.
+#[cfg(target_os = "linux")]
+fn follow_hyprland(events: Sender<Event<Own>>) -> io::Result<()> {
+    thread::Builder::new()
+        .name("events".into())
+        .stack_size(STACK_SIZE)
+        .spawn(move || {
+            loop {
+                let (hyprland, mut stream) = Hyprland::wait(|err| log!("waiting for Hyprland: {err}"));
+                // Events are followed before the windows are read, so none is
+                // missed in between; one about a window read already changes
+                // nothing.
+                if events.send(Event::Own(Own::Up(hyprland))).is_err() {
+                    return;
+                }
+                while let Some(change) = stream.next_change() {
+                    if events.send(Event::Own(Own::Change(change))).is_err() {
+                        return;
+                    }
+                }
+                if events.send(Event::Own(Own::Lost)).is_err() {
+                    return;
+                }
+            }
+        })?;
     Ok(())
 }
 
@@ -131,10 +171,7 @@ impl Extension {
                 let outcome = self
                     .run(&action, &item, &arguments)
                     .unwrap_or_else(|message| Outcome::Failed { message });
-                self.writer.send(&FromExtension::ActionDone {
-                    invocation,
-                    outcome,
-                })?;
+                self.writer.send(&FromExtension::ActionDone { invocation, outcome })?;
             }
             Event::Message(ToExtension::ViewPopped { view }) if view == binds::VIEW => {
                 self.view_open = false;
@@ -153,8 +190,7 @@ impl Extension {
                 self.read_binds();
                 self.publish_binds()?;
                 if self.view_open {
-                    self.writer
-                        .send(&FromExtension::UpdateView(binds::view(&self.binds)))?;
+                    self.writer.send(&FromExtension::UpdateView(binds::view(&self.binds)))?;
                 }
             }
             Event::Own(Own::Change(change)) => {
@@ -173,26 +209,23 @@ impl Extension {
         Ok(true)
     }
 
-    fn run(
-        &mut self,
-        action: &str,
-        item: &ItemRef,
-        arguments: &BTreeMap<String, String>,
-    ) -> Result<Outcome, String> {
+    fn run(&mut self, action: &str, item: &ItemRef, arguments: &BTreeMap<String, String>) -> Result<Outcome, String> {
         let hyprland = self.hyprland.as_ref().ok_or("Hyprland isn't running")?;
         match &item.kind {
             ItemKind::Window { address } => {
                 let workspace = arguments.get(WORKSPACE).map(String::as_str);
-                hyprland.dispatch(&windows::dispatch(action, address, workspace)?)?;
+                let dispatch = windows::dispatch(action, address, workspace).map_err(|err| err.to_string())?;
+                hyprland.dispatch(&dispatch).map_err(|err| Chain(&err).to_string())?;
                 Ok(Outcome::Close)
             }
             kind if kind.name() == binds::KIND && action == RUN => {
-                let bind = binds::find(&self.binds, &item.id)
-                    .ok_or("That shortcut is no longer bound in Hyprland")?;
+                let bind = binds::find(&self.binds, &item.id).ok_or("That shortcut is no longer bound in Hyprland")?;
                 if bind.mouse {
                     return Err("A mouse bind only runs with the mouse".into());
                 }
-                hyprland.dispatch(&bind.dispatch())?;
+                hyprland
+                    .dispatch(&bind.dispatch())
+                    .map_err(|err| Chain(&err).to_string())?;
                 Ok(Outcome::Close)
             }
             _ if item.id == SHORTCUTS && action == OPEN => {
@@ -212,11 +245,14 @@ impl Extension {
 
     /// Sends `request` and reads the answer with `parse`; `None`, logged,
     /// if either fails.
-    fn read<T>(&self, request: &str, parse: impl FnOnce(&str) -> Result<T, String>) -> Option<T> {
+    fn read<T, E>(&self, request: &str, parse: impl FnOnce(&str) -> Result<T, E>) -> Option<T>
+    where
+        E: std::error::Error,
+    {
         let answer = self.hyprland.as_ref()?.request(request);
         answer
             .map_err(|err| err.to_string())
-            .and_then(|json| parse(&json))
+            .and_then(|json| parse(&json).map_err(|err| Chain(&err).to_string()))
             .map_err(|err| log!("{request}: {err}"))
             .ok()
     }
@@ -235,14 +271,12 @@ impl Extension {
             .hyprland
             .is_some()
             .then(|| std::iter::once(binds::shortcuts_item()).chain(binds::items(&self.binds)));
-        self.sent_binds
-            .publish(&mut self.writer, items.into_iter().flatten())
+        self.sent_binds.publish(&mut self.writer, items.into_iter().flatten())
     }
 
     /// Sends the windows that changed.
     fn publish_windows(&mut self) -> Result<(), Error> {
         self.windows_changed = false;
-        self.sent_windows
-            .publish(&mut self.writer, self.windows.items())
+        self.sent_windows.publish(&mut self.writer, self.windows.items())
     }
 }

@@ -1,18 +1,64 @@
 //! Hyprland's two sockets, in `$XDG_RUNTIME_DIR/hypr/$HYPRLAND_INSTANCE_SIGNATURE/`:
 //! `.socket.sock` answers one request per connection, as `hyprctl` sends
 //! them, and `.socket2.sock` streams events, one line each.
+//!
+//! # Owns
+//!
+//! - Finding the running Hyprland instance, and waiting for one.
+//! - Requests and dispatches on `.socket.sock`.
+//! - Reading `.socket2.sock` line by line.
+//!
+//! # Not here
+//!
+//! - What an event line means: [`crate::events`].
+//! - What a request's answer means: [`crate::binds`] and [`crate::windows`].
 
 use std::ffi::OsStr;
-use std::io::{self, BufRead, BufReader, Read, Write};
+use std::io;
+use std::io::BufRead;
+use std::io::BufReader;
+use std::io::Read;
+use std::io::Write;
 use std::os::unix::net::UnixStream;
-use std::path::{Path, PathBuf};
-use std::time::{Duration, SystemTime};
+use std::path::Path;
+use std::path::PathBuf;
+use std::time::Duration;
+use std::time::SystemTime;
 
 use crate::events::Change;
 
 /// How long a request may take before it counts as failed, so a hung
 /// Hyprland can't hang the Extension; `hyprctl` waits as long.
 const TIMEOUT: Duration = Duration::from_secs(5);
+
+/// Why Hyprland could not be found or did not do what it was asked.
+#[derive(Debug, thiserror::Error)]
+pub enum Error {
+    /// No instance's event socket took a connection.
+    #[error("no Hyprland in {}", .dir.display())]
+    NotRunning { dir: PathBuf },
+    #[error("Couldn't reach Hyprland")]
+    Unreachable(#[source] io::Error),
+    /// Hyprland answered a dispatch with something other than `ok`.
+    #[error("Hyprland: {answer}")]
+    Refused { answer: String },
+}
+
+impl Error {
+    fn not_running(dir: PathBuf) -> Self {
+        Error::NotRunning { dir }
+    }
+
+    fn unreachable(err: io::Error) -> Self {
+        Error::Unreachable(err)
+    }
+
+    fn refused(answer: &str) -> Self {
+        Error::Refused {
+            answer: answer.to_owned(),
+        }
+    }
+}
 
 /// The Hyprland instance the Extension runs in.
 #[derive(Clone, Debug)]
@@ -53,14 +99,15 @@ impl Hyprland {
 
     /// The first of the [`candidates`](Hyprland::candidates) whose event
     /// socket takes a connection, and its events.
-    pub fn connect(
-        signature: Option<&OsStr>,
-        runtime: &Path,
-    ) -> Result<(Hyprland, Events), String> {
+    ///
+    /// # Errors
+    ///
+    /// [`Error::NotRunning`] when no candidate's event socket takes a connection.
+    pub fn connect(signature: Option<&OsStr>, runtime: &Path) -> Result<(Hyprland, Events), Error> {
         Hyprland::candidates(signature, runtime)
             .into_iter()
             .find_map(|hyprland| Some((hyprland.clone(), hyprland.events().ok()?)))
-            .ok_or_else(|| format!("no Hyprland in {}", runtime.join("hypr").display()))
+            .ok_or_else(|| Error::not_running(runtime.join("hypr")))
     }
 
     /// Waits until a Hyprland runs, from this process's environment, and
@@ -80,13 +127,18 @@ impl Hyprland {
         let hypr = runtime.join("hypr");
         kotodama_extension::runtime::wait_for(
             &[&hypr, &runtime],
-            || Hyprland::connect(signature.as_deref(), &runtime),
+            || Hyprland::connect(signature.as_deref(), &runtime).map_err(|err| err.to_string()),
             waiting,
         )
     }
 
     /// Sends one request, as `hyprctl` writes it: its flags, a `/`, then the
     /// command, as `j/clients` or `/dispatch …`. Returns the whole answer.
+    ///
+    /// # Errors
+    ///
+    /// The socket's error when it cannot be connected to, written to or read from, or when
+    /// Hyprland takes longer than [`TIMEOUT`].
     pub fn request(&self, request: &str) -> io::Result<String> {
         let mut stream = UnixStream::connect(self.dir.join(".socket.sock"))?;
         stream.set_read_timeout(Some(TIMEOUT))?;
@@ -97,18 +149,25 @@ impl Hyprland {
         Ok(answer)
     }
 
-    /// Runs `dispatch <args>`; Hyprland answers `ok`, or why it didn't.
-    pub fn dispatch(&self, args: &str) -> Result<(), String> {
-        let answer = self
-            .request(&format!("/dispatch {args}"))
-            .map_err(|err| format!("Couldn't reach Hyprland: {err}"))?;
+    /// Runs `dispatch <args>`.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::Unreachable`] when the request fails, and [`Error::Refused`] with Hyprland's answer
+    /// when it is not `ok`.
+    pub fn dispatch(&self, args: &str) -> Result<(), Error> {
+        let answer = self.request(&format!("/dispatch {args}")).map_err(Error::unreachable)?;
         match answer.trim() {
             "ok" => Ok(()),
-            err => Err(format!("Hyprland: {err}")),
+            answer => Err(Error::refused(answer)),
         }
     }
 
     /// Connects to the event socket.
+    ///
+    /// # Errors
+    ///
+    /// The socket's error when it takes no connection.
     pub fn events(&self) -> io::Result<Events> {
         UnixStream::connect(self.dir.join(".socket2.sock")).map(|stream| Events {
             lines: BufReader::new(stream),
@@ -117,6 +176,7 @@ impl Hyprland {
 }
 
 /// Hyprland's event stream, keeping only the [`Change`]s.
+#[derive(Debug)]
 pub struct Events {
     lines: BufReader<UnixStream>,
 }

@@ -2,11 +2,13 @@
 //! recorded stream of Hyprland's events.
 
 use kotodama_hyprland::events::Change;
-use kotodama_hyprland::windows::{self, Windows};
-use kotodama_protocol::{Item, ItemKind};
+use kotodama_hyprland::windows;
+use kotodama_hyprland::windows::Windows;
+use kotodama_protocol::Item;
+use kotodama_protocol::ItemKind;
 
 fn recorded() -> Windows {
-    Windows::from_clients(include_str!("fixtures/clients.json")).unwrap()
+    Windows::from_clients(include_str!("fixtures/clients.json")).expect("parse the recorded clients")
 }
 
 /// Applies each line as Hyprland sends it, and says which changed a window.
@@ -53,16 +55,8 @@ fn every_mapped_client_is_a_window_item() {
     assert_eq!(item.kind.name(), "window");
     assert_eq!(item.icon.as_deref(), Some("firefox"));
     assert_eq!(
-        item.actions
-            .iter()
-            .map(|action| action.id.as_str())
-            .collect::<Vec<_>>(),
-        [
-            windows::FOCUS,
-            windows::CLOSE,
-            windows::MOVE,
-            windows::FLOAT
-        ]
+        item.actions.iter().map(|action| action.id.as_str()).collect::<Vec<_>>(),
+        [windows::FOCUS, windows::CLOSE, windows::MOVE, windows::FLOAT]
     );
 }
 
@@ -107,20 +101,14 @@ fn only_events_about_windows_change_them() {
     assert_eq!(changed.iter().filter(|&&changed| changed).count(), 4);
     // An event about a window never seen changes nothing.
     assert_eq!(
-        replay(
-            &mut windows,
-            "closewindow>>deadbeef\nwindowtitlev2>>deadbeef,x\n"
-        ),
+        replay(&mut windows, "closewindow>>deadbeef\nwindowtitlev2>>deadbeef,x\n"),
         [false, false]
     );
 }
 
 #[test]
 fn a_config_reload_is_a_change_of_its_own() {
-    assert_eq!(
-        Change::parse("configreloaded>>"),
-        Some(Change::ConfigReloaded)
-    );
+    assert_eq!(Change::parse("configreloaded>>"), Some(Change::ConfigReloaded));
     assert_eq!(Change::parse("activewindowv2>>55d0c6a1b2c0"), None);
     assert_eq!(Change::parse("garbage"), None);
 }
