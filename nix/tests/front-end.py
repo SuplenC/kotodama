@@ -2,6 +2,7 @@
 
     front-end.py QUERY          prints the Results, one `extension<TAB>id<TAB>title` per line
     front-end.py --run QUERY    also runs the top Result's primary Action
+    front-end.py --wait QUERY   waits for Results that aren't empty, as a Live query's
 """
 
 import json
@@ -25,7 +26,8 @@ def recv(reader):
 def main():
     args = sys.argv[1:]
     run = args[:1] == ["--run"]
-    query = " ".join(args[1:] if run else args)
+    wait = args[:1] == ["--wait"]
+    query = " ".join(args[1:] if run or wait else args)
 
     sock = socket.socket(socket.AF_UNIX)
     sock.settimeout(10)
@@ -40,7 +42,8 @@ def main():
         message = recv(reader)
         if isinstance(message, dict) and "results" in message:
             results = message["results"]["results"]
-            break
+            if results or not wait:
+                break
     for result in results:
         print("%s\t%s\t%s" % (result["extension"], result["item"]["id"], result["item"]["title"]))
     if not run:

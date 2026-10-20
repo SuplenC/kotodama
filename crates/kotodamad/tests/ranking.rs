@@ -877,6 +877,70 @@ fn the_settings_reload_with_the_config() {
     assert_eq!(w.first("fi"), "Fish");
 }
 
+// The calculator, with its real Manifest and its real answers.
+
+/// Apps, and the calculator Bundled extension answering what it is sent.
+struct Calculating {
+    h: Harness,
+    calc: Ext,
+    ui: FrontEnd,
+    calculator: kotodama_calculator::Calculator,
+}
+
+impl Calculating {
+    fn new(titles: &[&str]) -> Self {
+        let calculator = manifest(include_str!("../../kotodama-calculator/manifest.toml"));
+        let mut h = Harness::new(vec![plain("apps"), calculator]);
+        let apps = h.up(0);
+        h.add(&apps, titles.iter().map(|title| app(title)).collect());
+        let calc = h.up(1);
+        calc.drain();
+        let ui = h.front_end();
+        Calculating {
+            h,
+            calc,
+            ui,
+            calculator: kotodama_calculator::Calculator::new(Default::default()),
+        }
+    }
+
+    /// The rows for `query`, once the calculator has answered.
+    fn rows(&mut self, query: &str) -> Vec<String> {
+        let mut rows = self.h.query(&self.ui, query);
+        for message in self.calc.drain() {
+            let ToExtension::LiveQuery { id, query, prefix } = message else {
+                continue;
+            };
+            let now = kotodama_calculator::Zoned::now();
+            let results = match self.calculator.evaluate(&query, prefix.is_some(), &now) {
+                kotodama_calculator::Evaluation::Answer(answer) => vec![answer.live_result()],
+                _ => vec![],
+            };
+            self.h.send(
+                &self.calc,
+                FromExtension::LiveResults {
+                    live_query: id,
+                    results,
+                    done: true,
+                },
+            );
+            rows = self.ui.results().unwrap_or(rows);
+        }
+        titles(&rows).into_iter().map(str::to_owned).collect()
+    }
+}
+
+/// V1, V2, V6
+#[test]
+fn a_bare_number_gives_no_answer_but_an_expression_or_conversion_takes_the_top_row() {
+    let mut w = Calculating::new(&["42 Lab", "2048", "Kilometre Tracker"]);
+    assert_eq!(w.rows("42"), ["42 Lab"]);
+    assert_eq!(w.rows("42*2"), ["84"]);
+    assert_eq!(w.rows("42 km to mi"), ["26.0975900740 mi"]);
+    assert_eq!(w.rows("2048"), ["2048"]);
+    assert_eq!(w.rows("2048/2")[0], "1024");
+}
+
 // Invariants, over a desktop's worth of apps and a range of queries.
 
 const DESKTOP: &[&str] = &[

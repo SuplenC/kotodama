@@ -120,6 +120,9 @@ pub enum Outcome {
     Type { text: String },
     /// The menu closes and the Daemon pastes into the window that had focus.
     Paste(Clipboard),
+    /// The menu closes and the Daemon puts this on the clipboard, without
+    /// pasting it.
+    Copy(Clipboard),
     /// The Action failed; the menu stays open and shows `message`.
     Failed { message: String },
 }

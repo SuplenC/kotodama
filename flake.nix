@@ -85,6 +85,11 @@
               # The shell example Extension
               jq
 
+              # The calculator: exchange rates through curl, and a time zone
+              # database the tests read the same everywhere
+              curl
+              tzdata
+
               just
               nixfmt
               shellcheck
@@ -115,6 +120,7 @@
               </fontconfig>
             '';
             RUST_SRC_PATH = "${pkgs.rustPlatform.rustLibSrc}";
+            TZDIR = "${pkgs.tzdata}/share/zoneinfo";
           };
         }
       );

@@ -146,6 +146,26 @@ fn changing_the_query_cancels_the_live_query_in_flight_and_drops_its_results() {
 }
 
 #[test]
+fn no_live_results_send_the_front_end_nothing_new() {
+    let mut h = Harness::new(vec![calculator()]);
+    let calc = h.up(0);
+    calc.drain();
+    let ui = h.front_end();
+
+    h.query(&ui, "42");
+    let (id, ..) = live_queries(&calc)[0].clone();
+    h.send(
+        &calc,
+        FromExtension::LiveResults {
+            live_query: id,
+            results: vec![],
+            done: true,
+        },
+    );
+    assert_eq!(ui.drain(), []);
+}
+
+#[test]
 fn a_late_result_goes_below_the_visible_rows_however_well_it_scores() {
     let mut h = Harness::new(vec![plain("apps"), web()]);
     let apps = h.up(0);
@@ -628,6 +648,33 @@ fn open_and_toggle_go_to_every_front_end_but_the_one_that_asked() {
     assert_eq!(menu.drain(), expected);
     assert_eq!(other.drain(), expected);
     assert_eq!(command.drain(), []);
+}
+
+#[test]
+fn copying_closes_every_front_end_and_copies_without_waiting_for_them() {
+    let mut h = Harness::new(vec![typer()]);
+    let typer = h.up(0);
+    let ui = h.front_end();
+    let other = h.front_end();
+
+    h.add(&typer, vec![app("Snippet")]);
+    h.query(&ui, "snippet");
+    typer.drain();
+    run(&mut h, &ui, "typer", "snippet", "typer", "open");
+    let (invocation, ..) = runs(&typer)[0].clone();
+    h.send(
+        &typer,
+        FromExtension::ActionDone {
+            invocation,
+            outcome: Outcome::Copy(Clipboard::Text("84".into())),
+        },
+    );
+    assert!(ui.drain().contains(&ToFrontEnd::Close));
+    assert!(other.drain().contains(&ToFrontEnd::Close));
+    assert_eq!(
+        *h.outputs.0.borrow(),
+        [Output::Copy(Clipboard::Text("84".into()))]
+    );
 }
 
 #[test]

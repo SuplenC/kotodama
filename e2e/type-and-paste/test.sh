@@ -1,6 +1,6 @@
 # shellcheck shell=bash
 # Actions whose outcome is "type" or "paste" put their text into the window
-# that has focus.
+# that has focus, and "copy" puts it on the clipboard for the next Ctrl+V.
 root=$(cd ../.. && pwd)
 target=$(cargo metadata --format-version 1 --no-deps --manifest-path "$root/Cargo.toml" | jq -r .target_directory)
 cargo build --quiet --manifest-path "$root/Cargo.toml" -p kotodamad --bin kotodamad --example front-end
@@ -20,6 +20,7 @@ install() {
 }
 install typer Snippet '{"type":{"text":"Hello, Wayland!"}}'
 install paster Clip '{"paste":{"text":" Pasted."}}'
+install copier Copier '{"copy":{"text":" Copied."}}'
 
 spawn quickshell --path client.qml
 wait_for_log quickshell.log "ready"
@@ -37,3 +38,8 @@ done
 wait_for_log quickshell.log "typed: Hello, Wayland!"
 "$front_end" --run clip
 wait_for_log quickshell.log "typed: Hello, Wayland! Pasted."
+"$front_end" --run copier
+# The copy happens after the menu closes, on the Daemon's Wayland thread.
+sleep 1
+wtype -M ctrl v -m ctrl
+wait_for_log quickshell.log "typed: Hello, Wayland! Pasted. Copied."

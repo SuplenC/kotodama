@@ -26,6 +26,8 @@ wayland-protocols-misc = { version = "0.3.12", features = ["client"] }
 wayland-protocols-wlr = { version = "0.3.12", features = ["client"] }
 
 [dev-dependencies]
+# The ranking scenarios answer math with the real calculator.
+kotodama-calculator = { path = "../kotodama-calculator" }
 criterion = { version = "0.8.2", default-features = false, features = ["cargo_bench_support"] }
 tempfile = "3.27.0"
 

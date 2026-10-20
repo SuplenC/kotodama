@@ -8,7 +8,7 @@ Kotodama is a command menu for Wayland desktops. You type, and it finds and does
 - **A Quickshell QML module** written in Rust (cxx-qt) gives QML a native result model. QML only draws the results.
 - **Extensions** are separate processes in any language. They speak a protocol whose wire format is negotiated (JSON, MessagePack or postcard), so a crashing Extension never takes down the menu.
 
-Status: early. The protocol, the Daemon, the Quickshell Front end and the apps Bundled extension work; Views, the Action panel and the other Bundled extensions are next. See `docs/adr/0001-architecture.md` and the issues.
+Status: early. The protocol, the Daemon, the Quickshell Front end and the apps, clipboard history and calculator Bundled extensions work; Views, the Action panel and the other Bundled extensions are next. See `docs/adr/0001-architecture.md` and the issues.
 
 ## Installing
 
@@ -44,7 +44,7 @@ The module installs the package and enables `kotodamad.socket`. On NixOS without
 The Daemon starts the first time something connects to its socket, whether a `kotodama toggle` or the Quickshell Front end, and stays running after that. While it is stopped, systemd holds new connections and starts it again. It runs with the environment of the systemd user manager, not the compositor's:
 
 - **Desktop notifications** (a job finishing) go over the session bus at `DBUS_SESSION_BUS_ADDRESS`, or `$XDG_RUNTIME_DIR/bus` when that isn't set. That is where systemd's per-user bus lives, so this works with no setup.
-- **Typing and pasting** need `WAYLAND_DISPLAY`, and the apps it starts need the rest of the graphical session's environment. The compositor must hand these to the user manager before the menu is first used, since the Daemon reads its environment once, when it starts. uwsm does this. In a plain Hyprland session, add `exec-once = dbus-update-activation-environment --systemd --all` (or `systemctl --user import-environment WAYLAND_DISPLAY XDG_CURRENT_DESKTOP`). If the Daemon started before that, run `systemctl --user restart kotodamad`.
+- **Typing, pasting and copying** need `WAYLAND_DISPLAY`, and the apps it starts need the rest of the graphical session's environment. The compositor must hand these to the user manager before the menu is first used, since the Daemon reads its environment once, when it starts. uwsm does this. In a plain Hyprland session, add `exec-once = dbus-update-activation-environment --systemd --all` (or `systemctl --user import-environment WAYLAND_DISPLAY XDG_CURRENT_DESKTOP`). If the Daemon started before that, run `systemctl --user restart kotodamad`.
 
 The Nix package's `kotodamad` puts its Bundled extensions first on its own `XDG_DATA_DIRS`, followed by the inherited directories (or `/usr/local/share:/usr/share` when there are none). The rest of the session's `XDG_DATA_DIRS` is left alone.
 
@@ -184,6 +184,34 @@ max_age_days = 7
 Only an index of the entries (a short preview of each text, the size of each image) stays in memory: about 5 MiB resident with 1000 entries. What was copied is read from disk when it is pasted or shown. Searching 1000 entries takes about 0.1 ms in the Daemon (`benches/search.rs`, which fails above the 2 ms budget).
 
 Its `manifest.toml` runs `./kotodama-clipboard`, so a package installs the binary next to it in `$XDG_DATA_DIRS/kotodama/extensions/clipboard/`.
+
+### Calculator
+
+`kotodama-calculator` (`crates/kotodama-calculator`) answers math as you type. Its answer takes the top row, over every other Result, and Enter copies it; the second Action, "Copy Expression and Answer", copies `5 km in mi = 3.1068559612 mi`. It answers on every keystroke (its Live query debounce is 0), and a simple sum is on screen within the frame of the keystroke: `just bench` checks that the p99 from query to answer, over the Daemon's socket, stays under 8 ms. In the dev container on an Apple M-series machine it is 0.14 ms, and the calculator holds 3.9 MiB resident.
+
+| Typed | Answer |
+| --- | --- |
+| `42*2`, `(3 + 4) * 2`, `2^10`, `sqrt 2` | `84`, `14`, `1024`, `1.4142135624` |
+| `5 km in mi`, `100 F to C`, `3 weeks in days` | `3.1068559612 mi`, `37.7777777778 °C`, `21 days` |
+| `100 usd to eur` | in euros, at the European Central Bank's rate |
+| `today + 3 weeks`, `dec 25 - 1 month` | `Tuesday, 10 November 2026` |
+| `days until dec 25`, `days since 2026-01-01` | `66 days` |
+| `5pm PT in Warsaw`, `now in Tokyo`, `17:00 UTC to Europe/Lisbon` | `02:00 CEST, Wednesday 21 October` |
+
+A query goes to it when it looks like math: it starts with a number (or a sign, bracket or currency symbol and then a number), a function such as `sqrt`, `today`/`tomorrow`/`yesterday` or a month and day followed by `+` or `-`, `now in`, or `days until`/`days since`. Even then it answers only if the query does something: a number or quantity alone (`42`, `5 kg`) and words (`fi`) get no answer, so they don't push the other Results down. After its `=` prefix, anything that evaluates is answered: `= pi`.
+
+Arithmetic, units and currency come from [fend](https://github.com/printfn/fend), with each evaluation cut off after 50 ms. Dates and time zones are its own, as fend has no clock and no time zones: dates are `today`, `tomorrow`, `yesterday`, `2026-12-25`, `dec 25` or `25 december`, with or without a year (without one, the next such day, or for `days since` the last); amounts are days, weeks, months and years. A zone is an abbreviation (`PT`, `ET`, `UTC`, `CET`, `JST` and others, each standing for its region's zone all year), an IANA name, or the city one ends in (`Warsaw`, `New York`), read from the system's time zone database (`$TZDIR`, or `/usr/share/zoneinfo`). A time without a zone is local. Natural-language dates (`next friday`) are out of scope.
+
+Exchange rates are the European Central Bank's, from [frankfurter.app](https://frankfurter.app). Nothing is fetched until the first currency query. Then the rates are fetched with `curl` and cached in `$XDG_CACHE_HOME/kotodama/calculator/rates.json`, and fetched again only once that is more than a day old; the query is answered as soon as they arrive. A failed fetch is tried again after 10 minutes.
+
+```toml
+[extensions.calculator]
+# Fetch exchange rates. Off, currency uses the cached rates, however old, and
+# nothing without them.
+network = true
+# Where the rates come from: frankfurter's API, or anything answering like it.
+rates_url = "https://api.frankfurter.app/latest"
+```
 
 ## The Quickshell Front end
 

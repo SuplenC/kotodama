@@ -67,8 +67,8 @@ pub trait Launcher {
     fn stop(&mut self, extension: ExtensionId, generation: u64);
 }
 
-/// Types or pastes into the focused window, starts programs for the user, and
-/// shows desktop notifications.
+/// Types or pastes into the focused window, copies, starts programs for the
+/// user, and shows desktop notifications.
 pub trait Desktop {
     fn output(&mut self, output: Output);
     /// Starts a program and its arguments, detached from the Daemon, as a
@@ -78,11 +78,13 @@ pub trait Desktop {
     fn notify(&mut self, summary: String, body: String);
 }
 
-/// What an Action asked the Daemon to put into the window the user came from.
+/// What an Action asked the Daemon to put into the window the user came from,
+/// or on the clipboard.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Output {
     Type(String),
     Paste(Clipboard),
+    Copy(Clipboard),
 }
 
 pub enum Event {
@@ -1078,6 +1080,8 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             return;
         };
         let live = &mut session.live[id.0];
+        // Nothing to show changes the rows on screen, so they aren't sent again.
+        let changed = !results.is_empty();
         let room = MAX_LIVE_RESULTS.saturating_sub(live.results.len());
         if results.len() > room {
             log::warn!(
@@ -1094,7 +1098,9 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             live.sent = None;
             self.live_queries.remove(&live_query);
         }
-        session.update = session.update.max(Update::Late);
+        if changed {
+            session.update = session.update.max(Update::Late);
+        }
     }
 
     fn action_done(&mut self, id: ExtensionId, invocation: u64, outcome: Outcome, now: Instant) {
@@ -1119,6 +1125,14 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             }
             Outcome::Type { text } => self.output(Output::Type(text), now),
             Outcome::Paste(clipboard) => self.output(Output::Paste(clipboard), now),
+            // Nothing goes into a window, so there is no waiting for the menu
+            // to close. A paste still waiting goes first, so it can't take the
+            // clipboard back afterwards.
+            Outcome::Copy(clipboard) => {
+                self.deliver_output();
+                self.broadcast(|| ToFrontEnd::Close);
+                self.desktop.output(Output::Copy(clipboard));
+            }
         }
     }
 

@@ -9,6 +9,7 @@
   pkg-config,
   libGL,
   makeWrapper,
+  curl,
 }:
 
 let
@@ -43,7 +44,11 @@ rustPlatform.buildRustPackage {
     qt
     libGL
   ];
-  env.QMAKE = "${qt}/bin/qmake";
+  env = {
+    QMAKE = "${qt}/bin/qmake";
+    # The calculator fetches exchange rates with curl, by this path.
+    KOTODAMA_CURL = lib.getExe curl;
+  };
   # Quickshell loads the QML module as a plugin: there is no Qt app to wrap.
   dontWrapQtApps = true;
   # CI runs the tests in the dev shell, where they have the processes and the
@@ -60,7 +65,7 @@ rustPlatform.buildRustPackage {
     rmdir $out/lib
 
     # Each Bundled extension's manifest runs its binary, beside it.
-    for name in apps clipboard; do
+    for name in apps calculator clipboard; do
       dir=$extensions/share/kotodama/extensions/$name
       mkdir -p $dir
       cp crates/kotodama-$name/manifest.toml $dir/
