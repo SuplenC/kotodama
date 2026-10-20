@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+# Prints the named crates and every workspace crate they depend on through a
+# `path` dependency, directly or not, one directory name under crates/ per
+# line. Dev-dependencies count too, since benches and tests use them.
+# Usage: path-deps CRATE...
+set -euo pipefail
+
+cd "$(dirname "$0")/.."
+found=" "
+queue=("$@")
+while [ ${#queue[@]} -gt 0 ]; do
+    crate=${queue[0]}
+    queue=("${queue[@]:1}")
+    case $found in *" $crate "*) continue ;; esac
+    found+="$crate "
+    while read -r dep; do
+        queue+=("$dep")
+    done < <(sed -nE 's|.*path *= *"\.\./([^"/]+)".*|\1|p' "crates/$crate/Cargo.toml")
+done
+tr ' ' '\n' <<<"$found" | grep . | sort
