@@ -56,7 +56,7 @@ def main():
     sock.connect(os.path.join(os.environ["XDG_RUNTIME_DIR"], "kotodama.sock"))
     reader = sock.makefile("rb")
     # The handshake: this Front end speaks JSON only.
-    send(sock, {"version": 5, "formats": ["json"]})
+    send(sock, {"version": 6, "formats": ["json"]})
     recv(reader)
     if args == ["--listen"]:
         # Runs until the test ends it; it never searches.

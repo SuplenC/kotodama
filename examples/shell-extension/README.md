@@ -32,7 +32,7 @@ The Daemon starts `command` from `manifest.toml`, in this directory, and talks t
 {"remove_items":{"ids":["a"]}}
 ```
 
-**Handshake.** Each side sends a hello first, always in JSON: `{"version":5,"formats":["json"]}`. `version` is the protocol version, `PROTOCOL_VERSION` in `crates/kotodama-protocol`; the Daemon turns away a hello with any other. List the Wire formats you support, from `postcard`, `msgpack` and `json`. Both sides then use the fastest they share. JSON is required, so offering only JSON is enough.
+**Handshake.** Each side sends a hello first, always in JSON: `{"version":6,"formats":["json"]}`. `version` is the protocol version, `PROTOCOL_VERSION` in `crates/kotodama-protocol`; the Daemon turns away a hello with any other. List the Wire formats you support, from `postcard`, `msgpack` and `json`. Both sides then use the fastest they share. JSON is required, so offering only JSON is enough.
 
 **Messages.** A message is an object with one key, its name, holding its fields: `{"add_items": {"items": [...]}}`. A message without fields is just its name as a string: `"request_action_catalog"`. Optional fields can be left out.
 
@@ -52,6 +52,17 @@ Adding an Item whose id you already sent replaces it. `remove_items` takes the i
 **Actions.** When the user runs one of your Actions, you get `run_action` with an `invocation` number, the Action's `id`, the Item's `id`, `kind` and kind field, and any Arguments. Answer with `action_done` and the same `invocation`, and an outcome: `"close"`, `"keep_open"`, `{"type": {"text": "..."}}` to type into the focused window, `{"paste": {"text": "..."}}` to paste, `{"copy": {"text": "..."}}` to put it on the clipboard, or `{"failed": {"message": "..."}}`. The Daemon does the typing, pasting and copying, so don't call `wtype` or `wl-copy` yourself.
 
 **Arguments and shortcuts.** An Action can list `arguments`, each with a `name`, an optional `placeholder`, and `optional: true` if it may be left out. With an Item `keyword`, the user types them after it: `timer 5` gives `{"seconds": "5"}`. Each Argument takes one word, and the last takes the rest. The Daemon asks for a required one that wasn't typed in a form of its own, so `run_action` always has them. A `shortcut` such as `"ctrl+l"` runs the Action from the menu; it needs Ctrl, Alt or Super, since a bare key types into the search.
+
+**Reserved keys.** The menu keeps these key bindings for itself, and the Daemon drops any of them from your Actions and Contributed actions, however you spell them (`Control+Z` is `ctrl+z`). The Action stays; only its binding goes, with a warning in the Daemon's log. They are listed as `RESERVED_SHORTCUTS` in `crates/kotodama-protocol`.
+
+| Key | What it does |
+| --- | --- |
+| `ctrl+k` | Opens and closes the Action panel |
+| `ctrl+n`, `ctrl+p` | Move the selection down and up |
+| `ctrl+z` | Undoes what the Toast offers to, after Forget or "Clear history" |
+| `ctrl+shift+backspace` | Forgets the selected Result |
+
+The menu's other keys (Enter, Esc, Tab, the arrows, Page Up and Page Down) have no Ctrl, Alt or Super, so no binding can take them anyway.
 
 **Views.** `push_view` puts a View on top of the menu: a `list` of Items, a `form`, a Markdown `detail`, or a `progress` View that follows a job. `update_view` replaces it, and `pop_view` takes it away. To go from one View to the next, as from a form to its progress, send `{"replace_view": {"view": "<open view id>", "with": {...}}}`: a `pop_view` then a `push_view` may show the search in between. When the user leaves one with Esc, you get `view_popped`; treat it as "cancel" if that suits you.
 

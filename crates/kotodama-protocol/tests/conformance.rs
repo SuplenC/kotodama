@@ -444,6 +444,11 @@ fn to_front_end_messages() -> Vec<ToFrontEnd> {
             view: None,
         },
         ToFrontEnd::Toggle,
+        ToFrontEnd::OfferUndo {
+            change: 3,
+            title: "Forgot “Firefox”".into(),
+        },
+        ToFrontEnd::WithdrawUndo { change: 3 },
     ]
 }
 
@@ -484,6 +489,7 @@ fn from_front_end_messages() -> Vec<FromFrontEnd> {
             view: None,
         },
         FromFrontEnd::Toggle,
+        FromFrontEnd::Undo { change: 3 },
     ]
 }
 
@@ -501,9 +507,11 @@ fn to_front_end_variant(message: &ToFrontEnd) -> usize {
         ToFrontEnd::JobProgress { .. } => 9,
         ToFrontEnd::Open { .. } => 10,
         ToFrontEnd::Toggle => 11,
+        ToFrontEnd::OfferUndo { .. } => 12,
+        ToFrontEnd::WithdrawUndo { .. } => 13,
     }
 }
-const TO_FRONT_END_VARIANTS: usize = 12;
+const TO_FRONT_END_VARIANTS: usize = 14;
 
 fn from_front_end_variant(message: &FromFrontEnd) -> usize {
     match message {
@@ -517,9 +525,10 @@ fn from_front_end_variant(message: &FromFrontEnd) -> usize {
         FromFrontEnd::Closed => 7,
         FromFrontEnd::Open { .. } => 8,
         FromFrontEnd::Toggle => 9,
+        FromFrontEnd::Undo { .. } => 10,
     }
 }
-const FROM_FRONT_END_VARIANTS: usize = 10;
+const FROM_FRONT_END_VARIANTS: usize = 11;
 
 #[test]
 fn every_message_to_a_front_end_survives_every_wire_format() {

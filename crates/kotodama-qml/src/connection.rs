@@ -73,6 +73,15 @@ pub enum Update {
         extension: String,
         job: Job,
     },
+    /// The change to the History the Toast offers to undo.
+    OfferUndo {
+        change: u64,
+        title: String,
+    },
+    /// The change can't be undone any more.
+    WithdrawUndo {
+        change: u64,
+    },
     Disconnected,
 }
 
@@ -269,6 +278,8 @@ fn update(message: ToFrontEnd) -> Update {
             matches,
         },
         ToFrontEnd::JobProgress { extension, job } => Update::JobProgress { extension, job },
+        ToFrontEnd::OfferUndo { change, title } => Update::OfferUndo { change, title },
+        ToFrontEnd::WithdrawUndo { change } => Update::WithdrawUndo { change },
     }
 }
 
