@@ -19,8 +19,7 @@ use notify::{RecommendedWatcher, Watcher as _};
 
 use crate::STACK_SIZE;
 
-/// Watches directories until the last clone of it is dropped.
-#[derive(Clone)]
+/// Watches directories until it is dropped.
 pub struct Watcher(Arc<Inner>);
 
 struct Inner {
@@ -43,6 +42,9 @@ pub struct Watched {
     /// The directories asked for that don't exist, watched through their
     /// parent.
     missing: Vec<PathBuf>,
+    /// Directories forgotten since the last [`Watcher::watch`], whose
+    /// watches, which may follow a directory renamed elsewhere, it removes.
+    gone: Vec<PathBuf>,
 }
 
 impl Watched {
@@ -73,7 +75,10 @@ impl Watched {
         }
         let mut forgot = false;
         for path in &event.paths {
-            forgot |= self.dirs.remove(path).is_some();
+            if self.dirs.remove(path).is_some() {
+                self.gone.push(path.clone());
+                forgot = true;
+            }
         }
         forgot
     }
@@ -164,8 +169,29 @@ impl Watcher {
     /// watched costs nothing.
     pub fn watch(&self, dirs: Vec<PathBuf>) {
         let mut notify = lock(&self.0.notify);
+        self.watch_locked(&mut notify, dirs);
+    }
+
+    /// Watches the directories asked for again, for those that appeared or
+    /// came back since.
+    fn refresh(&self) {
+        // Read under the `notify` lock, so a `watch` running meanwhile isn't
+        // undone with the directories it replaced.
+        let mut notify = lock(&self.0.notify);
+        let dirs = lock(&self.0.wanted).clone();
+        self.watch_locked(&mut notify, dirs);
+    }
+
+    fn watch_locked(&self, notify: &mut RecommendedWatcher, dirs: Vec<PathBuf>) {
         let mode = self.0.mode;
-        let old = lock(&self.0.watched).dirs.clone();
+        let (old, gone) = {
+            let mut watched = lock(&self.0.watched);
+            (watched.dirs.clone(), std::mem::take(&mut watched.gone))
+        };
+        // A watch follows its directory, even renamed elsewhere.
+        for dir in &gone {
+            let _ = notify.unwatch(dir);
+        }
         let mut dirs_now: HashMap<PathBuf, RecursiveMode> = HashMap::with_capacity(dirs.len());
         let mut missing = Vec::new();
         for dir in &dirs {
@@ -198,18 +224,9 @@ impl Watcher {
         let mut watched = lock(&self.0.watched);
         // One that went while this ran is forgotten, to be watched again.
         dirs_now.retain(|dir, _| !old.contains_key(dir) || watched.dirs.contains_key(dir));
-        *watched = Watched {
-            dirs: dirs_now,
-            missing,
-        };
+        watched.dirs = dirs_now;
+        watched.missing = missing;
         drop(watched);
         *lock(&self.0.wanted) = dirs;
-    }
-
-    /// Watches the directories asked for again, for those that appeared or
-    /// came back since.
-    fn refresh(&self) {
-        let dirs = lock(&self.0.wanted).clone();
-        self.watch(dirs);
     }
 }

@@ -15,7 +15,7 @@
         {
           "type": "toml",
           "path": "Cargo.lock",
-          "jsonpath": "$.package[?(@.name.value == 'kotodama' || @.name.value == 'kotodama-apps' || @.name.value == 'kotodama-calculator' || @.name.value == 'kotodama-extension' || @.name.value == 'kotodama-protocol' || @.name.value == 'kotodama-qml' || @.name.value == 'kotodamad')].version"
+          "jsonpath": "$.package[?(@.name.value == 'kotodama' || @.name.value == 'kotodama-apps' || @.name.value == 'kotodama-calculator' || @.name.value == 'kotodama-clipboard' || @.name.value == 'kotodama-extension' || @.name.value == 'kotodama-folders' || @.name.value == 'kotodama-protocol' || @.name.value == 'kotodama-qml' || @.name.value == 'kotodamad')].version"
         }
       ]
     }

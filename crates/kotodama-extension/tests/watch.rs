@@ -103,6 +103,18 @@ fn a_directory_removed_and_made_again_is_still_watched() {
 }
 
 #[test]
+fn a_directory_renamed_away_is_no_longer_watched() {
+    let root = TempDir::new().unwrap();
+    let (dir, elsewhere) = (root.path().join("scripts"), root.path().join("old"));
+    fs::create_dir(&dir).unwrap();
+    let (_watcher, changes) = watch(vec![dir.clone()], RecursiveMode::NonRecursive, |_| true);
+    fs::rename(&dir, &elsewhere).unwrap();
+    assert!(noticed(&changes));
+    fs::write(elsewhere.join("file"), "x").unwrap();
+    assert!(quiet(&changes));
+}
+
+#[test]
 fn directories_no_longer_asked_for_are_no_longer_watched() {
     let root = TempDir::new().unwrap();
     let (one, two) = (root.path().join("one"), root.path().join("two"));

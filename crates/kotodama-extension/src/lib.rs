@@ -16,6 +16,14 @@
 //! - `watch` (with the `watch` feature) watches directories, and acts once
 //!   they settle after a change.
 //!
+//! An Extension is installed as a directory of its own in
+//! `$XDG_DATA_DIRS/kotodama/extensions/` or `~/.config/kotodama/extensions/`,
+//! holding its `manifest.toml` and, by the Bundled extensions' convention,
+//! its binary beside it, which the Manifest runs as
+//! `command = ["./<binary>"]`.
+//!
+//! A whole Extension, which offers one Item titled by its config:
+//!
 //! ```no_run
 //! use std::process::ExitCode;
 //!
