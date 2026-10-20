@@ -10,7 +10,7 @@ cargo build --quiet --manifest-path "$root/Cargo.toml" -p kotodamad -p kotodama 
 imports=$("$root/scripts/qml-module")
 
 home=$(mktemp -d)
-export XDG_CONFIG_HOME="$home/config" XDG_CONFIG_DIRS="$home/etc" XDG_DATA_DIRS="$home/share" XDG_STATE_HOME="$home/state"
+export XDG_CONFIG_HOME="$home/config" XDG_CONFIG_DIRS="$home/etc" XDG_DATA_DIRS="$home/share" XDG_STATE_HOME="$home/state" XDG_CACHE_HOME="$home/cache"
 
 # Installed as a package installs it, next to its Manifest, but held back
 # from starting until the test says so, as an Extension still starting when

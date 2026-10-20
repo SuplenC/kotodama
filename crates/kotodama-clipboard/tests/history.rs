@@ -228,7 +228,7 @@ fn a_text_preview_is_one_short_line() {
         panic!("expected text");
     };
     assert!(preview.starts_with("fn main() { xxx"), "{preview}");
-    assert_eq!(preview.chars().count(), 60);
+    assert_eq!(preview.chars().count(), 100);
     assert_eq!(*chars, long.chars().count() as u64);
     // The whole text is still there to paste.
     assert_eq!(history.read(id).unwrap(), long.as_bytes());

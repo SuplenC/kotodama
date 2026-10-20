@@ -46,6 +46,7 @@ fn main() {
         .env("XDG_CONFIG_HOME", path("config"))
         .env("XDG_CONFIG_DIRS", path("etc"))
         .env("XDG_DATA_DIRS", path("share"))
+        .env("XDG_CACHE_HOME", path("cache"))
         .env("KOTODAMA_BENCH_EXTENSION", "1")
         .env("KOTODAMA_LOG", "warn")
         .stdout(Stdio::null())

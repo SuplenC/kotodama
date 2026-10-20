@@ -5,16 +5,20 @@ The Daemon. Maintained by hand: fix stale lines when you find them, and update t
 - `lib.rs:run`: wires paths, config, discovery, watchers, server and the main loop.
 - `main.rs`: binary entry; calls `run`.
 - `daemon.rs`: the state machine. `Daemon::handle(Event)` is the one entry point; `Event`, `Output`, `Launcher`/`Desktop` traits. `Daemon::run_catalog_action` runs a confirmed Proposal (ADR 0019).
-  - `Candidate` and `Candidate::rank`: the full Result order (Tier, then Learned choices/Frecency, then kind order; ADR 0006, 0011).
+  - `Candidate` and `Candidate::rank`: the full Result order (`Standing`: answers first, fallbacks last, ADR 0016; then Tier, then Learned choices/Frecency, then kind order; ADR 0006, 0011).
   - `Session`: per-Front-end state (query, shown Results, list View filters); `FromFrontEnd::Viewport` handling keeps visible rows stable (ADR 0003).
   - Views: `Daemon::filter_view` and `send_filtered` (a list View's filter, or `ToExtension::FilterView` when it filters itself), `view_contributed` (Contributed actions by Item kind), `front_end_up` re-sends the open Views to a Front end that connects. Hidden Items (ADR 0015) live in `Daemon::hidden`, outside the Index, for `--view` alone.
   - `Daemon::query`, `Daemon::empty_query`: searching, and what shows before typing. `Daemon::refresh` narrows a search to the last one's matches (`Narrowing`, forgotten on the empty query); `Daemon::add_near_misses` adds Near misses when real matches leave rows empty (ADR 0013); `Daemon::add_fallbacks` adds a Fallback's Live results (`[live_query] fallback`), last, after `learn`, and asks it the query, under the same condition (ADR 0016). `Daemon::picked` never makes a Fallback's Result a Learned choice.
   - Own Results under `OWN = "kotodama"` (ADR 0005): `FORGET`, `CLEAR_HISTORY`, `UNDO` (ADR 0010). Limits `MAX_RESULTS`, `MAX_LIVE_RESULTS`.
-- `rank.rs`: match quality. `Tier`, `Query` (folding, `searches_subtitles`), `Letters` (character sets as bits), `Filter` (what lets a search skip Items before nucleo), `Haystack`, `fold_text`. `Tiers::near_miss`, `Tiers::near_miss_highlights` and `LETTERS_PER_TYPO`: typo tolerance (ADR 0013).
-- `index.rs`: `Index`, every Indexed item in memory, searched with nucleo, with dense per-slot initials and every-letter `Letters` arrays (`starting_with`); `keyed` (keywords), `identified` (shared identities, ADR 0008).
+  - Hot Items (ADR 0017): `Daemon::plan_hot` (time-of-day habit around now, `HOT_CAPACITY`, `HOT_LEAD_SECS`/`HOT_GRACE_SECS`, re-planned every `HOT_EVERY` and `HOT_SETTLE` after a change), the menu opening warms the CPU cache (`Index::warm`); `next_wake` is `next_deadline` plus the hot timer.
+- `rank.rs`: match quality. `Tier`, `Query` (folding, `searches_subtitles`), `Letters` (character sets as bits), `Filter` (what lets a search skip Items before nucleo), `Searched` (the texts scored before a match), `Haystack`, `fold_text`, `Folded` (what a Segment keeps of an Item's texts). `Tiers::near_miss`, `Tiers::near_miss_highlights` and `LETTERS_PER_TYPO`: typo tolerance (ADR 0013). `OPTIMAL_CHARS`: longer texts are scored by nucleo's greedy match (ADR 0017).
+- `index.rs`: `Index`, every Indexed item: one `Segment` per Extension, searched with nucleo (`search` hands each match's `Ranked` row to its caller, `starting_with`); `Slot` (Segment and row), `SlotHasher`; `keyed` (keywords), `identified` (shared identities, ADR 0008). `Index::item` reads an Item back off its Shelf and keeps it resident (`SHOWN_RESIDENT` read last, plus the hot ones and those a keyword or an Alias names: `set_hot`, `hot_read`, `pin`, `trim`); `keep` takes `Read`s made on the indexing thread; `ItemRef` is a resident or borrowed Item.
+- `segment.rs`: `Segment`, one Extension's Items laid out for scanning (ADR 0017): dense `Letters` arrays, one text arena, word starts; `Segment::score` reads a row's title and keywords, the rest only on a match; `Ranked` (a row's keys for ranking, its texts on demand); `Held` (id, Identity, keyword, Actions on offer, `Place` on the Shelf); `Edit`; rows emptied in one version are reused from the next (`next_version`).
+- `indexer.rs`: `Indexer`, the `index` thread that makes Extensions' changes into new Segment versions off the keystroke path, coalescing what queues up; the Daemon swaps them in on `Event::Indexed`. The thread also plans the hot Items (`Plan`) and reads them and the keyword and Alias targets off their Shelves, sent with each version or as `Event::Kept`.
+- `payload.rs`: `Shelf`, the append-only store of encoded Items (an unlinked file in `$XDG_CACHE_HOME/kotodama`, or memory); `Place`.
 - `history.rs`: `History` on disk (`$XDG_STATE_HOME/kotodama/history.json`); `Habit::frecency`, `History::learned` (Learned choices), `Settings::from_config`.
 - `clock.rs`: `Clock`, `When` (time of day for Frecency, ADR 0009).
-- `kind_order.rs`: `KindOrder::place`, configurable kind order for equal matches.
+- `kind_order.rs`: `KindOrder::place`, configurable kind order for equal matches; `KindPlaces`, the place of each Segment's kinds, worked out per search.
 - `empty_query.rs`: `EmptyQuery::from_config`, the empty-query menu.
 - `keywords.rs`: Aliases and Quicklinks from config (`Keywords`, `Quicklink::command`); URL templates and the opener are `kotodama_extension::url`.
 - `open_view.rs`: `kotodama open --view` (ADR 0014): `ViewName` (`<extension>/<item>`), `Opening`. The Daemon side is `daemon.rs:Daemon::open_on_view` (runs the Item's primary Action, holds `Open`/`Toggle` back until the View is there, `OPEN_VIEW_TIMEOUT`).
@@ -27,5 +31,5 @@ The Daemon. Maintained by hand: fix stale lines when you find them, and update t
 - `server.rs`: `listen`, `serve`, the Front end Unix socket.
 - `desktop.rs`: paste/type worker over Wayland (virtual keyboard, `Keymap`, `Wayland`, `Worker`); `launch` and `host.rs` pass `WAYLAND_DISPLAY` on; data-control and finding the compositor are `kotodama_extension::wayland`; keys wait `SETTLE` after the menu closes (`settle_left`).
 - `notify.rs:send`: desktop notifications over D-Bus.
-- `paths.rs:Paths::from_env`: socket, config and Extension dirs from XDG.
+- `paths.rs:Paths::from_env`: socket, config, state, cache and Extension dirs from XDG.
 - `usage.rs`: opt-in Usage log (`Writer`, `forget`).

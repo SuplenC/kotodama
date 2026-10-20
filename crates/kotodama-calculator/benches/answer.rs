@@ -37,6 +37,7 @@ fn main() {
         extension_dirs: vec![path("extensions")],
         history: path("state/history.json"),
         usage_log: path("state/usage.jsonl"),
+        cache: path("cache"),
     };
     let socket = paths.socket.clone();
     thread::spawn(move || kotodamad::run(&paths));

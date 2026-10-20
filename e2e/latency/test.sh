@@ -8,7 +8,7 @@ cargo build --quiet --release --manifest-path "$root/Cargo.toml" -p kotodamad -p
 imports=$("$root/scripts/qml-module" --release)
 
 home=$(mktemp -d)
-export XDG_CONFIG_HOME="$home/config" XDG_CONFIG_DIRS="$home/etc" XDG_DATA_DIRS="$home/share" XDG_STATE_HOME="$home/state"
+export XDG_CONFIG_HOME="$home/config" XDG_CONFIG_DIRS="$home/etc" XDG_DATA_DIRS="$home/share" XDG_STATE_HOME="$home/state" XDG_CACHE_HOME="$home/cache"
 
 ext="$XDG_CONFIG_HOME/kotodama/extensions/many"
 mkdir -p "$ext"

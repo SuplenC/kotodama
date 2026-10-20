@@ -23,10 +23,10 @@ use serde::{Deserialize, Serialize};
 use crate::copied::Copied;
 
 /// How many characters of a text show in its preview, which is its title and
-/// all the Daemon searches. About what a menu row shows; a longer title costs
-/// every keystroke more than it shows (100 characters made searching 1000
-/// entries about three times slower in `benches/search.rs`).
-pub const PREVIEW_CHARS: usize = 60;
+/// all the Daemon searches. A keystroke's time grows with the titles' length:
+/// in `benches/search.rs`, the next keystroke takes about 100 us at 60
+/// characters, 135 us at 100 and 310 us at 200, against a budget of 2 ms.
+pub const PREVIEW_CHARS: usize = 100;
 
 const INDEX: &str = "index.json";
 const DATA: &str = "data";
