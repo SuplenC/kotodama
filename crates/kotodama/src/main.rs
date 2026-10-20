@@ -4,7 +4,11 @@
 //! ```sh
 //! kotodama toggle
 //! kotodama open --query "fir"
+//! kotodama open --view clipboard/history
 //! ```
+//!
+//! `--view <extension>/<item>` opens the menu on the View that Item's primary
+//! Action pushes (ADR 0014).
 
 use std::os::unix::net::UnixStream;
 use std::process::ExitCode;
@@ -13,7 +17,7 @@ use std::time::Duration;
 use kotodama_protocol::{Channel, FromFrontEnd, Hello, WireFormat, socket_path};
 
 const USAGE: &str = "usage: kotodama toggle
-       kotodama open [--view <id>] [--query <text>]";
+       kotodama open [--view <extension>/<item>] [--query <text>]";
 
 /// Under socket activation the first keypress also starts the Daemon, so the
 /// handshake may wait for it to come up.

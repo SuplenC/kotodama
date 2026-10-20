@@ -144,7 +144,8 @@ pub mod qobject {
         fn close_requested(self: Pin<&mut KotodamaSearch>);
 
         /// `kotodama open`: show the window with `query` typed. `view` is the
-        /// View asked for, or empty.
+        /// View asked for, or empty; it is on top already, so the first frame
+        /// shows it.
         #[qsignal]
         #[cxx_name = "openRequested"]
         fn open_requested(self: Pin<&mut KotodamaSearch>, query: QString, view: QString);

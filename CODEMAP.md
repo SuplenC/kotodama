@@ -38,8 +38,8 @@ are in [docs/adr/](docs/adr/).
 ## Tests and checks
 
 - Unit tests: `#[cfg(test)]` modules in each `src/*.rs`.
-- Integration: `crates/*/tests/*.rs`. Daemon: `kotodamad/tests/` (`common/` helpers, `fixtures/recorder`, `ranking.rs`, `interaction.rs`, `config.rs`, `forget.rs`). Protocol: `layout.rs`, `conformance.rs`, `shell_extension.rs`.
-- e2e: `e2e/*/test.sh` under headless sway. `latency` is skipped on PRs.
+- Integration: `crates/*/tests/*.rs`. Daemon: `kotodamad/tests/` (`common/` helpers, `fixtures/recorder`, `ranking.rs`, `interaction.rs`, `open_view.rs`, `config.rs`, `forget.rs`). Protocol: `layout.rs`, `conformance.rs`, `shell_extension.rs`.
+- e2e: `e2e/*/test.sh` under headless sway. `latency` is skipped on PRs. `open-view` checks `kotodama open --view` shows the View in the first frame (its `shell.qml` logs the top View as the window maps).
 - Benches: `kotodamad/benches/{query,daemon}.rs` (+ `corpus/`), `kotodama-protocol/benches/batch.rs`, `kotodama-calculator/benches/answer.rs`, `kotodama-clipboard/benches/search.rs`.
 - Nix: `nix/tests/vm.nix` (NixOS VM, `front-end.py`), `nix/tests/qml-module.nix`; `flake.nix` `checks`.
 - Script tests: `scripts/tests/*.sh`.
