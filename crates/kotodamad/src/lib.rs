@@ -20,6 +20,7 @@ pub mod paths;
 pub mod rank;
 mod server;
 pub mod usage;
+mod views;
 
 use std::sync::mpsc::{self, RecvTimeoutError};
 use std::time::Instant;

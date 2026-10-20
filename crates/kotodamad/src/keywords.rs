@@ -96,6 +96,7 @@ impl Quicklink {
             keyword: Some(self.keyword.clone()),
             identity: None,
             keywords: Vec::new(),
+            hidden: false,
             actions: vec![Action {
                 id: "open".into(),
                 title: "Open".into(),

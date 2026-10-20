@@ -41,6 +41,7 @@ pub fn items() -> Vec<Item> {
                 keyword: None,
                 identity: None,
                 keywords: vec![format!("app{n}")],
+                hidden: false,
                 actions: vec![Action {
                     id: "open".into(),
                     title: "Open".into(),
