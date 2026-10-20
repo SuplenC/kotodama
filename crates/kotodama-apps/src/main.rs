@@ -170,7 +170,10 @@ impl Extension {
         launch::launch_watched(
             &argv,
             app.dir.as_deref(),
-            program,
+            launch::App {
+                id: &app.id,
+                program,
+            },
             self.settings.withdraw_within,
             move || {
                 let _ = exits.send(Event::Own(Own::ExitedSoon { invocation }));

@@ -23,11 +23,9 @@
 //! get the CPU and answer, short enough not to be seen.
 
 use std::fmt::Write as _;
-use std::process::Stdio;
 use std::time::{Duration, Instant};
 
 use kotodama_extension::Chain;
-use kotodama_protocol::launch_command;
 
 use crate::daemon::{Desktop, Output};
 use crate::host::spawn;
@@ -102,34 +100,18 @@ fn settle_left(requested: Instant, now: Instant) -> Duration {
     (requested + SETTLE).saturating_duration_since(now)
 }
 
-/// Starts `command` through the launch prefix ([`launch_command`]) if one is
-/// set, else in a systemd scope of its own when it can have one
-/// (`kotodama_extension::scope`), with no stdio of its own. A thread of its
-/// own starts it, so the Daemon never waits for the user manager, and reaps
-/// it when it exits.
+/// Starts `command` as an Extension starts a program
+/// (`kotodama_extension::launch::launch`): in a systemd scope of its own
+/// when it can have one, and reaped when it exits. A thread of its own
+/// starts it, because starting waits until the user manager has made the
+/// scope, and the Daemon never waits for the user manager.
 fn launch(command: Vec<String>) {
-    let Some(program) = command.first().cloned() else {
+    let Some(program) = command.first() else {
         return;
     };
     spawn(format!("launch-{program}"), move || {
-        let started = launch_command(&command).and_then(|mut process| {
-            #[cfg(target_os = "linux")]
-            kotodama_extension::runtime::pass_wayland_display(&mut process);
-            process
-                .stdin(Stdio::null())
-                .stdout(Stdio::null())
-                .stderr(Stdio::null());
-            let named = program.clone();
-            kotodama_extension::scope::spawn(&mut process, move |err| {
-                log::warn!("{named} runs without a scope of its own: {}", Chain(&err));
-            })
-            .map(|launched| launched.child)
-        });
-        match started {
-            Ok(mut child) => {
-                let _ = child.wait();
-            }
-            Err(err) => log::error!("couldn't start {program}: {err}"),
+        if let Err(err) = kotodama_extension::launch::launch(&command, None) {
+            log::error!("{err}");
         }
     });
 }

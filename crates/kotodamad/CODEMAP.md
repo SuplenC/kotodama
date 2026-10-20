@@ -31,7 +31,7 @@ The Daemon. Maintained by hand: fix stale lines when you find them, and update t
 - `host.rs`: `Processes`, spawning Extension processes with reader/writer threads.
 - `link.rs:pump`: post-handshake connection threads (Extension or Front end).
 - `server.rs`: `listen`, `serve`, the Front end Unix socket.
-- `desktop.rs`: paste/type worker over Wayland (virtual keyboard, `Keymap`, `Wayland`, `Worker`); `launch` and `host.rs` pass `WAYLAND_DISPLAY` on; data-control and finding the compositor are `kotodama_extension::wayland`; keys wait `SETTLE` after the menu closes (`settle_left`).
+- `desktop.rs`: paste/type worker over Wayland (virtual keyboard, `Keymap`, `Wayland`, `Worker`); `launch` starts a Quicklink's command through `kotodama_extension::launch::launch` on a thread of its own (a scope of its own, `WAYLAND_DISPLAY` passed on, as `host.rs` passes it to Extensions); data-control and finding the compositor are `kotodama_extension::wayland`; keys wait `SETTLE` after the menu closes (`settle_left`).
 - `notify.rs:send`: desktop notifications over D-Bus (`kotodama_extension::dbus`).
 - `paths.rs:Paths::from_env`: socket, config, state, cache and Extension dirs from XDG.
 - `usage.rs`: opt-in Usage log (`Writer`, `forget`).
