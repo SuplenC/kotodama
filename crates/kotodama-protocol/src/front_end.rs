@@ -159,6 +159,8 @@ pub struct ListMatch {
     /// The Item's position in the View's `items`.
     pub item: u32,
     /// The positions, in characters, of the title's characters that matched.
+    /// Empty past the first few hundred matches, which are seldom seen and
+    /// would cost as much again to highlight.
     pub highlights: Vec<u32>,
 }
 

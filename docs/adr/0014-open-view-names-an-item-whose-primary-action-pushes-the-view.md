@@ -8,7 +8,7 @@ The Daemon holds the request back from the menus until the Action is done. The V
 
 Under socket activation, the keypress may also start the Daemon. Until the named Extension is up, and for its first second up while the Item hasn't arrived (an Extension may send its Items in several batches), the request waits, so the first keypress after login still opens on the View. A name that matches nothing in an Extension that has been up longer fails at once. It waits at most a second in all, then the menus open on the search; the Action is still followed, so a View that arrives later is pushed over it like any other, and a later failure is shown. A `kotodama toggle` or plain `kotodama open` that arrives while the menus wait is held back until they open, then passed on in order, so it can't show the search first either.
 
-Every Extension starts with the Daemon today. If Extensions ever start only on demand, `--view` must start the one it names. An Extension that has only Live queries has no Indexed item, so `--view` can't reach its Views yet.
+Every Extension starts with the Daemon today. If Extensions ever start only on demand, `--view` must start the one it names. An Extension that has only Live queries has no Indexed item; it adds a hidden Item for `--view` to name (ADR 0015).
 
 The protocol is unchanged: `Open`'s `view` was already an optional string.
 
