@@ -80,6 +80,9 @@ const CURL: &str = match option_env!("KOTODAMA_CURL") {
 /// How many answers are kept for the user to confirm from.
 const KEPT_ANSWERS: usize = 4;
 
+/// What an Action or the View says with neither a key nor an endpoint set.
+const NOT_CONFIGURED: &str = "the AI isn't configured";
+
 type Error = kotodama_protocol::Error;
 
 fn main() -> ExitCode {
@@ -146,8 +149,8 @@ type KeyCache = Arc<Mutex<Option<Secret>>>;
 enum Purpose {
     /// The `?` Live query with this id.
     Live(u64),
-    /// The "Ask AI" Result's View.
-    View,
+    /// The "Ask AI" Result's View, which asked this query.
+    View(String),
 }
 
 struct Request {
@@ -188,6 +191,10 @@ impl Extension {
                 // nothing asked under the old settings answers, and no key
                 // read under them is kept.
                 self.key = KeyCache::default();
+                let asked_in_view = self.request.as_ref().and_then(|r| match &r.purpose {
+                    Purpose::View(query) if self.view_open => Some(query.clone()),
+                    _ => None,
+                });
                 self.cancel();
                 if !self.settings.enabled() {
                     self.pending = None;
@@ -195,7 +202,21 @@ impl Extension {
                     self.asked_catalog = true;
                     self.writer.send(&FromExtension::RequestActionCatalog)?;
                 }
-                Ok(())
+                // The open View would wait on the cancelled request forever,
+                // so it asks again under the new settings, or says it can't.
+                let Some(query) = asked_in_view else {
+                    return Ok(());
+                };
+                if self.settings.enabled() {
+                    self.start(Purpose::View(query.clone()), &query);
+                    Ok(())
+                } else {
+                    self.writer.send(&FromExtension::UpdateView(View {
+                        id: ANSWER_VIEW.into(),
+                        title: format!("AI: {query}"),
+                        content: detail(NOT_CONFIGURED.into()),
+                    }))
+                }
             }
             ToExtension::ActionCatalog { entries } => {
                 self.catalog = Arc::new(entries);
@@ -238,7 +259,7 @@ impl Extension {
                 if self
                     .request
                     .as_ref()
-                    .is_some_and(|r| r.purpose == Purpose::View)
+                    .is_some_and(|r| matches!(r.purpose, Purpose::View(_)))
                 {
                     self.cancel();
                 }
@@ -285,7 +306,7 @@ impl Extension {
     fn ask_in_view(&mut self, query: &str) -> Result<Outcome, Error> {
         if !self.settings.enabled() {
             return Ok(Outcome::Failed {
-                message: "the AI isn't configured".into(),
+                message: NOT_CONFIGURED.into(),
             });
         }
         self.writer.send(&FromExtension::PushView(View {
@@ -294,7 +315,7 @@ impl Extension {
             content: detail(format!("Asking which Actions do “{query}”…")),
         }))?;
         self.view_open = true;
-        self.start(Purpose::View, query);
+        self.start(Purpose::View(query.to_owned()), query);
         Ok(Outcome::KeepOpen)
     }
 
@@ -391,7 +412,7 @@ impl Extension {
         };
         let sent = match current.purpose {
             Purpose::Live(live) => self.send_live(live, live_results(&proposals, request)),
-            Purpose::View if self.view_open => {
+            Purpose::View(_) if self.view_open => {
                 let content = match failure {
                     Some(message) => detail(message),
                     None if proposals.is_empty() => {
@@ -412,7 +433,7 @@ impl Extension {
                     content,
                 }))
             }
-            Purpose::View => Ok(()),
+            Purpose::View(_) => Ok(()),
         };
         // An answer with nothing to confirm would only push out one the user
         // may still confirm from.

@@ -305,6 +305,61 @@ fn the_key_command_runs_once_and_again_after_a_new_config() {
     assert_eq!(count(), 2);
 }
 
+/// Opens the "Ask AI" View for `QUERY` with a slow curl, and waits until its
+/// request is in flight.
+fn view_waiting(dir: &Path) -> Spawned {
+    canned_answer(dir);
+    fs::write(dir.join("slow"), "").expect("mark the fake curl");
+    let mut ai = start(dir, configured());
+    assert_eq!(ai.recv(), FromExtension::RequestActionCatalog);
+    ai.send(ToExtension::ActionCatalog { entries: catalog() });
+    live(&mut ai, 1, QUERY, None);
+    let ask = results(&ai, 1).remove(0).item;
+    ai.start_run(1, ASK, ask.to_ref(), BTreeMap::new());
+    assert!(matches!(ai.recv(), FromExtension::PushView(_)));
+    assert_eq!(ai.outcome(1, |_| false), Outcome::KeepOpen);
+    let deadline = Instant::now() + WAIT;
+    while !dir.join("request").exists() {
+        assert!(Instant::now() < deadline, "curl never ran");
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    ai
+}
+
+#[test]
+fn a_new_config_while_the_view_waits_asks_again_under_it() {
+    let dir = tempfile::tempdir().expect("make a temporary directory");
+    let mut ai = view_waiting(dir.path());
+
+    fs::remove_file(dir.path().join("slow")).expect("unmark the fake curl");
+    ai.send(ToExtension::Config(configured()));
+
+    match ai.recv() {
+        FromExtension::UpdateView(View {
+            content: ViewContent::List { items, .. },
+            ..
+        }) => assert_eq!(items.len(), 2),
+        other => panic!("expected the Proposals, got {other:?}"),
+    }
+}
+
+#[test]
+fn a_config_that_turns_it_off_while_the_view_waits_says_so() {
+    let dir = tempfile::tempdir().expect("make a temporary directory");
+    let mut ai = view_waiting(dir.path());
+
+    ai.send(ToExtension::Config(Table::new()));
+
+    match ai.recv() {
+        FromExtension::UpdateView(View {
+            content: ViewContent::Detail { markdown, .. },
+            ..
+        }) => assert_eq!(markdown, "the AI isn't configured"),
+        other => panic!("expected the View to say so, got {other:?}"),
+    }
+    ai.quiet();
+}
+
 #[test]
 fn a_cancelled_question_never_answers() {
     let dir = tempfile::tempdir().expect("make a temporary directory");

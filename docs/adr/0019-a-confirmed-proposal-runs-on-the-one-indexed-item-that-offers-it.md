@@ -1,4 +1,4 @@
-# 17. A confirmed Proposal runs on the one Indexed item that offers it
+# 19. A confirmed Proposal runs on the one Indexed item that offers it
 
 Status: accepted (2026-10-20)
 
