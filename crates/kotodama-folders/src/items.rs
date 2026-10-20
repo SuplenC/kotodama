@@ -58,18 +58,9 @@ pub fn project(project: &Project, home: Option<&Path>) -> Item {
 }
 
 pub fn script(script: &Script, home: Option<&Path>) -> Item {
-    let file_name = script
-        .path
-        .file_name()
-        .map(|name| name.to_string_lossy().into_owned())
-        .unwrap_or_default();
-    // A desktop entry kept among the scripts is the app the apps Extension
-    // offers under the same desktop id (ADR 0008).
-    let identity = if file_name.ends_with(".desktop") {
-        format!("app:{file_name}")
-    } else {
-        format!("file:{}", script.path.to_string_lossy())
-    };
+    // A `.desktop` file is a file here too: the app the apps Extension offers
+    // is a different thing (ADR 0008).
+    let identity = format!("file:{}", script.path.to_string_lossy());
     let arguments = if script.header.prompt {
         vec![Argument {
             name: ARGUMENTS.to_owned(),

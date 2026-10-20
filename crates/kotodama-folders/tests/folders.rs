@@ -382,8 +382,17 @@ fn executable_files_are_scripts_titled_by_their_subfolders() {
     assert!(backup.actions[0].arguments.is_empty());
     // Found by its file's name too.
     assert_eq!(items["Deploy staging"].keywords, ["named"]);
-    // The same app the apps Extension offers.
-    assert_eq!(items["app"].identity.as_deref(), Some("app:app.desktop"));
+    // A desktop entry is a file like any other, not the apps Extension's app.
+    assert_eq!(
+        items["app"].identity.as_deref(),
+        Some(
+            format!(
+                "file:{}",
+                folders.path().join("Scripts/app.desktop").display()
+            )
+            .as_str()
+        )
+    );
 }
 
 #[test]
