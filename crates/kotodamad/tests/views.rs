@@ -323,6 +323,90 @@ fn a_list_view_that_filters_itself_is_sent_what_is_typed() {
 }
 
 #[test]
+fn a_front_end_that_connects_clears_what_a_list_that_filters_itself_was_filtered_by() {
+    let mut h = Harness::new(vec![plain("files")]);
+    let files = h.up(0);
+    let ui = h.front_end();
+    let mut view = reading();
+    view.content = ViewContent::List {
+        items: vec![],
+        filters_itself: true,
+    };
+    h.send(&files, FromExtension::PushView(view));
+    filter(&mut h, &ui, "recent", "rea");
+    files.drain();
+
+    // Its filter box starts empty, so the Extension lists every Item again.
+    connects(&mut h);
+    assert_eq!(
+        files.drain(),
+        [ToExtension::FilterView {
+            view: "recent".into(),
+            text: String::new(),
+        }]
+    );
+}
+
+#[test]
+fn a_filtered_list_updated_into_another_kind_of_view_is_not_filtered_any_more() {
+    let mut h = Harness::new(vec![plain("files")]);
+    let files = h.up(0);
+    let ui = h.front_end();
+    h.send(&files, FromExtension::PushView(reading()));
+    filter(&mut h, &ui, "recent", "read");
+    ui.drain();
+
+    h.send(&files, FromExtension::UpdateView(detail("recent")));
+    let sent = sent(&ui);
+    assert!(
+        matches!(&sent[..], [ToFrontEnd::UpdateView { .. }]),
+        "no matches follow: {sent:?}"
+    );
+    // Nor when it is a list again.
+    h.send(&files, FromExtension::UpdateView(reading()));
+    let sent = self::sent(&ui);
+    assert!(
+        matches!(&sent[..], [ToFrontEnd::UpdateView { .. }]),
+        "{sent:?}"
+    );
+}
+
+#[test]
+fn a_list_views_contributed_actions_follow_the_extensions_that_start_and_stop() {
+    let mut h = contributors();
+    let files = h.up(0);
+    let ui = h.front_end();
+    let view = list("recent", vec![file("notes", "notes.md")]);
+    h.send(&files, FromExtension::PushView(view.clone()));
+    ui.drain();
+
+    let pinner = h.up(1);
+    assert!(
+        sent(&ui).contains(&ToFrontEnd::UpdateView {
+            extension: "files".into(),
+            view: view.clone(),
+            contributed: BTreeMap::from([("file".into(), vec![offered("pinner", "pin")])]),
+        }),
+        "the View's Items now offer pinner's Action"
+    );
+
+    // An Extension that contributes nothing to it changes nothing.
+    h.up(2);
+    assert!(
+        !sent(&ui)
+            .iter()
+            .any(|message| matches!(message, ToFrontEnd::UpdateView { .. }))
+    );
+
+    h.down(&pinner);
+    assert!(sent(&ui).contains(&ToFrontEnd::UpdateView {
+        extension: "files".into(),
+        view,
+        contributed: BTreeMap::new(),
+    }));
+}
+
+#[test]
 fn a_filter_for_a_view_that_isnt_open_is_ignored() {
     let mut h = Harness::new(vec![plain("files")]);
     h.up(0);

@@ -22,7 +22,7 @@ pub struct Open {
     /// is filtered: most lists never are.
     haystacks: Option<Vec<Haystack>>,
     /// What the last filter matched, so typing on searches only those.
-    last: Narrowing,
+    narrowing: Narrowing,
 }
 
 /// The Items the last filter of a list View matched. A filter that only adds
@@ -55,7 +55,7 @@ impl Open {
             extension,
             view,
             haystacks: None,
-            last: Narrowing::default(),
+            narrowing: Narrowing::default(),
         }
     }
 
@@ -69,6 +69,18 @@ impl Open {
             ViewContent::List { items, .. } => items,
             _ => &[],
         }
+    }
+
+    /// Whether this is a list View the Daemon filters, rather than its
+    /// Extension.
+    pub fn filtered_here(&self) -> bool {
+        matches!(
+            self.view.content,
+            ViewContent::List {
+                filters_itself: false,
+                ..
+            }
+        )
     }
 
     /// Whether this is a list View its Extension filters itself.
@@ -179,7 +191,7 @@ impl Views {
         );
         let query = rank::Query::new(text);
         let filter = query.filter();
-        let narrowed = open.last.narrows(text, &query);
+        let narrowed = open.narrowing.narrows(text, &query);
         let mut found: Vec<(u8, rank::Tier, u32)> = Vec::new();
         let mut consider = |n: u32| {
             let (item, haystack) = (&items[n as usize], &haystacks[n as usize]);
@@ -190,11 +202,15 @@ impl Views {
             }
         };
         if narrowed {
-            open.last.matched.iter().copied().for_each(&mut consider);
+            open.narrowing
+                .matched
+                .iter()
+                .copied()
+                .for_each(&mut consider);
         } else {
             (0..items.len() as u32).for_each(&mut consider);
         }
-        let last = &mut open.last;
+        let last = &mut open.narrowing;
         last.text.clear();
         last.text.push_str(text);
         last.subtitles = query.searches_subtitles();

@@ -34,7 +34,7 @@ use crate::kind_order::KindOrder;
 use crate::open_view::{Opening, ViewName};
 use crate::rank::{self, Haystack, Matched, Tier, Tiers};
 use crate::usage::{Entry, Used};
-use crate::views::Views;
+use crate::views::{Open, Views};
 
 /// The name the Daemon's own Results go by: Quicklinks and the Action that
 /// clears the History. No Extension may take it.
@@ -1061,6 +1061,17 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
 
     /// The set of running Extensions changed.
     fn extensions_changed(&mut self) {
+        // The Contributed actions on the open list Views, to tell the menus
+        // of those that change.
+        let before: Vec<_> = self
+            .views
+            .iter()
+            .filter(|open| matches!(open.view.content, ViewContent::List { .. }))
+            .map(|open| {
+                let contributed = self.view_contributed(open.extension, &open.view);
+                (open.extension, open.view.id.clone(), contributed)
+            })
+            .collect();
         self.contributed.clear();
         for (id, ext) in self.extensions.iter().enumerate() {
             if ext.sender().is_none() {
@@ -1075,6 +1086,16 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
         }
         self.catalog_dirty = true;
         self.mark_late();
+        for (id, view_id, contributed) in before {
+            let Some(open) = self.views.get(id, &view_id) else {
+                continue;
+            };
+            if self.view_contributed(id, &open.view) != contributed {
+                let view = open.view.clone();
+                let name = self.extensions[id.0].name().to_owned();
+                self.update_view(id, &name, view);
+            }
+        }
     }
 
     fn extension_message(&mut self, id: ExtensionId, message: FromExtension, now: Instant) {
@@ -1103,9 +1124,11 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
                 self.run_openings(now);
             }
             FromExtension::RemoveItems { ids } => {
-                let hidden = self.hidden.entry(id).or_default();
+                let mut hidden = self.hidden.get_mut(&id);
                 for item in ids {
-                    hidden.remove(&item);
+                    if let Some(hidden) = hidden.as_mut() {
+                        hidden.remove(&item);
+                    }
                     self.index.remove(id, &item);
                 }
                 self.items_changed();
@@ -1177,7 +1200,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             && self
                 .views
                 .get(id, &view_id)
-                .is_some_and(|open| !open.filters_itself());
+                .is_some_and(Open::filtered_here);
         if !filtered {
             self.forget_filters(id, &view_id);
         }
@@ -1213,6 +1236,9 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
         let Some(open) = self.views.get(id, view) else {
             return;
         };
+        if !matches!(open.view.content, ViewContent::List { .. }) {
+            return;
+        }
         if open.filters_itself() {
             self.extensions[id.0].send(ToExtension::FilterView {
                 view: view.to_owned(),
@@ -1462,8 +1488,16 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
                 job: job.clone(),
             });
         }
-        // A menu that restarted shows the Views it had, bottom first.
+        // A menu that restarted shows the Views it had, bottom first, with
+        // nothing typed into them: a list that filters itself lists every
+        // Item again.
         for open in self.views.iter() {
+            if open.filters_itself() {
+                self.extensions[open.extension.0].send(ToExtension::FilterView {
+                    view: open.view.id.clone(),
+                    text: String::new(),
+                });
+            }
             session.send(ToFrontEnd::PushView {
                 extension: self.extensions[open.extension.0].name().to_owned(),
                 view: open.view.clone(),
