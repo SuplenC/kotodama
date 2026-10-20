@@ -16,6 +16,7 @@ The Daemon. Maintained by hand: fix stale lines when you find them, and update t
 - `kind_order.rs`: `KindOrder::place`, configurable kind order for equal matches.
 - `empty_query.rs`: `EmptyQuery::from_config`, the empty-query menu.
 - `keywords.rs`: Aliases and Quicklinks from config (`Keywords`, `Quicklink::command`, `percent_encode`).
+- `open_view.rs`: `kotodama open --view` (ADR 0013): `ViewName` (`<extension>/<item>`), `Opening`. The Daemon side is `daemon.rs:Daemon::open_on_view` (runs the Item's primary Action, holds `Open`/`Toggle` back until the View is there, `OPEN_VIEW_TIMEOUT`).
 - `arguments.rs`: text after a keyword filling an Action's Arguments, and the form for missing ones.
 - `config.rs`: `load` (merge every `*.toml` in config dirs), `watch`, `extension_table` (`[extensions.<name>]`).
 - `discovery.rs`: `discover` (`<dir>/*/manifest.toml`), `watch` for Extension dirs; `Found`.
