@@ -1,6 +1,15 @@
 //! Hyprland's events, read as lines from its event socket (`.socket2.sock`),
 //! each `EVENT>>DATA`. Only the ones that change an Item are kept; Hyprland
 //! sends many more, about focus, monitors and layers.
+//!
+//! # Owns
+//!
+//! - Which events change an Item, and what each one's data says.
+//!
+//! # Not here
+//!
+//! - Reading the lines from the socket: [`crate::hyprland::Events`].
+//! - Applying a change to the windows: [`crate::windows::Windows::apply`].
 
 /// An event that changes a window Item, or the binds.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -47,9 +56,7 @@ impl Change {
                     title,
                 }
             }
-            "closewindow" => Change::Closed {
-                address: address(data),
-            },
+            "closewindow" => Change::Closed { address: address(data) },
             // `movewindow` and `windowtitle` come first and say less: the
             // first names the workspace without its id, the second only the
             // window.

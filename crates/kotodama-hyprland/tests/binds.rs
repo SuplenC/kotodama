@@ -1,11 +1,13 @@
 //! Hyprland's binds, from recorded `hyprctl binds -j` output, as Indexed
 //! items and as the Shortcuts View.
 
-use kotodama_hyprland::binds::{self, Bind};
-use kotodama_protocol::{Item, ViewContent};
+use kotodama_hyprland::binds;
+use kotodama_hyprland::binds::Bind;
+use kotodama_protocol::Item;
+use kotodama_protocol::ViewContent;
 
 fn recorded() -> Vec<Bind> {
-    binds::parse(include_str!("fixtures/binds.json")).unwrap()
+    binds::parse(include_str!("fixtures/binds.json")).expect("parse the recorded binds")
 }
 
 fn rows(items: &[Item]) -> Vec<(&str, &str)> {
@@ -69,12 +71,7 @@ fn the_shortcuts_view_lists_every_bind_grouped_by_modifier() {
         ]
     );
     // Typing in the View finds a bind by what it does, too.
-    assert!(
-        items[7]
-            .keywords
-            .iter()
-            .any(|word| word == "Screenshot a region")
-    );
+    assert!(items[7].keywords.iter().any(|word| word == "Screenshot a region"));
 }
 
 #[test]
@@ -82,10 +79,7 @@ fn a_bind_runs_its_dispatcher_with_its_argument() {
     let binds = recorded();
     let items = binds::items(&binds);
     let screenshot = binds::find(&binds, &items[1].id).unwrap();
-    assert_eq!(
-        screenshot.dispatch(),
-        "exec grim -g \"$(slurp)\" - | wl-copy"
-    );
+    assert_eq!(screenshot.dispatch(), "exec grim -g \"$(slurp)\" - | wl-copy");
     let close = binds::find(&binds, &items[0].id).unwrap();
     assert_eq!(close.dispatch(), "killactive");
     assert!(binds::find(&binds, "nope").is_none());

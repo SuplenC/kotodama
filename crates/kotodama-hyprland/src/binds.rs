@@ -1,10 +1,25 @@
 //! Hyprland's binds, read from `j/binds` (what `hyprctl binds -j` prints):
 //! the ones with a description as Indexed items, and every one in the
 //! Shortcuts View, grouped by modifier.
+//!
+//! # Owns
+//!
+//! - Parsing `j/binds`, and a bind's keys and dispatch in words.
+//! - The binds' Items, their ids, and the Shortcuts Item and View.
+//!
+//! # Not here
+//!
+//! - Asking Hyprland for the binds and running a dispatch: [`crate::hyprland`].
+//! - When the binds are read again and sent: `main.rs`.
 
 use std::collections::HashMap;
 
-use kotodama_protocol::{Action, Item, ItemKind, NamespacedKind, View, ViewContent};
+use kotodama_protocol::Action;
+use kotodama_protocol::Item;
+use kotodama_protocol::ItemKind;
+use kotodama_protocol::NamespacedKind;
+use kotodama_protocol::View;
+use kotodama_protocol::ViewContent;
 use serde::Deserialize;
 
 /// The Action that runs a bind's dispatcher.
@@ -107,6 +122,7 @@ impl Bind {
         }
     }
 
+    /// `text`, followed by the bind's submap when it is in one.
     fn in_submap(&self, text: String) -> String {
         if self.submap.is_empty() {
             text
@@ -114,45 +130,63 @@ impl Bind {
             format!("{text} · submap {}", self.submap)
         }
     }
+}
 
-    fn item(&self, id: String, title: String, subtitle: String, keywords: Vec<String>) -> Item {
-        Item {
-            id,
-            kind: ItemKind::Namespaced(NamespacedKind::new(KIND).expect("a valid kind")),
-            identity: None,
-            title,
-            subtitle: Some(subtitle),
-            icon: Some(ICON.to_owned()),
-            keyword: None,
-            keywords,
-            hidden: false,
-            actions: vec![Action::new(RUN, "Run")],
-        }
+/// The error [`parse`] returns.
+#[derive(Debug, thiserror::Error)]
+#[error("couldn't read Hyprland's binds")]
+pub struct ParseError(#[source] serde_json::Error);
+
+impl ParseError {
+    fn json(err: serde_json::Error) -> Self {
+        ParseError(err)
+    }
+}
+
+fn kind(name: &str) -> ItemKind {
+    ItemKind::Namespaced(NamespacedKind::new(name).expect("the Extension's kinds are valid"))
+}
+
+/// A bind's Item, which runs it.
+fn bind_item(id: String, title: String, subtitle: String, keywords: Vec<String>) -> Item {
+    Item {
+        id,
+        kind: kind(KIND),
+        identity: None,
+        title,
+        subtitle: Some(subtitle),
+        icon: Some(ICON.to_owned()),
+        keyword: None,
+        keywords,
+        hidden: false,
+        actions: vec![Action::new(RUN, "Run")],
     }
 }
 
 /// The Item that opens the Shortcuts View, which `kotodama open --view
-/// hyprland/shortcuts` names (ADR 0014). The search finds it too.
+/// hyprland/shortcuts` names. The search finds it too.
 pub fn shortcuts_item() -> Item {
     Item {
         id: SHORTCUTS.to_owned(),
-        kind: ItemKind::Namespaced(NamespacedKind::new(SHORTCUTS_KIND).expect("a valid kind")),
+        kind: kind(SHORTCUTS_KIND),
         identity: None,
         title: "Keyboard Shortcuts".to_owned(),
         subtitle: Some("Hyprland's binds, by modifier".to_owned()),
         icon: Some(ICON.to_owned()),
         keyword: None,
-        keywords: ["keybinds", "hotkeys", "hyprland"]
-            .map(str::to_owned)
-            .to_vec(),
+        keywords: ["keybinds", "hotkeys", "hyprland"].map(str::to_owned).to_vec(),
         hidden: false,
         actions: vec![Action::new(OPEN, "Show Keyboard Shortcuts")],
     }
 }
 
 /// Reads `j/binds`.
-pub fn parse(json: &str) -> Result<Vec<Bind>, String> {
-    serde_json::from_str(json).map_err(|err| format!("couldn't read Hyprland's binds: {err}"))
+///
+/// # Errors
+///
+/// [`ParseError`] when `json` is not a list of binds.
+pub fn parse(json: &str) -> Result<Vec<Bind>, ParseError> {
+    serde_json::from_str(json).map_err(ParseError::json)
 }
 
 /// Each bind's id: its submap, modifiers and key, so it stays the same however
@@ -165,21 +199,14 @@ fn ids(binds: &[Bind]) -> Vec<String> {
             let id = format!("{}/{}/{}", bind.submap, bind.modmask, bind.key_name());
             let count = seen.entry(id.clone()).or_insert(0);
             *count += 1;
-            if *count == 1 {
-                id
-            } else {
-                format!("{id}#{count}")
-            }
+            if *count == 1 { id } else { format!("{id}#{count}") }
         })
         .collect()
 }
 
 /// The bind an Item stands for, by the Item's id.
 pub fn find<'a>(binds: &'a [Bind], id: &str) -> Option<&'a Bind> {
-    ids(binds)
-        .iter()
-        .position(|bind| bind == id)
-        .map(|at| &binds[at])
+    ids(binds).iter().position(|bind| bind == id).map(|at| &binds[at])
 }
 
 /// Every bind with a description, as an Indexed item titled by it, with its
@@ -190,7 +217,7 @@ pub fn items(binds: &[Bind]) -> Vec<Item> {
         .zip(ids(binds))
         .filter(|(bind, _)| !bind.description.is_empty() && !bind.mouse)
         .map(|(bind, id)| {
-            bind.item(
+            bind_item(
                 id,
                 bind.description.clone(),
                 bind.in_submap(bind.keys()),
@@ -222,7 +249,7 @@ pub fn view(binds: &[Bind]) -> View {
                 .filter(|word| !word.is_empty())
                 .cloned()
                 .collect();
-            bind.item(id, bind.keys(), bind.in_submap(bind.summary()), keywords)
+            bind_item(id, bind.keys(), bind.in_submap(bind.summary()), keywords)
         })
         .collect();
     View {

@@ -1,20 +1,75 @@
 //! Hyprland's open windows, read once from `j/clients` (what `hyprctl
 //! clients -j` prints) and then kept up to date from its events, as Items of
 //! the shared kind `window`, by address.
+//!
+//! # Owns
+//!
+//! - Parsing `j/clients`, and applying a [`Change`] to the windows.
+//! - The windows' Items, and the dispatch each window Action runs.
+//!
+//! # Not here
+//!
+//! - Reading the events: [`crate::events`] and [`crate::hyprland`].
+//! - Running a dispatch and sending the Items: [`crate::hyprland`] and `main.rs`.
 
 use std::collections::BTreeMap;
 
-use kotodama_protocol::{Action, Argument, Item, ItemKind};
+use kotodama_protocol::Action;
+use kotodama_protocol::Argument;
+use kotodama_protocol::Item;
+use kotodama_protocol::ItemKind;
 use serde::Deserialize;
 
 use crate::events::Change;
 
+/// The Action that focuses a window.
 pub const FOCUS: &str = "focus";
+/// The Action that closes a window.
 pub const CLOSE: &str = "close";
+/// The Action that moves a window to the workspace in its [`WORKSPACE`] Argument.
 pub const MOVE: &str = "move";
+/// The Action that toggles whether a window floats.
 pub const FLOAT: &str = "float";
 /// The Argument [`MOVE`] asks for.
 pub const WORKSPACE: &str = "Workspace";
+
+/// The error [`Windows::from_clients`] returns.
+#[derive(Debug, thiserror::Error)]
+#[error("couldn't read Hyprland's windows")]
+pub struct ParseError(#[source] serde_json::Error);
+
+impl ParseError {
+    fn json(err: serde_json::Error) -> Self {
+        ParseError(err)
+    }
+}
+
+/// Why a window Action has no dispatch to run.
+#[derive(Debug, thiserror::Error)]
+pub enum DispatchError {
+    /// [`MOVE`] was run with a blank [`WORKSPACE`] Argument, or none.
+    #[error("Name a workspace to move the window to")]
+    NoWorkspace,
+    /// The workspace would end the dispatcher's argument early.
+    #[error("`{workspace}` isn't a workspace: it has a comma")]
+    Comma { workspace: String },
+    #[error("A window has no Action `{action}`")]
+    UnknownAction { action: String },
+}
+
+impl DispatchError {
+    fn comma(workspace: &str) -> Self {
+        DispatchError::Comma {
+            workspace: workspace.to_owned(),
+        }
+    }
+
+    fn unknown_action(action: &str) -> Self {
+        DispatchError::UnknownAction {
+            action: action.to_owned(),
+        }
+    }
+}
 
 #[derive(Debug, PartialEq, Eq)]
 struct Window {
@@ -47,9 +102,12 @@ struct ClientWorkspace {
 impl Windows {
     /// Reads `j/clients`. A client not mapped yet isn't a window to show:
     /// its `openwindow` event is still to come.
-    pub fn from_clients(json: &str) -> Result<Self, String> {
-        let clients: Vec<Client> = serde_json::from_str(json)
-            .map_err(|err| format!("couldn't read Hyprland's windows: {err}"))?;
+    ///
+    /// # Errors
+    ///
+    /// [`ParseError`] when `json` is not a list of clients.
+    pub fn from_clients(json: &str) -> Result<Self, ParseError> {
+        let clients: Vec<Client> = serde_json::from_str(json).map_err(ParseError::json)?;
         Ok(Windows(
             clients
                 .into_iter()
@@ -84,14 +142,10 @@ impl Windows {
                 old.as_ref() != self.0.get(address)
             }
             Change::Closed { address } => self.0.remove(address).is_some(),
-            Change::Moved { address, workspace } => set(
-                self.0.get_mut(address).map(|window| &mut window.workspace),
-                workspace,
-            ),
-            Change::Retitled { address, title } => set(
-                self.0.get_mut(address).map(|window| &mut window.title),
-                title,
-            ),
+            Change::Moved { address, workspace } => {
+                set(self.0.get_mut(address).map(|window| &mut window.workspace), workspace)
+            }
+            Change::Retitled { address, title } => set(self.0.get_mut(address).map(|window| &mut window.title), title),
             Change::ConfigReloaded => false,
         }
     }
@@ -147,7 +201,12 @@ fn item(address: &str, window: &Window) -> Item {
 
 /// What `dispatch` runs for `action` on the window at `address`; `workspace`
 /// is the [`MOVE`] Action's Argument.
-pub fn dispatch(action: &str, address: &str, workspace: Option<&str>) -> Result<String, String> {
+///
+/// # Errors
+///
+/// [`DispatchError`] when `action` is not a window Action, or [`MOVE`]'s workspace is blank or
+/// has a comma.
+pub fn dispatch(action: &str, address: &str, workspace: Option<&str>) -> Result<String, DispatchError> {
     Ok(match action {
         FOCUS => format!("focuswindow address:{address}"),
         CLOSE => format!("closewindow address:{address}"),
@@ -156,12 +215,12 @@ pub fn dispatch(action: &str, address: &str, workspace: Option<&str>) -> Result<
             let workspace = workspace
                 .map(str::trim)
                 .filter(|workspace| !workspace.is_empty())
-                .ok_or("Name a workspace to move the window to")?;
+                .ok_or(DispatchError::NoWorkspace)?;
             if workspace.contains(',') {
-                return Err(format!("`{workspace}` isn't a workspace: it has a comma"));
+                return Err(DispatchError::comma(workspace));
             }
             format!("movetoworkspacesilent {workspace},address:{address}")
         }
-        _ => return Err(format!("A window has no Action `{action}`")),
+        _ => return Err(DispatchError::unknown_action(action)),
     })
 }

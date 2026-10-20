@@ -3,10 +3,14 @@
 
 use std::cell::RefCell;
 use std::collections::BTreeMap;
-use std::io::{Read, Write};
-use std::os::unix::net::{UnixListener, UnixStream};
+use std::io::Read;
+use std::io::Write;
+use std::os::unix::net::UnixListener;
+use std::os::unix::net::UnixStream;
 use std::process::Command;
-use std::sync::{Arc, Condvar, Mutex};
+use std::sync::Arc;
+use std::sync::Condvar;
+use std::sync::Mutex;
 use std::thread;
 use std::time::Duration;
 
@@ -37,14 +41,14 @@ struct FakeHyprland {
 
 impl FakeHyprland {
     fn start() -> Self {
-        FakeHyprland::start_in(Arc::new(tempfile::tempdir().unwrap()), SIGNATURE)
+        FakeHyprland::start_in(Arc::new(tempfile::tempdir().expect("make the runtime dir")), SIGNATURE)
     }
 
     /// A Hyprland instance `signature` in `runtime`, which another may have
     /// run in before.
     fn start_in(runtime: Arc<TempDir>, signature: &str) -> Self {
         let dir = runtime.path().join("hypr").join(signature);
-        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::create_dir_all(&dir).expect("make the instance dir");
         let state = Arc::new((
             Mutex::new(State {
                 binds: BINDS.to_owned(),
@@ -53,16 +57,16 @@ impl FakeHyprland {
             Condvar::new(),
         ));
 
-        let requests = UnixListener::bind(dir.join(".socket.sock")).unwrap();
-        let shared = state.clone();
+        let requests = UnixListener::bind(dir.join(".socket.sock")).expect("bind the request socket");
+        let shared = Arc::clone(&state);
         thread::spawn(move || {
             for stream in requests.incoming() {
-                let mut stream = stream.unwrap();
+                let mut stream = stream.expect("accept a request");
                 // Hyprland reads one request, answers it and hangs up.
                 let mut buf = [0; 8192];
-                let len = stream.read(&mut buf).unwrap();
+                let len = stream.read(&mut buf).expect("read a request");
                 let request = String::from_utf8_lossy(&buf[..len]).into_owned();
-                let mut state = shared.0.lock().unwrap();
+                let mut state = shared.0.lock().expect("fake Hyprland mutex poisoned");
                 let reply = match request.as_str() {
                     "j/clients" => include_str!("fixtures/clients.json").to_owned(),
                     "j/binds" => state.binds.clone(),
@@ -76,11 +80,11 @@ impl FakeHyprland {
             }
         });
 
-        let events = UnixListener::bind(dir.join(".socket2.sock")).unwrap();
-        let shared = state.clone();
+        let events = UnixListener::bind(dir.join(".socket2.sock")).expect("bind the event socket");
+        let shared = Arc::clone(&state);
         thread::spawn(move || {
-            let (stream, _) = events.accept().unwrap();
-            shared.0.lock().unwrap().events = Some(stream);
+            let (stream, _) = events.accept().expect("accept the Extension on the event socket");
+            shared.0.lock().expect("fake Hyprland mutex poisoned").events = Some(stream);
             shared.1.notify_all();
         });
         FakeHyprland { runtime, state }
@@ -101,26 +105,28 @@ impl FakeHyprland {
     fn emit(&self, line: &str) {
         let (lock, ready) = &*self.state;
         let state = ready
-            .wait_timeout_while(lock.lock().unwrap(), WAIT, |state| state.events.is_none())
-            .unwrap()
+            .wait_timeout_while(lock.lock().expect("fake Hyprland mutex poisoned"), WAIT, |state| {
+                state.events.is_none()
+            })
+            .expect("fake Hyprland mutex poisoned")
             .0;
         let mut stream = state.events.as_ref().expect("nothing listens to events");
-        writeln!(stream, "{line}").unwrap();
+        writeln!(stream, "{line}").expect("send an event");
     }
 
     /// Closes the event socket, as Hyprland exiting does.
     fn exit(&self) {
         self.emit("workspace>>1");
-        self.state.0.lock().unwrap().events = None;
+        self.state.0.lock().expect("fake Hyprland mutex poisoned").events = None;
     }
 
     fn set_binds(&self, json: &str) {
-        self.state.0.lock().unwrap().binds = json.to_owned();
+        json.clone_into(&mut self.state.0.lock().expect("fake Hyprland mutex poisoned").binds);
     }
 
     /// The `/dispatch` requests so far, without the prefix.
     fn dispatched(&self) -> Vec<String> {
-        let state = self.state.0.lock().unwrap();
+        let state = self.state.0.lock().expect("fake Hyprland mutex poisoned");
         state
             .requests
             .iter()
@@ -152,7 +158,7 @@ fn window(address: &str) -> ItemRef {
 fn shortcuts() -> ItemRef {
     ItemRef {
         id: "shortcuts".into(),
-        kind: ItemKind::Namespaced(NamespacedKind::new("hyprland.shortcuts").unwrap()),
+        kind: ItemKind::Namespaced(NamespacedKind::new("hyprland.shortcuts").expect("a valid kind")),
     }
 }
 
@@ -242,23 +248,14 @@ fn a_windows_actions_dispatch_on_it_and_close_the_menu() {
     let mut extension = hyprland.extension();
     started(&extension);
 
-    assert_eq!(
-        run(&mut extension, 1, "focus", window(FIREFOX)),
-        Outcome::Close
-    );
-    assert_eq!(
-        run(&mut extension, 2, "float", window(FOOT)),
-        Outcome::Close
-    );
+    assert_eq!(run(&mut extension, 1, "focus", window(FIREFOX)), Outcome::Close);
+    assert_eq!(run(&mut extension, 2, "float", window(FOOT)), Outcome::Close);
     let workspace = [("Workspace".to_owned(), "3".to_owned())].into();
     assert_eq!(
         run_with(&mut extension, 3, "move", window(FOOT), workspace),
         Outcome::Close
     );
-    assert_eq!(
-        run(&mut extension, 4, "close", window(FIREFOX)),
-        Outcome::Close
-    );
+    assert_eq!(run(&mut extension, 4, "close", window(FIREFOX)), Outcome::Close);
     assert_eq!(
         hyprland.dispatched(),
         [
@@ -275,14 +272,8 @@ fn a_binds_item_runs_its_dispatcher() {
     let hyprland = FakeHyprland::start();
     let mut extension = hyprland.extension();
     let items = started(&extension);
-    let close = items
-        .iter()
-        .find(|item| item.title == "Close the window")
-        .unwrap();
-    assert_eq!(
-        run(&mut extension, 1, "run", close.to_ref()),
-        Outcome::Close
-    );
+    let close = items.iter().find(|item| item.title == "Close the window").unwrap();
+    assert_eq!(run(&mut extension, 1, "run", close.to_ref()), Outcome::Close);
     assert_eq!(hyprland.dispatched(), ["killactive"]);
 }
 
@@ -292,10 +283,7 @@ fn a_mouse_bind_in_the_shortcuts_view_isnt_run_from_the_menu() {
     let mut extension = hyprland.extension();
     started(&extension);
     let view = open_shortcuts(&mut extension, 1);
-    let drag = view
-        .iter()
-        .find(|item| item.title == "SUPER + mouse:272")
-        .unwrap();
+    let drag = view.iter().find(|item| item.title == "SUPER + mouse:272").unwrap();
     assert!(matches!(
         run(&mut extension, 2, "run", drag.to_ref()),
         Outcome::Failed { .. }
@@ -355,16 +343,16 @@ fn a_config_reload_sends_the_binds_that_changed() {
 
 /// The CPU time a process has used, in clock ticks.
 fn cpu_ticks(pid: u32) -> u64 {
-    let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).unwrap();
+    let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).expect("read the process's stat");
     // The fields after the command, which is in parentheses.
     let fields: Vec<&str> = stat
         .rsplit_once(')')
-        .unwrap()
+        .expect("a command in parentheses")
         .1
         .split_whitespace()
         .collect();
     // utime and stime, fields 14 and 15 of the whole line.
-    fields[11].parse::<u64>().unwrap() + fields[12].parse::<u64>().unwrap()
+    fields[11].parse::<u64>().expect("utime") + fields[12].parse::<u64>().expect("stime")
 }
 
 fn stays_quiet_and_idle(mut extension: Spawned) {
@@ -375,7 +363,11 @@ fn stays_quiet_and_idle(mut extension: Spawned) {
         "the Extension kept the CPU busy"
     );
     assert!(
-        extension.child.try_wait().unwrap().is_none(),
+        extension
+            .child
+            .try_wait()
+            .expect("check whether the Extension exited")
+            .is_none(),
         "the Extension exited, and the Daemon would start it again"
     );
     // An Action still gets an answer.
@@ -385,7 +377,7 @@ fn stays_quiet_and_idle(mut extension: Spawned) {
     }
     // And the Daemon hanging up still ends it.
     extension.hang_up();
-    let status = extension.child.wait().unwrap();
+    let status = extension.child.wait().expect("wait for the Extension");
     assert!(status.success());
 }
 
@@ -456,7 +448,7 @@ fn a_restarted_hyprland_is_followed_again() {
     hyprland.exit();
     let _gone = [extension.removed(), extension.removed()].concat();
 
-    let _again = FakeHyprland::start_in(hyprland.runtime.clone(), "fixture_1729000100_42");
+    let _again = FakeHyprland::start_in(Arc::clone(&hyprland.runtime), "fixture_1729000100_42");
     let items = started(&extension);
     assert!(ids(&items).contains(&FIREFOX), "{:?}", ids(&items));
 }
