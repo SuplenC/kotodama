@@ -1,4 +1,4 @@
-use kotodama_protocol::{Error, Hello, PROTOCOL_VERSION, WireFormat};
+use kotodama_protocol::{Channel, Error, Hello, PROTOCOL_VERSION, WireFormat, frame};
 
 use WireFormat::{Json, MessagePack, Postcard};
 
@@ -9,7 +9,9 @@ fn hello(json: &str) -> Hello {
 #[test]
 fn a_side_that_only_speaks_json_ends_up_on_json() {
     let daemon = Hello::new(&[Postcard, MessagePack, Json]);
-    let shell_script = hello(r#"{"version": 1, "formats": ["json"]}"#);
+    let shell_script = hello(&format!(
+        r#"{{"version": {PROTOCOL_VERSION}, "formats": ["json"]}}"#
+    ));
     assert_eq!(daemon.negotiate(&shell_script).unwrap(), Json);
     assert_eq!(shell_script.negotiate(&daemon).unwrap(), Json);
 }
@@ -31,7 +33,9 @@ fn messagepack_wins_over_json_whatever_order_the_lists_are_in() {
 
 #[test]
 fn formats_this_side_has_never_heard_of_are_ignored() {
-    let future = hello(r#"{"version": 1, "formats": ["cbor", "msgpack", "json"]}"#);
+    let future = hello(&format!(
+        r#"{{"version": {PROTOCOL_VERSION}, "formats": ["cbor", "msgpack", "json"]}}"#
+    ));
     let daemon = Hello::new(&[Postcard, MessagePack, Json]);
     assert_eq!(daemon.negotiate(&future).unwrap(), MessagePack);
 }
@@ -71,4 +75,36 @@ fn sides_on_different_protocol_versions_fail_the_handshake() {
             theirs: 0
         })
     ));
+}
+
+#[test]
+fn a_peer_built_for_version_1_is_turned_away_at_the_handshake_not_at_a_later_decode() {
+    // Version 1 predates the Identity of Items and the copy Outcome, so a postcard
+    // peer on it would misread every Item it was sent.
+    let mut peer_hello = Vec::new();
+    frame::write(
+        &mut peer_hello,
+        br#"{"version":1,"formats":["postcard","msgpack","json"]}"#,
+    )
+    .unwrap();
+
+    let error = Channel::handshake(
+        peer_hello.as_slice(),
+        Vec::new(),
+        &Hello::new(&WireFormat::ALL),
+    )
+    .err()
+    .expect("a version 1 peer should fail the handshake");
+
+    assert!(matches!(
+        error,
+        Error::VersionMismatch {
+            ours: PROTOCOL_VERSION,
+            theirs: 1
+        }
+    ));
+    assert_eq!(
+        error.to_string(),
+        format!("the peer speaks protocol version 1, but this side speaks {PROTOCOL_VERSION}")
+    );
 }

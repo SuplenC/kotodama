@@ -6,8 +6,13 @@ use serde::{Deserialize, Deserializer, Serialize};
 use crate::{Error, WireFormat};
 
 /// The protocol version this crate speaks. Both sides of a connection must
-/// speak the same one.
-pub const PROTOCOL_VERSION: u32 = 1;
+/// speak the same one, so a peer that would misread this side's messages is
+/// turned away at the handshake rather than failing at some later decode.
+///
+/// It goes up by one with every change an older peer can't read in some Wire
+/// format; see `docs/adr/0012-the-protocol-version-goes-up-with-every-layout-change.md`.
+/// The `layout` test fails until it does.
+pub const PROTOCOL_VERSION: u32 = 2;
 
 /// What one side sends to open a connection. Both sides send theirs straight
 /// away, without waiting for the other's, and each then picks the same Wire format
