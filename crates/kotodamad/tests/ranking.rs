@@ -885,12 +885,7 @@ fn frecency_applies_to_quicklinks() {
 #[test]
 fn any_action_counts_as_a_pick() {
     let mut firefox = app("Firefox");
-    firefox.actions.push(Action {
-        id: "copy-path".into(),
-        title: "Copy path".into(),
-        shortcut: None,
-        arguments: vec![],
-    });
+    firefox.actions.push(Action::new("copy-path", "Copy path"));
     let mut w = World::with(vec![app("Files"), firefox, app("Fish")], "");
     w.pick_by("firefox", "Firefox", Some("copy-path"));
     assert_eq!(w.first("fi"), "Firefox");

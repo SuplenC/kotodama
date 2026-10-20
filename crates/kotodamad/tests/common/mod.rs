@@ -123,15 +123,6 @@ pub fn plain(name: &str) -> Found {
     manifest(&format!("name = \"{name}\"\ncommand = [\"x\"]"))
 }
 
-pub fn action(id: &str) -> Action {
-    Action {
-        id: id.into(),
-        title: id.into(),
-        shortcut: None,
-        arguments: vec![],
-    }
-}
-
 pub fn item(id: &str, title: &str, kind: ItemKind) -> Item {
     Item {
         id: id.into(),
@@ -143,7 +134,7 @@ pub fn item(id: &str, title: &str, kind: ItemKind) -> Item {
         identity: None,
         keywords: vec![],
         hidden: false,
-        actions: vec![action("open")],
+        actions: vec![Action::new("open", "open")],
     }
 }
 

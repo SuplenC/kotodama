@@ -19,7 +19,7 @@ fn branches_item() -> Item {
             url: "https://git/branches".into(),
         },
     );
-    item.actions = vec![action("list"), action("prune")];
+    item.actions = vec![Action::new("list", "list"), Action::new("prune", "prune")];
     item
 }
 
@@ -360,7 +360,7 @@ fn calculator_history(hidden: bool) -> Item {
             url: "calc:history".into(),
         },
     );
-    history.actions = vec![action("show-history")];
+    history.actions = vec![Action::new("show-history", "show-history")];
     history.hidden = hidden;
     history
 }
