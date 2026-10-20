@@ -45,6 +45,14 @@ impl Manifest {
 }
 
 /// Which queries are sent to the Extension as Live queries.
+///
+/// ```toml
+/// # A fallback: sent what nothing matches well, and what looks like an address.
+/// [live_query]
+/// fallback = true
+/// triggers = ['^\S+\.\S+$']
+/// debounce_ms = 0
+/// ```
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
 #[serde(try_from = "LiveQueriesToml")]
 pub struct LiveQueries {
@@ -57,6 +65,10 @@ pub struct LiveQueries {
     /// How long the query must stay unchanged before it is sent. 0 sends on
     /// every keystroke, and lets the Extension mark a result as the answer.
     pub debounce_ms: u32,
+    /// The Extension is a fallback, such as web search: it is also sent any
+    /// query whose real matches leave rows on screen empty, and its results,
+    /// but for an answer, rank below every real match.
+    pub fallback: bool,
 }
 
 /// An Action offered on every Item of one kind, whichever Extension owns it.
@@ -113,18 +125,21 @@ struct LiveQueriesToml {
     #[serde(default)]
     triggers: Vec<String>,
     debounce_ms: u32,
+    #[serde(default)]
+    fallback: bool,
 }
 
 impl TryFrom<LiveQueriesToml> for LiveQueries {
     type Error = String;
     fn try_from(toml: LiveQueriesToml) -> Result<Self, String> {
-        if toml.prefixes.is_empty() && toml.triggers.is_empty() {
-            return Err("`live_query` needs at least one prefix or trigger".into());
+        if toml.prefixes.is_empty() && toml.triggers.is_empty() && !toml.fallback {
+            return Err("`live_query` needs at least one prefix or trigger, or `fallback`".into());
         }
         Ok(LiveQueries {
             prefixes: toml.prefixes,
             triggers: toml.triggers,
             debounce_ms: toml.debounce_ms,
+            fallback: toml.fallback,
         })
     }
 }

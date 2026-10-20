@@ -8,7 +8,7 @@ The Daemon. Maintained by hand: fix stale lines when you find them, and update t
   - `Candidate` and `Candidate::rank`: the full Result order (Tier, then Learned choices/Frecency, then kind order; ADR 0006, 0011).
   - `Session`: per-Front-end state (query, shown Results, list View filters); `FromFrontEnd::Viewport` handling keeps visible rows stable (ADR 0003).
   - Views: `Daemon::filter_view` and `send_filtered` (a list View's filter, or `ToExtension::FilterView` when it filters itself), `view_contributed` (Contributed actions by Item kind), `front_end_up` re-sends the open Views to a Front end that connects. Hidden Items (ADR 0015) live in `Daemon::hidden`, outside the Index, for `--view` alone.
-  - `Daemon::query`, `Daemon::empty_query`: searching, and what shows before typing. `Daemon::refresh` narrows a search to the last one's matches (`Narrowing`, forgotten on the empty query); `Daemon::add_near_misses` adds Near misses when real matches leave rows empty (ADR 0013).
+  - `Daemon::query`, `Daemon::empty_query`: searching, and what shows before typing. `Daemon::refresh` narrows a search to the last one's matches (`Narrowing`, forgotten on the empty query); `Daemon::add_near_misses` adds Near misses when real matches leave rows empty (ADR 0013); `Daemon::add_fallbacks` adds a Fallback's Live results (`[live_query] fallback`), last, after `learn`, and asks it the query, under the same condition (ADR 0016). `Daemon::picked` never makes a Fallback's Result a Learned choice.
   - Own Results under `OWN = "kotodama"` (ADR 0005): `FORGET`, `CLEAR_HISTORY`, `UNDO` (ADR 0010). Limits `MAX_RESULTS`, `MAX_LIVE_RESULTS`.
 - `rank.rs`: match quality. `Tier`, `Query` (folding, `searches_subtitles`), `Letters` (character sets as bits), `Filter` (what lets a search skip Items before nucleo), `Haystack`, `fold_text`. `Tiers::near_miss`, `Tiers::near_miss_highlights` and `LETTERS_PER_TYPO`: typo tolerance (ADR 0013).
 - `index.rs`: `Index`, every Indexed item in memory, searched with nucleo, with dense per-slot initials and every-letter `Letters` arrays (`starting_with`); `keyed` (keywords), `identified` (shared identities, ADR 0008).
@@ -16,7 +16,7 @@ The Daemon. Maintained by hand: fix stale lines when you find them, and update t
 - `clock.rs`: `Clock`, `When` (time of day for Frecency, ADR 0009).
 - `kind_order.rs`: `KindOrder::place`, configurable kind order for equal matches.
 - `empty_query.rs`: `EmptyQuery::from_config`, the empty-query menu.
-- `keywords.rs`: Aliases and Quicklinks from config (`Keywords`, `Quicklink::command`, `percent_encode`).
+- `keywords.rs`: Aliases and Quicklinks from config (`Keywords`, `Quicklink::command`); URL templates and the opener are `kotodama_extension::url`.
 - `open_view.rs`: `kotodama open --view` (ADR 0014): `ViewName` (`<extension>/<item>`), `Opening`. The Daemon side is `daemon.rs:Daemon::open_on_view` (runs the Item's primary Action, holds `Open`/`Toggle` back until the View is there, `OPEN_VIEW_TIMEOUT`).
 - `views.rs`: `Views`, every View Extensions have open, the top last; `Views::filter` matches a list View's Items with the search's matcher and Tiers, narrowing as the user types on (`Narrowing`), highlights for the first `HIGHLIGHTED`.
 - `arguments.rs`: text after a keyword filling an Action's Arguments, and the form for missing ones.

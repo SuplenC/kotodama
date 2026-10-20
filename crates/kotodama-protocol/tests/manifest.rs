@@ -45,6 +45,7 @@ fn a_manifest_declares_everything_an_extension_contributes() {
     assert_eq!(live_query.prefixes, ["suite "]);
     assert_eq!(live_query.triggers, [r"^\d+\.\d+$"]);
     assert_eq!(live_query.debounce_ms, 120);
+    assert!(!live_query.fallback);
 
     assert_eq!(manifest.contributed_actions.len(), 2);
     let pin = &manifest.contributed_actions[0];
@@ -92,6 +93,23 @@ fn a_live_query_debounce_of_zero_is_allowed() {
     )
     .unwrap();
     assert_eq!(manifest.live_query.unwrap().debounce_ms, 0);
+}
+
+#[test]
+fn a_fallback_needs_no_prefix_or_trigger() {
+    let manifest = parse(
+        r#"
+        name = "web-search"
+        command = ["kotodama-web-search"]
+        [live_query]
+        fallback = true
+        debounce_ms = 0
+        "#,
+    )
+    .unwrap();
+    let live_query = manifest.live_query.unwrap();
+    assert!(live_query.fallback);
+    assert!(live_query.prefixes.is_empty() && live_query.triggers.is_empty());
 }
 
 #[test]
