@@ -9,6 +9,11 @@ dir=$1
 out=$(realpath -m "$2")
 : >"$out"
 cd "$dir"
+# CI builds two checkouts into one target directory, and Cargo gives a
+# workspace crate the same artifacts in both, judging them fresh by their
+# sources' mtimes. Without this, the checkout built second would reuse the
+# first's crates wherever its own files were written before that build.
+git ls-files -z | xargs -0 touch -h
 if nix develop --command scripts/has-benches; then
     nix develop --command just bench --bench '*' -- --output-format bencher | tee "$out.log"
     grep 'bench:' "$out.log" >"$out" || true
