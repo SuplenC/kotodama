@@ -1767,7 +1767,10 @@ fn an_alias_whose_item_is_gone_shows_a_row_saying_so() {
     assert_eq!(gone.unavailable.as_deref(), Some("No longer in apps"));
     assert_eq!(gone.item.actions, [], "nothing to run");
     assert_eq!(no_extension.item.title, "todo");
-    assert_eq!(no_extension.unavailable.as_deref(), Some("No Extension notes"));
+    assert_eq!(
+        no_extension.unavailable.as_deref(),
+        Some("No Extension notes")
+    );
 }
 
 #[test]
@@ -1835,7 +1838,14 @@ fn a_quicklink_opens_with_its_own_opener_or_else_the_default() {
     h.query(&ui, "yt cats");
     run(&mut h, &ui, "kotodama", "quicklink:yt", "kotodama", "open");
     h.query(&ui, "mail");
-    run(&mut h, &ui, "kotodama", "quicklink:mail", "kotodama", "open");
+    run(
+        &mut h,
+        &ui,
+        "kotodama",
+        "quicklink:mail",
+        "kotodama",
+        "open",
+    );
 
     assert_eq!(
         *h.outputs.1.borrow(),
