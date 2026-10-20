@@ -63,6 +63,7 @@ pub fn load(dirs: &[PathBuf]) -> Result<Table, Error> {
 pub fn watch(dirs: Vec<PathBuf>, events: Sender<Event>) -> notify::Result<Watcher> {
     let filter = dirs.clone();
     let watcher = Watcher::start(
+        "config",
         RecursiveMode::NonRecursive,
         SETTLE,
         move |event, _| event.paths.iter().any(|path| is_config_file(&filter, path)),

@@ -93,9 +93,10 @@ impl Watcher {
     /// Each change `matters` approves, and each directory asked for
     /// appearing, starts a wait; once nothing more happened for `settle`,
     /// the directories asked for are watched again and `settled` runs, on a
-    /// thread of the watcher's own. `matters` runs for every change, on
-    /// `notify`'s thread, so it should be quick.
+    /// thread of the watcher's own called `name`. `matters` runs for every
+    /// change, on `notify`'s thread, so it should be quick.
     pub fn start(
+        name: &str,
         mode: RecursiveMode,
         settle: Duration,
         matters: impl Fn(&Event, &Watched) -> bool + Send + 'static,
@@ -109,7 +110,7 @@ impl Watcher {
         // holds `touched`, which ends the thread.
         let weak: Weak<Inner> = Arc::downgrade(&watcher.0);
         thread::Builder::new()
-            .name("watch".into())
+            .name(name.into())
             .stack_size(STACK_SIZE)
             .spawn(move || {
                 while touches.recv().is_ok() {

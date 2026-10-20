@@ -25,6 +25,7 @@ fn watch(
 ) -> (Watcher, Receiver<()>) {
     let (settled, changes) = mpsc::channel();
     let watcher = Watcher::start(
+        "watch",
         mode,
         SETTLE,
         move |event, _| event.paths.iter().any(|path| matters(path)),
@@ -140,6 +141,7 @@ fn the_filter_sees_which_directories_are_watched() {
     fs::create_dir_all(&project).unwrap();
     let (settled, changes) = mpsc::channel();
     let watcher = Watcher::start(
+        "watch",
         RecursiveMode::NonRecursive,
         SETTLE,
         // Only a watched folder going matters, which can't be told from the

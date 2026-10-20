@@ -99,6 +99,7 @@ pub fn watch(dirs: Vec<PathBuf>, events: Sender<Event>) -> notify::Result<Watche
     let filter = dirs.clone();
     let first = watched(&dirs);
     let watcher = Watcher::start(
+        "extensions",
         RecursiveMode::NonRecursive,
         SETTLE,
         move |event, _| event.paths.iter().any(|path| is_relevant(&filter, path)),

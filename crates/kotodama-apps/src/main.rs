@@ -44,6 +44,7 @@ fn run() -> Result<(), kotodama_protocol::Error> {
     let apps = scan::scan(&dirs, &env);
     let watching = dirs.clone();
     let watcher = Watcher::start(
+        "watch",
         RecursiveMode::Recursive,
         SETTLE,
         move |event, _| {
