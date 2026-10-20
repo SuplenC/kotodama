@@ -174,6 +174,12 @@ pub mod qobject {
         #[qinvokable]
         fn closed(self: Pin<&mut KotodamaSearch>);
 
+        /// The window became visible, however it was opened. Call it every
+        /// time, so the Daemon ranks the Empty query again for the time of
+        /// day.
+        #[qinvokable]
+        fn shown(self: Pin<&mut KotodamaSearch>);
+
         /// The Daemon asks the window to close, before it types or pastes into
         /// the window underneath. Hide it, then call `closed()`.
         #[qsignal]
@@ -542,6 +548,10 @@ impl KotodamaSearch {
 
     fn closed(mut self: Pin<&mut Self>) {
         self.as_mut().rust_mut().send(&FromFrontEnd::Closed);
+    }
+
+    fn shown(mut self: Pin<&mut Self>) {
+        self.as_mut().rust_mut().send(&FromFrontEnd::Shown);
     }
 
     fn data(&self, index: &QModelIndex, role: i32) -> QVariant {

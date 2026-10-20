@@ -174,7 +174,11 @@ PanelWindow {
     // The Daemon types or pastes once the window is gone and focus is back
     // where the user came from, so it is told only after the window unmaps.
     property bool closing: false
+    // However the window opened, the Daemon is told, so the Empty query it
+    // shows is ranked for this time of day.
     onVisibleChanged: {
+        if (visible)
+            search.shown();
         if (!visible && closing) {
             closing = false;
             Qt.callLater(search.closed);

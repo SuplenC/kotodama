@@ -495,6 +495,7 @@ fn from_front_end() -> Vec<FromFrontEnd> {
         },
         FromFrontEnd::Toggle,
         FromFrontEnd::Undo { change: 7 },
+        FromFrontEnd::Shown,
     ]
 }
 

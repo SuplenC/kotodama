@@ -492,6 +492,7 @@ fn from_front_end_messages() -> Vec<FromFrontEnd> {
         },
         FromFrontEnd::Toggle,
         FromFrontEnd::Undo { change: 3 },
+        FromFrontEnd::Shown,
     ]
 }
 
@@ -528,9 +529,10 @@ fn from_front_end_variant(message: &FromFrontEnd) -> usize {
         FromFrontEnd::Open { .. } => 8,
         FromFrontEnd::Toggle => 9,
         FromFrontEnd::Undo { .. } => 10,
+        FromFrontEnd::Shown => 11,
     }
 }
-const FROM_FRONT_END_VARIANTS: usize = 11;
+const FROM_FRONT_END_VARIANTS: usize = 12;
 
 #[test]
 fn every_message_to_a_front_end_survives_every_wire_format() {

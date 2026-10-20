@@ -21,7 +21,7 @@ send() {
 }
 
 echo $$ >pid
-send '{"version":7,"formats":["json"]}'
+send '{"version":8,"formats":["json"]}'
 read_frame
 
 while read_frame; do
