@@ -5,7 +5,8 @@
 //! share and hands QML each Result's fields through model roles, so Results
 //! never pass through JavaScript. It also keeps the stack of Views Extensions
 //! push, the jobs they report, and each Result's Action panel. While a list View
-//! is on top, the model holds that View's Items instead of the Results.
+//! is on top, the model holds that View's Items instead of the Results: those
+//! that match its filter, as the Daemon finds them.
 //! `KotodamaMenu.qml` is the window that draws them; a host shell can use it as
 //! it is, set its look, or draw its own.
 
@@ -22,11 +23,11 @@ use std::time::Instant;
 
 use cxx_qt::{CxxQtType, Initialize, Threading};
 use cxx_qt_lib::{QByteArray, QHash, QHashPair_i32_QByteArray, QModelIndex, QString, QVariant};
-use kotodama_protocol::{FromFrontEnd, ShownResult, Value, ViewContent};
+use kotodama_protocol::{FromFrontEnd, Value};
 
 use connection::{Update, Writer};
 use rows::{Replace, Row};
-use views::Views;
+use views::{Open, Views};
 
 #[cxx_qt::bridge]
 pub mod qobject {
@@ -105,6 +106,13 @@ pub mod qobject {
         #[cxx_name = "runShortcut"]
         fn run_shortcut(self: Pin<&mut KotodamaSearch>, row: i32, key: i32, modifiers: i32)
         -> bool;
+
+        /// Filters the list View on top by `text`: the Daemon matches it as it
+        /// does the search, or the View's Extension does. False if the top
+        /// View isn't a list, or `text` is its filter already. The top View's
+        /// `filter` is what was typed.
+        #[qinvokable]
+        fn filter(self: Pin<&mut KotodamaSearch>, text: QString) -> bool;
 
         /// Pops the top View, as Esc does, and tells its Extension the user
         /// left it. False if there is none. Closing the menu pops nothing:
@@ -273,8 +281,8 @@ impl Default for SearchRust {
 impl Initialize for KotodamaSearch {
     fn initialize(self: Pin<&mut Self>) {
         let qt_thread = self.qt_thread();
-        connection::spawn(move |update| {
-            qt_thread.queue(move |search| search.apply(update)).is_ok()
+        connection::spawn(move |updates| {
+            qt_thread.queue(move |search| search.apply(updates)).is_ok()
         });
     }
 }
@@ -345,15 +353,26 @@ impl KotodamaSearch {
         let Some(n) = self.row(row).and_then(|found| {
             found.actions().position(|entry| {
                 entry
-                    .action
                     .shortcut
-                    .as_deref()
                     .is_some_and(|bound| shortcut::matches(bound, key, modifiers))
             })
         }) else {
             return false;
         };
         self.run_action(row, n as i32)
+    }
+
+    fn filter(mut self: Pin<&mut Self>, text: QString) -> bool {
+        let text = String::from(&text);
+        let Some(message) = self.as_mut().rust_mut().views.set_filter(&text) else {
+            return false;
+        };
+        self.as_mut().rust_mut().send(&message);
+        if text.is_empty() {
+            // No answer comes: every Item shows again.
+            self.as_mut().show_rows();
+        }
+        true
     }
 
     fn pop_view(mut self: Pin<&mut Self>) -> bool {
@@ -444,8 +463,22 @@ impl KotodamaSearch {
         }
     }
 
-    /// Takes what the connection read, on the Qt thread.
-    fn apply(mut self: Pin<&mut Self>, update: Update) {
+    /// Takes what the connection read, on the Qt thread, and shows what it
+    /// adds up to.
+    fn apply(mut self: Pin<&mut Self>, updates: Vec<Update>) {
+        let mut shown = Shown::Same;
+        for update in updates {
+            shown = shown.max(self.as_mut().apply_one(update));
+        }
+        match shown {
+            Shown::Same => {}
+            Shown::Rows => self.as_mut().show_rows(),
+            Shown::View => self.as_mut().show_view(),
+        }
+    }
+
+    /// Takes one update and says what to show again.
+    fn apply_one(mut self: Pin<&mut Self>, update: Update) -> Shown {
         match update {
             Update::Connected(writer) => {
                 let mut this = self.as_mut().rust_mut();
@@ -456,6 +489,7 @@ impl KotodamaSearch {
                 // nothing typed has Results: those of the empty query.
                 let text = String::from(&self.query);
                 self.as_mut().send_query(text);
+                Shown::Same
             }
             Update::Rows(rows) => {
                 if self.results.is_some() {
@@ -471,32 +505,89 @@ impl KotodamaSearch {
                     self.as_mut().rust_mut().latency = micros;
                     self.as_mut().latency_changed();
                 }
+                Shown::Same
             }
             Update::Down(down) => {
                 self.as_mut().rust_mut().down = down.iter().map(QString::from).collect();
                 self.as_mut().down_changed();
+                Shown::Same
             }
-            Update::Close => self.as_mut().close_requested(),
+            Update::Close => {
+                self.as_mut().close_requested();
+                Shown::Same
+            }
             Update::Open { query, view } => {
                 let view = view.as_deref().map(QString::from).unwrap_or_default();
                 self.as_mut().open_requested(QString::from(&query), view);
+                Shown::Same
             }
-            Update::Toggle => self.as_mut().toggle_requested(),
+            Update::Toggle => {
+                self.as_mut().toggle_requested();
+                Shown::Same
+            }
             Update::ActionFailed(message) => {
                 self.as_mut().action_failed(QString::from(&message));
+                Shown::Same
             }
-            Update::PushView { extension, view } => {
-                self.as_mut().rust_mut().views.push(extension, view);
-                self.as_mut().show_view();
+            Update::PushView {
+                extension,
+                view,
+                contributed,
+            } => {
+                self.as_mut()
+                    .rust_mut()
+                    .views
+                    .push(extension, view, contributed);
+                Shown::View
             }
-            Update::ReplaceView { extension, view } => {
-                if self.as_mut().rust_mut().views.update(extension, view) {
-                    self.as_mut().show_view();
+            Update::ViewUpdated {
+                extension,
+                view,
+                contributed,
+            } => {
+                if self
+                    .as_mut()
+                    .rust_mut()
+                    .views
+                    .update(extension, view, contributed)
+                {
+                    Shown::View
+                } else {
+                    Shown::Same
+                }
+            }
+            Update::ReplaceView {
+                extension,
+                view,
+                with,
+                contributed,
+            } => {
+                self.as_mut()
+                    .rust_mut()
+                    .views
+                    .replace(extension, &view, with, contributed);
+                Shown::View
+            }
+            Update::FilteredView {
+                extension,
+                view,
+                text,
+                matches,
+            } => {
+                if self
+                    .as_mut()
+                    .rust_mut()
+                    .views
+                    .filtered(&extension, &view, &text, matches)
+                {
+                    Shown::Rows
+                } else {
+                    Shown::Same
                 }
             }
             Update::PopView { extension, view } => {
                 self.as_mut().rust_mut().views.pop(&extension, &view);
-                self.as_mut().show_view();
+                Shown::View
             }
             Update::JobProgress { extension, job } => {
                 let followed = self
@@ -510,16 +601,20 @@ impl KotodamaSearch {
                     self.as_mut().view_changed();
                 }
                 self.as_mut().show_jobs();
+                Shown::Same
             }
             Update::Disconnected => {
                 let mut this = self.as_mut().rust_mut();
                 this.writer = None;
                 this.asked = None;
                 this.views.reset();
+                // The Results of a Daemon that is gone, kept under a list
+                // View, go too.
+                this.results = None;
                 self.as_mut().set_connected(false);
-                self.as_mut().show_view();
                 self.as_mut().show_jobs();
                 self.as_mut().replace(Vec::new());
+                Shown::View
             }
         }
     }
@@ -529,25 +624,6 @@ impl KotodamaSearch {
     fn show_view(mut self: Pin<&mut Self>) {
         let view = variant::view(&self.views);
         let depth = self.views.depth() as i32;
-        let items = match self.views.top() {
-            Some(open) => match &open.view.content {
-                ViewContent::List { items } => Some(
-                    items
-                        .iter()
-                        .map(|item| {
-                            Row::from(ShownResult {
-                                extension: open.extension.clone(),
-                                item: item.clone(),
-                                contributed: Vec::new(),
-                                highlights: Vec::new(),
-                            })
-                        })
-                        .collect(),
-                ),
-                _ => None,
-            },
-            None => None,
-        };
         let mut this = self.as_mut().rust_mut();
         this.view = view;
         let deeper = this.depth != depth;
@@ -556,6 +632,13 @@ impl KotodamaSearch {
         if deeper {
             self.as_mut().depth_changed();
         }
+        self.as_mut().show_rows();
+    }
+
+    /// Shows the rows of the list View on top, or the Results if there is
+    /// none.
+    fn show_rows(mut self: Pin<&mut Self>) {
+        let items = self.views.top().and_then(Open::rows);
         match items {
             Some(items) => {
                 if self.results.is_none() {
@@ -637,6 +720,16 @@ impl KotodamaSearch {
         }
         self.as_mut().data_changed(&first, &last, &changed);
     }
+}
+
+/// What a batch of updates changed, so it is shown once: the least first.
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum Shown {
+    Same,
+    /// The rows of the list View on top.
+    Rows,
+    /// The View stack, and so the rows too.
+    View,
 }
 
 impl SearchRust {

@@ -4,8 +4,9 @@
 
 use std::fmt::Write;
 use std::ops::Range;
+use std::sync::Arc;
 
-use kotodama_protocol::{Action, ActionRef, OfferedAction, ResultRef, ShownResult};
+use kotodama_protocol::{Action, ActionRef, Item, OfferedAction, ResultRef, ShownResult};
 
 /// One row of the list model.
 #[derive(Clone, Debug, PartialEq)]
@@ -13,8 +14,9 @@ pub struct Row {
     pub result: ResultRef,
     /// The Item's own Actions, the primary one (what Enter runs) first.
     own: Vec<Action>,
-    /// Other Extensions' Actions for the Item, grouped by Extension.
-    contributed: Vec<OfferedAction>,
+    /// Other Extensions' Actions for the Item, grouped by Extension. The
+    /// Items of a list View share those of their kind.
+    contributed: Arc<[OfferedAction]>,
     pub title: String,
     pub subtitle: String,
     pub icon: String,
@@ -29,6 +31,9 @@ pub struct PanelEntry<'a> {
     /// The Extension that offers a Contributed action; `None` for the Item's
     /// own Actions.
     pub group: Option<&'a str>,
+    /// What runs it from the keyboard: the Action's shortcut, unless it is a
+    /// Contributed action's and one of the Item's own Actions binds it too.
+    pub shortcut: Option<&'a str>,
 }
 
 impl From<ShownResult> for Row {
@@ -43,7 +48,7 @@ impl From<ShownResult> for Row {
                 id: item.id,
             },
             own: item.actions,
-            contributed: shown.contributed,
+            contributed: shown.contributed.into(),
             title: item.title,
             subtitle: item.subtitle.unwrap_or_default(),
             icon: item.icon.unwrap_or_default(),
@@ -53,16 +58,47 @@ impl From<ShownResult> for Row {
 }
 
 impl Row {
+    /// A list View's Item, with the Actions contributed to its kind and the
+    /// filter's `highlights`, in order.
+    pub fn listed(
+        extension: &str,
+        item: &Item,
+        contributed: Arc<[OfferedAction]>,
+        highlights: Vec<u32>,
+    ) -> Self {
+        Row {
+            result: ResultRef {
+                extension: extension.to_owned(),
+                id: item.id.clone(),
+            },
+            own: item.actions.clone(),
+            contributed,
+            title: item.title.clone(),
+            subtitle: item.subtitle.clone().unwrap_or_default(),
+            icon: item.icon.clone().unwrap_or_default(),
+            highlights,
+        }
+    }
+
     /// The Action panel: the Item's own Actions, then the Contributed ones.
     /// Built when asked for, since most rows are never opened.
     pub fn actions(&self) -> impl Iterator<Item = PanelEntry<'_>> {
         let own = self.own.iter().map(|action| PanelEntry {
             action,
             group: None,
+            shortcut: action.shortcut.as_deref(),
         });
         let contributed = self.contributed.iter().map(|offered| PanelEntry {
             action: &offered.action,
             group: Some(offered.extension.as_str()),
+            // The Daemon settles clashes among contributors, and with a
+            // Result's own Actions, but a View's Items share theirs by kind.
+            shortcut: offered.action.shortcut.as_deref().filter(|shortcut| {
+                !self
+                    .own
+                    .iter()
+                    .any(|own| own.shortcut.as_deref() == Some(*shortcut))
+            }),
         });
         own.chain(contributed)
     }
@@ -161,7 +197,7 @@ mod tests {
                 id: "x".into(),
             },
             own: Vec::new(),
-            contributed: Vec::new(),
+            contributed: Arc::new([]),
             title: title.into(),
             subtitle: String::new(),
             icon: String::new(),
@@ -199,6 +235,7 @@ mod tests {
                 icon: None,
                 keyword: None,
                 keywords: Vec::new(),
+                hidden: false,
                 identity: None,
                 actions: vec![action("open", "Open"), action("term", "Open in terminal")],
             },
@@ -234,6 +271,44 @@ mod tests {
             ]
         );
         assert_eq!(row.action(5), None);
+    }
+
+    #[test]
+    fn a_contributed_shortcut_an_items_own_action_binds_is_left_to_the_own_one() {
+        let mut open = action("open", "Open");
+        open.shortcut = Some("ctrl+o".into());
+        let item = Item {
+            id: "https://example.com".into(),
+            kind: ItemKind::Url {
+                url: "https://example.com".into(),
+            },
+            title: "Example".into(),
+            subtitle: None,
+            icon: None,
+            keyword: None,
+            keywords: Vec::new(),
+            hidden: false,
+            identity: None,
+            actions: vec![open],
+        };
+        let mut copy = offered("links", "copy", "Copy link");
+        copy.action.shortcut = Some("ctrl+o".into());
+        let mut share = offered("links", "share", "Share");
+        share.action.shortcut = Some("ctrl+s".into());
+        let row = Row::listed("bookmarks", &item, Arc::from([copy, share]), Vec::new());
+        let shortcuts: Vec<_> = row
+            .actions()
+            .map(|entry| (entry.action.id.as_str(), entry.shortcut))
+            .collect();
+        assert_eq!(
+            shortcuts,
+            [
+                ("open", Some("ctrl+o")),
+                ("copy", None),
+                ("share", Some("ctrl+s"))
+            ]
+        );
+        assert_eq!(row.result.extension, "bookmarks");
     }
 
     #[test]

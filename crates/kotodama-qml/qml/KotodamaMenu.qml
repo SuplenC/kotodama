@@ -32,7 +32,7 @@ PanelWindow {
     readonly property KotodamaSearch search: search
     // Whether keys reach the menu: the compositor has given the window
     // keyboard focus.
-    readonly property bool focused: input.activeFocus || viewKeys.activeFocus || form.activeFocus || actionPanel.activeFocus
+    readonly property bool focused: input.activeFocus || filter.activeFocus || viewKeys.activeFocus || form.activeFocus || actionPanel.activeFocus
     // Why the last Action failed, until the next Action or opening.
     property string failure: ""
     // The top View's kind (`list`, `form`, `detail` or `progress`), or empty
@@ -58,13 +58,15 @@ PanelWindow {
         visible = false;
     }
 
-    // Gives keys to the top View: the search box, the first field of a form,
-    // or the menu itself for a list, a detail or a progress View.
+    // Gives keys to the top View: the search box, a list's filter, the first
+    // field of a form, or the menu itself for a detail or a progress View.
     function focusView() {
         if (menu.actionsOpen)
             actionPanel.forceActiveFocus();
         else if (menu.kind === "")
             input.forceActiveFocus();
+        else if (menu.kind === "list")
+            filter.forceActiveFocus();
         else if (menu.kind === "form" && fields.count > 0)
             fields.itemAt(0).take();
         else
@@ -91,7 +93,10 @@ PanelWindow {
         const ctrl = event.modifiers & Qt.ControlModifier;
         const enter = event.key === Qt.Key_Return || event.key === Qt.Key_Enter;
         if (event.key === Qt.Key_Escape) {
-            if (search.depth > 0)
+            // Esc clears a list's filter first, then pops the View.
+            if (menu.kind === "list" && filter.text !== "")
+                filter.text = "";
+            else if (search.depth > 0)
                 search.popView();
             else
                 menu.hide();
@@ -177,8 +182,12 @@ PanelWindow {
             list.positionViewAtBeginning();
         }
         // A View that is pushed, popped or changed takes the keys; one whose
-        // job progressed keeps them where they are.
+        // job progressed keeps them where they are. A list's filter shows
+        // what was typed into it, which is nothing for a new one.
         onViewChanged: {
+            const typed = search.view.filter ?? "";
+            if (filter.text !== typed)
+                filter.text = typed;
             if (menu.visible && !menu.actionsOpen)
                 Qt.callLater(menu.focusView);
         }
@@ -228,12 +237,46 @@ PanelWindow {
                 Keys.onPressed: event => event.accepted = menu.key(event)
             }
 
-            // A View's title stands where the search box was.
+            // A list View's filter, with the View's title until something is
+            // typed. The Daemon matches what is typed as it does the search,
+            // so the rows narrow as they would there.
+            TextInput {
+                id: filter
+                anchors.fill: parent
+                anchors.leftMargin: 18
+                anchors.rightMargin: 18
+                visible: menu.kind === "list"
+                verticalAlignment: TextInput.AlignVCenter
+                color: menu.foreground
+                selectionColor: menu.selection
+                font.family: menu.fontFamily
+                font.pixelSize: menu.fontSize + 3
+                onTextChanged: {
+                    if (search.filter(text)) {
+                        list.currentIndex = 0;
+                        list.positionViewAtBeginning();
+                    }
+                }
+
+                Text {
+                    anchors.fill: parent
+                    verticalAlignment: Text.AlignVCenter
+                    visible: filter.text === ""
+                    elide: Text.ElideRight
+                    text: search.view.title ?? ""
+                    color: menu.dimmed
+                    font: filter.font
+                }
+
+                Keys.onPressed: event => event.accepted = menu.key(event)
+            }
+
+            // The title of any other View stands where the search box was.
             Text {
                 anchors.fill: parent
                 anchors.leftMargin: 18
                 anchors.rightMargin: 18
-                visible: menu.kind !== ""
+                visible: menu.kind !== "" && menu.kind !== "list"
                 verticalAlignment: Text.AlignVCenter
                 elide: Text.ElideRight
                 text: search.view.title ?? ""
