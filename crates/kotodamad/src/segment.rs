@@ -63,6 +63,9 @@ struct Keys {
     letters: Letters,
     /// The Item's kind, as an index into [`Segment::kinds`].
     kind: u16,
+    /// Whether the row holds an Item: a search reads it here, beside the
+    /// rest, rather than in the Segment's `held`.
+    filled: bool,
 }
 
 /// One change to an Extension's Items, as it sent it.
@@ -255,6 +258,7 @@ impl Segment {
             subtitle_initials: folded.subtitle_initials,
             letters: folded.letters,
             kind,
+            filled: true,
         };
         let at = row as usize;
         self.keys[at] = keys;
@@ -491,8 +495,7 @@ impl Segment {
 
     /// What a search reads of `row`, if it holds an Item.
     pub fn texts(&self, row: Row) -> Option<Texts<'_>> {
-        self.held(row)?;
-        let keys = &self.keys[row as usize];
+        let keys = self.keys.get(row as usize).filter(|keys| keys.filled)?;
         let starts = keys.starts as usize;
         let words = starts + keys.title_starts as usize;
         Some(Texts {
