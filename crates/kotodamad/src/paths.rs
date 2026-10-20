@@ -14,6 +14,8 @@ pub struct Paths {
     pub history: PathBuf,
     /// `$XDG_STATE_HOME/kotodama/usage.jsonl`.
     pub usage_log: PathBuf,
+    /// `$XDG_CACHE_HOME/kotodama`, where the Items wait that aren't shown.
+    pub cache: PathBuf,
 }
 
 impl Paths {
@@ -29,6 +31,10 @@ impl Paths {
             None => {
                 PathBuf::from(env::var_os("HOME").ok_or("HOME isn't set")?).join(".local/state")
             }
+        };
+        let cache_home = match env::var_os("XDG_CACHE_HOME").filter(|dir| !dir.is_empty()) {
+            Some(dir) => PathBuf::from(dir),
+            None => PathBuf::from(env::var_os("HOME").ok_or("HOME isn't set")?).join(".cache"),
         };
 
         let mut config_dirs = search_path("XDG_CONFIG_DIRS", "/etc/xdg");
@@ -46,6 +52,7 @@ impl Paths {
             extension_dirs,
             history: state_home.join("kotodama/history.json"),
             usage_log: state_home.join("kotodama/usage.jsonl"),
+            cache: cache_home.join("kotodama"),
         })
     }
 }

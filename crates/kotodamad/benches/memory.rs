@@ -1,7 +1,8 @@
 //! The heap the Daemon keeps for its Indexed items: the 10k made-up apps of
 //! `corpus`, and every emoji and symbol of the emoji Extension, counted by a
 //! global allocator that tracks the bytes in use. Unlike resident memory, it
-//! is the same on every machine.
+//! is the same on every machine. Items' payloads are kept in a file, as
+//! `kotodamad` keeps them, so they don't count.
 //!
 //! The lines use the bencher format with `bytes` as their unit, so CI compares
 //! them with the baseline like the Daemon's resident memory (see
@@ -84,6 +85,9 @@ fn kept(name: &str, items: impl FnOnce() -> Vec<Item>) -> (usize, usize) {
         Nothing,
         now,
     );
+    // As `kotodamad` runs: what a search doesn't read waits in a file.
+    let payloads = tempfile::tempdir().unwrap();
+    daemon.keep_items_in(payloads.path());
     let (sender, _extension) = mpsc::sync_channel(64);
     daemon.handle(
         Event::ExtensionUp {

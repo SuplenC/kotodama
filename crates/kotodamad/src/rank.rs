@@ -347,6 +347,10 @@ const _: () = assert!(size_of::<Letters>() == size_of::<u64>());
 
 impl Letters {
     pub const NONE: Letters = Letters(0);
+
+    pub fn bits(self) -> u64 {
+        self.0
+    }
     /// The one every character but an ASCII letter or digit stands for.
     const OTHER: Letters = Letters(1 << 63);
 

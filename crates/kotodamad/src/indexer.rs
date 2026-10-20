@@ -1,4 +1,4 @@
-//! Indexing off the keystroke path (ADR 0015): Extensions' changes to their
+//! Indexing off the keystroke path (ADR 0016): Extensions' changes to their
 //! Items are made on a thread of their own, into a new version of each
 //! changed Extension's Segment, which the Daemon puts in whole between two
 //! events. A keystroke never waits for a change, and never sees half of one.
@@ -6,6 +6,7 @@
 //! Changes that queue up while the thread works are made together, one new
 //! version of each Segment for all of them.
 
+use std::path::Path;
 use std::sync::Arc;
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread;
@@ -39,12 +40,13 @@ pub struct Indexer {
 }
 
 impl Indexer {
-    /// Starts the thread, which sends each new version to `events`. It stops
-    /// when the Indexer is dropped.
-    pub fn start(events: Sender<Event>) -> Self {
+    /// Starts the thread, which sends each new version to `events` and keeps
+    /// payloads in files in `dir`, or in memory. It stops when the Indexer is
+    /// dropped.
+    pub fn start(events: Sender<Event>, dir: Option<Arc<Path>>) -> Self {
         let (jobs, queue) = mpsc::channel();
         if let Err(err) = thread::Builder::new().name("index".into()).spawn(move || {
-            work(queue, |indexed| {
+            work(queue, dir, |indexed| {
                 events.send(Event::Indexed(indexed)).is_ok()
             })
         }) {
@@ -74,7 +76,8 @@ impl Indexer {
 
 /// Makes the changes from `queue`, all that are waiting at once, and passes
 /// each new version to `send`, until it fails or the queue closes.
-fn work(queue: Receiver<Job>, mut send: impl FnMut(Indexed) -> bool) {
+fn work(queue: Receiver<Job>, dir: Option<Arc<Path>>, mut send: impl FnMut(Indexed) -> bool) {
+    let empty = || Arc::new(Segment::new(dir.clone()));
     let mut segments: Vec<Arc<Segment>> = Vec::new();
     while let Ok(first) = queue.recv() {
         // By Extension, the last change each new version holds.
@@ -87,7 +90,7 @@ fn work(queue: Receiver<Job>, mut send: impl FnMut(Indexed) -> bool) {
                     edit,
                 } => {
                     if segments.len() <= extension.0 {
-                        segments.resize_with(extension.0 + 1, Arc::default);
+                        segments.resize_with(extension.0 + 1, empty);
                     }
                     // Copies the version the Daemon has, once for all the
                     // changes to it waiting.
@@ -103,7 +106,7 @@ fn work(queue: Receiver<Job>, mut send: impl FnMut(Indexed) -> bool) {
                 }
                 Job::Clear(extension) => {
                     if let Some(segment) = segments.get_mut(extension.0) {
-                        *segment = Arc::default();
+                        *segment = empty();
                     }
                     changed.retain(|(ext, _)| *ext != extension);
                 }
@@ -157,7 +160,7 @@ mod tests {
         }
         drop(sender);
         let mut built = Vec::new();
-        work(queue, |indexed| {
+        work(queue, None, |indexed| {
             built.push(indexed);
             true
         });

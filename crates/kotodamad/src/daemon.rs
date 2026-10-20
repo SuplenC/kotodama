@@ -9,6 +9,7 @@
 
 use std::cell::Cell;
 use std::collections::{BTreeMap, HashMap, HashSet};
+use std::path::Path;
 use std::sync::mpsc::{Sender, SyncSender, TrySendError};
 use std::time::{Duration, Instant};
 
@@ -21,14 +22,14 @@ use nucleo_matcher::pattern::{CaseMatching, Normalization, Pattern};
 use nucleo_matcher::{Config, Matcher};
 
 use crate::arguments;
-use crate::clock::{Clock, When};
+use crate::clock::{Clock, DAY_SECS, When};
 use crate::config::extension_table;
 use crate::discovery::Found;
 use crate::empty_query::EmptyQuery;
 use crate::history::{
     Change, Habit, History, IDENTITIES, Picks, ResultKey, Settings, Store, query_key,
 };
-use crate::index::{Index, Slot};
+use crate::index::{Index, ItemRef, Slot};
 use crate::indexer::{Indexed, Indexer};
 use crate::keywords::{self, Keywords};
 use crate::kind_order::KindOrder;
@@ -151,6 +152,19 @@ pub const MAX_LIVE_RESULTS: usize = 500;
 /// How long an Extension or Front end may take to say hello before it counts as
 /// hung.
 pub const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// How many Items are hot at most: kept resident, and read when the menu
+/// opens (ADR 0016).
+pub const HOT_CAPACITY: usize = 256;
+/// How far ahead of a time of day the Items picked then turn hot.
+const HOT_LEAD_SECS: i64 = 15 * 60;
+/// How long after a time of day the Items picked then stay hot.
+const HOT_GRACE_SECS: i64 = 30 * 60;
+/// How often the hot Items are worked out again, ahead of the time of day.
+const HOT_EVERY: Duration = Duration::from_secs(5 * 60);
+/// How soon after the Index or the History changes they are, once it
+/// settles.
+const HOT_SETTLE: Duration = Duration::from_secs(1);
 
 enum State {
     /// Started; waiting for the handshake until `deadline`.
@@ -633,16 +647,6 @@ fn alias_id(keyword: &str) -> String {
     format!("alias:{keyword}")
 }
 
-/// What the History keeps a Result under: its Identity, which every
-/// Extension's Result of that Identity shares, or else the name of the
-/// Extension that owns it and its id.
-fn history_key<'a>(extension: &'a str, item: &'a Item) -> (&'a str, &'a str) {
-    match &item.identity {
-        Some(identity) => (IDENTITIES, identity),
-        None => (extension, &item.id),
-    }
-}
-
 /// What a pick the History kept counts for, for one Indexed item.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Counts {
@@ -699,6 +703,13 @@ pub struct Daemon<L, D, S> {
     /// By Extension, the last change made before its Items were last
     /// cleared: a version holding no later one is stale.
     stale: Vec<u64>,
+    hot_capacity: usize,
+    /// When the hot Items are next worked out.
+    hot_due: Instant,
+    /// The versions of the Index and the History they were worked out for.
+    hot_versions: (u64, u64),
+    /// A menu is opening: read what its first keystroke will read.
+    warm: bool,
     matcher: Matcher,
     sessions: BTreeMap<FrontEndId, Session>,
     live_queries: HashMap<u64, (FrontEndId, ExtensionId)>,
@@ -763,6 +774,10 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             index: Index::new(found.len()),
             indexer: None,
             stale: vec![0; found.len()],
+            hot_capacity: HOT_CAPACITY,
+            hot_due: now,
+            hot_versions: (0, 0),
+            warm: false,
             extensions: found
                 .into_iter()
                 .map(|found| Extension::new(found, now))
@@ -824,7 +839,71 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
     /// sends each new version to `events` as an [`Event::Indexed`]. Until
     /// then, and in tests, a change to them is made as its event is handled.
     pub fn index_in_background(&mut self, events: Sender<Event>) {
-        self.indexer = Some(Indexer::start(events));
+        self.indexer = Some(Indexer::start(events, self.index.payload_dir()));
+    }
+
+    /// Keeps what a search doesn't read of Indexed items in files in `dir`
+    /// rather than in memory. Call it before any Item arrives.
+    pub fn keep_items_in(&mut self, dir: &Path) {
+        self.index.keep_payloads_in(dir.into());
+    }
+
+    /// How many Items may be hot at most; none turns the hot Items off.
+    pub fn set_hot_capacity(&mut self, capacity: usize) {
+        self.hot_capacity = capacity;
+        self.hot_due = self.started;
+    }
+
+    /// The hot Items, by Extension name and id, each resident.
+    pub fn hot(&self) -> Vec<(String, String)> {
+        self.index
+            .hot()
+            .iter()
+            .filter(|&&slot| self.index.is_resident(slot))
+            .filter_map(|&slot| {
+                let extension = self.extensions[slot.extension().0].name();
+                Some((extension.to_owned(), self.index.id(slot)?.to_owned()))
+            })
+            .collect()
+    }
+
+    /// Works out the hot Items: those picked most near this time of day,
+    /// from a little before it to a little after, up to the hot capacity.
+    /// Their payloads are read now, so the menu shows them without waiting.
+    fn plan_hot(&mut self, now: Instant) {
+        self.hot_due = now + HOT_EVERY;
+        self.hot_versions = (self.index.version(), self.history.version());
+        let mut hot: Vec<(f64, Slot)> = Vec::new();
+        if self.hot_capacity > 0 && !self.history.is_empty() {
+            self.cache_frecent();
+            let half_life = self.history.settings().half_life_secs;
+            let when = self.when(now);
+            let around = [-HOT_GRACE_SECS, 0, HOT_LEAD_SECS].map(|by| When {
+                at: when.at.saturating_add_signed(by),
+                time_of_day: (i64::from(when.time_of_day) + by).rem_euclid(DAY_SECS as i64) as u32,
+            });
+            for &(slot, picks, _) in &self.frecent {
+                let near = around
+                    .iter()
+                    .map(|&when| picks.habit(when, half_life).near_now)
+                    .fold(0.0, f64::max);
+                if near > 0.0 {
+                    hot.push((near, slot));
+                }
+            }
+        }
+        hot.sort_unstable_by(|a, b| b.0.total_cmp(&a.0).then(a.1.cmp(&b.1)));
+        let mut slots: Vec<Slot> = Vec::with_capacity(self.hot_capacity);
+        for (_, slot) in hot {
+            if slots.len() == self.hot_capacity {
+                break;
+            }
+            if !slots.contains(&slot) {
+                slots.push(slot);
+            }
+        }
+        slots.sort_unstable();
+        self.index.set_hot(slots);
     }
 
     /// Replaces the wall clock, which starts as the system's.
@@ -945,6 +1024,14 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             .chain(undo)
             .chain(opening)
             .min()
+    }
+
+    /// When the Daemon next has something to do: what
+    /// [`next_deadline`](Self::next_deadline) says, or working out the hot
+    /// Items again ahead of the time of day.
+    pub fn next_wake(&self) -> Option<Instant> {
+        let hot = (self.hot_capacity > 0 && !self.history.is_empty()).then_some(self.hot_due);
+        self.next_deadline().into_iter().chain(hot).min()
     }
 
     fn start(&mut self, id: ExtensionId, now: Instant) {
@@ -1653,6 +1740,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             // The menu may open on the empty query, which may have been
             // ranked hours ago.
             FromFrontEnd::Open { query, view } => {
+                self.warm = true;
                 self.refresh_empty(Update::Fresh, Some(id));
                 match view {
                     Some(text) => self.open_on_view(id, query, &text, now),
@@ -1660,6 +1748,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
                 }
             }
             FromFrontEnd::Toggle => {
+                self.warm = true;
                 self.refresh_empty(Update::Fresh, Some(id));
                 self.ask_menus(id, ToFrontEnd::Toggle);
             }
@@ -1797,7 +1886,11 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             .index
             .find(ext_id, &view.item)
             .and_then(|slot| self.index.item(slot))
-            .or_else(|| self.hidden.get(&ext_id)?.get(&view.item))
+            .map(ItemRef::Resident)
+            .or_else(|| {
+                let hidden = self.hidden.get(&ext_id)?.get(&view.item)?;
+                Some(ItemRef::Borrowed(hidden))
+            })
         else {
             return if now.duration_since(since) < OPEN_VIEW_TIMEOUT {
                 Ok(None)
@@ -1995,16 +2088,17 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
         let owner = self.extension_named(&result.extension).ok_or_else(gone)?;
         let session = self.sessions.get(&front_end).ok_or_else(gone)?;
         let searched = match self.index.find(owner, &result.id) {
-            Some(slot) => self.index.item(slot),
+            Some(slot) => self.index.item(slot).map(ItemRef::Resident),
             None => session.live[owner.0]
                 .results
                 .iter()
                 .rev()
                 .find(|live| live.item.id == result.id)
-                .map(|live| &live.item),
+                .map(|live| ItemRef::Borrowed(&live.item)),
         };
         // Or an Item of one of the owner's list Views.
-        let in_view = || self.views.item(owner, &result.id);
+        let in_view = || self.views.item(owner, &result.id).map(ItemRef::Borrowed);
+        let found_searched = searched.is_some();
         let item = searched.or_else(in_view).ok_or_else(gone)?;
 
         let own = (action.extension == result.extension)
@@ -2026,7 +2120,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
         .ok_or_else(|| format!("`{}` has no Action `{}`", item.title, action.id))?;
 
         // Arguments are typed in the search, after the Item's keyword.
-        if searched.is_some()
+        if found_searched
             && let Some(keyword) = &item.keyword
             && let Some(typed) = after_keyword(&session.query, &keyword.to_lowercase())
         {
@@ -2133,7 +2227,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
         now: Instant,
     ) -> Result<(), String> {
         let (session, item) = self.shown_item(front_end, result)?;
-        let keys = self.history_keys(session, &result.extension, item);
+        let keys = self.history_keys(session, &result.extension, &item);
         let title = format!("Undo forgetting “{}”", item.title);
         let change = self.history.forget(&keys);
         self.changed(title, change, now);
@@ -2162,9 +2256,8 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
         // doesn't know which Extension a pick of one came through.
         let identities: HashSet<&str> = self
             .index
-            .items(ext)
-            .chain(live.iter().map(|live| &live.item))
-            .filter_map(|item| item.identity.as_deref())
+            .identities(ext)
+            .chain(live.iter().filter_map(|live| live.item.identity.as_deref()))
             .collect();
         let aliases: HashSet<String> = self
             .keywords
@@ -2189,7 +2282,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
         &self,
         front_end: FrontEndId,
         result: &ResultRef,
-    ) -> Result<(&Session, &Item), String> {
+    ) -> Result<(&Session, ItemRef<'_>), String> {
         let gone = || "that Result is gone".to_owned();
         let session = self.sessions.get(&front_end).ok_or_else(gone)?;
         let source = self
@@ -2368,8 +2461,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             self.history.touch(&result.extension, &result.id, when);
         } else {
             let key = source
-                .and_then(|source| self.item(session, source))
-                .map(|(extension, item)| history_key(extension, item))
+                .and_then(|source| self.history_key(session, source))
                 .unwrap_or((&result.extension, &result.id));
             // What ranked above it, nearest first: what it was picked over.
             // The same thing from another Extension wasn't.
@@ -2378,8 +2470,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
                     session.shown[..at]
                         .iter()
                         .rev()
-                        .filter_map(|&(shown, _)| self.item(session, shown))
-                        .map(|(extension, item)| history_key(extension, item))
+                        .filter_map(|&(shown, _)| self.history_key(session, shown))
                         .filter(|&above| above != key)
                         .map(|(extension, id)| (extension.to_owned(), id.to_owned()))
                         .collect()
@@ -2485,6 +2576,21 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             }
             // A refresh asks fallbacks what real matches left rows empty for.
             self.send_due_live_queries(now);
+        }
+
+        let versions = (self.index.version(), self.history.version());
+        if versions != self.hot_versions {
+            self.hot_versions = versions;
+            self.hot_due = self.hot_due.min(now + HOT_SETTLE);
+        }
+        if self.hot_due <= now {
+            self.plan_hot(now);
+        }
+        self.index.trim();
+        // Once the menu has what it shows, so its first keystroke finds what
+        // it reads in the CPU's cache.
+        if std::mem::take(&mut self.warm) {
+            std::hint::black_box(self.index.warm());
         }
 
         if self.catalog_dirty {
@@ -2778,7 +2884,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             let when = self.when(now);
             for fallback in &mut fallbacks {
                 if let Some((extension, item)) = self.item(session, fallback.source) {
-                    (fallback.frecency, fallback.direct) = self.frecency(extension, item, when);
+                    (fallback.frecency, fallback.direct) = self.frecency(extension, &item, when);
                 }
             }
         }
@@ -2928,7 +3034,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             }
             for candidate in &mut candidates[indexed..] {
                 if let Some((extension, item)) = self.item(session, candidate.source) {
-                    (candidate.frecency, candidate.direct) = self.frecency(extension, item, when);
+                    (candidate.frecency, candidate.direct) = self.frecency(extension, &item, when);
                 }
             }
             for candidate in candidates.iter_mut() {
@@ -2998,7 +3104,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
                         session.max_score,
                         item.title.chars().count() as u32,
                     );
-                    (candidate.frecency, candidate.direct) = self.frecency(extension, item, when);
+                    (candidate.frecency, candidate.direct) = self.frecency(extension, &item, when);
                     candidates.push(candidate);
                     candidates.len() - 1
                 }
@@ -3049,12 +3155,11 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
                 None => true,
                 Some(passed_over) => {
                     candidate.fine == Tier::Exact
-                        && !self
-                            .item(session, candidate.source)
-                            .is_some_and(|(extension, item)| {
-                                let (extension, id) = history_key(extension, item);
+                        && !self.history_key(session, candidate.source).is_some_and(
+                            |(extension, id)| {
                                 passed_over.iter().any(|(e, i)| e == extension && i == id)
-                            })
+                            },
+                        )
                 }
             };
             if named {
@@ -3118,10 +3223,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             }
         }
 
-        let identity = |source: Source| {
-            self.item(session, source)
-                .and_then(|(_, item)| item.identity.as_deref())
-        };
+        let identity = |source: Source| self.identity(session, source);
         let mut stands_for: HashMap<&str, usize> = HashMap::new();
         let mut keep = vec![true; most.len()];
         for n in 0..most.len() {
@@ -3186,10 +3288,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             } else if let Some(ext) = self.extension_named(extension)
                 && let Some(slot) = self.index.find(ext, id)
             {
-                let identified = self
-                    .index
-                    .item(slot)
-                    .is_some_and(|item| item.identity.is_some());
+                let identified = self.index.identity(slot).is_some();
                 let counts = if identified {
                     Counts::Direct
                 } else {
@@ -3250,10 +3349,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
         if !ranked.iter().any(|candidate| candidate.direct > 0.0) {
             return;
         }
-        let identity = |candidate: &Candidate| {
-            self.item(session, candidate.source)
-                .and_then(|(_, item)| item.identity.as_deref())
-        };
+        let identity = |candidate: &Candidate| self.identity(session, candidate.source);
         let mut done: Vec<&str> = Vec::new();
         for first in 0..ranked.len() {
             let Some(id) = identity(&ranked[first]) else {
@@ -3289,17 +3385,66 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
     }
 
     /// A Result's Item and the name of the Extension that owns it.
-    fn item<'a>(&'a self, session: &'a Session, source: Source) -> Option<(&'a str, &'a Item)> {
+    fn item<'a>(&'a self, session: &'a Session, source: Source) -> Option<(&'a str, ItemRef<'a>)> {
         match source {
             Source::Indexed(slot) => {
                 let item = self.index.item(slot)?;
-                Some((self.extensions[slot.extension().0].name(), item))
+                Some((
+                    self.extensions[slot.extension().0].name(),
+                    ItemRef::Resident(item),
+                ))
             }
             Source::Live(ext, n) => Some((
                 self.extensions[ext.0].name(),
-                &session.live[ext.0].results.get(n as usize)?.item,
+                ItemRef::Borrowed(&session.live[ext.0].results.get(n as usize)?.item),
             )),
-            Source::Own(n) => Some((OWN, &self.own.get(n as usize)?.item)),
+            Source::Own(n) => Some((OWN, ItemRef::Borrowed(&self.own.get(n as usize)?.item))),
+        }
+    }
+
+    /// A Result's id and Identity, and the name of the Extension that owns
+    /// it, without reading an Indexed item off its Shelf.
+    fn names<'a>(
+        &'a self,
+        session: &'a Session,
+        source: Source,
+    ) -> Option<(&'a str, &'a str, Option<&'a str>)> {
+        let item = match source {
+            Source::Indexed(slot) => {
+                return Some((
+                    self.extensions[slot.extension().0].name(),
+                    self.index.id(slot)?,
+                    self.index.identity(slot),
+                ));
+            }
+            Source::Live(ext, n) => &session.live[ext.0].results.get(n as usize)?.item,
+            Source::Own(n) => &self.own.get(n as usize)?.item,
+        };
+        let extension = match source {
+            Source::Live(ext, _) => self.extensions[ext.0].name(),
+            _ => OWN,
+        };
+        Some((extension, &item.id, item.identity.as_deref()))
+    }
+
+    /// What the History keeps a Result under, as [`history_key`] gives it.
+    fn history_key<'a>(
+        &'a self,
+        session: &'a Session,
+        source: Source,
+    ) -> Option<(&'a str, &'a str)> {
+        let (extension, id, identity) = self.names(session, source)?;
+        Some(match identity {
+            Some(identity) => (IDENTITIES, identity),
+            None => (extension, id),
+        })
+    }
+
+    /// A Result's Identity, if it has one.
+    fn identity<'a>(&'a self, session: &'a Session, source: Source) -> Option<&'a str> {
+        match source {
+            Source::Indexed(slot) => self.index.identity(slot),
+            _ => self.names(session, source)?.2,
         }
     }
 
@@ -3312,10 +3457,10 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
         primary: Option<&str>,
     ) -> Option<ShownResult> {
         let (live_title, mut live_starts);
-        let (owner, item, title): (Option<ExtensionId>, &Item, Text) = match source {
+        let (owner, item, title): (Option<ExtensionId>, ItemRef, Text) = match source {
             Source::Indexed(slot) => (
                 Some(slot.extension()),
-                self.index.item(slot)?,
+                ItemRef::Resident(self.index.item(slot)?),
                 self.index.texts(slot)?.title,
             ),
             Source::Live(ext, n) => {
@@ -3327,11 +3472,15 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
                     chars: live_title.slice(..),
                     starts: &live_starts,
                 };
-                (Some(ext), item, title)
+                (Some(ext), ItemRef::Borrowed(item), title)
             }
             Source::Own(n) => {
                 let own = self.own.get(n as usize)?;
-                (None, &own.item, own.haystack.texts().title)
+                (
+                    None,
+                    ItemRef::Borrowed(&own.item),
+                    own.haystack.texts().title,
+                )
             }
         };
         self.highlights.clear();
@@ -3434,18 +3583,18 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
                     action: contributed.action.clone(),
                 });
             }
-            let mut own: BTreeMap<(&str, &str), &Action> = BTreeMap::new();
-            for item in self.index.items(ExtensionId(id)) {
-                for action in &item.actions {
-                    own.entry((item.kind.name(), &action.id)).or_insert(action);
-                }
-            }
+            let own: BTreeMap<(String, String), Action> = self
+                .index
+                .offered(ExtensionId(id))
+                .into_iter()
+                .map(|(kind, action)| ((kind, action.id.clone()), action))
+                .collect();
             for ((kind, _), action) in own {
-                if let Ok(kind) = KindName::new(kind) {
+                if let Ok(kind) = KindName::new(&kind) {
                     entries.push(CatalogEntry {
                         extension: ext.name().to_owned(),
                         kind,
-                        action: action.clone(),
+                        action,
                     });
                 }
             }

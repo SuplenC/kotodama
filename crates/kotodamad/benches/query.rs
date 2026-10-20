@@ -1,8 +1,9 @@
 //! From a query arriving to its Results encoded for the Front end, with 10k
 //! Indexed items: everything the Daemon does per keystroke except the socket
 //! write. Also: titles 200 characters long, a keystroke right behind a 1,000
-//! Item batch, and the first keystroke after the menu opens on a cold CPU
-//! cache. Then the same for a list View of 10k Items the Daemon filters.
+//! Item batch, the first keystroke after the menu opens on a cold CPU cache,
+//! and rows whose Items were read from the payload file. Then the same for a
+//! list View of 10k Items the Daemon filters.
 
 use std::hint::black_box;
 use std::path::PathBuf;
@@ -56,6 +57,8 @@ struct Setup {
     /// Batches sent and not indexed yet.
     pending: usize,
     buf: Vec<u8>,
+    /// Where the Items' payloads are kept, as in `$XDG_CACHE_HOME`.
+    _payloads: tempfile::TempDir,
 }
 
 impl Setup {
@@ -110,6 +113,8 @@ impl Setup {
                 now,
             );
         }
+        let payloads = tempfile::tempdir().unwrap();
+        daemon.keep_items_in(payloads.path());
         let (events, indexed) = mpsc::channel();
         daemon.index_in_background(events);
         let mut setup = Setup {
@@ -118,6 +123,7 @@ impl Setup {
             indexed,
             pending: 0,
             buf: Vec::new(),
+            _payloads: payloads,
         };
         setup.send(APPS, items);
         setup.settle();
@@ -344,24 +350,57 @@ fn bench(c: &mut Criterion) {
     let mut group = c.benchmark_group("open_10k_items");
     group.sample_size(10);
     group.measurement_time(Duration::from_secs(2));
-    group.bench_function("first_keystroke_cold_cache", |b| {
-        let mut evict = vec![0u8; 32 << 20];
-        let mut n = 0u8;
-        b.iter_custom(|iters| {
-            let mut total = Duration::ZERO;
-            for _ in 0..iters {
-                setup.query("");
-                n = n.wrapping_add(1);
-                for page in evict.chunks_mut(64) {
-                    page[0] = n;
+    // Opening warms the cache with what a keystroke reads; `_unwarmed` takes
+    // it again between the toggle and the keystroke, as if the Daemon didn't.
+    for (name, warmed) in [
+        ("first_keystroke_cold_cache", true),
+        ("first_keystroke_cold_cache_unwarmed", false),
+    ] {
+        group.bench_function(name, |b| {
+            let mut evict = vec![0u8; 32 << 20];
+            let mut n = 0u8;
+            b.iter_custom(|iters| {
+                let mut total = Duration::ZERO;
+                for _ in 0..iters {
+                    setup.query("");
+                    n = n.wrapping_add(1);
+                    let mut evict = || {
+                        for page in evict.chunks_mut(64) {
+                            page[0] = n;
+                        }
+                        black_box(&evict);
+                    };
+                    evict();
+                    setup.toggle();
+                    if !warmed {
+                        evict();
+                    }
+                    let start = Instant::now();
+                    black_box(setup.query(if n.is_multiple_of(2) { "f" } else { "t" }));
+                    total += start.elapsed();
                 }
-                black_box(&evict);
-                setup.toggle();
-                let start = Instant::now();
-                black_box(setup.query(if n.is_multiple_of(2) { "f" } else { "t" }));
-                total += start.elapsed();
-            }
-            total
+                total
+            })
+        });
+    }
+    group.finish();
+
+    // A query whose rows' Items were read for the last Results, and one
+    // whose rows' Items are each read from the payload file: an app's own
+    // keyword, a different app each time, out of the most kept resident.
+    let mut group = c.benchmark_group("query_10k_items");
+    group.bench_function("rows_resident", |b| {
+        b.iter(|| {
+            setup.query("");
+            black_box(setup.query("app4321"))
+        })
+    });
+    group.bench_function("rows_from_payload_file", |b| {
+        let mut n = 0;
+        b.iter(|| {
+            n = (n + 7919) % corpus::ITEMS;
+            setup.query("");
+            black_box(setup.query(&format!("app{n}")))
         })
     });
     group.finish();
