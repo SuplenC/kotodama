@@ -2802,7 +2802,8 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             self.own.pop();
         }
         if let Some(done) = self.latest_undo().and_then(Undoable::done) {
-            self.own.push(Own::new(undo_item(&done.undo), OwnAction::Undo));
+            self.own
+                .push(Own::new(undo_item(&done.undo), OwnAction::Undo));
         }
         self.mark_late();
     }

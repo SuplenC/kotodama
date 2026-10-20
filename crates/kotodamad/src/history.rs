@@ -758,8 +758,14 @@ impl History {
                     Some(learned) => self.learned.insert(query, learned),
                     None => self.learned.remove(&query),
                 };
-            } else if let (Some(Pick { when, learned: Some(picked) }), Some(_), Some(now)) =
-                (&pick, after, now)
+            } else if let (
+                Some(Pick {
+                    when,
+                    learned: Some(picked),
+                }),
+                Some(_),
+                Some(now),
+            ) = (&pick, after, now)
             {
                 match now.clone().take_off(picked, *when, half_life) {
                     Some(learned) => self.learned.insert(query, learned),
@@ -1355,7 +1361,11 @@ mod tests {
         second_only.pick("apps", "mail", "ma", &[], when(5, 9 * HOUR));
         let close = |a: f64, b: f64| (a - b).abs() <= 1e-3 * b.abs().max(1.0);
         for at in [when(5, 9 * HOUR), when(5, 21 * HOUR), when(9, 3 * HOUR)] {
-            let picked = [(IDENTITIES, "app:firefox"), ("apps", "fish"), ("apps", "mail")];
+            let picked = [
+                (IDENTITIES, "app:firefox"),
+                ("apps", "fish"),
+                ("apps", "mail"),
+            ];
             for (extension, id) in picked {
                 let (got, want) = (
                     withdrawn.frecency(extension, id, at),
@@ -1366,7 +1376,10 @@ mod tests {
             for query in ["fi", "sh"] {
                 let strengths = |history: &History| -> Vec<(String, f64)> {
                     let choices = history.learned(query, at.at);
-                    choices.iter().map(|c| (c.id.to_owned(), c.strength)).collect()
+                    choices
+                        .iter()
+                        .map(|c| (c.id.to_owned(), c.strength))
+                        .collect()
                 };
                 let (got, want) = (strengths(&withdrawn), strengths(&second_only));
                 assert_eq!(got.len(), want.len(), "{query}: {got:?} for {want:?}");
@@ -1376,7 +1389,10 @@ mod tests {
                 }
             }
         }
-        assert_eq!(withdrawn.learned["ma"].contenders, second_only.learned["ma"].contenders);
+        assert_eq!(
+            withdrawn.learned["ma"].contenders,
+            second_only.learned["ma"].contenders
+        );
     }
 
     #[test]

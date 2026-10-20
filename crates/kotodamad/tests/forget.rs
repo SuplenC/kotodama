@@ -639,7 +639,10 @@ fn only_the_extension_that_ran_the_action_withdraws_its_pick_and_only_for_a_whil
             invocation: invocation + 100,
         },
     );
-    assert!(saved(&h).picks("apps", "firefox").is_some(), "another run's");
+    assert!(
+        saved(&h).picks("apps", "firefox").is_some(),
+        "another run's"
+    );
 
     h.advance(UNDO_FOR);
     h.send(&ext, FromExtension::WithdrawPick { invocation });
