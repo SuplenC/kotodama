@@ -17,10 +17,10 @@ The flake builds Kotodama once and splits it into outputs, each also a package o
 | Package | Output | What's in it |
 | --- | --- | --- |
 | `kotodamad` | `out` | the `kotodama` command, the Daemon, and its systemd user units in `lib/systemd/user/` |
-| `kotodama-qml` | `qml` | the `Kotodama` QML module, in `lib/qt-6/qml/` |
+| `kotodama-qml` | `qml` | the `Kotodama` QML module, in `lib/qt-6/qml/`, and the ready Front end, a Quickshell config that runs the menu, in `share/kotodama/quickshell/` |
 | `kotodama-extensions` | `extensions` | the Bundled extensions, in `share/kotodama/extensions/` |
 
-`default` installs all three. With home-manager:
+`default` installs all three. To try it on a Hyprland desktop step by step, with the checks to run by hand, see [docs/try-it.md](docs/try-it.md). With home-manager:
 
 ```nix
 {
@@ -30,6 +30,8 @@ The flake builds Kotodama once and splits it into outputs, each also a package o
   imports = [ inputs.kotodama.homeModules.default ];
   programs.kotodama = {
     enable = true;
+    # Runs the menu in a Quickshell of its own, with the graphical session.
+    frontEnd.enable = true;
     # Written to ~/.config/kotodama/home-manager.toml; any other *.toml there still applies.
     settings = {
       extensions.apps.terminal = [ "ghostty" "-e" ];
@@ -72,7 +74,32 @@ programs.kotodama = {
 };
 ```
 
-The module installs the package and enables `kotodamad.socket`. On NixOS without home-manager, add the package to `systemd.packages` and `environment.systemPackages`, and set `systemd.user.sockets.kotodamad.wantedBy = [ "sockets.target" ]`.
+The module installs the package and enables `kotodamad.socket`. `frontEnd.enable` adds the ready Front end: a systemd user service, `kotodama-menu`, that runs the menu in a Quickshell instance of its own, beside whatever shell the desktop already runs, so a compositor bind running `kotodama toggle` is all that's left to set up.
+
+| Option | What it does |
+| --- | --- |
+| `frontEnd.enable` | Runs the `kotodama-menu` service. Off by default. |
+| `frontEnd.quickshellPackage` | The Quickshell that runs it. Unset, the one from the same nixpkgs as `package` (its `quickshell` attribute), which shares the QML module's Qt. |
+| `frontEnd.target` | The systemd user target that starts and stops it. Unset, `wayland.systemd.target`, which is `graphical-session.target` unless set. |
+| `frontEnd.look.{background, foreground, dimmed, accent, selection, border, error}` | `KotodamaMenu`'s colors, as QML takes them (`"#1e1e2e"`, `"red"`). |
+| `frontEnd.look.{fontFamily, fontSize, radius, menuWidth, rowHeight, maxRows, top, placeholder}` | The rest of its look, in pixels where it's a size. |
+| `qmlImportPath` (read-only) | The QML import path that holds the `Kotodama` module, for a Quickshell config of your own (see [The Quickshell Front end](#the-quickshell-front-end)). |
+
+A look property left unset keeps `KotodamaMenu`'s default. The service starts with the target, which needs something to start it once the compositor has handed `WAYLAND_DISPLAY` to the user manager: uwsm does, and so does home-manager's `wayland.windowManager.hyprland` with its systemd integration (on by default). Without either, start it from the compositor: `exec-once = systemctl --user start kotodama-menu`, after the environment import below. Its only extra environment is `QML_IMPORT_PATH`, for this Quickshell alone.
+
+```nix
+programs.kotodama.frontEnd = {
+  enable = true;
+  look = {
+    background = "#1d2021";
+    accent = "#d79921";
+    fontFamily = "Inter";
+    fontSize = 14;
+  };
+};
+```
+
+On NixOS without home-manager, add the package to `systemd.packages` and `environment.systemPackages`, and set `systemd.user.sockets.kotodamad.wantedBy = [ "sockets.target" ]`. The ready Front end then runs as `QML_IMPORT_PATH=<qml>/lib/qt-6/qml quickshell --path <qml>/share/kotodama/quickshell`, where `<qml>` is the package's `qml` output and `quickshell` is `kotodama.quickshell`, from the same nixpkgs.
 
 The QML module links against Qt, so it shares Qt with a Quickshell built from the same nixpkgs. With a Quickshell from any other nixpkgs (another channel, or Quickshell's own flake), Kotodama's package brings a second Qt, about 760 MiB. Build Kotodama with your Quickshell's nixpkgs instead, and only the 4 MiB module is new:
 
@@ -444,6 +471,8 @@ ShellRoot {
 ```
 
 The other look properties are `dimmed`, `selection`, `border`, `error`, `fontSize`, `radius`, `menuWidth`, `rowHeight`, `maxRows`, `top` and `placeholder`.
+
+The home-manager module's `frontEnd.enable` runs such a config, the package's `share/kotodama/quickshell/shell.qml`, as a Quickshell of its own. To put the menu in your own Quickshell config instead, that Quickshell needs the module's directory as `QML_IMPORT_PATH`: `programs.kotodama.qmlImportPath` in home-manager, which home-manager's `programs.quickshell` service (`systemd.enable`) gets on its own. A Quickshell started some other way, such as `exec-once = quickshell` in Hyprland's config, needs it in its environment, for example `exec-once = env QML_IMPORT_PATH=${config.programs.kotodama.qmlImportPath} quickshell` written from Nix, or `$HOME/.nix-profile/lib/qt-6/qml` (`/etc/profiles/per-user/$USER/lib/qt-6/qml` with home-manager's `useUserPackages`), where the profile links the module. Set it on that Quickshell only: the module holds one Qt version's plugin, which nothing else in the session needs. That Quickshell must come from the same nixpkgs as Kotodama, or Kotodama built with its nixpkgs (see [Installing](#installing)).
 
 A compositor keybind opens it through the `kotodama` command, which asks the Daemon to pass the request on to every Front end:
 
