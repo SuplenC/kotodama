@@ -25,10 +25,8 @@
 
 use std::collections::HashMap;
 
+use kotodama_extension::url::{self, PLACEHOLDER};
 use kotodama_protocol::{Action, Argument, Item, ItemKind, NamespacedKind, Table, Value};
-
-/// The placeholder a Quicklink's template takes the typed query in.
-pub const PLACEHOLDER: &str = "{query}";
 
 /// A keyword that stands for an Item, or for one of its own Actions.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -65,13 +63,10 @@ impl Quicklink {
     }
 
     /// The command that opens the Quicklink for `query`. A URL opens with
-    /// `xdg-open`.
+    /// [`url::opener`].
     pub fn command(&self, query: &str) -> Vec<String> {
         match &self.target {
-            Target::Url(url) => vec![
-                "xdg-open".into(),
-                url.replace(PLACEHOLDER, &percent_encode(query)),
-            ],
+            Target::Url(template) => url::opener(&url::fill(template, query)),
             Target::Command(args) => args
                 .iter()
                 .map(|arg| arg.replace(PLACEHOLDER, query))
@@ -206,18 +201,4 @@ pub(crate) fn string(table: &Table, key: &str) -> Result<Option<String>, String>
         None => Ok(None),
         Some(_) => Err(format!("`{key}` should be a string")),
     }
-}
-
-/// Percent-encodes everything but RFC 3986's unreserved characters, so any
-/// query fits anywhere in a URL.
-pub fn percent_encode(text: &str) -> String {
-    let mut encoded = String::with_capacity(text.len());
-    for byte in text.bytes() {
-        if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'.' | b'_' | b'~') {
-            encoded.push(byte as char);
-        } else {
-            encoded.push_str(&format!("%{byte:02X}"));
-        }
-    }
-    encoded
 }
