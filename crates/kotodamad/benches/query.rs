@@ -145,6 +145,8 @@ fn bench(c: &mut Criterion) {
             black_box(setup.query(if alternate { "f" } else { "t" }))
         })
     });
+    // Two words pasted into a cleared box: the empty query forgets the last
+    // search, so this one searches every Item.
     group.bench_function("two_words", |b| {
         b.iter(|| {
             setup.query("");
