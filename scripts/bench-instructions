@@ -3,10 +3,12 @@
 # `instructions`) of the checkout in DIR, in that checkout's dev shell, under
 # Valgrind. `save` keeps the counts as the baseline `base`; `compare` compares
 # with it, and fails when a benchmark runs more than 5% more instructions than
-# it did there. The counts are the same from run to run and on any runner, so
-# both checkouts needn't run on one machine. CI's `instructions` job runs the
-# base commit with `save` and this one with `compare`; both write to
-# GUNGRAUN_HOME, so they find each other's baseline.
+# it did there. The counts are the same from run to run, but another CPU can
+# count a little differently (glibc picks its string functions by CPU
+# feature), so both run on one machine: CI's `instructions` job runs the base
+# commit with `save` and this one with `compare`, both writing to
+# GUNGRAUN_HOME. Without a baseline (a base commit with no such benchmark),
+# `compare` only prints the counts.
 # Usage: GUNGRAUN_HOME=... bench-instructions DIR save|compare
 set -euo pipefail
 

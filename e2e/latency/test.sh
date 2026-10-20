@@ -34,8 +34,7 @@ wait_for_log quickshell.log "focused: true" "$mark"
 # The Extension sends the 10k Items in one message, so they are all in once
 # "9999" finds any. The search logs only when its Results change, and opening
 # with the query already in the box changes nothing, so each try first types
-# another query. (Before, each try after the first waited out wait_for_log's
-# 10 s for a "results: 1" that never came: 8 minutes before the first key.)
+# another query; otherwise each try waits out wait_for_log's 10 s.
 indexed=false
 for _ in $(seq 50); do
     "$kotodama" open --query 999

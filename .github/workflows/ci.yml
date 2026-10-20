@@ -307,8 +307,8 @@ jobs:
 
   # Counts the instructions the Daemon runs per keystroke
   # (scripts/bench-instructions), for the base commit and this one, and fails
-  # when a benchmark runs 5% more. Callgrind's counts are the same on any
-  # runner and from run to run, so unlike `bench`'s timings, small changes show.
+  # when a benchmark runs 5% more. Callgrind's counts are the same from run to
+  # run on one runner, so unlike `bench`'s timings, small changes show.
   instructions:
     needs: changes
     if: ${{ !cancelled() && (github.event_name == 'push' || needs.changes.outputs.bench == 'true') }}

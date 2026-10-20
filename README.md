@@ -151,7 +151,7 @@ cargo run -p kotodamad --example front-end -- --run firefox  # run the top one
 `just bench` measures three things with 10k Indexed items:
 
 - `query_10k_items`: from a query arriving to its Results encoded for the Front end, in process (criterion).
-- `instructions`: the instructions the same keystrokes run, counted under Valgrind by gungraun. The count is the same on every run and every machine, so a change of a few percent shows where the timings can't tell it from noise. CI fails when a keystroke runs more than 5% more instructions than on the base commit.
+- `instructions`: the instructions the same keystrokes run, counted under Valgrind by gungraun. The count is the same on every run on one machine, so a change of a few percent shows where the timings can't tell it from noise. CI fails when a keystroke runs more than 5% more instructions than on the base commit.
 - `daemon`: the real `kotodamad` with a real Extension process: the round trip of 2,000 queries over the socket, and the Daemon's resident memory (`VmRSS`) afterwards.
 
 | Machine | First keystroke | Next keystroke | Socket round trip p99 | Resident memory |

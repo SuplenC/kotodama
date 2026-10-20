@@ -1,8 +1,9 @@
 //! The instructions the Daemon runs per keystroke with 10k Indexed items, from
 //! a query arriving to its Results encoded for the Front end, as `query.rs`
 //! times them. gungraun counts them under Valgrind's Callgrind, so the count
-//! is the same from run to run and from one CI runner to another, and a few
-//! percent more shows, where the wall-clock benchmarks can't tell it from noise.
+//! is the same from run to run on one machine, and a few percent more shows,
+//! where the wall-clock benchmarks can't tell it from noise. Another CPU can
+//! count a little differently: glibc picks its string functions by CPU feature.
 //!
 //! Needs Valgrind and the gungraun-runner of the `gungraun` version pinned in
 //! Cargo.toml (both in the dev shell): `cargo bench -p kotodamad --bench instructions`.
@@ -44,13 +45,13 @@ impl Store for Nothing {
 
 /// The Daemon with the corpus Indexed and a Front end connected, with `typed`
 /// in the search box already.
-struct Typed {
+struct Search {
     daemon: Daemon<Nothing, Nothing, Nothing>,
     results: Receiver<ToFrontEnd>,
     buf: Vec<u8>,
 }
 
-impl Typed {
+impl Search {
     fn new(typed: &str) -> Self {
         let manifest = Manifest::from_toml("name = \"apps\"\ncommand = [\"x\"]").unwrap();
         let found = Found::new(manifest, PathBuf::from("/")).unwrap();
@@ -92,14 +93,14 @@ impl Typed {
             },
             now,
         );
-        let mut this = Typed {
+        let mut search = Search {
             daemon,
             results,
             buf: Vec::new(),
         };
-        this.results.try_iter().for_each(drop);
-        this.query(typed);
-        this
+        search.results.try_iter().for_each(drop);
+        search.query(typed);
+        search
     }
 
     /// Sends one query and encodes its Results as the socket writer would.
@@ -120,26 +121,26 @@ impl Typed {
     }
 }
 
-/// The keystroke that turns the box from `before` into `after`.
-fn typed(before: &str, after: &'static str) -> (Typed, &'static str) {
-    (Typed::new(before), after)
+/// The search with `before` typed, and the query the next keystroke makes.
+fn typed_then(before: &str, query: &'static str) -> (Search, &'static str) {
+    (Search::new(before), query)
 }
 
 /// Drops the Daemon outside of what is counted.
-fn done(typed: Typed) {
-    drop(typed);
+fn drop_search(search: Search) {
+    drop(search);
 }
 
-#[library_benchmark(setup = typed, teardown = done)]
+#[library_benchmark(setup = typed_then, teardown = drop_search)]
 // The first keystroke matches the most Items and can't narrow.
 #[bench::first_keystroke("", "f")]
 // Typing on: the keystroke narrows the last one's matches.
 #[bench::next_keystroke("firefo", "firefox")]
 // Two words pasted into a cleared box: no last search to narrow.
 #[bench::two_words_pasted("", "fire tool")]
-fn keystroke((mut typed, text): (Typed, &'static str)) -> Typed {
-    black_box(typed.query(black_box(text)));
-    typed
+fn keystroke((mut search, query): (Search, &'static str)) -> Search {
+    black_box(search.query(black_box(query)));
+    search
 }
 
 library_benchmark_group!(name = query_10k_items, benchmarks = [keystroke]);
