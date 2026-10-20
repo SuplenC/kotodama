@@ -121,7 +121,7 @@ pub fn scan(dirs: &[PathBuf], env: &Environment) -> BTreeMap<String, App> {
                     apps.insert(app.id.clone(), app);
                 }
                 Ok(None) => {}
-                Err(err) => eprintln!("kotodama-apps: {}: {err}", path.display()),
+                Err(err) => kotodama_extension::log!("{}: {err}", path.display()),
             }
         }
     }
@@ -202,11 +202,7 @@ fn app(
                 command,
             }),
             Err(err) => {
-                eprintln!(
-                    "kotodama-apps: {}: action {}: {err}",
-                    path.display(),
-                    action.id
-                );
+                kotodama_extension::log!("{}: action {}: {err}", path.display(), action.id);
                 None
             }
         })

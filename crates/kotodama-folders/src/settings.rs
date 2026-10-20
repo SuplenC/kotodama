@@ -22,6 +22,7 @@
 
 use std::path::{Path, PathBuf};
 
+use kotodama_extension::config;
 use kotodama_protocol::{Table, Value};
 
 use crate::projects::ProjectFolder;
@@ -80,11 +81,11 @@ impl Settings {
             Some(Value::Array(folders)) => {
                 for (n, folder) in folders.iter().enumerate() {
                     if let Err(message) = settings.add_folder(folder, home) {
-                        warn(&format!("`folders[{n}]` {message}"));
+                        config::warn(format_args!("`folders[{n}]` {message}"));
                     }
                 }
             }
-            Some(_) => warn("`folders` should be a list of `{ path, kind }` tables"),
+            Some(_) => config::warn("`folders` should be a list of `{ path, kind }` tables"),
             None => {}
         }
         for (key, setting) in [
@@ -95,13 +96,8 @@ impl Settings {
             ("file_manager", &mut settings.file_manager),
             ("copy_path", &mut settings.copy_path),
         ] {
-            if let Some(value) = config.get(key) {
-                match strings(value) {
-                    Some(command) if !command.is_empty() => *setting = command,
-                    _ => warn(&format!(
-                        "`{key}` should be a list of strings, the program first"
-                    )),
-                }
+            if let Some(command) = config::command(config, key) {
+                *setting = command;
             }
         }
         settings
@@ -126,7 +122,7 @@ impl Settings {
             }
             Some(Value::String(kind)) if kind == "scripts" => {
                 if folder.contains_key("depth") {
-                    warn("a scripts folder is searched whole; its `depth` is skipped");
+                    config::warn("a scripts folder is searched whole; its `depth` is skipped");
                 }
                 self.folders.scripts.push(path);
             }
@@ -164,23 +160,6 @@ pub fn fill(command: &[String], path: &Path, session: Option<&str>) -> Vec<Strin
             }
         })
         .collect()
-}
-
-fn strings(value: &Value) -> Option<Vec<String>> {
-    match value {
-        Value::Array(values) => values
-            .iter()
-            .map(|value| match value {
-                Value::String(value) => Some(value.clone()),
-                _ => None,
-            })
-            .collect(),
-        _ => None,
-    }
-}
-
-fn warn(message: &str) {
-    eprintln!("kotodama-folders: config: {message}");
 }
 
 #[cfg(test)]

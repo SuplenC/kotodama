@@ -5,26 +5,22 @@
 //! change. See `settings.rs` for its config table.
 
 use std::collections::BTreeMap;
-use std::io::{self, Stdout};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
-use std::sync::mpsc::{self, Sender};
-use std::thread;
+use std::sync::mpsc::Sender;
 
+use kotodama_extension::launch::{self, Ended};
+use kotodama_extension::{Connection, Event, SentItems, Writer};
 use kotodama_folders::items::{
     self, ARGUMENTS, COPY_PATH, FILE_MANAGER, LAZYGIT, OPEN, RUN, SHELL,
 };
-use kotodama_folders::launch::{self, Ended};
 use kotodama_folders::projects::Project;
 use kotodama_folders::scan::{Scan, Scanner};
 use kotodama_folders::scripts::Script;
 use kotodama_folders::settings::{Settings, fill};
-use kotodama_protocol::{
-    Channel, ChannelWriter, FromExtension, Hello, Job, JobState, Outcome, ToExtension, WireFormat,
-};
+use kotodama_protocol::{FromExtension, Job, JobState, Outcome, ToExtension};
 
-enum Event {
-    Message(ToExtension),
+enum Own {
     Scanned(Scan),
     /// A script run in the background exited.
     Ended {
@@ -32,66 +28,22 @@ enum Event {
         title: String,
         ended: Ended,
     },
-    /// The Daemon hung up, or its messages can't be read any more.
-    Hangup,
-}
-
-/// Keeps resident memory down, as the Daemon does: one malloc arena, and no
-/// transparent huge pages.
-fn lean_memory() {
-    #[cfg(target_os = "linux")]
-    // SAFETY: both calls only set process-wide flags, before any thread starts.
-    unsafe {
-        libc::prctl(libc::PR_SET_THP_DISABLE, 1, 0, 0, 0);
-        #[cfg(target_env = "gnu")]
-        libc::mallopt(libc::M_ARENA_MAX, 1);
-    }
 }
 
 fn main() -> ExitCode {
-    lean_memory();
-    match run() {
-        Ok(()) => ExitCode::SUCCESS,
-        Err(err) => {
-            eprintln!("kotodama-folders: {err}");
-            ExitCode::FAILURE
-        }
-    }
+    kotodama_extension::main("kotodama-folders", run)
 }
 
 fn run() -> Result<(), kotodama_protocol::Error> {
-    let channel = Channel::handshake(io::stdin(), io::stdout(), &Hello::new(&WireFormat::ALL))?;
-    let (mut reader, writer) = channel.split();
-    let (events, received) = mpsc::channel();
-
-    let messages = events.clone();
-    thread::Builder::new()
-        .name("read".into())
-        .stack_size(256 * 1024)
-        .spawn(move || {
-            loop {
-                match reader.recv::<ToExtension>() {
-                    Ok(Some(message)) => {
-                        if messages.send(Event::Message(message)).is_err() {
-                            return;
-                        }
-                    }
-                    Ok(None) => break,
-                    Err(err @ kotodama_protocol::Error::Decode { .. }) => {
-                        eprintln!("kotodama-folders: skipped a message: {err}");
-                    }
-                    Err(err) => {
-                        eprintln!("kotodama-folders: {err}");
-                        break;
-                    }
-                }
-            }
-            let _ = messages.send(Event::Hangup);
-        })?;
+    let Connection {
+        writer,
+        events,
+        received,
+    } = kotodama_extension::connect()?;
 
     let scanned = events.clone();
     let scanner = Scanner::start(move |scan| {
-        let _ = scanned.send(Event::Scanned(scan));
+        let _ = scanned.send(Event::Own(Own::Scanned(scan)));
     })?;
 
     let mut extension = Extension {
@@ -102,14 +54,14 @@ fn run() -> Result<(), kotodama_protocol::Error> {
         settings: Settings::default(),
         projects: BTreeMap::new(),
         scripts: BTreeMap::new(),
-        sent: items::SentItems::default(),
+        sent: SentItems::default(),
         jobs: 0,
     };
     for event in received {
         match event {
             Event::Message(message) => extension.message(message)?,
-            Event::Scanned(scan) => extension.scanned(scan)?,
-            Event::Ended { job, title, ended } => extension.ended(job, title, ended)?,
+            Event::Own(Own::Scanned(scan)) => extension.scanned(scan)?,
+            Event::Own(Own::Ended { job, title, ended }) => extension.ended(job, title, ended)?,
             Event::Hangup => break,
         }
     }
@@ -117,15 +69,15 @@ fn run() -> Result<(), kotodama_protocol::Error> {
 }
 
 struct Extension {
-    writer: ChannelWriter<Stdout>,
-    events: Sender<Event>,
+    writer: Writer,
+    events: Sender<Event<Own>>,
     scanner: Scanner,
     home: Option<PathBuf>,
     settings: Settings,
     /// By Item id.
     projects: BTreeMap<String, Project>,
     scripts: BTreeMap<String, Script>,
-    sent: items::SentItems,
+    sent: SentItems,
     /// How many background jobs have started, which names the next.
     jobs: u64,
 }
@@ -183,14 +135,7 @@ impl Extension {
                     .values()
                     .map(|script| items::script(script, home)),
             );
-        let (removed, added) = self.sent.update(all);
-        if !removed.is_empty() {
-            self.send(&FromExtension::RemoveItems { ids: removed })?;
-        }
-        if !added.is_empty() {
-            self.send(&FromExtension::AddItems { items: added })?;
-        }
-        Ok(())
+        self.sent.publish(&mut self.writer, all)
     }
 
     fn run(
@@ -209,7 +154,7 @@ impl Extension {
                 _ => return Err(format!("A project has no Action `{action}`")),
             };
             let argv = fill(command, &project.path, Some(&project.session()));
-            return launch::launch(&argv, &project.path).map_err(|err| err.to_string());
+            return launch::launch(&argv, Some(&project.path)).map_err(|err| err.to_string());
         }
         let script = self
             .scripts
@@ -220,7 +165,7 @@ impl Extension {
             RUN => {}
             COPY_PATH => {
                 let argv = fill(&self.settings.copy_path, &script.path, None);
-                return launch::launch(&argv, dir).map_err(|err| err.to_string());
+                return launch::launch(&argv, Some(dir)).map_err(|err| err.to_string());
             }
             _ => return Err(format!("A script has no Action `{action}`")),
         }
@@ -231,19 +176,19 @@ impl Extension {
         }
         if script.header.terminal {
             let argv: Vec<String> = self.settings.terminal.iter().cloned().chain(argv).collect();
-            return launch::launch(&argv, dir).map_err(|err| err.to_string());
+            return launch::launch(&argv, Some(dir)).map_err(|err| err.to_string());
         }
         self.jobs += 1;
         let job = format!("run-{}", self.jobs);
         let title = script.title();
         let events = self.events.clone();
         let (ended_job, ended_title) = (job.clone(), title.clone());
-        launch::background(&argv, dir, move |ended| {
-            let _ = events.send(Event::Ended {
+        launch::background(&argv, Some(dir), move |ended| {
+            let _ = events.send(Event::Own(Own::Ended {
                 job: ended_job,
                 title: ended_title,
                 ended,
-            });
+            }));
         })
         .map_err(|err| err.to_string())?;
         self.send(&FromExtension::JobProgress(Job {

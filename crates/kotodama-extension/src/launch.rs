@@ -1,5 +1,9 @@
-//! Starting the programs an Action runs, detached from the Extension, and
-//! scripts in the background, reporting how they ended.
+//! Starting the programs Actions run, detached from the Extension, and
+//! programs in the background, reporting how they ended.
+//!
+//! Each runs through the launch prefix ([`launch_command`]), with no stdio of
+//! the Extension's, which carries the protocol, and in a process group of its
+//! own, so a signal to the Extension's group doesn't reach it.
 
 use std::io::{self, Read};
 use std::os::unix::process::CommandExt;
@@ -13,19 +17,18 @@ use kotodama_protocol::launch_command;
 
 /// Small: the threads only wait for the program, or read its output.
 const SMALL_STACK: usize = 64 * 1024;
-/// How much of a background script's last line of output its notification
-/// shows, in characters.
+/// How much of a background program's last line of output is kept, in
+/// characters.
 const LAST_LINE: usize = 200;
-/// How long a background script's output may stay open after it exits.
+/// How long a background program's output may stay open after it exits.
 const OUTPUT_GRACE: Duration = Duration::from_millis(100);
 
-/// A command for `argv` through the launch prefix ([`launch_command`]), in
-/// `dir`, with no stdio of the Extension's, which carries the protocol, and
-/// a process group of its own, so a signal to the Extension's group doesn't
-/// reach it.
-fn command(argv: &[String], dir: &Path) -> io::Result<Command> {
+/// A command for `argv`, in `dir` if given, detached as the module says.
+fn command(argv: &[String], dir: Option<&Path>) -> io::Result<Command> {
     let program = argv.first().map_or("", String::as_str);
-    if !dir.is_dir() {
+    if let Some(dir) = dir
+        && !dir.is_dir()
+    {
         return Err(io::Error::new(
             io::ErrorKind::NotFound,
             format!(
@@ -35,8 +38,10 @@ fn command(argv: &[String], dir: &Path) -> io::Result<Command> {
         ));
     }
     let mut command = launch_command(argv)?;
+    if let Some(dir) = dir {
+        command.current_dir(dir);
+    }
     command
-        .current_dir(dir)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
@@ -49,9 +54,9 @@ fn spawn_error(argv: &[String], err: io::Error) -> io::Error {
     io::Error::new(err.kind(), format!("couldn't start {program}: {err}"))
 }
 
-/// Starts `argv` in `dir`, and leaves it running. A thread reaps it when it
-/// exits.
-pub fn launch(argv: &[String], dir: &Path) -> io::Result<()> {
+/// Starts `argv`, in `dir` if given, and leaves it running. A thread reaps it
+/// when it exits. The error says what went wrong in words for the user.
+pub fn launch(argv: &[String], dir: Option<&Path>) -> io::Result<()> {
     let mut child = command(argv, dir)?
         .spawn()
         .map_err(|err| spawn_error(argv, err))?;
@@ -64,24 +69,26 @@ pub fn launch(argv: &[String], dir: &Path) -> io::Result<()> {
             let _ = child.wait();
         })
     {
-        eprintln!("kotodama-folders: won't reap {}: {err}", argv[0]);
+        crate::log!("won't reap {}: {err}", argv[0]);
     }
     Ok(())
 }
 
-/// How a background script ended.
+/// How a background program ended.
 #[derive(Debug)]
 pub struct Ended {
+    /// `None` if it couldn't be waited for.
     pub status: Option<ExitStatus>,
     /// The last line it wrote to stdout or stderr that wasn't blank.
     pub last_line: Option<String>,
 }
 
-/// Starts `argv` in `dir` with its output read, and calls `ended` once it
-/// exits. Only its last line is kept, so a chatty script costs no memory.
+/// Starts `argv`, in `dir` if given, with its output read, and calls `ended`
+/// once it exits. Only its last line is kept, so a chatty program costs no
+/// memory.
 pub fn background(
     argv: &[String],
-    dir: &Path,
+    dir: Option<&Path>,
     ended: impl FnOnce(Ended) + Send + 'static,
 ) -> io::Result<()> {
     let (reader, writer) = io::pipe()?;
@@ -92,7 +99,7 @@ pub fn background(
     // keep it open.
     drop(command);
     // The reading thread ends when the last holder of the output closes it,
-    // which may be something the script left running; it takes a small stack
+    // which may be something the program left running; it takes a small stack
     // and a pipe until then.
     let (read, last_line) = mpsc::channel();
     thread::Builder::new()
@@ -106,7 +113,7 @@ pub fn background(
         .stack_size(SMALL_STACK)
         .spawn(move || {
             let status = child.wait().ok();
-            // Something the script started may keep its output open; what it
+            // Something the program started may keep its output open; what it
             // wrote itself is read by now, or soon.
             let last_line = last_line.recv_timeout(OUTPUT_GRACE).ok().flatten();
             ended(Ended { status, last_line });

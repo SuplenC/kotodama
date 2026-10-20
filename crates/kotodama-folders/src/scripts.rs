@@ -200,7 +200,7 @@ fn search(dir: &Path, folders: &mut Vec<String>, found: &mut Found) {
 }
 
 fn warn(message: &str) {
-    eprintln!("kotodama-folders: {message}");
+    kotodama_extension::log!("{message}");
 }
 
 #[cfg(test)]

@@ -12,8 +12,8 @@
 //! ```
 
 use std::collections::{BTreeMap, HashMap, HashSet};
-use std::hash::{DefaultHasher, Hash, Hasher};
 
+use kotodama_extension::config;
 use kotodama_protocol::{Action, Item, ItemKind, Table, Value};
 
 use crate::scan::{App, app_id};
@@ -51,16 +51,13 @@ impl Settings {
     /// at its default; the others still apply.
     pub fn from_config(config: &Table) -> Self {
         let mut settings = Settings::default();
-        if let Some(value) = config.get("terminal") {
-            match strings(value) {
-                Some(terminal) if !terminal.is_empty() => settings.terminal = terminal,
-                _ => warn("`terminal` should be a list of strings, the program first"),
-            }
+        if let Some(terminal) = config::command(config, "terminal") {
+            settings.terminal = terminal;
         }
         if let Some(value) = config.get("hidden") {
-            match strings(value) {
+            match config::strings(value) {
                 Some(hidden) => settings.hidden = hidden.iter().map(|id| app_id(id)).collect(),
-                None => warn("`hidden` should be a list of desktop ids"),
+                None => config::warn("`hidden` should be a list of desktop ids"),
             }
         }
         match config.get("names") {
@@ -70,11 +67,11 @@ impl Settings {
                         Value::String(name) => {
                             settings.names.insert(app_id(id), name.clone());
                         }
-                        _ => warn(&format!("`names.{id}` should be a string")),
+                        _ => config::warn(format_args!("`names.{id}` should be a string")),
                     }
                 }
             }
-            Some(_) => warn("`names` should be a table of names by desktop id"),
+            Some(_) => config::warn("`names` should be a table of names by desktop id"),
             None => {}
         }
         settings
@@ -146,75 +143,4 @@ fn action(id: String, title: String) -> Action {
         shortcut: None,
         arguments: Vec::new(),
     }
-}
-
-fn strings(value: &Value) -> Option<Vec<String>> {
-    match value {
-        Value::Array(values) => values
-            .iter()
-            .map(|value| match value {
-                Value::String(value) => Some(value.clone()),
-                _ => None,
-            })
-            .collect(),
-        _ => None,
-    }
-}
-
-fn warn(message: &str) {
-    eprintln!("kotodama-apps: config: {message}");
-}
-
-/// What the Daemon has of each Item, by id, so only what changed is sent
-/// again. A fingerprint stands in for each Item, so the Items aren't kept
-/// twice.
-#[derive(Default)]
-pub struct SentItems(HashMap<String, u64>);
-
-impl SentItems {
-    /// Makes `items` what the Daemon has. Returns the ids to remove and the
-    /// Items to add or replace.
-    pub fn update(&mut self, items: impl Iterator<Item = Item>) -> (Vec<String>, Vec<Item>) {
-        let mut next = HashMap::with_capacity(self.0.len());
-        let mut added = Vec::new();
-        for item in items {
-            let print = fingerprint(&item);
-            if self.0.remove(&item.id) != Some(print) {
-                next.insert(item.id.clone(), print);
-                added.push(item);
-            } else {
-                next.insert(item.id, print);
-            }
-        }
-        let mut removed: Vec<String> = std::mem::replace(&mut self.0, next).into_keys().collect();
-        removed.sort();
-        (removed, added)
-    }
-}
-
-/// A hash of everything an Item sends.
-fn fingerprint(item: &Item) -> u64 {
-    let mut hasher = DefaultHasher::new();
-    let Item {
-        id,
-        kind,
-        identity,
-        title,
-        subtitle,
-        icon,
-        keyword,
-        keywords,
-        actions,
-    } = item;
-    (id, kind, identity, title, subtitle, icon, keyword, keywords).hash(&mut hasher);
-    for Action {
-        id,
-        title,
-        shortcut,
-        arguments,
-    } in actions
-    {
-        (id, title, shortcut, arguments.len()).hash(&mut hasher);
-    }
-    hasher.finish()
 }

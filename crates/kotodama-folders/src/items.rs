@@ -1,7 +1,5 @@
-//! The Items projects and scripts become, and sending only what changed.
+//! The Items projects and scripts become.
 
-use std::collections::HashMap;
-use std::hash::{DefaultHasher, Hash, Hasher};
 use std::path::Path;
 
 use kotodama_protocol::{Action, Argument, Item, ItemKind};
@@ -105,66 +103,4 @@ fn action(id: &str, title: &str, arguments: Vec<Argument>) -> Action {
         shortcut: None,
         arguments,
     }
-}
-
-/// What the Daemon has of each Item, by id, so only what changed is sent
-/// again. A fingerprint stands in for each Item, so the Items aren't kept
-/// twice.
-#[derive(Default)]
-pub struct SentItems(HashMap<String, u64>);
-
-impl SentItems {
-    /// Makes `items` what the Daemon has. Returns the ids to remove and the
-    /// Items to add or replace.
-    pub fn update(&mut self, items: impl Iterator<Item = Item>) -> (Vec<String>, Vec<Item>) {
-        let mut next = HashMap::with_capacity(self.0.len());
-        let mut added = Vec::new();
-        for item in items {
-            let print = fingerprint(&item);
-            if self.0.remove(&item.id) != Some(print) {
-                next.insert(item.id.clone(), print);
-                added.push(item);
-            } else {
-                next.insert(item.id, print);
-            }
-        }
-        let mut removed: Vec<String> = std::mem::replace(&mut self.0, next).into_keys().collect();
-        removed.sort();
-        (removed, added)
-    }
-}
-
-/// A hash of everything an Item sends.
-fn fingerprint(item: &Item) -> u64 {
-    let mut hasher = DefaultHasher::new();
-    let Item {
-        id,
-        kind,
-        identity,
-        title,
-        subtitle,
-        icon,
-        keyword,
-        keywords,
-        actions,
-    } = item;
-    (id, kind, identity, title, subtitle, icon, keyword, keywords).hash(&mut hasher);
-    for Action {
-        id,
-        title,
-        shortcut,
-        arguments,
-    } in actions
-    {
-        (id, title, shortcut).hash(&mut hasher);
-        for Argument {
-            name,
-            placeholder,
-            optional,
-        } in arguments
-        {
-            (name, placeholder, optional).hash(&mut hasher);
-        }
-    }
-    hasher.finish()
 }

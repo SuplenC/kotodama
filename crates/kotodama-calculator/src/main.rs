@@ -11,19 +11,15 @@
 //! rates_url = "https://api.frankfurter.app/latest"
 //! ```
 
-use std::io::{self, Stdout};
-use std::path::PathBuf;
 use std::process::ExitCode;
-use std::sync::mpsc::{self, Sender};
+use std::sync::mpsc::Sender;
 use std::thread;
 use std::time::{Duration, Instant, SystemTime};
 
 use jiff::Zoned;
 use kotodama_calculator::{Answer, COPY, COPY_EXPRESSION, Calculator, Evaluation, Rates, rates};
-use kotodama_protocol::{
-    Channel, ChannelWriter, Clipboard, FromExtension, Hello, Outcome, Table, ToExtension, Value,
-    WireFormat,
-};
+use kotodama_extension::{Connection, Event, STACK_SIZE, Writer, config, dirs};
+use kotodama_protocol::{Clipboard, FromExtension, Outcome, Table, ToExtension};
 
 /// The curl the rates are fetched with. A package may build in its path.
 const CURL: &str = match option_env!("KOTODAMA_CURL") {
@@ -34,66 +30,19 @@ const CURL: &str = match option_env!("KOTODAMA_CURL") {
 /// How long after a failed fetch the next currency query tries again.
 const RETRY: Duration = Duration::from_secs(10 * 60);
 
-enum Event {
-    Message(ToExtension),
-    /// A fetch of the exchange rates finished.
-    Fetched(Result<rates::Table, String>),
-    /// The Daemon hung up, or its messages can't be read any more.
-    Hangup,
-}
-
-/// Keeps resident memory down, as the Daemon does: one malloc arena, and no
-/// transparent huge pages.
-fn lean_memory() {
-    #[cfg(target_os = "linux")]
-    // SAFETY: both calls only set process-wide flags, before any thread starts.
-    unsafe {
-        libc::prctl(libc::PR_SET_THP_DISABLE, 1, 0, 0, 0);
-        #[cfg(target_env = "gnu")]
-        libc::mallopt(libc::M_ARENA_MAX, 1);
-    }
-}
+/// A fetch of the exchange rates finished.
+struct Fetched(Result<rates::Table, String>);
 
 fn main() -> ExitCode {
-    lean_memory();
-    match run() {
-        Ok(()) => ExitCode::SUCCESS,
-        Err(err) => {
-            eprintln!("kotodama-calculator: {err}");
-            ExitCode::FAILURE
-        }
-    }
+    kotodama_extension::main("kotodama-calculator", run)
 }
 
 fn run() -> Result<(), kotodama_protocol::Error> {
-    let channel = Channel::handshake(io::stdin(), io::stdout(), &Hello::new(&WireFormat::ALL))?;
-    let (mut reader, writer) = channel.split();
-    let (events, received) = mpsc::channel();
-
-    let messages = events.clone();
-    thread::Builder::new()
-        .name("read".into())
-        .stack_size(256 * 1024)
-        .spawn(move || {
-            loop {
-                match reader.recv::<ToExtension>() {
-                    Ok(Some(message)) => {
-                        if messages.send(Event::Message(message)).is_err() {
-                            return;
-                        }
-                    }
-                    Ok(None) => break,
-                    Err(err @ kotodama_protocol::Error::Decode { .. }) => {
-                        eprintln!("kotodama-calculator: skipped a message: {err}");
-                    }
-                    Err(err) => {
-                        eprintln!("kotodama-calculator: {err}");
-                        break;
-                    }
-                }
-            }
-            let _ = messages.send(Event::Hangup);
-        })?;
+    let Connection {
+        writer,
+        events,
+        received,
+    } = kotodama_extension::connect()?;
 
     let rates = Rates::default();
     let mut extension = Extension {
@@ -109,7 +58,7 @@ fn run() -> Result<(), kotodama_protocol::Error> {
     for event in received {
         match event {
             Event::Message(message) => extension.message(message)?,
-            Event::Fetched(fetched) => extension.fetched(fetched)?,
+            Event::Own(Fetched(fetched)) => extension.fetched(fetched)?,
             Event::Hangup => break,
         }
     }
@@ -133,24 +82,16 @@ impl Default for Settings {
 impl Settings {
     /// Reads the config table. A setting of the wrong shape is logged and left
     /// at its default.
-    fn from_config(config: &Table) -> Self {
+    fn from_config(table: &Table) -> Self {
         let mut settings = Settings::default();
-        match config.get("network") {
-            Some(Value::Bool(network)) => settings.network = *network,
-            Some(_) => warn("`network` should be true or false"),
-            None => {}
+        if let Some(network) = config::boolean(table, "network") {
+            settings.network = network;
         }
-        match config.get("rates_url") {
-            Some(Value::String(url)) => settings.rates_url.clone_from(url),
-            Some(_) => warn("`rates_url` should be a string"),
-            None => {}
+        if let Some(url) = config::string(table, "rates_url") {
+            url.clone_into(&mut settings.rates_url);
         }
         settings
     }
-}
-
-fn warn(message: &str) {
-    eprintln!("kotodama-calculator: config: {message}");
 }
 
 /// Where the exchange rates stand.
@@ -167,14 +108,6 @@ struct Exchange {
 }
 
 /// `$XDG_CACHE_HOME/kotodama/calculator/rates.json`.
-fn cache_path() -> Option<PathBuf> {
-    let home = std::env::var_os("XDG_CACHE_HOME")
-        .filter(|dir| !dir.is_empty())
-        .map(PathBuf::from)
-        .or_else(|| std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".cache")))?;
-    Some(home.join("kotodama/calculator/rates.json"))
-}
-
 /// A Live query waiting for exchange rates.
 struct Waiting {
     id: u64,
@@ -183,11 +116,11 @@ struct Waiting {
 }
 
 struct Extension {
-    writer: ChannelWriter<Stdout>,
+    writer: Writer,
     calculator: Calculator,
     rates: Rates,
     settings: Settings,
-    events: Sender<Event>,
+    events: Sender<Event<Fetched>>,
     exchange: Exchange,
     waiting: Option<Waiting>,
     /// The last answer sent, which an Action most likely runs on.
@@ -271,7 +204,7 @@ impl Extension {
     /// A query converted currency: loads the cached rates the first time, and
     /// fetches them if they are missing or more than a day old.
     fn want_rates(&mut self) {
-        let cache = cache_path();
+        let cache = dirs::cache("calculator").map(|dir| dir.join("rates.json"));
         if !self.exchange.read_cache {
             self.exchange.read_cache = true;
             if let Some((rates, fetched)) = cache.as_deref().and_then(rates::load) {
@@ -295,9 +228,10 @@ impl Extension {
         let events = self.events.clone();
         let spawned = thread::Builder::new()
             .name("rates".into())
-            .stack_size(256 * 1024)
+            .stack_size(STACK_SIZE)
             .spawn(move || {
-                let _ = events.send(Event::Fetched(rates::fetch(CURL, &url, cache.as_deref())));
+                let fetched = rates::fetch(CURL, &url, cache.as_deref());
+                let _ = events.send(Event::Own(Fetched(fetched)));
             });
         if spawned.is_err() {
             self.exchange.fetching = false;
@@ -316,7 +250,7 @@ impl Extension {
                 self.exchange.failed = None;
             }
             Err(err) => {
-                eprintln!("kotodama-calculator: {err}");
+                kotodama_extension::log!("{err}");
                 self.exchange.failed = Some(Instant::now());
             }
         }

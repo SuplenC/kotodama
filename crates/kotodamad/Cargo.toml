@@ -7,9 +7,9 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
+kotodama-extension = { path = "../kotodama-extension", features = ["watch"] }
 kotodama-protocol = { path = "../kotodama-protocol" }
 log = "0.4.34"
-notify = "8"
 nucleo-matcher = "0.3.1"
 regex = "1.13.1"
 serde = { version = "1.0.229", features = ["derive"] }

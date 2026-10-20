@@ -18,8 +18,8 @@ The Daemon. Maintained by hand: fix stale lines when you find them, and update t
 - `keywords.rs`: Aliases and Quicklinks from config (`Keywords`, `Quicklink::command`, `percent_encode`).
 - `open_view.rs`: `kotodama open --view` (ADR 0014): `ViewName` (`<extension>/<item>`), `Opening`. The Daemon side is `daemon.rs:Daemon::open_on_view` (runs the Item's primary Action, holds `Open`/`Toggle` back until the View is there, `OPEN_VIEW_TIMEOUT`).
 - `arguments.rs`: text after a keyword filling an Action's Arguments, and the form for missing ones.
-- `config.rs`: `load` (merge every `*.toml` in config dirs), `watch`, `extension_table` (`[extensions.<name>]`).
-- `discovery.rs`: `discover` (`<dir>/*/manifest.toml`), `watch` for Extension dirs; `Found`.
+- `config.rs`: `load` (merge every `*.toml` in config dirs), `watch` (a `kotodama_extension::watch::Watcher` on thread `config`), `extension_table` (`[extensions.<name>]`).
+- `discovery.rs`: `discover` (`<dir>/*/manifest.toml`), `watch` for Extension dirs (a `Watcher` on thread `extensions`); `Found`.
 - `host.rs`: `Processes`, spawning Extension processes with reader/writer threads.
 - `link.rs:pump`: post-handshake connection threads (Extension or Front end).
 - `server.rs`: `listen`, `serve`, the Front end Unix socket.

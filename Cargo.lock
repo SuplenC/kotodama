@@ -678,9 +678,8 @@ dependencies = [
 name = "kotodama-apps"
 version = "0.1.0"
 dependencies = [
+ "kotodama-extension",
  "kotodama-protocol",
- "libc",
- "notify",
  "tempfile",
 ]
 
@@ -690,9 +689,9 @@ version = "0.1.0"
 dependencies = [
  "fend-core",
  "jiff",
+ "kotodama-extension",
  "kotodama-protocol",
  "kotodamad",
- "libc",
  "serde_json",
  "tempfile",
 ]
@@ -703,9 +702,9 @@ version = "0.1.0"
 dependencies = [
  "criterion",
  "image",
+ "kotodama-extension",
  "kotodama-protocol",
  "kotodamad",
- "libc",
  "rustix",
  "serde",
  "serde_json",
@@ -716,13 +715,22 @@ dependencies = [
 ]
 
 [[package]]
-name = "kotodama-folders"
+name = "kotodama-extension"
 version = "0.1.0"
 dependencies = [
  "kotodama-protocol",
- "kotodamad",
  "libc",
  "notify",
+ "tempfile",
+]
+
+[[package]]
+name = "kotodama-folders"
+version = "0.1.0"
+dependencies = [
+ "kotodama-extension",
+ "kotodama-protocol",
+ "kotodamad",
  "shlex",
  "tempfile",
  "toml",
@@ -760,10 +768,10 @@ version = "0.1.0"
 dependencies = [
  "criterion",
  "kotodama-calculator",
+ "kotodama-extension",
  "kotodama-protocol",
  "libc",
  "log",
- "notify",
  "nucleo-matcher",
  "regex",
  "rustix",

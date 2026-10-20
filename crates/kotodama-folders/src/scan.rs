@@ -5,7 +5,6 @@
 //! not what is below it: a project's files are never watched, however many
 //! there are, and neither is anything below the depth.
 
-use std::collections::HashSet;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, RecvTimeoutError, Sender};
@@ -13,8 +12,9 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
-use notify::event::{CreateKind, EventKind, ModifyKind, RemoveKind};
-use notify::{RecommendedWatcher, RecursiveMode, Watcher};
+use kotodama_extension::STACK_SIZE;
+use kotodama_extension::watch::notify::event::{CreateKind, EventKind, ModifyKind, RemoveKind};
+use kotodama_extension::watch::{Event, RecursiveMode, Watched, Watcher};
 
 use crate::projects::{self, Project, ProjectFolder};
 use crate::scripts::{self, Script};
@@ -57,6 +57,7 @@ pub fn scan(folders: &Folders) -> (Scan, Vec<PathBuf>) {
 
 enum Request {
     Folders(Folders),
+    /// The folders changed.
     Touched,
 }
 
@@ -68,27 +69,29 @@ impl Scanner {
     pub fn start(scanned: impl Fn(Scan) + Send + 'static) -> io::Result<Self> {
         let (requests, received) = mpsc::channel();
         let touched = requests.clone();
-        let filter = Arc::new(Mutex::new(Filter::default()));
-        let watching = Arc::clone(&filter);
-        let watcher = notify::recommended_watcher(move |event: notify::Result<notify::Event>| {
-            let Ok(event) = event else {
-                return;
-            };
-            let filter = watching.lock().unwrap_or_else(|poison| poison.into_inner());
-            if filter.matters(&event) {
+        // The folders searched, for telling which changes matter.
+        let searched = Arc::new(Mutex::new(Folders::default()));
+        let filtering = Arc::clone(&searched);
+        // No thread of the watcher's own: this one waits for the folders to
+        // settle.
+        let watcher = Watcher::new(
+            RecursiveMode::NonRecursive,
+            move |event, watched| {
+                let folders = filtering
+                    .lock()
+                    .unwrap_or_else(|poison| poison.into_inner());
+                matters(&folders, watched, event)
+            },
+            move || {
                 let _ = touched.send(Request::Touched);
-            }
-        })
-        .map_err(|err| eprintln!("kotodama-folders: not watching the folders: {err}"))
+            },
+        )
+        .map_err(|err| kotodama_extension::log!("not watching the folders: {err}"))
         .ok();
         thread::Builder::new()
             .name("scan".into())
-            .stack_size(256 * 1024)
+            .stack_size(STACK_SIZE)
             .spawn(move || {
-                let mut watch = Watch {
-                    watcher,
-                    watched: HashSet::new(),
-                };
                 let mut folders = Folders::default();
                 while let Ok(request) = received.recv() {
                     match request {
@@ -105,23 +108,21 @@ impl Scanner {
                     let (scan, mut dirs) = scan(&folders);
                     // A folder that isn't there yet is watched for through
                     // its parent.
-                    for folder in folders
-                        .projects
-                        .iter()
-                        .map(|folder| &folder.path)
-                        .chain(&folders.scripts)
-                    {
-                        if !folder.is_dir()
-                            && let Some(parent) = folder.parent()
-                        {
-                            dirs.push(parent.to_owned());
-                        }
+                    dirs.extend(
+                        folders
+                            .projects
+                            .iter()
+                            .map(|folder| &folder.path)
+                            .chain(&folders.scripts)
+                            .filter(|folder| !folder.is_dir())
+                            .cloned(),
+                    );
+                    if let Some(watcher) = &watcher {
+                        watcher.watch(dirs);
                     }
-                    watch.set(dirs);
-                    *filter.lock().unwrap_or_else(|poison| poison.into_inner()) = Filter {
-                        folders: folders.clone(),
-                        watched: watch.watched.clone(),
-                    };
+                    folders.clone_into(
+                        &mut searched.lock().unwrap_or_else(|poison| poison.into_inner()),
+                    );
                     scanned(scan);
                 }
             })?;
@@ -134,87 +135,46 @@ impl Scanner {
     }
 }
 
-struct Watch {
-    watcher: Option<RecommendedWatcher>,
-    watched: HashSet<PathBuf>,
-}
-
-impl Watch {
-    /// Watches `dirs`, each on its own, and nothing else.
-    fn set(&mut self, dirs: Vec<PathBuf>) {
-        let Some(watcher) = &mut self.watcher else {
-            return;
-        };
-        let dirs: HashSet<PathBuf> = dirs.into_iter().collect();
-        for gone in self.watched.difference(&dirs) {
-            let _ = watcher.unwatch(gone);
-        }
-        let mut watched = HashSet::with_capacity(dirs.len());
-        for dir in dirs {
-            if self.watched.contains(&dir)
-                || watcher.watch(&dir, RecursiveMode::NonRecursive).is_ok()
-            {
-                watched.insert(dir);
-            }
-        }
-        self.watched = watched;
+/// Whether `event` can change what a search of `folders` finds. In a scripts
+/// folder any change can, a header edit included. In a projects folder only a
+/// folder coming or going can, or the files that make a repository or list
+/// its submodules, so saving or deleting files at the top of a project
+/// searches nothing.
+fn matters(folders: &Folders, watched: &Watched, event: &Event) -> bool {
+    if matches!(event.kind, EventKind::Access(_)) {
+        return false;
     }
-}
-
-/// What the watcher needs to tell which changes matter.
-#[derive(Default)]
-struct Filter {
-    folders: Folders,
-    /// The folders watched.
-    watched: HashSet<PathBuf>,
-}
-
-impl Filter {
-    /// Whether `event` can change what a search finds. In a scripts folder
-    /// any change can, a header edit included. In a projects folder only a
-    /// folder coming or going can, or the files that make a repository or
-    /// list its submodules, so saving or deleting files at the top of a
-    /// project searches nothing.
-    fn matters(&self, event: &notify::Event) -> bool {
-        if matches!(event.kind, EventKind::Access(_)) {
+    event.paths.iter().any(|path| {
+        if folders
+            .scripts
+            .iter()
+            .any(|folder| path.starts_with(folder))
+        {
+            return true;
+        }
+        if !folders
+            .projects
+            .iter()
+            .any(|folder| path.starts_with(&folder.path))
+        {
             return false;
         }
-        event.paths.iter().any(|path| {
-            if self
-                .folders
-                .scripts
-                .iter()
-                .any(|folder| path.starts_with(folder))
-            {
-                return true;
-            }
-            if !self
-                .folders
-                .projects
-                .iter()
-                .any(|folder| path.starts_with(&folder.path))
-            {
-                return false;
-            }
-            let telling = path
-                .file_name()
-                .is_some_and(|name| name == ".git" || name == ".gitmodules" || name == "HEAD");
-            // What is gone can't be looked at: it was a folder if it was
-            // watched.
-            let folder = || self.watched.contains(path) || Path::is_dir(path);
-            telling
-                || match event.kind {
-                    EventKind::Create(CreateKind::Folder)
-                    | EventKind::Remove(RemoveKind::Folder) => true,
-                    EventKind::Create(CreateKind::File) | EventKind::Remove(RemoveKind::File) => {
-                        false
-                    }
-                    EventKind::Create(_)
-                    | EventKind::Remove(_)
-                    | EventKind::Modify(ModifyKind::Name(_)) => folder(),
-                    EventKind::Modify(_) => false,
-                    _ => true,
+        let telling = path
+            .file_name()
+            .is_some_and(|name| name == ".git" || name == ".gitmodules" || name == "HEAD");
+        // What is gone can't be looked at: it was a folder if it was watched.
+        let folder = || watched.contains(path) || Path::is_dir(path);
+        telling
+            || match event.kind {
+                EventKind::Create(CreateKind::Folder) | EventKind::Remove(RemoveKind::Folder) => {
+                    true
                 }
-        })
-    }
+                EventKind::Create(CreateKind::File) | EventKind::Remove(RemoveKind::File) => false,
+                EventKind::Create(_)
+                | EventKind::Remove(_)
+                | EventKind::Modify(ModifyKind::Name(_)) => folder(),
+                EventKind::Modify(_) => false,
+                _ => true,
+            }
+    })
 }
