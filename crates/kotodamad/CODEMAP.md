@@ -7,10 +7,10 @@ The Daemon. Maintained by hand: fix stale lines when you find them, and update t
 - `daemon.rs`: the state machine. `Daemon::handle(Event)` is the one entry point; `Event`, `Output`, `Launcher`/`Desktop` traits.
   - `Candidate` and `Candidate::rank`: the full Result order (Tier, then Learned choices/Frecency, then kind order; ADR 0006, 0011).
   - `Session`: per-Front-end state (query, shown Results, open Views); `FromFrontEnd::Viewport` handling keeps visible rows stable (ADR 0003).
-  - `Daemon::query`, `Daemon::empty_query`: searching, and what shows before typing.
+  - `Daemon::query`, `Daemon::empty_query`: searching, and what shows before typing. `Daemon::refresh` narrows a search to the last one's matches (`Narrowing`, forgotten on the empty query); `Daemon::add_near_misses` adds Near misses when real matches leave rows empty (ADR 0013).
   - Own Results under `OWN = "kotodama"` (ADR 0005): `FORGET`, `CLEAR_HISTORY`, `UNDO` (ADR 0010). Limits `MAX_RESULTS`, `MAX_LIVE_RESULTS`.
-- `rank.rs`: match quality. `Tier`, `Query` (folding, `searches_subtitles`), `Haystack`, `fold_text`.
-- `index.rs`: `Index`, every Indexed item in memory, searched with nucleo; `keyed` (keywords), `identified` (shared identities, ADR 0008).
+- `rank.rs`: match quality. `Tier`, `Query` (folding, `searches_subtitles`), `Letters` (character sets as bits), `Filter` (what lets a search skip Items before nucleo), `Haystack`, `fold_text`. `Tiers::near_miss`, `Tiers::near_miss_highlights` and `LETTERS_PER_TYPO`: typo tolerance (ADR 0013).
+- `index.rs`: `Index`, every Indexed item in memory, searched with nucleo, with dense per-slot initials and every-letter `Letters` arrays (`starting_with`); `keyed` (keywords), `identified` (shared identities, ADR 0008).
 - `history.rs`: `History` on disk (`$XDG_STATE_HOME/kotodama/history.json`); `Habit::frecency`, `History::learned` (Learned choices), `Settings::from_config`.
 - `clock.rs`: `Clock`, `When` (time of day for Frecency, ADR 0009).
 - `kind_order.rs`: `KindOrder::place`, configurable kind order for equal matches.

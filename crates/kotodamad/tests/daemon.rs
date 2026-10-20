@@ -33,11 +33,29 @@ fn indexed_items_are_found_by_a_fuzzy_query_best_match_first() {
     let ui = h.front_end();
 
     let rows = h.query(&ui, "firef");
-    assert_eq!(titles(&rows), ["Firefox"]);
+    // Fire Alarm is a near miss: "fire" with an extra letter.
+    assert_eq!(titles(&rows), ["Firefox", "Fire Alarm"]);
     assert_eq!(rows[0].extension, "apps");
     assert_eq!(rows[0].highlights, [0, 1, 2, 3, 4]);
 
     assert_eq!(titles(&h.query(&ui, "fi")).len(), 3);
+}
+
+#[test]
+fn a_near_miss_highlights_the_words_it_nearly_matches() {
+    let mut h = Harness::new(vec![plain("apps")]);
+    let apps = h.up(0);
+    h.add(&apps, vec![app("Visual Studio Code"), app("Steam")]);
+    let ui = h.front_end();
+
+    let rows = h.query(&ui, "visaul studoi");
+    assert_eq!(titles(&rows), ["Visual Studio Code"]);
+    assert_eq!(rows[0].highlights, [0, 1, 2, 3, 4, 5, 7, 8, 9, 10, 11, 12]);
+
+    // A word may start a longer one: "steem" is "steam" with a wrong letter.
+    let rows = h.query(&ui, "steem");
+    assert_eq!(titles(&rows), ["Steam"]);
+    assert_eq!(rows[0].highlights, [0, 1, 2, 3, 4]);
 }
 
 fn calculator() -> Found {
@@ -196,6 +214,37 @@ fn a_late_result_goes_below_the_visible_rows_however_well_it_scores() {
         shown.split(',').take(2).collect::<Vec<_>>().join(",")
     );
     assert_eq!(titles[2], "rust", "first row below the visible ones");
+}
+
+#[test]
+fn late_results_keep_a_near_miss_on_screen_though_real_matches_now_fill_the_rows() {
+    let mut h = Harness::new(vec![plain("apps"), web()]);
+    let apps = h.up(0);
+    let web = h.up(1);
+    h.add(&apps, vec![app("G Stream Deck"), app("G Steam")]);
+    let ui = h.front_end();
+    h.front_end_sends(&ui, FromFrontEnd::Viewport { top: 0, rows: 2 });
+
+    assert_eq!(
+        titles(&h.query(&ui, "g stream")),
+        ["G Stream Deck", "G Steam"]
+    );
+    h.advance(Duration::from_millis(100));
+    let (id, ..) = live_queries(&web)[0].clone();
+    h.send(
+        &web,
+        FromExtension::LiveResults {
+            live_query: id,
+            results: vec![
+                live("stream one", 1.0, false),
+                live("stream two", 1.0, false),
+            ],
+            done: true,
+        },
+    );
+
+    let rows = ui.results().unwrap();
+    assert_eq!(titles(&rows)[..2], ["G Stream Deck", "G Steam"]);
 }
 
 #[test]

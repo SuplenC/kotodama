@@ -8,7 +8,7 @@ use nucleo_matcher::Matcher;
 use nucleo_matcher::pattern::Pattern;
 
 use crate::daemon::ExtensionId;
-use crate::rank::{Filter, Haystack, Matched};
+use crate::rank::{Filter, Haystack, Letters, Matched};
 
 /// Where an Indexed item lives. Stable until the Item is removed.
 pub type Slot = u32;
@@ -32,6 +32,14 @@ impl Entry {
 #[derive(Default)]
 pub struct Index {
     slots: Vec<Option<Entry>>,
+    /// The word initials of each slot's Item, as [`Haystack::initials`] gives
+    /// them, or none for an empty slot. Kept apart from the Entries, so looking
+    /// for near misses passes over most slots without reading them.
+    initials: Vec<Letters>,
+    /// Every letter of each slot's Item, as [`Haystack::every_letter`] gives
+    /// them, or none for an empty slot: a search passes over the slots that lack
+    /// one of the query's without reading them.
+    letters: Vec<Letters>,
     free: Vec<Slot>,
     /// Each Extension's Items by id.
     ids: Vec<HashMap<String, Slot>>,
@@ -88,6 +96,15 @@ impl Index {
                 slot
             }
         };
+        if self.initials.len() <= slot as usize {
+            self.initials.resize(slot as usize + 1, Letters::NONE);
+            self.letters.resize(slot as usize + 1, Letters::NONE);
+        }
+        let haystack = self.entry(slot).map(|entry| &entry.haystack);
+        let initials = haystack.map_or(Letters::NONE, Haystack::initials);
+        let letters = haystack.map_or(Letters::NONE, Haystack::every_letter);
+        self.initials[slot as usize] = initials;
+        self.letters[slot as usize] = letters;
         if let Some(keyword) = keyword {
             self.keywords.entry(keyword).or_default().push(slot);
         }
@@ -110,6 +127,8 @@ impl Index {
     fn empty(&mut self, slot: Slot) {
         self.unkey(slot);
         self.slots[slot as usize] = None;
+        self.initials[slot as usize] = Letters::NONE;
+        self.letters[slot as usize] = Letters::NONE;
         self.free.push(slot);
     }
 
@@ -154,6 +173,16 @@ impl Index {
         self.ids[extension.0].get(id).copied()
     }
 
+    /// The slots, in order, whose Item has a word starting with one of
+    /// `initials`, as [`Haystack::initials`] gives them.
+    pub fn starting_with(&self, initials: Letters) -> impl Iterator<Item = Slot> {
+        self.initials
+            .iter()
+            .enumerate()
+            .filter(move |&(_, &item)| item.meets(initials))
+            .map(|(slot, _)| slot as Slot)
+    }
+
     pub fn entry(&self, slot: Slot) -> Option<&Entry> {
         self.slots.get(slot as usize)?.as_ref()
     }
@@ -178,7 +207,11 @@ impl Index {
         out: &mut Vec<(Slot, u32, Matched)>,
     ) {
         let mut score = |slot: Slot| {
-            if let Some(entry) = self.entry(slot)
+            if self
+                .letters
+                .get(slot as usize)
+                .is_some_and(|&letters| filter.may_match(letters))
+                && let Some(entry) = self.entry(slot)
                 && let Some((score, matched)) = entry.haystack.score(pattern, matcher, filter)
             {
                 out.push((slot, score, matched));

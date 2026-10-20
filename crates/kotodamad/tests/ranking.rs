@@ -11,7 +11,7 @@ use std::time::Duration;
 use common::*;
 use kotodama_protocol::*;
 use kotodamad::daemon::Event;
-use kotodamad::rank::{Haystack, Matched, Query, Tiers};
+use kotodamad::rank::{Haystack, Matched, Query, Tier, Tiers};
 
 const DAY: Duration = Duration::from_secs(24 * 60 * 60);
 
@@ -348,11 +348,89 @@ fn a_missing_letter_still_finds_it() {
     assert_eq!(w.first("firfox"), "Firefox");
 }
 
+/// T5
+#[test]
+fn two_letters_swapped_still_find_it() {
+    let mut w = World::new(&["Firefox"]);
+    assert_eq!(rows(&mut w, "fierfox"), ["Firefox"]);
+}
+
+/// T6
+#[test]
+fn a_wrong_letter_still_finds_it() {
+    let mut w = World::new(&["Firefox", "Calculator"]);
+    assert_eq!(rows(&mut w, "calculater"), ["Calculator"]);
+}
+
+/// T7
+#[test]
+fn an_extra_letter_still_finds_it() {
+    let mut w = World::new(&["Firefox"]);
+    assert_eq!(rows(&mut w, "firefoxx"), ["Firefox"]);
+}
+
 /// T8
 #[test]
 fn a_real_match_comes_first() {
     let mut w = World::new(&["Steam", "Stream Deck"]);
-    assert_eq!(w.first("stream"), "Stream Deck");
+    assert_eq!(rows(&mut w, "stream"), ["Stream Deck", "Steam"]);
+}
+
+/// T8: however much the near miss is used.
+#[test]
+fn use_never_lifts_a_near_miss_above_a_real_match() {
+    let mut w = World::new(&["Steam", "Stream Deck"]);
+    w.daily(30, "steam", "Steam");
+    assert_eq!(rows(&mut w, "stream"), ["Stream Deck", "Steam"]);
+}
+
+/// T9
+#[test]
+fn a_query_has_at_most_one_typo_per_four_letters() {
+    let mut w = World::new(&["Firefox", "Calculator"]);
+    assert_eq!(
+        rows(&mut w, "fri"),
+        Vec::<String>::new(),
+        "3 letters, no typo"
+    );
+    assert_eq!(rows(&mut w, "frie"), ["Firefox"], "4 letters, one typo");
+    assert_eq!(
+        rows(&mut w, "cakcuka"),
+        Vec::<String>::new(),
+        "7 letters, one typo"
+    );
+    assert_eq!(rows(&mut w, "cakcukat"), ["Calculator"], "8 letters, two");
+}
+
+/// T9: each word of the query has its own typos.
+#[test]
+fn every_word_may_have_its_typos() {
+    let mut w = World::new(&["Fire Alarm", "Firefox"]);
+    assert_eq!(rows(&mut w, "frie alram"), ["Fire Alarm"]);
+    assert_eq!(
+        rows(&mut w, "fire arl"),
+        Vec::<String>::new(),
+        "3 letters of a word, no typo, however long the query"
+    );
+}
+
+/// T9: people rarely mistype the first letter, and holding to it keeps a
+/// short query from nearly matching most words.
+#[test]
+fn the_first_letter_is_never_a_typo() {
+    let mut w = World::new(&["Firefox"]);
+    assert_eq!(rows(&mut w, "virefox"), Vec::<String>::new());
+    assert_eq!(rows(&mut w, "ifrefox"), Vec::<String>::new());
+}
+
+/// Near misses rank below every real match, so they aren't looked for once
+/// real matches fill the rows on screen.
+#[test]
+fn near_misses_only_fill_rows_that_real_matches_leave_empty() {
+    let mut w = World::new(&["Steam", "Stream Deck"]);
+    w.h.front_end_sends(&w.ui, FromFrontEnd::Viewport { top: 0, rows: 1 });
+    w.ui.drain();
+    assert_eq!(rows(&mut w, "stream"), ["Stream Deck"]);
 }
 
 // Several words.
@@ -1125,7 +1203,40 @@ const QUERIES: &[&str] = &[
     "fi ",
     "mon sys",
     "dis",
+    "firfox",
+    "fierfox",
+    "calculater",
+    "stream",
+    "termnal",
+    "setings",
+    "sistem monitr",
 ];
+
+/// A one-letter query only matches at a word start; the next letter may
+/// match inside a word (#80).
+#[test]
+fn typing_on_from_one_letter_finds_matches_inside_words() {
+    let mut w = World::new(&["Terminal", "Steam"]);
+    assert_eq!(rows(&mut w, "t"), ["Terminal"]);
+    assert_eq!(
+        rows(&mut w, "te"),
+        World::new(&["Terminal", "Steam"]).rows("te")
+    );
+    assert_eq!(rows(&mut w, "te"), ["Terminal", "Steam"]);
+}
+
+#[test]
+fn typing_a_query_letter_by_letter_gives_the_rows_typing_it_at_once_does() {
+    let mut typed = World::new(DESKTOP);
+    for query in QUERIES {
+        let mut letters = String::new();
+        for c in query.chars() {
+            letters.push(c);
+            let rows = rows(&mut typed, &letters);
+            assert_eq!(rows, World::new(DESKTOP).rows(&letters), "{letters:?}");
+        }
+    }
+}
 
 #[test]
 fn the_same_query_gives_the_same_rows() {
@@ -1145,8 +1256,14 @@ fn with_nothing_learned_a_better_match_is_never_below_a_worse_one() {
         let ranked: Vec<u8> = rows
             .iter()
             .map(|row| {
+                let haystack = Haystack::new(&row.item);
                 tiers
-                    .item(&Haystack::new(&row.item), &row.item, &folded, Matched::ALL)
+                    .item(&haystack, &row.item, &folded, Matched::ALL)
+                    .or_else(|| {
+                        tiers
+                            .near_miss(&haystack, &row.item, &folded)
+                            .then_some(Tier::NearMiss)
+                    })
                     .unwrap_or_else(|| panic!("{:?} doesn't match {query:?}", row.item.title))
                     .coarse()
             })

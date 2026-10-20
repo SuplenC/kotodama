@@ -373,14 +373,7 @@ struct Session {
     /// How many rows, from the first, late Results may not move: those on
     /// screen and those scrolled past.
     rows: usize,
-    /// The slots that matched `narrowed_query` at index version
-    /// `narrowed_version`. A query that only adds to it can only match a
-    /// subset, so the next search looks at these alone.
-    narrowed: Vec<Slot>,
-    narrowed_query: String,
-    narrowed_version: u64,
-    /// Whether `narrowed_query` searched subtitles.
-    narrowed_subtitles: bool,
+    narrowing: Narrowing,
     /// By Extension.
     live: Vec<Live>,
     /// The Results last sent, in order, and whether each is an answer.
@@ -401,16 +394,71 @@ impl Session {
             self.hung.set(true);
         }
     }
+}
 
-    fn can_narrow(&self, version: u64) -> bool {
+/// What a Session's last search of the Index found. A query that only adds
+/// to that one can only match a subset, so the next search looks at those
+/// alone.
+#[derive(Default)]
+struct Narrowing {
+    /// The slots that matched `query` at index version `version`, in slot
+    /// order.
+    matched: Vec<Slot>,
+    query: String,
+    version: u64,
+    /// Whether `query` searched subtitles.
+    subtitles: bool,
+    /// Whether `query` was one letter, which matches only at a word start, so
+    /// `matched` lacks the Items a longer query matches inside a word.
+    by_letter: bool,
+    /// The slots that matched `query` or nearly did, in slot order, if near
+    /// misses were looked for. A query that only adds to it, with as many
+    /// typos for each word, can only nearly match these.
+    nearly: Vec<Slot>,
+    /// `query` as tiers are worked out from, if `nearly` is for it.
+    nearly_for: Option<rank::Query>,
+}
+
+impl Narrowing {
+    /// Whether `query`, folded as `folded`, need only search `matched` at
+    /// index version `version`.
+    fn narrows(&self, query: &str, folded: &rank::Query, version: u64) -> bool {
         const SYNTAX: &[char] = &['^', '$', '!', '\'', '\\'];
         // Subtitles are searched from a few letters on, so the matches of a
         // query too short for them may lack some of this one's.
-        !self.narrowed_query.is_empty()
-            && self.narrowed_subtitles == self.folded.searches_subtitles()
-            && self.narrowed_version == version
-            && self.query.starts_with(&self.narrowed_query)
-            && !self.query.contains(SYNTAX)
+        !self.query.is_empty()
+            && self.subtitles == folded.searches_subtitles()
+            && !self.by_letter
+            && self.version == version
+            && query.starts_with(&self.query)
+            && !query.contains(SYNTAX)
+    }
+
+    /// Remembers what `query`, folded as `folded`, matched at index version
+    /// `version`.
+    fn found(
+        &mut self,
+        query: &str,
+        folded: &rank::Query,
+        version: u64,
+        matched: impl Iterator<Item = Slot>,
+    ) {
+        self.matched.clear();
+        self.matched.extend(matched);
+        self.query.clear();
+        self.query.push_str(query);
+        self.version = version;
+        self.subtitles = folded.searches_subtitles();
+        self.by_letter = folded.filter().by_letter();
+    }
+
+    /// Forgets the last search, as the empty query does: the next one starts
+    /// from every Item.
+    fn forget(&mut self) {
+        self.matched.clear();
+        self.query.clear();
+        self.nearly.clear();
+        self.nearly_for = None;
     }
 }
 
@@ -1264,10 +1312,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             pattern: Pattern::default(),
             max_score: 0,
             rows: DEFAULT_ROWS,
-            narrowed: Vec::new(),
-            narrowed_query: String::new(),
-            narrowed_version: 0,
-            narrowed_subtitles: false,
+            narrowing: Narrowing::default(),
             live: self.extensions.iter().map(|_| Live::default()).collect(),
             shown: Vec::new(),
             via_alias: None,
@@ -2267,6 +2312,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
         session.update = Update::None;
 
         if session.query.is_empty() {
+            session.narrowing.forget();
             let mut ranked = self.empty_query(&session, now);
             if !fresh {
                 // The rows on screen stay put, as for any query.
@@ -2293,9 +2339,11 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
 
         let mut candidates = Vec::new();
         self.scored.clear();
-        let within = session
-            .can_narrow(self.index.version())
-            .then_some(session.narrowed.as_slice());
+        let version = self.index.version();
+        let narrow = session
+            .narrowing
+            .narrows(&session.query, &session.folded, version);
+        let within = narrow.then_some(session.narrowing.matched.as_slice());
         self.index.search(
             &session.pattern,
             &mut self.matcher,
@@ -2303,13 +2351,12 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             within,
             &mut self.scored,
         );
-        session.narrowed.clear();
-        session
-            .narrowed
-            .extend(self.scored.iter().map(|&(slot, ..)| slot));
-        session.narrowed_query.clone_from(&session.query);
-        session.narrowed_version = self.index.version();
-        session.narrowed_subtitles = session.folded.searches_subtitles();
+        session.narrowing.found(
+            &session.query,
+            &session.folded,
+            version,
+            self.scored.iter().map(|&(slot, ..)| slot),
+        );
         for &(slot, score, matched) in &self.scored {
             if let Some(entry) = self.index.entry(slot)
                 && let Some(tier) =
@@ -2377,6 +2424,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
                 ));
             }
         }
+        let indexed = self.add_near_misses(&mut session, &mut candidates, indexed, narrow, fresh);
         let primary = self.learn(&mut session, &mut candidates, indexed, now);
 
         let mut answers: Vec<Candidate> = Vec::new();
@@ -2424,6 +2472,108 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             .collect();
         session.send(ToFrontEnd::Results { results });
         self.sessions.insert(id, session);
+    }
+
+    /// Adds the near misses of the session's query, Indexed items and the
+    /// Daemon's own, to `candidates`, unless the real matches already fill the
+    /// rows: near misses rank below every real match, so they would never be
+    /// seen, except those on screen when the query hasn't changed (ADR 0003).
+    /// `narrowed` is whether this search narrowed the last one's matches;
+    /// then near misses are looked for among the last one's, if it looked for
+    /// them and allowed as many typos. The candidates before `indexed` are the
+    /// Indexed items, in slot order, and stay so; returns how many there are
+    /// now.
+    fn add_near_misses(
+        &mut self,
+        session: &mut Session,
+        candidates: &mut Vec<Candidate>,
+        indexed: usize,
+        narrowed: bool,
+        fresh: bool,
+    ) -> usize {
+        let last = session.narrowing.nearly_for.take();
+        let narrow =
+            narrowed && last.is_some_and(|last| last.narrows_near_misses_of(&session.folded));
+        let typos = session.folded.tolerates_typos();
+        let look = typos && candidates.len() < session.rows;
+        let mut nearly = std::mem::take(&mut session.narrowing.nearly);
+
+        let Daemon {
+            index,
+            own,
+            tiers,
+            kinds,
+            ..
+        } = self;
+        let folded = &session.folded;
+        let known = &candidates[..];
+        // The near miss `source` is, unless it is a candidate already.
+        let mut near_miss = |source: Source| {
+            let (haystack, item) = match source {
+                Source::Indexed(slot) => {
+                    if known[..indexed]
+                        .binary_search_by_key(&source, |c| c.source)
+                        .is_ok()
+                    {
+                        return None;
+                    }
+                    let entry = index.entry(slot)?;
+                    (&entry.haystack, &entry.item)
+                }
+                Source::Own(n) => {
+                    if known[indexed..].iter().any(|c| c.source == source) {
+                        return None;
+                    }
+                    let own = own.get(n as usize)?;
+                    (&own.haystack, &own.item)
+                }
+                Source::Live(..) => return None,
+            };
+            tiers.near_miss(haystack, item, folded).then(|| {
+                let len = haystack.title.len() as u32;
+                Candidate::new(source, Tier::NearMiss, kinds.place(&item.kind), 0, len)
+            })
+        };
+        let mut found = Vec::new();
+        if look {
+            let (within, all) = if narrow {
+                (&nearly[..], None)
+            } else {
+                (&[][..], Some(index.starting_with(folded.typo_initials())))
+            };
+            let slots = within.iter().copied().chain(all.into_iter().flatten());
+            let own = (0..own.len() as u32).map(Source::Own);
+            found.extend(
+                slots
+                    .map(Source::Indexed)
+                    .chain(own)
+                    .filter_map(&mut near_miss),
+            );
+        } else if typos && !fresh {
+            let shown = session.shown.iter().take(session.rows);
+            found.extend(shown.filter_map(|&(source, _)| near_miss(source)));
+        }
+
+        nearly.clear();
+        if look {
+            nearly.extend(&session.narrowing.matched);
+            nearly.extend(found.iter().filter_map(|candidate| match candidate.source {
+                Source::Indexed(slot) => Some(slot),
+                _ => None,
+            }));
+            nearly.sort_unstable();
+            session.narrowing.nearly_for = Some(session.folded.clone());
+        }
+        session.narrowing.nearly = nearly;
+        // The Indexed items first, in slot order, then the Daemon's own.
+        found.sort_unstable_by_key(|candidate| candidate.source);
+        let own = found.partition_point(|candidate| matches!(candidate.source, Source::Indexed(_)));
+        candidates.extend(found.drain(own..));
+        let added = found.len();
+        candidates.splice(indexed..indexed, found);
+        let indexed = indexed + added;
+        candidates[..indexed].sort_unstable_by_key(|candidate| candidate.source);
+        indexed
     }
 
     /// Applies what the Daemon learned from the user, and the user's
@@ -2882,6 +3032,15 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             self.highlights.dedup();
         } else {
             self.highlights.clear();
+            // A near miss: the words it nearly matches.
+            if session.folded.tolerates_typos() {
+                self.tiers.near_miss_highlights(
+                    haystack,
+                    &item.title,
+                    &session.folded,
+                    &mut self.highlights,
+                );
+            }
         }
         let mut item = item.clone();
         if let Source::Own(n) = source
