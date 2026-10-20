@@ -701,10 +701,13 @@ impl KotodamaSearch {
         // reaches them.
         let views = std::mem::take(&mut self.as_mut().rust_mut().views);
         if let Some(listed) = views.top().and_then(Open::listed) {
-            rows::diff(&mut Signals(self.as_mut()), &listed);
+            rows::diff(&mut QtModel(self.as_mut()), &listed);
         }
         self.as_mut().rust_mut().views = views;
         if same {
+            // `selected` is still the Item selected before the diff: a list
+            // view applies model changes to its current row only when it
+            // lays out, after this, and `selectRow` settles that row first.
             let row = self
                 .selected
                 .as_ref()
@@ -732,7 +735,7 @@ impl KotodamaSearch {
     /// Puts the Results in place of the current rows, by position: see
     /// [`rows::replace`].
     fn replace(self: Pin<&mut Self>, rows: Vec<Row>) {
-        rows::replace(&mut Signals(self), rows);
+        rows::replace(&mut QtModel(self), rows);
     }
 
     /// Tells views the rows in `range` changed, in `roles` or, if empty, in all.
@@ -753,9 +756,9 @@ impl KotodamaSearch {
 
 /// The model's rows, changed between the signals Qt requires around each
 /// change.
-struct Signals<'a>(Pin<&'a mut KotodamaSearch>);
+struct QtModel<'a>(Pin<&'a mut KotodamaSearch>);
 
-impl Model for Signals<'_> {
+impl Model for QtModel<'_> {
     fn rows(&mut self) -> &mut Rows {
         &mut self.0.as_mut().rust_mut().get_mut().rows
     }
@@ -797,15 +800,12 @@ impl Model for Signals<'_> {
         let root = QModelIndex::default();
         // SAFETY: the row moves before `end_move`, as Qt requires; `before`
         // is never `from` or `from + 1`, the moves Qt refuses.
-        unsafe {
-            self.0.as_mut().begin_move_rows(
-                &root,
-                from as i32,
-                from as i32,
-                &root,
-                before as i32,
-            );
-        }
+        let moving = unsafe {
+            self.0
+                .as_mut()
+                .begin_move_rows(&root, from as i32, from as i32, &root, before as i32)
+        };
+        debug_assert!(moving, "Qt refused to move row {from} before {before}");
     }
 
     fn end_move(&mut self) {

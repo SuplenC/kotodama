@@ -250,7 +250,7 @@ impl Rows {
     }
 
     /// Moves row `from` to be row `to`.
-    fn shift(&mut self, from: usize, to: usize) {
+    fn move_row(&mut self, from: usize, to: usize) {
         self.gap_at(from + 1);
         let row = self.head.pop().expect("a row before the gap");
         self.gap_at(to);
@@ -264,9 +264,10 @@ impl Rows {
     }
 }
 
-/// A list model's rows, and the views it tells how they change. Between each
-/// `begin_*` and its `end_*` the rows change as the call says, and only then,
-/// so a view that reads them on any signal finds them as it was told.
+/// A list model's rows, and the (Qt) views it tells how they change. Rows are
+/// inserted, removed or moved between a `begin_*` and its `end_*`, and rows
+/// changed in place before `changed` names them, so a view that reads them
+/// on any signal finds them as it was told.
 pub trait Model {
     fn rows(&mut self) -> &mut Rows;
     fn begin_remove(&mut self, rows: Range<usize>);
@@ -326,7 +327,9 @@ pub trait Fresh {
 }
 
 /// Above this many rows out of place, [`diff`] removes and inserts them
-/// rather than moving each: a move shifts every row between its two places.
+/// rather than moving each: a move shifts every row between its two places,
+/// here and in each view, so many of them cost more than the few delegates
+/// on screen that removing and inserting makes again.
 const MOST_MOVES: usize = 64;
 
 /// Puts `new` in place of the model's rows by key: a row only the old list
@@ -336,7 +339,7 @@ const MOST_MOVES: usize = 64;
 /// listed. For a list View, whose Items stay put as its filter changes.
 pub fn diff(model: &mut impl Model, new: &impl Fresh) {
     // Each new row's old place, if the old list has its key.
-    let mut was: Vec<Option<usize>> = {
+    let mut old_place: Vec<Option<usize>> = {
         let old = model.rows();
         let mut place: HashMap<(&str, &str), usize> = HashMap::with_capacity(old.len());
         for (n, row) in old.iter().enumerate() {
@@ -347,9 +350,9 @@ pub fn diff(model: &mut impl Model, new: &impl Fresh) {
     };
     // The kept rows in order already, which stay where they are; the rest
     // move, unless that's too many moves.
-    let in_order = increasing(&was);
-    if was.iter().flatten().count() - in_order.len() > MOST_MOVES {
-        for (n, old) in was.iter_mut().enumerate() {
+    let in_order = increasing(&old_place);
+    if old_place.iter().flatten().count() - in_order.len() > MOST_MOVES {
+        for (n, old) in old_place.iter_mut().enumerate() {
             if old.is_some() && in_order.binary_search(&n).is_err() {
                 *old = None;
             }
@@ -359,7 +362,7 @@ pub fn diff(model: &mut impl Model, new: &impl Fresh) {
     // Removed, last first so the places of the rows before stay as they were.
     let old = model.rows().len();
     let mut kept = vec![false; old];
-    for &at in was.iter().flatten() {
+    for &at in old_place.iter().flatten() {
         kept[at] = true;
     }
     let mut end = old;
@@ -368,7 +371,10 @@ pub fn diff(model: &mut impl Model, new: &impl Fresh) {
             end -= 1;
             continue;
         }
-        let start = kept[..end].iter().rposition(|&kept| kept).map_or(0, |at| at + 1);
+        let start = kept[..end]
+            .iter()
+            .rposition(|&kept| kept)
+            .map_or(0, |at| at + 1);
         remove(model, start..end);
         end = start;
     }
@@ -377,22 +383,22 @@ pub fn diff(model: &mut impl Model, new: &impl Fresh) {
     // by their new place. Each row out of order goes just after the row
     // before it in the new list; the rows in order never move, so the list
     // ends in the new order.
-    let mut order: Vec<usize> = Vec::with_capacity(was.len());
+    let mut order: Vec<usize> = Vec::with_capacity(old_place.len());
     let mut by_old: Vec<Option<usize>> = vec![None; old];
-    for (n, &at) in was.iter().enumerate() {
+    for (n, &at) in old_place.iter().enumerate() {
         if let Some(at) = at {
             by_old[at] = Some(n);
         }
     }
     order.extend(by_old.into_iter().flatten());
-    let mut out_of_order = was
+    let mut out_of_order = old_place
         .iter()
         .enumerate()
         .filter(|(n, at)| at.is_some() && in_order.binary_search(n).is_err())
         .map(|(n, _)| n)
         .peekable();
     if out_of_order.peek().is_some() {
-        let placed: Vec<usize> = was
+        let placed: Vec<usize> = old_place
             .iter()
             .enumerate()
             .filter_map(|(n, at)| at.map(|_| n))
@@ -401,7 +407,11 @@ pub fn diff(model: &mut impl Model, new: &impl Fresh) {
             let before = placed[..placed.binary_search(&n).unwrap_or_default()]
                 .last()
                 .map_or(0, |&previous| {
-                    order.iter().position(|&at| at == previous).unwrap_or_default() + 1
+                    order
+                        .iter()
+                        .position(|&at| at == previous)
+                        .unwrap_or_default()
+                        + 1
                 });
             let from = order.iter().position(|&at| at == n).unwrap_or_default();
             if from == before {
@@ -409,7 +419,7 @@ pub fn diff(model: &mut impl Model, new: &impl Fresh) {
             }
             let to = if from < before { before - 1 } else { before };
             model.begin_move(from, before);
-            model.rows().shift(from, to);
+            model.rows().move_row(from, to);
             order.remove(from);
             order.insert(to, n);
             model.end_move();
@@ -419,15 +429,15 @@ pub fn diff(model: &mut impl Model, new: &impl Fresh) {
     // Inserted, in runs, first first: each run's place is its new one, since
     // the rows before it are the new list's already.
     let mut n = 0;
-    while n < was.len() {
-        if was[n].is_some() {
+    while n < old_place.len() {
+        if old_place[n].is_some() {
             n += 1;
             continue;
         }
-        let end = was[n..]
+        let end = old_place[n..]
             .iter()
             .position(Option::is_some)
-            .map_or(was.len(), |run| n + run);
+            .map_or(old_place.len(), |run| n + run);
         insert(model, n, (n..end).map(|at| new.row(at)));
         n = end;
     }
@@ -436,7 +446,7 @@ pub fn diff(model: &mut impl Model, new: &impl Fresh) {
     let mut changed: Vec<Range<usize>> = Vec::new();
     let rows = model.rows();
     rows.gap_at(rows.len());
-    for (n, at) in was.iter().enumerate() {
+    for (n, at) in old_place.iter().enumerate() {
         if at.is_some() && new.refresh(n, &mut rows.head[n]) {
             match changed.last_mut() {
                 Some(run) if run.end == n => run.end += 1,
@@ -455,14 +465,14 @@ fn key(row: &Row) -> (&str, &str) {
 
 /// The new places, in order, of a longest run of kept rows whose old places
 /// increase too: the most rows that can stay where they are.
-fn increasing(was: &[Option<usize>]) -> Vec<usize> {
+fn increasing(old_place: &[Option<usize>]) -> Vec<usize> {
     // tails[k]: the new place of the row ending the best run of length k + 1
     // found so far, the one with the lowest old place.
     let mut tails: Vec<usize> = Vec::new();
-    let mut previous: Vec<Option<usize>> = vec![None; was.len()];
-    for (n, at) in was.iter().enumerate() {
+    let mut previous: Vec<Option<usize>> = vec![None; old_place.len()];
+    for (n, at) in old_place.iter().enumerate() {
         let Some(at) = *at else { continue };
-        let length = tails.partition_point(|&tail| was[tail].unwrap_or_default() < at);
+        let length = tails.partition_point(|&tail| old_place[tail].unwrap_or_default() < at);
         previous[n] = length.checked_sub(1).map(|k| tails[k]);
         if length == tails.len() {
             tails.push(n);
@@ -830,19 +840,13 @@ mod tests {
         let model = diffed(&["a", "b", "c", "d"], &new(&["b", "c", "d", "a"]));
         assert_eq!(model.told, [Told::Moved { from: 0, before: 4 }]);
 
-        let model = diffed(
-            &["a", "b", "c", "d", "e"],
-            &new(&["e", "c", "a", "b", "d"]),
-        );
+        let model = diffed(&["a", "b", "c", "d", "e"], &new(&["e", "c", "a", "b", "d"]));
         assert_eq!(model.told.len(), 2, "a, b and d stay: {:?}", model.told);
     }
 
     #[test]
     fn a_filter_that_removes_inserts_and_reorders_at_once_ends_with_the_new_rows() {
-        let model = diffed(
-            &["a", "b", "c", "d", "e"],
-            &new(&["x", "d", "b", "y", "a"]),
-        );
+        let model = diffed(&["a", "b", "c", "d", "e"], &new(&["x", "d", "b", "y", "a"]));
         assert_eq!(
             model.told,
             [
@@ -888,9 +892,7 @@ mod tests {
         // Lists and shuffles from a fixed linear congruential sequence.
         let mut seed = 7_u64;
         let mut next = |below: usize| {
-            seed = seed
-                .wrapping_mul(6_364_136_223_846_793_005)
-                .wrapping_add(1);
+            seed = seed.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1);
             (seed >> 33) as usize % below
         };
         let ids: Vec<String> = (0..40).map(|n| n.to_string()).collect();

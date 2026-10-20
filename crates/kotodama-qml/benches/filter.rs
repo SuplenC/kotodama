@@ -54,9 +54,9 @@ fn found(items: impl Iterator<Item = u32>, highlights: &[u32]) -> Vec<ListMatch>
 }
 
 /// The model's rows, with signals no view hears.
-struct Shown(Rows);
+struct Unheard(Rows);
 
-impl Model for Shown {
+impl Model for Unheard {
     fn rows(&mut self) -> &mut Rows {
         &mut self.0
     }
@@ -78,7 +78,7 @@ impl Model for Shown {
 }
 
 /// What `KotodamaSearch` does with a filter reply, less Qt.
-fn reply(views: &mut Views, rows: &mut Shown, text: &str, matches: &[ListMatch]) {
+fn reply(views: &mut Views, rows: &mut Unheard, text: &str, matches: &[ListMatch]) {
     views.set_filter(text);
     views.filtered("clipboard", "history", text, matches.to_vec());
     let listed = views.top().and_then(Open::listed).unwrap();
@@ -107,7 +107,7 @@ fn bench(c: &mut Criterion) {
     let start = || {
         let mut views = Views::default();
         views.push("clipboard".into(), view.clone(), Contributed::new());
-        let mut rows = Shown(Rows::default());
+        let mut rows = Unheard(Rows::default());
         reply(&mut views, &mut rows, "a", &all);
         (views, rows)
     };
