@@ -10,7 +10,7 @@
 //! # Names to show instead of the app's own, by desktop id.
 //! names = { nvim = "Neovim" }
 //! # An app that exits within this many seconds of starting was picked by
-//! # mistake: its pick is withdrawn. 0 never withdraws one; at most 60.
+//! # mistake: its pick is withdrawn. 0 never withdraws one; at most 30.
 //! withdraw_within = 5
 //! ```
 
@@ -36,9 +36,10 @@ const DEFAULT_TERMINAL: &str = "xdg-terminal-exec";
 /// it, short enough that an app closed after real use still counts.
 pub const DEFAULT_WITHDRAW_WITHIN: Duration = Duration::from_secs(5);
 
-/// The longest `withdraw_within` the config may set, in seconds: the Daemon
-/// withdraws a pick only for a minute after the run.
-const MAX_WITHDRAW_WITHIN: f64 = 60.0;
+/// The longest `withdraw_within` the config may set, in seconds. The Daemon
+/// withdraws a pick only for a minute after the run, and the app's time
+/// starts once it has its scope, so this leaves room for a slow start.
+const MAX_WITHDRAW_WITHIN: f64 = 30.0;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Settings {
@@ -95,7 +96,7 @@ impl Settings {
             match seconds(value) {
                 Some(within) => settings.withdraw_within = within,
                 None => {
-                    config::warn("`withdraw_within` should be a number of seconds from 0 to 60")
+                    config::warn("`withdraw_within` should be a number of seconds from 0 to 30")
                 }
             }
         }
