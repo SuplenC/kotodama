@@ -10,6 +10,8 @@
 //! skin_tone = "medium"
 //! ```
 
+#![forbid(unsafe_code)]
+
 use std::process::ExitCode;
 
 use kotodama_emoji::Tone;

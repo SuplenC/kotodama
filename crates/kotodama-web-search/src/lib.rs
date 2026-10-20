@@ -3,6 +3,8 @@
 //! answer. Templates are filled and opened as Quicklinks' are
 //! ([`kotodama_extension::url`]).
 
+#![forbid(unsafe_code)]
+
 use kotodama_extension::{config, url};
 use kotodama_protocol::{Action, Fraction, Item, ItemKind, ItemRef, LiveResult, Table, Value};
 

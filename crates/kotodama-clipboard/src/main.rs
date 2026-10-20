@@ -4,6 +4,8 @@
 //! them all, newest first, and clears them. What a password manager marks
 //! sensitive is never kept. See `items.rs` for the config table.
 
+#![forbid(unsafe_code)]
+
 use std::process::ExitCode;
 use std::sync::mpsc::RecvTimeoutError;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};

@@ -3,6 +3,8 @@
 //! installed and removed. Its desktop actions, such as "New Private Window",
 //! are extra Actions. See `items.rs` for its config table.
 
+#![forbid(unsafe_code)]
+
 mod entry;
 mod exec;
 mod items;

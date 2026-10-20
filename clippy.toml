@@ -1,0 +1,3 @@
+# Settings for the lints in Cargo.toml's [workspace.lints].
+# `unwrap_used` spares tests; elsewhere the guide asks for `.expect("…")`.
+allow-unwrap-in-tests = true

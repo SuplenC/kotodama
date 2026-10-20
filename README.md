@@ -481,7 +481,9 @@ The first run fetches the toolchain (Rust, Qt 6, Quickshell, sway) into the `kot
 | Recipe | What it does |
 | --- | --- |
 | `just shell` | Opens a shell in the dev environment |
-| `just check` | Checks formatting and runs the lints (rustfmt, clippy, nixfmt, shellcheck, actionlint) |
+| `just check` | Checks formatting and runs the lints (rustfmt, clippy, the comment check, nixfmt, shellcheck, actionlint) |
+| `just fmt` | Formats the crates brought in line with the [code-quality guide](docs/agents/code-quality.md), with the nightly rustfmt |
+| `just comments` | Checks the guide's comment rules in those crates |
 | `just test` | Runs the tests; extra arguments go to `cargo nextest run` |
 | `just bench` | Runs the benchmarks; extra arguments go to `cargo bench` |
 | `just e2e` | Runs the e2e tests against headless sway, or only those named (`just e2e menu`); `just e2e --update menu` rewrites a test's reference image |

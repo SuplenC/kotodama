@@ -41,6 +41,12 @@
           kotodamad = kotodama.out;
           kotodama-qml = kotodama.qml;
           kotodama-extensions = kotodama.extensions;
+          # Development only: `scripts/fmt` fetches it on demand. The dev shell's
+          # rustfmt, built in nightly mode, so it reads the unstable options in
+          # .config/rustfmt.toml. It comes from the same source as the shell's
+          # rustc, so flake.lock pins it and no second toolchain is fetched. Out
+          # of the dev shell, so only the jobs that format pay for it.
+          rustfmt-nightly = pkgs.rustfmt.override { asNightly = true; };
         }
       );
 

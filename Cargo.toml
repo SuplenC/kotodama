@@ -7,3 +7,35 @@ version = "0.1.0"
 edition = "2024"
 license = "Apache-2.0"
 repository = "https://github.com/SuplenC/kotodama"
+
+# The lints of docs/agents/code-quality.md. A crate opts in with
+# `[lints] workspace = true` once it is restyled (#108); scripts/restyled-crates
+# reads that line to check its formatting and comments as well. `just check`
+# runs clippy with -D warnings, so every warning here fails it.
+[workspace.lints.rust]
+missing_debug_implementations = "warn"
+
+[workspace.lints.clippy]
+pedantic = { level = "warn", priority = -1 }
+# Opt-outs from pedantic, each with its reason:
+# - The guide asks #[must_use] of constructors and builders, which
+#   `return_self_not_must_use` covers, not of every function with a result.
+must_use_candidate = "allow"
+# - Numeric casts are deliberate across the workspace: the Index keeps u32
+#   positions and f32 scores to save memory, Qt takes i32 rows, and the hot
+#   loops convert without a checked conversion's branch. An #[expect] on each
+#   of the ~150 casts would be noise.
+cast_possible_truncation = "allow"
+cast_possible_wrap = "allow"
+cast_precision_loss = "allow"
+cast_sign_loss = "allow"
+# The guide's rules clippy checks, beyond pedantic (`manual_let_else` and
+# `return_self_not_must_use` are pedantic, named so they stay on). Tests may
+# unwrap (clippy.toml).
+allow_attributes = "warn"
+clone_on_ref_ptr = "warn"
+dbg_macro = "warn"
+manual_let_else = "warn"
+mod_module_files = "warn"
+return_self_not_must_use = "warn"
+unwrap_used = "warn"

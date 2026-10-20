@@ -3,6 +3,8 @@
 //! they become. `main.rs` speaks the protocol and starts what their Actions
 //! run.
 
+#![forbid(unsafe_code)]
+
 pub mod items;
 pub mod projects;
 pub mod scan;

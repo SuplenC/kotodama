@@ -1,0 +1,12 @@
+# The formatting of the crates brought in line with docs/agents/code-quality.md
+# (scripts/restyled-crates). `just fmt` and `just check` pass it to the nightly
+# rustfmt (flake.nix, `rustfmt-nightly`) with --config-path, since most of
+# these options are unstable. It lives here rather than at the root so that
+# stable rustfmt, in an editor or `cargo fmt`, does not find it and reformat
+# the crates still on its defaults.
+max_width = 120
+group_imports = "StdExternalCrate"
+imports_granularity = "Item"
+normalize_comments = true
+wrap_comments = true
+comment_width = 100

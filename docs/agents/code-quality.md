@@ -2,7 +2,32 @@
 
 How Kotodama's Rust is written. Each rule names its source: Microsoft's Pragmatic Rust Guidelines (`M-…`), the Rust API Guidelines (`C-…`), the Style Guide, the std docs, or **kotodama** where the choice is this project's own. The rules are adapted from castello's guide; castello's framework-specific rules (async, plugins, preludes) are left out.
 
-New code follows every rule here. Code written before this guide is being brought in line crate by crate (#108); until a crate's turn, edit it in the new style where you touch it, without restyling the rest of the file in the same PR. The mechanical rules are not yet enforced by `rustfmt.toml`, `clippy.toml` or `[workspace.lints]`: they arrive with that rewrite, because turning them on reformats every file. Until then, follow them by hand.
+New code follows every rule here. Code written before this guide is being brought in line crate by crate (#108); until a crate's turn, edit it in the new style where you touch it, without restyling the rest of the file in the same PR. The tools that enforce the mechanical rules apply only to the crates that have opted in (below), because turning them on reformats every file. In the other crates, follow the rules by hand.
+
+## How the tools apply
+
+Three tools check what can be checked mechanically. Each runs only on the crates that have opted in, so `just check` stays green on a crate until its restyle:
+
+- **Lints**: `[workspace.lints]` in the root `Cargo.toml` (clippy `pedantic` and the rules below, each opt-out with its reason), with `clippy.toml`. `just check` runs clippy with `-D warnings`.
+- **Formatting**: `.config/rustfmt.toml` (width 120, imports grouped `std`/external/crate with one item per `use`, comments wrapped at 100). Its options are unstable, so `just fmt` and `just check` use the flake's `rustfmt-nightly`, fetched on first use; the build toolchain stays stable. The crates not yet opted in are checked against stable rustfmt's defaults, as before, and `just fmt` leaves them alone. The file sits in `.config/` so that stable rustfmt in an editor does not find it.
+- **Comments**: `just comments` (`scripts/comments`, run by `just check`) fails on `FIXME`/`XXX`, a `TODO` not written `TODO(#n):`, a trailing comment or a label on a closing brace, `/* */`, and change narration ("now", "previously", "no longer"; text in backticks is skipped).
+
+A crate opts in with one line in its `Cargo.toml`:
+
+```toml
+[lints]
+workspace = true
+```
+
+`scripts/restyled-crates` lists the crates with that line, and `just fmt`, `just comments` and the format check read that list. A crate's restyle PR (one per crate, #108) therefore:
+
+1. Adds `[lints] workspace = true` to the crate's `Cargo.toml`.
+2. Runs `just fmt`, which formats that crate only.
+3. Fixes what `just check` reports: the lints (or an `#[expect(…, reason = "…")]` where the rule must give way, such as on the hot path), and the comments.
+4. Rewrites the rest by hand: the comments and rustdoc, `# Owns`/`# Not here`, unit tests in sibling `tests.rs` files, `thiserror` enums with named constructors.
+5. Ticks the crate off in #108.
+
+A crate with no FFI boundary already carries `#![forbid(unsafe_code)]`.
 
 ## Performance comes before style
 

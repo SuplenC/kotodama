@@ -21,6 +21,8 @@
 //! [`PROTOCOL_VERSION`] (ADR 0012), so the handshake turns away a peer that
 //! would misread it. `tests/layout.rs` fails until the version goes up.
 
+#![forbid(unsafe_code)]
+
 mod channel;
 pub mod frame;
 mod front_end;

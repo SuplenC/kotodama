@@ -4,6 +4,8 @@
 //! of kind `file` that run them. Both are kept up to date as the folders
 //! change. See `settings.rs` for its config table.
 
+#![forbid(unsafe_code)]
+
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;

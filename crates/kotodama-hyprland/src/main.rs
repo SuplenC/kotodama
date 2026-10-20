@@ -8,6 +8,8 @@
 //! (in `$XDG_RUNTIME_DIR/hypr/`, see `Hyprland::wait`) or the Daemon to hang
 //! up; when Hyprland restarts it follows the new instance.
 
+#![forbid(unsafe_code)]
+
 use std::collections::BTreeMap;
 use std::process::ExitCode;
 use std::thread;
