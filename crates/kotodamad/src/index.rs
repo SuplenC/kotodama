@@ -36,6 +36,10 @@ pub struct Index {
     /// them, or 0 for an empty slot. Kept apart from the Entries, so looking
     /// for near misses passes over most slots without reading them.
     initials: Vec<u64>,
+    /// Every letter of each slot's Item, as [`Haystack::every_letter`] gives
+    /// them, or 0 for an empty slot: a search passes over the slots that lack
+    /// one of the query's without reading them.
+    letters: Vec<u64>,
     free: Vec<Slot>,
     /// Each Extension's Items by id.
     ids: Vec<HashMap<String, Slot>>,
@@ -94,10 +98,13 @@ impl Index {
         };
         if self.initials.len() <= slot as usize {
             self.initials.resize(slot as usize + 1, 0);
+            self.letters.resize(slot as usize + 1, 0);
         }
-        self.initials[slot as usize] = self
-            .entry(slot)
-            .map_or(0, |entry| entry.haystack.initials());
+        let haystack = self.entry(slot).map(|entry| &entry.haystack);
+        let initials = haystack.map_or(0, Haystack::initials);
+        let letters = haystack.map_or(0, Haystack::every_letter);
+        self.initials[slot as usize] = initials;
+        self.letters[slot as usize] = letters;
         if let Some(keyword) = keyword {
             self.keywords.entry(keyword).or_default().push(slot);
         }
@@ -121,6 +128,7 @@ impl Index {
         self.unkey(slot);
         self.slots[slot as usize] = None;
         self.initials[slot as usize] = 0;
+        self.letters[slot as usize] = 0;
         self.free.push(slot);
     }
 
@@ -199,7 +207,11 @@ impl Index {
         out: &mut Vec<(Slot, u32, Matched)>,
     ) {
         let mut score = |slot: Slot| {
-            if let Some(entry) = self.entry(slot)
+            if self
+                .letters
+                .get(slot as usize)
+                .is_some_and(|&letters| filter.may_match(letters))
+                && let Some(entry) = self.entry(slot)
                 && let Some((score, matched)) = entry.haystack.score(pattern, matcher, filter)
             {
                 out.push((slot, score, matched));

@@ -166,7 +166,12 @@ impl Query {
                 .map(|word| initial(word[0]))
                 .fold(0, |a, b| a | b)
         });
-        Filter { letter, subtitles }
+        let letters = self.letters.iter().fold(0, |a, b| a | b);
+        Filter {
+            letter,
+            subtitles,
+            letters,
+        }
     }
 }
 
@@ -181,6 +186,23 @@ pub struct Filter {
     /// start with for it to match, if it's long enough for subtitles to be
     /// searched.
     subtitles: Option<u64>,
+    /// Every letter of the query, as [`letters`] gives them: an Item's texts
+    /// need them all to match.
+    letters: u64,
+}
+
+impl Filter {
+    /// Whether the query's letter, if it is one, starts a word of the title
+    /// or keywords alone, so it matches fewer Items than a longer query may.
+    pub fn by_letter(&self) -> bool {
+        self.letter.is_some()
+    }
+
+    /// Whether an Item with `letters` in its texts, as
+    /// [`Haystack::every_letter`] gives them, may match.
+    pub fn may_match(&self, letters: u64) -> bool {
+        letters & self.letters == self.letters
+    }
 }
 
 /// The fewest letters a query needs for subtitles to be searched: fewer find
@@ -345,6 +367,12 @@ impl Haystack {
     /// character, which is always set.
     pub fn initials(&self) -> u64 {
         self.initials
+    }
+
+    /// Every character of the title, keywords and subtitle, as [`initial`]
+    /// gives them; the bit every other character shares is always set.
+    pub fn every_letter(&self) -> u64 {
+        self.letters | letters(self.subtitle.slice(..).chars())
     }
 }
 

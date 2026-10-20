@@ -376,6 +376,10 @@ struct Session {
     narrowed_version: u64,
     /// Whether `narrowed_query` searched subtitles.
     narrowed_subtitles: bool,
+    /// Whether `narrowed_query` was one letter, which matches only at a word
+    /// start, so `narrowed` lacks the Items a longer query matches inside a
+    /// word.
+    narrowed_by_letter: bool,
     /// The slots that matched `narrowed_query` or nearly did, in slot order,
     /// if near misses were looked for. A query that only adds to it, with as
     /// many typos for each word, can only nearly match these.
@@ -409,6 +413,7 @@ impl Session {
         // query too short for them may lack some of this one's.
         !self.narrowed_query.is_empty()
             && self.narrowed_subtitles == self.folded.searches_subtitles()
+            && !self.narrowed_by_letter
             && self.narrowed_version == version
             && self.query.starts_with(&self.narrowed_query)
             && !self.query.contains(SYNTAX)
@@ -1216,6 +1221,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             narrowed_query: String::new(),
             narrowed_version: 0,
             narrowed_subtitles: false,
+            narrowed_by_letter: false,
             nearly: Vec::new(),
             nearly_for: None,
             live: self.extensions.iter().map(|_| Live::default()).collect(),
@@ -2111,6 +2117,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
         session.narrowed_query.clone_from(&session.query);
         session.narrowed_version = self.index.version();
         session.narrowed_subtitles = session.folded.searches_subtitles();
+        session.narrowed_by_letter = session.folded.filter().by_letter();
         for &(slot, score, matched) in &self.scored {
             if let Some(entry) = self.index.entry(slot)
                 && let Some(tier) =

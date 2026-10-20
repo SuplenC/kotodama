@@ -1212,8 +1212,19 @@ const QUERIES: &[&str] = &[
     "sistem monitr",
 ];
 
-/// From the second letter on: typed on from one letter, matches inside words
-/// are lost (#80).
+/// A one-letter query only matches at a word start; the next letter may
+/// match inside a word (#80).
+#[test]
+fn typing_on_from_one_letter_finds_matches_inside_words() {
+    let mut w = World::new(&["Terminal", "Steam"]);
+    assert_eq!(rows(&mut w, "t"), ["Terminal"]);
+    assert_eq!(
+        rows(&mut w, "te"),
+        World::new(&["Terminal", "Steam"]).rows("te")
+    );
+    assert_eq!(rows(&mut w, "te"), ["Terminal", "Steam"]);
+}
+
 #[test]
 fn typing_a_query_letter_by_letter_gives_the_rows_typing_it_at_once_does() {
     let mut typed = World::new(DESKTOP);
@@ -1221,9 +1232,6 @@ fn typing_a_query_letter_by_letter_gives_the_rows_typing_it_at_once_does() {
         let mut letters = String::new();
         for c in query.chars() {
             letters.push(c);
-            if letters.chars().count() < 2 {
-                continue;
-            }
             let rows = rows(&mut typed, &letters);
             assert_eq!(rows, World::new(DESKTOP).rows(&letters), "{letters:?}");
         }
