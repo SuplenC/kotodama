@@ -26,7 +26,7 @@ are in [docs/adr/](docs/adr/).
 - `docker/`: the dev image for machines without Nix (`just image`).
 - `examples/shell-extension/`: a minimal Extension in shell, also run by `kotodama-protocol/tests/shell_extension.rs`.
 - `docs/adr/`: decisions, one file per ADR named for the area it governs. `docs/agents/`: how agents use issues, labels and domain docs.
-- Root: `flake.nix` (dev shell, packages, `checks`), `justfile`, `release-please-config.json`, `GLOSSARY.md`.
+- Root: `flake.nix` (dev shell, packages, `overlays.default`, `checks`), `justfile`, `release-please-config.json`, `GLOSSARY.md`.
 
 ## Where to change X
 

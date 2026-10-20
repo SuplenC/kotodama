@@ -41,6 +41,13 @@ The flake builds Kotodama once and splits it into outputs, each also a package o
 
 The module installs the package and enables `kotodamad.socket`. On NixOS without home-manager, add the package to `systemd.packages` and `environment.systemPackages`, and set `systemd.user.sockets.kotodamad.wantedBy = [ "sockets.target" ]`.
 
+The QML module links against Qt, so it shares Qt with a Quickshell built from the same nixpkgs. With a Quickshell from any other nixpkgs (another channel, or Quickshell's own flake), Kotodama's package brings a second Qt, about 760 MiB. Build Kotodama with your Quickshell's nixpkgs instead, and only the 4 MiB module is new:
+
+- If your Quickshell comes from your own `nixpkgs` input, have Kotodama follow it: `inputs.kotodama.inputs.nixpkgs.follows = "nixpkgs";`.
+- Otherwise, apply `inputs.kotodama.overlays.default` to the nixpkgs your Quickshell is built from (for Quickshell's flake, `inputs.quickshell.inputs.nixpkgs`) and use `pkgs.kotodama`. With home-manager, set `programs.kotodama.package = pkgs.kotodama;`.
+
+That nixpkgs must be recent enough to build Kotodama; nixos-25.11 is.
+
 The Daemon starts the first time something connects to its socket, whether a `kotodama toggle` or the Quickshell Front end, and stays running after that. While it is stopped, systemd holds new connections and starts it again. It runs with the environment of the systemd user manager, not the compositor's:
 
 - **Desktop notifications** (a job finishing) go over the session bus at `DBUS_SESSION_BUS_ADDRESS`, or `$XDG_RUNTIME_DIR/bus` when that isn't set. That is where systemd's per-user bus lives, so this works with no setup.
