@@ -273,6 +273,30 @@ pub struct Action {
     pub arguments: Vec<Argument>,
 }
 
+impl Action {
+    /// An Action with no shortcut and no Arguments; the setters below add them.
+    pub fn new(id: impl Into<String>, title: impl Into<String>) -> Self {
+        Action {
+            id: id.into(),
+            title: title.into(),
+            shortcut: None,
+            arguments: Vec::new(),
+        }
+    }
+
+    /// Binds the Action to `shortcut`, such as `ctrl+o`.
+    pub fn shortcut(mut self, shortcut: impl Into<String>) -> Self {
+        self.shortcut = Some(shortcut.into());
+        self
+    }
+
+    /// Asks for `arguments` when the Action runs.
+    pub fn arguments(mut self, arguments: Vec<Argument>) -> Self {
+        self.arguments = arguments;
+        self
+    }
+}
+
 /// A value the user types inline after the Item's keyword. One that is required
 /// but not typed opens a form.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

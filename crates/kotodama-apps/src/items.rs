@@ -98,9 +98,9 @@ impl Settings {
             keywords.push(app.id.clone());
         }
         let mut actions = Vec::with_capacity(1 + app.actions.len());
-        actions.push(action(OPEN.to_owned(), "Open".to_owned()));
+        actions.push(Action::new(OPEN, "Open"));
         actions.extend(app.actions.iter().map(|desktop| {
-            action(
+            Action::new(
                 format!("{DESKTOP_ACTION}{}", desktop.id),
                 desktop.name.clone(),
             )
@@ -135,13 +135,4 @@ pub fn command<'a>(app: &'a App, action: &str) -> Option<&'a [String]> {
         .iter()
         .find(|desktop| desktop.id == own)
         .map(|desktop| desktop.command.as_slice())
-}
-
-fn action(id: String, title: String) -> Action {
-    Action {
-        id,
-        title,
-        shortcut: None,
-        arguments: Vec::new(),
-    }
 }

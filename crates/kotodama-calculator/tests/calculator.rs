@@ -7,11 +7,12 @@ use std::fs;
 use std::io::{BufRead, BufReader, Write};
 use std::net::TcpListener;
 use std::path::PathBuf;
-use std::process::{Child, ChildStdin, Command, Stdio};
+use std::process::Command;
 use std::sync::mpsc::{self, Receiver};
 use std::thread;
 use std::time::{Duration, SystemTime};
 
+use kotodama_extension::testing::Spawned;
 use kotodama_protocol::*;
 use tempfile::TempDir;
 
@@ -22,46 +23,29 @@ const RATES: &str =
     r#"{"amount":1.0,"base":"EUR","date":"2026-10-19","rates":{"PLN":4.0,"USD":1.25}}"#;
 
 struct Calculator {
+    extension: Spawned,
     _cache: TempDir,
-    child: Child,
-    writer: ChannelWriter<ChildStdin>,
-    received: Receiver<FromExtension>,
     next_query: u64,
 }
 
 impl Calculator {
     /// Starts the Extension with its cache in `cache` and sends it `config`.
     fn start(cache: TempDir, config: Table) -> Self {
-        let mut child = Command::new(env!("CARGO_BIN_EXE_kotodama-calculator"))
-            .env("XDG_CACHE_HOME", cache.path())
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .spawn()
-            .unwrap();
-        let (stdout, stdin) = (child.stdout.take().unwrap(), child.stdin.take().unwrap());
-        let channel = Channel::handshake(stdout, stdin, &Hello::new(&WireFormat::ALL)).unwrap();
-        let (mut reader, writer) = channel.split();
-        let (sender, received) = mpsc::channel();
-        thread::spawn(move || {
-            while let Ok(Some(message)) = reader.recv::<FromExtension>() {
-                if sender.send(message).is_err() {
-                    break;
-                }
-            }
-        });
-        let mut calculator = Calculator {
+        let mut extension = Spawned::start(
+            Command::new(env!("CARGO_BIN_EXE_kotodama-calculator"))
+                .env("XDG_CACHE_HOME", cache.path()),
+            WAIT,
+        );
+        extension.send(ToExtension::Config(config));
+        Calculator {
+            extension,
             _cache: cache,
-            child,
-            writer,
-            received,
             next_query: 1,
-        };
-        calculator.send(ToExtension::Config(config));
-        calculator
+        }
     }
 
     fn send(&mut self, message: ToExtension) {
-        self.writer.send(&message).unwrap();
+        self.extension.send(message);
     }
 
     /// Sends `query` as a Live query and returns its id.
@@ -78,7 +62,7 @@ impl Calculator {
 
     /// The results for the Live query `id`, which must come all at once.
     fn results(&self, id: u64) -> Vec<LiveResult> {
-        match self.received.recv_timeout(WAIT) {
+        match self.extension.recv_timeout(WAIT) {
             Ok(FromExtension::LiveResults {
                 live_query,
                 results,
@@ -100,29 +84,12 @@ impl Calculator {
     }
 
     fn run(&mut self, id: &str, action: &str) -> Outcome {
-        self.send(ToExtension::RunAction {
-            invocation: 7,
-            action: action.into(),
-            item: ItemRef {
-                id: id.into(),
-                kind: ItemKind::Namespaced(NamespacedKind::new("calculator.answer").unwrap()),
-            },
-            arguments: BTreeMap::new(),
-        });
-        match self.received.recv_timeout(WAIT) {
-            Ok(FromExtension::ActionDone {
-                invocation: 7,
-                outcome,
-            }) => outcome,
-            other => panic!("expected action_done, got {other:?}"),
-        }
-    }
-}
-
-impl Drop for Calculator {
-    fn drop(&mut self) {
-        let _ = self.child.kill();
-        let _ = self.child.wait();
+        let item = ItemRef {
+            id: id.into(),
+            kind: ItemKind::Namespaced(NamespacedKind::new("calculator.answer").unwrap()),
+        };
+        self.extension.start_run(7, action, item, BTreeMap::new());
+        self.extension.outcome(7, |_| false)
     }
 }
 

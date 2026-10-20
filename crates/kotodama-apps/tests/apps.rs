@@ -3,25 +3,37 @@
 
 use std::collections::BTreeMap;
 use std::fs;
+use std::ops::{Deref, DerefMut};
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
-use std::process::{Child, ChildStdin, Command, Stdio};
-use std::sync::mpsc::{self, Receiver};
+use std::process::Command;
 use std::thread;
 use std::time::Duration;
 
+use kotodama_extension::testing::Spawned;
 use kotodama_protocol::*;
 use tempfile::TempDir;
 
 /// Long enough for a change on disk to be noticed and settle.
 const WAIT: Duration = Duration::from_secs(5);
 
+/// Declared first, so the Extension is killed before its directory goes.
 struct Apps {
+    extension: Spawned,
     dir: TempDir,
-    child: Child,
-    /// `None` once the test has hung up.
-    writer: Option<ChannelWriter<ChildStdin>>,
-    received: Receiver<FromExtension>,
+}
+
+impl Deref for Apps {
+    type Target = Spawned;
+    fn deref(&self) -> &Spawned {
+        &self.extension
+    }
+}
+
+impl DerefMut for Apps {
+    fn deref_mut(&mut self) -> &mut Spawned {
+        &mut self.extension
+    }
 }
 
 impl Apps {
@@ -33,36 +45,19 @@ impl Apps {
 
     /// Starts the Extension with `env` added to its environment.
     fn start_with(dir: TempDir, env: &[(&str, &str)]) -> Self {
-        let mut child = Command::new(env!("CARGO_BIN_EXE_kotodama-apps"))
-            .env("XDG_DATA_HOME", dir.path().join("home"))
-            .env("XDG_DATA_DIRS", dir.path().join("system"))
-            .env("XDG_CURRENT_DESKTOP", "Hyprland")
-            .env("LANG", "pl_PL.UTF-8")
-            .env_remove("LC_ALL")
-            .env_remove("LC_MESSAGES")
-            .env_remove("KOTODAMA_LAUNCH_PREFIX")
-            .envs(env.iter().copied())
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .spawn()
-            .unwrap();
-        let (stdout, stdin) = (child.stdout.take().unwrap(), child.stdin.take().unwrap());
-        let channel = Channel::handshake(stdout, stdin, &Hello::new(&WireFormat::ALL)).unwrap();
-        let (mut reader, writer) = channel.split();
-        let (sender, received) = mpsc::channel();
-        thread::spawn(move || {
-            while let Ok(Some(message)) = reader.recv::<FromExtension>() {
-                if sender.send(message).is_err() {
-                    break;
-                }
-            }
-        });
-        Apps {
-            dir,
-            child,
-            writer: Some(writer),
-            received,
-        }
+        let extension = Spawned::start(
+            Command::new(env!("CARGO_BIN_EXE_kotodama-apps"))
+                .env("XDG_DATA_HOME", dir.path().join("home"))
+                .env("XDG_DATA_DIRS", dir.path().join("system"))
+                .env("XDG_CURRENT_DESKTOP", "Hyprland")
+                .env("LANG", "pl_PL.UTF-8")
+                .env_remove("LC_ALL")
+                .env_remove("LC_MESSAGES")
+                .env_remove("KOTODAMA_LAUNCH_PREFIX")
+                .envs(env.iter().copied()),
+            WAIT,
+        );
+        Apps { dir, extension }
     }
 
     /// Starts the Extension and sends it `config`.
@@ -76,58 +71,16 @@ impl Apps {
         self.dir.path()
     }
 
-    fn send(&mut self, message: ToExtension) {
-        self.writer.as_mut().unwrap().send(&message).unwrap();
-    }
-
-    fn recv(&self) -> FromExtension {
-        self.received
-            .recv_timeout(WAIT)
-            .expect("the Extension sent nothing")
-    }
-
-    /// The Items of the next message, which must be `add_items`.
-    fn added(&self) -> Vec<Item> {
-        match self.recv() {
-            FromExtension::AddItems { items } => items,
-            other => panic!("expected add_items, got {other:?}"),
-        }
-    }
-
-    /// The ids of the next message, which must be `remove_items`.
-    fn removed(&self) -> Vec<String> {
-        match self.recv() {
-            FromExtension::RemoveItems { ids } => ids,
-            other => panic!("expected remove_items, got {other:?}"),
-        }
-    }
-
-    fn quiet(&self) {
-        if let Ok(message) = self.received.recv_timeout(Duration::from_millis(600)) {
-            panic!("expected nothing, got {message:?}");
-        }
-    }
-
     /// Runs `action` on the app `id` and returns the outcome.
     fn run(&mut self, id: &str, action: &str) -> Outcome {
-        self.send(ToExtension::RunAction {
-            invocation: 7,
-            action: action.into(),
-            item: ItemRef {
-                id: id.into(),
-                kind: ItemKind::App {
-                    desktop_id: format!("{id}.desktop"),
-                },
+        let item = ItemRef {
+            id: id.into(),
+            kind: ItemKind::App {
+                desktop_id: format!("{id}.desktop"),
             },
-            arguments: BTreeMap::new(),
-        });
-        match self.recv() {
-            FromExtension::ActionDone {
-                invocation: 7,
-                outcome,
-            } => outcome,
-            other => panic!("expected action_done, got {other:?}"),
-        }
+        };
+        self.start_run(7, action, item, BTreeMap::new());
+        self.outcome(7, |_| false)
     }
 }
 
@@ -137,13 +90,6 @@ fn data_dirs() -> TempDir {
     fs::create_dir_all(dir.path().join("home/applications")).unwrap();
     fs::create_dir_all(dir.path().join("system/applications")).unwrap();
     dir
-}
-
-impl Drop for Apps {
-    fn drop(&mut self) {
-        let _ = self.child.kill();
-        let _ = self.child.wait();
-    }
 }
 
 /// Writes a `.desktop` file under `<dir>/<data>/applications/`.
@@ -673,6 +619,6 @@ fn an_app_whose_directory_is_missing_says_so() {
 #[test]
 fn the_extension_exits_when_the_daemon_hangs_up() {
     let mut apps = Apps::start(data_dirs());
-    apps.writer = None;
+    apps.hang_up();
     assert!(apps.child.wait().unwrap().success());
 }

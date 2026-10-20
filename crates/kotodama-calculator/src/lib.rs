@@ -76,12 +76,6 @@ impl Calculator {
 impl Answer {
     /// The answer as the Live query result the Daemon shows in the top row.
     pub fn live_result(&self) -> LiveResult {
-        let action = |id: &str, title: &str| Action {
-            id: id.into(),
-            title: title.into(),
-            shortcut: None,
-            arguments: vec![],
-        };
         LiveResult {
             item: Item {
                 id: self.expression.clone(),
@@ -96,8 +90,8 @@ impl Answer {
                 keywords: vec![],
                 hidden: false,
                 actions: vec![
-                    action(COPY, "Copy Answer"),
-                    action(COPY_EXPRESSION, "Copy Expression and Answer"),
+                    Action::new(COPY, "Copy Answer"),
+                    Action::new(COPY_EXPRESSION, "Copy Expression and Answer"),
                 ],
             },
             score: Fraction::new(1.0).expect("1 is a fraction"),

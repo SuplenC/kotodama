@@ -6,11 +6,11 @@
 //! being sent. The p99 must stay under 8 ms, one frame at 120 Hz.
 
 use std::fs;
-use std::os::unix::net::UnixStream;
 use std::thread;
 use std::time::{Duration, Instant};
 
-use kotodama_protocol::{Channel, FromFrontEnd, Hello, ToFrontEnd, WireFormat};
+use kotodama_extension::testing;
+use kotodama_protocol::{FromFrontEnd, ToFrontEnd};
 use kotodamad::paths::Paths;
 
 const QUERIES: usize = 1_000;
@@ -20,15 +20,16 @@ const BUDGET: Duration = Duration::from_millis(8);
 fn main() {
     let dir = tempfile::tempdir().unwrap();
     let path = |sub: &str| dir.path().join(sub);
-    let ext = path("extensions/calculator");
-    fs::create_dir_all(&ext).unwrap();
     fs::create_dir_all(path("config")).unwrap();
     // The Bundled extension's own Manifest, run from where cargo built it.
-    let manifest = include_str!("../manifest.toml").replace(
-        "\"./kotodama-calculator\"",
-        &format!("{:?}", env!("CARGO_BIN_EXE_kotodama-calculator")),
+    testing::install(
+        &path("extensions"),
+        "calculator",
+        &testing::bundled(
+            include_str!("../manifest.toml"),
+            env!("CARGO_BIN_EXE_kotodama-calculator"),
+        ),
     );
-    fs::write(ext.join("manifest.toml"), manifest).unwrap();
 
     let paths = Paths {
         socket: path("kotodama.sock"),
@@ -40,23 +41,8 @@ fn main() {
     let socket = paths.socket.clone();
     thread::spawn(move || kotodamad::run(&paths));
 
-    let stream = (0..500)
-        .find_map(|_| {
-            UnixStream::connect(&socket)
-                .map_err(|_| thread::sleep(Duration::from_millis(10)))
-                .ok()
-        })
-        .expect("the Daemon never opened its socket");
     // A read that times out ends a wait for an answer that isn't coming.
-    stream
-        .set_read_timeout(Some(Duration::from_secs(1)))
-        .unwrap();
-    let mut ui = Channel::handshake(
-        stream.try_clone().unwrap(),
-        stream,
-        &Hello::new(&WireFormat::ALL),
-    )
-    .unwrap();
+    let mut ui = testing::connect(&socket, Duration::from_secs(1));
     // Sends `query` and waits for the answer to lead the Results; false if
     // it doesn't within a second.
     let mut answered = |query: &str| -> bool {

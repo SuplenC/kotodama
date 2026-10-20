@@ -17,6 +17,7 @@ kotodama-protocol = { path = "../kotodama-protocol" }
 serde_json = "1.0.154"
 
 [dev-dependencies]
+kotodama-extension = { path = "../kotodama-extension", features = ["testing"] }
 # The answer benchmark runs the real Daemon in process.
 kotodamad = { path = "../kotodamad" }
 tempfile = "3.27.0"

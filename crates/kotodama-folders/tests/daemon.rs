@@ -12,6 +12,7 @@ use std::process::Command;
 use std::thread;
 use std::time::{Duration, Instant};
 
+use kotodama_extension::testing;
 use kotodama_protocol::*;
 use kotodamad::paths::Paths;
 use tempfile::TempDir;
@@ -47,16 +48,14 @@ fn repo(dir: &Path) {
 /// source on `root/Projects` and the shell example installed.
 fn start(root: &Path) -> Client {
     let extensions = root.join("extensions");
-    let folders = extensions.join("folders");
-    fs::create_dir_all(&folders).unwrap();
-    fs::write(
-        folders.join("manifest.toml"),
-        format!(
+    testing::install(
+        &extensions,
+        "folders",
+        &format!(
             "name = \"folders\"\ncommand = [\"{}\"]\n",
             env!("CARGO_BIN_EXE_kotodama-folders")
         ),
-    )
-    .unwrap();
+    );
     let shell = extensions.join("shell-example");
     fs::create_dir_all(&shell).unwrap();
     for file in ["extension.sh", "manifest.toml"] {
@@ -96,22 +95,9 @@ fn start(root: &Path) -> Client {
     let socket = paths.socket.clone();
     thread::spawn(move || kotodamad::run(&paths));
 
-    let start = Instant::now();
-    let stream = loop {
-        if let Ok(stream) = UnixStream::connect(&socket) {
-            break stream;
-        }
-        assert!(start.elapsed() < TIMEOUT, "the Daemon never listened");
-        thread::sleep(Duration::from_millis(20));
+    let mut client = Client {
+        channel: testing::connect(&socket, TIMEOUT),
     };
-    stream.set_read_timeout(Some(TIMEOUT)).unwrap();
-    let channel = Channel::handshake(
-        stream.try_clone().unwrap(),
-        stream,
-        &Hello::new(&WireFormat::ALL),
-    )
-    .unwrap();
-    let mut client = Client { channel };
     client.settle();
     client
 }

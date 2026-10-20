@@ -13,6 +13,7 @@ kotodama-extension = { path = "../kotodama-extension" }
 kotodama-protocol = { path = "../kotodama-protocol" }
 
 [dev-dependencies]
+kotodama-extension = { path = "../kotodama-extension", features = ["testing"] }
 # The search tests and benchmark run the real Daemon in process.
 kotodamad = { path = "../kotodamad" }
 tempfile = "3.27.0"

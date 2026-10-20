@@ -86,8 +86,8 @@ pub fn history_item() -> Item {
         keywords: vec!["paste".to_owned(), "copied".to_owned()],
         hidden: false,
         actions: vec![
-            action(OPEN, "Show Clipboard History"),
-            action(CLEAR, "Clear Clipboard History"),
+            Action::new(OPEN, "Show Clipboard History"),
+            Action::new(CLEAR, "Clear Clipboard History"),
         ],
     }
 }
@@ -122,10 +122,10 @@ pub fn clip_item(history: &History, entry: &Entry) -> Item {
         keywords: Vec::new(),
         hidden: false,
         actions: vec![
-            action(PASTE, "Paste"),
-            action(COPY, "Copy to Clipboard"),
-            action(SHOW, "Show Details"),
-            action(DELETE, "Delete from History"),
+            Action::new(PASTE, "Paste"),
+            Action::new(COPY, "Copy to Clipboard"),
+            Action::new(SHOW, "Show Details"),
+            Action::new(DELETE, "Delete from History"),
         ],
     }
 }
@@ -200,15 +200,6 @@ fn kind(local: &str) -> ItemKind {
     ItemKind::Namespaced(
         NamespacedKind::new(format!("clipboard.{local}")).expect("a valid namespaced kind"),
     )
-}
-
-fn action(id: &str, title: &str) -> Action {
-    Action {
-        id: id.to_owned(),
-        title: title.to_owned(),
-        shortcut: None,
-        arguments: Vec::new(),
-    }
 }
 
 /// The start of a text, `size` bytes and `chars` characters in all, in a

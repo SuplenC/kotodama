@@ -8,7 +8,7 @@
 
 use std::hint::black_box;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::Command;
 use std::sync::mpsc::{self, Receiver};
 use std::time::{Duration, Instant};
 
@@ -16,9 +16,9 @@ use criterion::{Criterion, criterion_group, criterion_main};
 use kotodama_clipboard::copied::Copied;
 use kotodama_clipboard::history::{History, Limits};
 use kotodama_clipboard::items;
+use kotodama_extension::testing::Spawned;
 use kotodama_protocol::{
-    Channel, FromExtension, FromFrontEnd, Hello, Item, Manifest, Table, ToExtension, ToFrontEnd,
-    WireFormat,
+    FromExtension, FromFrontEnd, Item, Manifest, Table, ToExtension, ToFrontEnd, WireFormat,
 };
 use kotodamad::daemon::{Daemon, Desktop, Event, ExtensionId, FrontEndId, Launcher, Output};
 use kotodamad::discovery::Found;
@@ -253,21 +253,15 @@ fn bench(c: &mut Criterion) {
 /// Starts the Extension on the history in `state` and prints its resident
 /// memory once it has sent its Items.
 fn resident(state: &Path) {
-    let mut child = Command::new(env!("CARGO_BIN_EXE_kotodama-clipboard"))
-        .env("XDG_STATE_HOME", state)
-        .env_remove("WAYLAND_DISPLAY")
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .spawn()
-        .unwrap();
-    let (stdout, stdin) = (child.stdout.take().unwrap(), child.stdin.take().unwrap());
-    let mut channel = Channel::handshake(stdout, stdin, &Hello::new(&WireFormat::ALL)).unwrap();
-    channel.send(&ToExtension::Config(Table::new())).unwrap();
-    match channel.recv::<FromExtension>().unwrap() {
-        Some(FromExtension::AddItems { items }) => assert_eq!(items.len(), ENTRIES + 1),
-        other => panic!("expected add_items, got {other:?}"),
-    }
-    match vm_rss(child.id()) {
+    let mut extension = Spawned::start(
+        Command::new(env!("CARGO_BIN_EXE_kotodama-clipboard"))
+            .env("XDG_STATE_HOME", state)
+            .env_remove("WAYLAND_DISPLAY"),
+        Duration::from_secs(60),
+    );
+    extension.send(ToExtension::Config(Table::new()));
+    assert_eq!(extension.added().len(), ENTRIES + 1);
+    match vm_rss(extension.child.id()) {
         Some(bytes) => {
             println!(
                 "kotodama-clipboard, {ENTRIES} entries: {:.1} MiB resident",
@@ -277,8 +271,6 @@ fn resident(state: &Path) {
         }
         None => println!("resident memory is only measured on Linux"),
     }
-    let _ = child.kill();
-    let _ = child.wait();
 }
 
 /// `VmRSS` from `/proc/<pid>/status`, in bytes.

@@ -205,19 +205,10 @@ mod tests {
         }
     }
 
-    fn action(id: &str, title: &str) -> kotodama_protocol::Action {
-        kotodama_protocol::Action {
-            id: id.into(),
-            title: title.into(),
-            shortcut: None,
-            arguments: Vec::new(),
-        }
-    }
-
     fn offered(extension: &str, id: &str, title: &str) -> OfferedAction {
         OfferedAction {
             extension: extension.into(),
-            action: action(id, title),
+            action: Action::new(id, title),
         }
     }
 
@@ -237,7 +228,10 @@ mod tests {
                 keywords: Vec::new(),
                 hidden: false,
                 identity: None,
-                actions: vec![action("open", "Open"), action("term", "Open in terminal")],
+                actions: vec![
+                    Action::new("open", "Open"),
+                    Action::new("term", "Open in terminal"),
+                ],
             },
             contributed: vec![
                 offered("pinner", "pin", "Pin a version here"),
@@ -275,8 +269,7 @@ mod tests {
 
     #[test]
     fn a_contributed_shortcut_an_items_own_action_binds_is_left_to_the_own_one() {
-        let mut open = action("open", "Open");
-        open.shortcut = Some("ctrl+o".into());
+        let open = Action::new("open", "Open").shortcut("ctrl+o");
         let item = Item {
             id: "https://example.com".into(),
             kind: ItemKind::Url {

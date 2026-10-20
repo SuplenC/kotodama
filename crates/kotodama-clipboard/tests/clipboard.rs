@@ -6,78 +6,52 @@
 use std::collections::BTreeMap;
 use std::fs;
 use std::io::Cursor;
+use std::ops::{Deref, DerefMut};
 use std::path::{Path, PathBuf};
-use std::process::{Child, ChildStdin, Command, Stdio};
-use std::sync::mpsc::{self, Receiver};
+use std::process::Command;
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use kotodama_clipboard::copied::Copied;
 use kotodama_clipboard::history::{History, Limits};
+use kotodama_extension::testing::Spawned;
 use kotodama_protocol::*;
 use tempfile::TempDir;
 
 const WAIT: Duration = Duration::from_secs(5);
 const DAY: u64 = 24 * 60 * 60;
 
-struct Extension {
-    child: Child,
-    writer: ChannelWriter<ChildStdin>,
-    received: Receiver<FromExtension>,
+struct Extension(Spawned);
+
+impl Deref for Extension {
+    type Target = Spawned;
+    fn deref(&self) -> &Spawned {
+        &self.0
+    }
+}
+
+impl DerefMut for Extension {
+    fn deref_mut(&mut self) -> &mut Spawned {
+        &mut self.0
+    }
 }
 
 impl Extension {
+    /// Starts the Extension on the state in `state`, without its config.
+    fn unconfigured(state: &Path) -> Self {
+        Extension(Spawned::start(
+            Command::new(env!("CARGO_BIN_EXE_kotodama-clipboard"))
+                .env("XDG_STATE_HOME", state)
+                .env_remove("WAYLAND_DISPLAY"),
+            WAIT,
+        ))
+    }
+
     /// Starts the Extension on the state in `state`, and sends it `config`.
     fn start(state: &Path, config: Table) -> Self {
-        let mut child = Command::new(env!("CARGO_BIN_EXE_kotodama-clipboard"))
-            .env("XDG_STATE_HOME", state)
-            .env_remove("WAYLAND_DISPLAY")
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .spawn()
-            .unwrap();
-        let (stdout, stdin) = (child.stdout.take().unwrap(), child.stdin.take().unwrap());
-        let channel = Channel::handshake(stdout, stdin, &Hello::new(&WireFormat::ALL)).unwrap();
-        let (mut reader, writer) = channel.split();
-        let (sender, received) = mpsc::channel();
-        thread::spawn(move || {
-            while let Ok(Some(message)) = reader.recv::<FromExtension>() {
-                if sender.send(message).is_err() {
-                    break;
-                }
-            }
-        });
-        let mut extension = Extension {
-            child,
-            writer,
-            received,
-        };
+        let mut extension = Extension::unconfigured(state);
         extension.send(ToExtension::Config(config));
         extension
-    }
-
-    fn send(&mut self, message: ToExtension) {
-        self.writer.send(&message).unwrap();
-    }
-
-    fn recv(&self) -> FromExtension {
-        self.received
-            .recv_timeout(WAIT)
-            .expect("the Extension sent nothing")
-    }
-
-    fn added(&self) -> Vec<Item> {
-        match self.recv() {
-            FromExtension::AddItems { items } => items,
-            other => panic!("expected add_items, got {other:?}"),
-        }
-    }
-
-    fn removed(&self) -> Vec<String> {
-        match self.recv() {
-            FromExtension::RemoveItems { ids } => ids,
-            other => panic!("expected remove_items, got {other:?}"),
-        }
     }
 
     fn pushed(&self) -> View {
@@ -90,39 +64,22 @@ impl Extension {
     /// Runs `action` on the Item `id`, of `kind`, without waiting for the
     /// outcome.
     fn start_run(&mut self, id: &str, kind: &str, action: &str) {
-        self.send(ToExtension::RunAction {
-            invocation: 7,
-            action: action.into(),
-            item: ItemRef {
-                id: id.into(),
-                kind: ItemKind::Namespaced(NamespacedKind::new(kind).unwrap()),
-            },
-            arguments: BTreeMap::new(),
-        });
+        let item = ItemRef {
+            id: id.into(),
+            kind: ItemKind::Namespaced(NamespacedKind::new(kind).unwrap()),
+        };
+        self.0.start_run(7, action, item, BTreeMap::new());
     }
 
     /// The outcome of the Action run last.
     fn outcome(&self) -> Outcome {
-        match self.recv() {
-            FromExtension::ActionDone {
-                invocation: 7,
-                outcome,
-            } => outcome,
-            other => panic!("expected action_done, got {other:?}"),
-        }
+        self.0.outcome(7, |_| false)
     }
 
     /// Runs `action` on the clip `id` and returns its outcome.
     fn run(&mut self, id: &str, action: &str) -> Outcome {
         self.start_run(id, "clipboard.clip", action);
         self.outcome()
-    }
-}
-
-impl Drop for Extension {
-    fn drop(&mut self) {
-        let _ = self.child.kill();
-        let _ = self.child.wait();
     }
 }
 
@@ -383,24 +340,13 @@ fn a_longer_age_in_the_config_keeps_what_the_default_would_expire() {
     copy(state.path(), text("eight days old"), 8 * DAY);
     let mut config = Table::new();
     config.insert("max_age_days".into(), Value::Integer(30));
-    let mut child = Command::new(env!("CARGO_BIN_EXE_kotodama-clipboard"))
-        .env("XDG_STATE_HOME", state.path())
-        .env_remove("WAYLAND_DISPLAY")
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .spawn()
-        .unwrap();
-    let (stdout, stdin) = (child.stdout.take().unwrap(), child.stdin.take().unwrap());
-    let mut channel = Channel::handshake(stdout, stdin, &Hello::new(&WireFormat::ALL)).unwrap();
+    let mut extension = Extension::unconfigured(state.path());
     // A while without its config, which it waits for before expiring
     // anything by limits it doesn't know yet.
     thread::sleep(Duration::from_millis(300));
-    channel.send(&ToExtension::Config(config)).unwrap();
-    let first = channel.recv::<FromExtension>().unwrap();
-    let _ = child.kill();
-    let _ = child.wait();
-    match first {
-        Some(FromExtension::AddItems { items }) => {
+    extension.send(ToExtension::Config(config));
+    match extension.recv() {
+        FromExtension::AddItems { items } => {
             assert_eq!(
                 titles(&clips(&items).into_iter().cloned().collect::<Vec<_>>()),
                 ["eight days old"]

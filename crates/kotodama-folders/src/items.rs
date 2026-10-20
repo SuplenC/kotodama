@@ -47,11 +47,11 @@ pub fn project(project: &Project, home: Option<&Path>) -> Item {
         keywords: Vec::new(),
         hidden: false,
         actions: vec![
-            action(OPEN, "Open", Vec::new()),
-            action(SHELL, "Open Terminal Here", Vec::new()),
-            action(LAZYGIT, "Open in Lazygit", Vec::new()),
-            action(FILE_MANAGER, "Open in File Manager", Vec::new()),
-            action(COPY_PATH, "Copy Path", Vec::new()),
+            Action::new(OPEN, "Open"),
+            Action::new(SHELL, "Open Terminal Here"),
+            Action::new(LAZYGIT, "Open in Lazygit"),
+            Action::new(FILE_MANAGER, "Open in File Manager"),
+            Action::new(COPY_PATH, "Copy Path"),
         ],
     }
 }
@@ -92,17 +92,8 @@ pub fn script(script: &Script, home: Option<&Path>) -> Item {
             Vec::new()
         },
         actions: vec![
-            action(RUN, run, arguments),
-            action(COPY_PATH, "Copy Path", Vec::new()),
+            Action::new(RUN, run).arguments(arguments),
+            Action::new(COPY_PATH, "Copy Path"),
         ],
-    }
-}
-
-fn action(id: &str, title: &str, arguments: Vec<Argument>) -> Action {
-    Action {
-        id: id.to_owned(),
-        title: title.to_owned(),
-        shortcut: None,
-        arguments,
     }
 }
