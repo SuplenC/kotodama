@@ -10,6 +10,10 @@ use nucleo_matcher::pattern::{CaseMatching, Normalization, Pattern};
 use crate::daemon::ExtensionId;
 use crate::rank::{self, Haystack, Tiers};
 
+/// The matches past which none has highlights: they cost as much as the
+/// matching, and rows that far down are seldom seen.
+const HIGHLIGHTED: usize = 256;
+
 /// One open View.
 pub struct Open {
     pub extension: ExtensionId,
@@ -17,6 +21,32 @@ pub struct Open {
     /// A list View's Items as the matcher reads them, made the first time it
     /// is filtered: most lists never are.
     haystacks: Option<Vec<Haystack>>,
+    /// What the last filter matched, so typing on searches only those.
+    last: Narrowing,
+}
+
+/// The Items the last filter of a list View matched. A filter that only adds
+/// to it can only match a subset, as with the search's narrowing.
+#[derive(Default)]
+struct Narrowing {
+    text: String,
+    /// Whether `text` searched subtitles.
+    subtitles: bool,
+    /// Whether `text` matched only at word starts, as one letter does.
+    by_letter: bool,
+    /// The positions of the Items it matched, in order.
+    matched: Vec<u32>,
+}
+
+impl Narrowing {
+    fn narrows(&self, text: &str, query: &rank::Query) -> bool {
+        const SYNTAX: &[char] = &['^', '$', '!', '\'', '\\'];
+        !self.text.is_empty()
+            && self.subtitles == query.searches_subtitles()
+            && !self.by_letter
+            && text.starts_with(&self.text)
+            && !text.contains(SYNTAX)
+    }
 }
 
 impl Open {
@@ -25,6 +55,7 @@ impl Open {
             extension,
             view,
             haystacks: None,
+            last: Narrowing::default(),
         }
     }
 
@@ -79,7 +110,11 @@ impl Views {
     /// Replaces the open View with the same id where it is. False if there
     /// is none.
     pub fn update(&mut self, extension: ExtensionId, view: View) -> bool {
-        match self.stack.iter_mut().find(|open| open.is(extension, &view.id)) {
+        match self
+            .stack
+            .iter_mut()
+            .find(|open| open.is(extension, &view.id))
+        {
             Some(open) => {
                 *open = Open::new(extension, view);
                 true
@@ -116,8 +151,8 @@ impl Views {
 
     /// The Items of the list View that match `text`, as the search matches
     /// Items: the best Tier first, and within a Tier in the Extension's
-    /// order, which is the list's meaning, such as most recent first. Empty
-    /// if no such View is open.
+    /// order, which is the list's meaning, such as most recent first. The
+    /// first [`HIGHLIGHTED`] have highlights. Empty if no such View is open.
     pub fn filter(
         &mut self,
         extension: ExtensionId,
@@ -144,22 +179,38 @@ impl Views {
         );
         let query = rank::Query::new(text);
         let filter = query.filter();
+        let narrowed = open.last.narrows(text, &query);
         let mut found: Vec<(u8, rank::Tier, u32)> = Vec::new();
-        for (n, (item, haystack)) in items.iter().zip(haystacks.iter()).enumerate() {
+        let mut consider = |n: u32| {
+            let (item, haystack) = (&items[n as usize], &haystacks[n as usize]);
             if let Some((_, matched)) = haystack.score(&pattern, matcher, filter)
                 && let Some(tier) = tiers.item(haystack, item, &query, matched)
             {
-                found.push((tier.coarse(), tier, n as u32));
+                found.push((tier.coarse(), tier, n));
             }
+        };
+        if narrowed {
+            open.last.matched.iter().copied().for_each(&mut consider);
+        } else {
+            (0..items.len() as u32).for_each(&mut consider);
         }
+        let last = &mut open.last;
+        last.text.clear();
+        last.text.push_str(text);
+        last.subtitles = query.searches_subtitles();
+        last.by_letter = filter.by_letter();
+        last.matched.clear();
+        last.matched.extend(found.iter().map(|&(_, _, n)| n));
         // Stable, so a Tier keeps the Extension's order.
         found.sort_by(|a, b| b.0.cmp(&a.0).then(b.1.cmp(&a.1)));
         found
             .into_iter()
-            .map(|(_, _, n)| {
+            .enumerate()
+            .map(|(rank, (_, _, n))| {
                 let mut highlights = Vec::new();
                 let title = haystacks[n as usize].title.slice(..);
-                if pattern.indices(title, matcher, &mut highlights).is_some() {
+                if rank < HIGHLIGHTED && pattern.indices(title, matcher, &mut highlights).is_some()
+                {
                     highlights.sort_unstable();
                     highlights.dedup();
                 } else {

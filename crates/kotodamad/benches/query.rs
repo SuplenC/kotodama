@@ -1,6 +1,6 @@
 //! From a query arriving to its Results encoded for the Front end, with 10k
 //! Indexed items: everything the Daemon does per keystroke except the socket
-//! write.
+//! write. Then the same for a list View of 10k Items the Daemon filters.
 
 use std::hint::black_box;
 use std::path::PathBuf;
@@ -8,7 +8,9 @@ use std::sync::mpsc::{self, Receiver};
 use std::time::Instant;
 
 use criterion::{Criterion, criterion_group, criterion_main};
-use kotodama_protocol::{FromExtension, FromFrontEnd, Manifest, Table, ToFrontEnd, WireFormat};
+use kotodama_protocol::{
+    FromExtension, FromFrontEnd, Manifest, Table, ToFrontEnd, View, ViewContent, WireFormat,
+};
 use kotodamad::clock::{DAY_SECS, When};
 use kotodamad::daemon::{Daemon, Desktop, Event, ExtensionId, FrontEndId, Launcher, Output};
 use kotodamad::discovery::Found;
@@ -125,10 +127,50 @@ impl Setup {
             },
             Instant::now(),
         );
-        let results = self.results.try_recv().unwrap();
+        self.encode_reply()
+    }
+
+    /// Pushes the corpus as a list View, as `apps/all`.
+    fn push_list(&mut self) {
+        self.daemon.handle(
+            Event::FromExtension {
+                extension: ExtensionId(0),
+                generation: 1,
+                message: FromExtension::PushView(View {
+                    id: "all".into(),
+                    title: "All".into(),
+                    content: ViewContent::List {
+                        items: corpus::items(),
+                        filters_itself: false,
+                    },
+                }),
+            },
+            Instant::now(),
+        );
+        self.results.try_iter().for_each(drop);
+    }
+
+    /// Types `text` into the list View and encodes the Daemon's matches.
+    fn filter(&mut self, text: &str) -> usize {
+        self.daemon.handle(
+            Event::FromFrontEnd {
+                front_end: FrontEndId(0),
+                message: FromFrontEnd::FilterView {
+                    extension: "apps".into(),
+                    view: "all".into(),
+                    text: text.into(),
+                },
+            },
+            Instant::now(),
+        );
+        self.encode_reply()
+    }
+
+    fn encode_reply(&mut self) -> usize {
+        let reply = self.results.try_recv().unwrap();
         self.buf.clear();
         WireFormat::Postcard
-            .encode_into(&results, &mut self.buf)
+            .encode_into(&reply, &mut self.buf)
             .unwrap();
         self.buf.len()
     }
@@ -171,5 +213,29 @@ fn bench(c: &mut Criterion) {
     group.finish();
 }
 
-criterion_group!(benches, bench);
+/// Typing into a list View of 10k Items, matched as the search matches, to
+/// stay within `query_10k_items`'s budget.
+fn filter(c: &mut Criterion) {
+    let mut setup = Setup::new();
+    setup.push_list();
+    let mut group = c.benchmark_group("filter_10k_items");
+    group.bench_function("first_keystroke", |b| {
+        let mut alternate = false;
+        b.iter(|| {
+            alternate = !alternate;
+            black_box(setup.filter(if alternate { "f" } else { "t" }))
+        })
+    });
+    group.bench_function("next_keystroke", |b| {
+        let word = "firefoxterminal";
+        let mut len = 1;
+        b.iter(|| {
+            len = len % word.len() + 1;
+            black_box(setup.filter(&word[..len]))
+        })
+    });
+    group.finish();
+}
+
+criterion_group!(benches, bench, filter);
 criterion_main!(benches);

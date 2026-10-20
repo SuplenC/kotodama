@@ -208,6 +208,52 @@ fn typing_filters_a_list_view_best_match_first_and_in_the_extensions_order_withi
 }
 
 #[test]
+fn typing_on_or_back_matches_what_the_same_text_typed_afresh_does() {
+    let typing = |texts: &[&str]| {
+        let mut h = Harness::new(vec![plain("files")]);
+        let files = h.up(0);
+        let ui = h.front_end();
+        h.send(&files, FromExtension::PushView(reading()));
+        ui.drain();
+        let mut last = Vec::new();
+        for text in texts {
+            filter(&mut h, &ui, "recent", text);
+            last = matches(&sent(&ui)[0]).1;
+        }
+        last
+    };
+    let typed = [
+        "r", "re", "rea", "read", "rea", "read", "readm", "read l", "rd",
+    ];
+    for n in 1..=typed.len() {
+        assert_eq!(
+            typing(&typed[..n]),
+            typing(&typed[n - 1..n]),
+            "after typing {:?}",
+            &typed[..n]
+        );
+    }
+}
+
+#[test]
+fn only_the_first_256_matches_of_a_long_list_have_highlights() {
+    let mut h = Harness::new(vec![plain("files")]);
+    let files = h.up(0);
+    let ui = h.front_end();
+    let notes = (0..300)
+        .map(|n| file(&n.to_string(), &format!("note {n}")))
+        .collect();
+    h.send(&files, FromExtension::PushView(list("notes", notes)));
+    ui.drain();
+
+    filter(&mut h, &ui, "notes", "note");
+    let (_, found) = matches(&sent(&ui)[0]);
+    assert_eq!(found.len(), 300);
+    assert_eq!(found[255].1, [0, 1, 2, 3]);
+    assert_eq!(found[256].1, Vec::<u32>::new());
+}
+
+#[test]
 fn a_cleared_filter_sends_nothing_since_every_item_shows_in_order() {
     let mut h = Harness::new(vec![plain("files")]);
     let files = h.up(0);
@@ -313,10 +359,9 @@ fn replacing_a_view_pops_it_and_pushes_the_next_in_one_message() {
     files.drain();
     run(&mut h, &ui, "files", "readme", "files", "open");
     assert!(
-        files
-            .drain()
-            .iter()
-            .any(|message| matches!(message, ToExtension::RunAction { item, .. } if item.id == "readme")),
+        files.drain().iter().any(
+            |message| matches!(message, ToExtension::RunAction { item, .. } if item.id == "readme")
+        ),
         "the new list's Items run"
     );
 }
@@ -361,12 +406,7 @@ fn a_front_end_that_connects_is_shown_the_views_still_open_bottom_first() {
     h.send(&files, FromExtension::PushView(detail("c")));
     // Pushed again, it goes back on top, as in the menus.
     h.send(&files, FromExtension::PushView(detail("a")));
-    h.send(
-        &files,
-        FromExtension::PopView {
-            view: "b".into(),
-        },
-    );
+    h.send(&files, FromExtension::PopView { view: "b".into() });
     h.send(
         &files,
         FromExtension::ReplaceView {
