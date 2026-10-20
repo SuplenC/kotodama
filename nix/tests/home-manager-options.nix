@@ -1,7 +1,8 @@
 # The home-manager module's typed options, besides `extensions.ai` (see
 # home-manager-ai.nix): evaluates home configurations that set every option,
-# and none, and checks the TOML each writes. No VM: the file is all there is
-# to check.
+# and none, and checks the TOML each writes, and the `kotodama-menu` service
+# and shell.qml `frontEnd` makes. No VM: the files are all there is to check;
+# nix/tests/hyprland.nix runs the menu.
 {
   pkgs,
   self,
@@ -9,13 +10,17 @@
 }:
 
 let
-  # The home configuration one `programs.kotodama` makes.
-  home =
-    kotodama:
+  inherit (pkgs) lib;
+  kotodama = self.packages.${pkgs.stdenv.hostPlatform.system}.default;
+
+  # The home configuration one `programs.kotodama` makes, with `extra` beside it.
+  homeWith =
+    extra: options:
     (home-manager.lib.homeManagerConfiguration {
       inherit pkgs;
       modules = [
         self.homeModules.default
+        extra
         {
           home.username = "alice";
           home.homeDirectory = "/home/alice";
@@ -23,10 +28,11 @@ let
           programs.kotodama = {
             enable = true;
           }
-          // kotodama;
+          // options;
         }
       ];
     }).config;
+  home = homeWith { };
 
   # Every option, next to the user's own Quicklinks and Aliases.
   everything =
@@ -118,12 +124,57 @@ let
 
   # Nothing set: no config file at all, so every default applies.
   nothing = (home { }).xdg.configFile;
+
+  # The ready Front end, off unless enabled.
+  noMenu = (home { }).systemd.user.services;
+  # Enabled with the module's look: the package's own shell.qml, run by the
+  # package's Quickshell, with the module on its import path only.
+  menu = (home { frontEnd.enable = true; }).systemd.user.services.kotodama-menu;
+  importPath = "QML_IMPORT_PATH=${kotodama.qml}/lib/qt-6/qml";
+  # With a look, and a stand-in Quickshell, so the check builds neither the
+  # package nor Quickshell: ExecStart names the shell.qml written for it.
+  themedMenu =
+    (home {
+      frontEnd = {
+        enable = true;
+        quickshellPackage = pkgs.writeShellScriptBin "quickshell" "";
+        target = "hyprland-session.target";
+        look = {
+          accent = "#ff8800";
+          fontFamily = "Inter";
+          fontSize = 13;
+          radius = 0;
+          top = 80.5;
+        };
+      };
+    }).systemd.user.services.kotodama-menu;
+  # home-manager's own Quickshell service finds the module too.
+  userQuickshell =
+    (homeWith {
+      programs.quickshell = {
+        enable = true;
+        systemd.enable = true;
+      };
+    } { }).systemd.user.services.quickshell;
 in
 assert !(nothing ? "kotodama/home-manager.toml");
+assert !(noMenu ? kotodama-menu);
+assert
+  menu.Service.ExecStart
+  == [ "${lib.getExe kotodama.quickshell} --path ${kotodama.qml}/share/kotodama/quickshell" ];
+assert menu.Service.Environment == [ importPath ];
+assert menu.Unit.PartOf == [ "graphical-session.target" ];
+assert menu.Install.WantedBy == [ "graphical-session.target" ];
+assert themedMenu.Service.Environment == [ importPath ];
+assert themedMenu.Unit.PartOf == [ "hyprland-session.target" ];
+assert themedMenu.Install.WantedBy == [ "hyprland-session.target" ];
+assert userQuickshell.Service.Environment == [ importPath ];
 pkgs.runCommand "kotodama-home-manager-options-test"
   {
     nativeBuildInputs = [ pkgs.python3 ];
     inherit everything noEngines;
+    themedExecStart = builtins.head themedMenu.Service.ExecStart;
+    shipped = ../../crates/kotodama-qml/shell/shell.qml;
   }
   ''
     python3 - <<'PY'
@@ -189,6 +240,21 @@ pkgs.runCommand "kotodama-home-manager-options-test"
     })
 
     expect("noEngines", load("noEngines"), {"extensions": {"web-search": {"engines": []}}})
+
+    # The themed menu: the shipped shell.qml, with only the set look properties.
+    program, flag, config = os.environ["themedExecStart"].split(" ")
+    expect("themed program", (os.path.basename(program), flag), ("quickshell", "--path"))
+    with open(os.path.join(config, "shell.qml")) as f:
+        themed = f.read()
+    with open(os.environ["shipped"]) as f:
+        shipped = f.read()
+    expect("themed shell.qml", themed, shipped.replace("KotodamaMenu {}", """KotodamaMenu {
+            accent: "#ff8800"
+            fontFamily: "Inter"
+            fontSize: 13
+            radius: 0
+            top: 80.5
+        }"""))
     PY
     touch $out
   ''

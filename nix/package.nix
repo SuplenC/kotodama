@@ -1,6 +1,7 @@
 # Kotodama, built once from the whole Cargo workspace and split into outputs:
 # - out: the `kotodama` command, the Daemon and its systemd user units;
-# - qml: the `Kotodama` QML module, in lib/qt-6/qml;
+# - qml: the `Kotodama` QML module, in lib/qt-6/qml, and the ready Front end,
+#   a Quickshell config running the menu, in share/kotodama/quickshell;
 # - extensions: the Bundled extensions, in share/kotodama/extensions.
 # The dependencies build first, in a derivation of their own (crane's
 # buildDepsOnly). It changes only with the lockfile and the crates' manifests,
@@ -18,6 +19,7 @@
   curl,
   curlMinimal,
   runtimeShellPackage,
+  quickshell,
 }:
 
 let
@@ -164,6 +166,10 @@ craneLib.buildPackage (
       # the same nixpkgs already has those store paths.
       replaceRunpath $module/libKotodama.so ${qt}/lib ${qtRunpath}
 
+      # The ready Front end: `quickshell --path $qml/share/kotodama/quickshell`,
+      # with the module's import path as QML_IMPORT_PATH.
+      install -D -m 444 crates/kotodama-qml/shell/shell.qml $qml/share/kotodama/quickshell/shell.qml
+
       # Each Bundled extension's manifest runs its binary, beside it.
       for name in ai apps calculator clipboard emoji folders hyprland web-search; do
         dir=$extensions/share/kotodama/extensions/$name
@@ -190,6 +196,10 @@ craneLib.buildPackage (
       substitute crates/kotodamad/systemd/kotodamad.service $out/lib/systemd/user/kotodamad.service \
         --replace-fail @bindir@ $out/bin
     '';
+
+    # The Quickshell from the same nixpkgs, whose Qt the QML module links
+    # against: the home-manager module's Front end runs it.
+    passthru = { inherit quickshell; };
 
     meta = {
       description = "A fast, extensible command menu for Wayland";

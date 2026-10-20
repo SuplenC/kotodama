@@ -1,6 +1,8 @@
 # The home-manager module: `programs.kotodama`. It installs Kotodama, writes the
 # user's settings into ~/.config/kotodama/, and enables the Daemon's socket, so
-# the first `kotodama toggle` starts the Daemon.
+# the first `kotodama toggle` starts the Daemon. With `frontEnd.enable`, a
+# systemd user service runs the ready Front end, the menu in a Quickshell of its
+# own, with the graphical session.
 self:
 {
   config,
@@ -88,6 +90,35 @@ let
   };
   # Without its empty tables, so options left unset write nothing.
   nonEmpty = lib.filterAttrs (_: table: table != { });
+
+  # Where Quickshell finds the `Kotodama` QML module.
+  qmlImportPath = "${cfg.package.qml}/lib/qt-6/qml";
+  frontEnd = cfg.frontEnd;
+  # The look properties that are set; the rest keep KotodamaMenu's defaults.
+  look = set frontEnd.look;
+  # The package's ready Front end or, with a look set, a copy of it whose
+  # KotodamaMenu sets those properties. The copy is made from the same file in
+  # this flake's source, so writing it needs no build of the package.
+  shell = ../crates/kotodama-qml/shell/shell.qml;
+  properties = lib.concatStrings (
+    lib.mapAttrsToList (name: value: "        ${name}: ${builtins.toJSON value}\n") look
+  );
+  shellWithLook =
+    let
+      text = builtins.readFile shell;
+      themed =
+        builtins.replaceStrings [ "KotodamaMenu {}" ] [ "KotodamaMenu {\n${properties}    }" ]
+          text;
+    in
+    assert lib.assertMsg (
+      themed != text
+    ) "${toString shell} has no `KotodamaMenu {}` to set the look on.";
+    pkgs.writeTextDir "shell.qml" themed;
+  frontEndConfig =
+    if look == { } then "${cfg.package.qml}/share/kotodama/quickshell" else "${shellWithLook}";
+  # home-manager's own `programs.quickshell` service, for a shell of the user's.
+  ownQuickshell =
+    config.programs.quickshell.enable or false && config.programs.quickshell.systemd.enable;
 in
 {
   options.programs.kotodama = {
@@ -355,6 +386,70 @@ in
         before it is sent. Unset, 600.
       '';
     };
+
+    qmlImportPath = lib.mkOption {
+      type = lib.types.str;
+      readOnly = true;
+      default = qmlImportPath;
+      defaultText = lib.literalExpression ''"''${config.programs.kotodama.package.qml}/lib/qt-6/qml"'';
+      description = ''
+        The QML import path that holds the `Kotodama` module, for a Quickshell
+        config of the user's own that uses `KotodamaMenu` or `KotodamaSearch`:
+        give it to that Quickshell as `QML_IMPORT_PATH`. home-manager's
+        `programs.quickshell` service gets it without asking.
+      '';
+    };
+
+    # The ready Front end: the menu as a Quickshell instance of its own.
+    frontEnd = {
+      enable = lib.mkEnableOption ''
+        the ready Front end: a systemd user service, `kotodama-menu`, that runs
+        the menu in a Quickshell instance of its own, beside whatever shell the
+        desktop already runs, with the graphical session'';
+
+      quickshellPackage = lib.mkOption {
+        type = lib.types.package;
+        default = cfg.package.quickshell or pkgs.quickshell;
+        defaultText = lib.literalExpression "config.programs.kotodama.package.quickshell";
+        description = ''
+          The Quickshell that runs the menu. The default comes from the same
+          nixpkgs as `package`, so it shares the QML module's Qt; one from
+          another nixpkgs brings a second Qt.
+        '';
+      };
+
+      target = lib.mkOption {
+        type = lib.types.str;
+        default = config.wayland.systemd.target;
+        defaultText = lib.literalExpression "config.wayland.systemd.target";
+        example = "hyprland-session.target";
+        description = ''
+          The systemd user target that starts the menu, and stops it when it
+          stops. Something must start it once the compositor has handed
+          `WAYLAND_DISPLAY` to the user manager: uwsm, or home-manager's
+          `wayland.windowManager.hyprland` with its systemd integration.
+        '';
+      };
+
+      # KotodamaMenu's look properties, by their own names.
+      look = {
+        background = optional lib.types.str ''The background color, such as `"#1e1e2e"`. Unset, `#1e1e2e`.'';
+        foreground = optional lib.types.str "The text color. Unset, `#cdd6f4`.";
+        dimmed = optional lib.types.str "The color of secondary text, such as subtitles. Unset, `#a6adc8`.";
+        accent = optional lib.types.str "The color of matched characters. Unset, `#89b4fa`.";
+        selection = optional lib.types.str "The selected row's background color. Unset, `#313244`.";
+        border = optional lib.types.str "The border's color. Unset, `#45475a`.";
+        error = optional lib.types.str "The color of a failure message. Unset, `#f38ba8`.";
+        fontFamily = optional lib.types.str "The font family. Unset, `sans-serif`.";
+        fontSize = optional lib.types.ints.positive "The font size, in pixels. Unset, 15.";
+        radius = optional lib.types.number "The corner radius, in pixels. Unset, 12.";
+        menuWidth = optional lib.types.ints.positive "The menu's width, in pixels. Unset, 640.";
+        rowHeight = optional lib.types.ints.positive "A row's height, in pixels. Unset, 44.";
+        maxRows = optional lib.types.ints.positive "How many rows show at most. Unset, 8.";
+        top = optional lib.types.number "The menu's distance from the top of the screen, in pixels. Unset, a fifth of the screen's height.";
+        placeholder = optional lib.types.str "What the empty search box says. Unset, `Search`.";
+      };
+    };
   };
 
   config = lib.mkIf cfg.enable {
@@ -368,7 +463,7 @@ in
 
     programs.kotodama.settings = nonEmpty typed;
 
-    # The command, and the QML module for Quickshell to import.
+    # The command, the QML module and the ready Front end.
     home.packages = [ cfg.package ];
 
     xdg.configFile = {
@@ -382,5 +477,32 @@ in
       "systemd/user/sockets.target.wants/kotodamad.socket".source =
         "${cfg.package}/lib/systemd/user/kotodamad.socket";
     };
+
+    systemd.user.services = lib.mkMerge [
+      (lib.mkIf frontEnd.enable {
+        kotodama-menu = {
+          Unit = {
+            Description = "Kotodama's menu, a Quickshell Front end";
+            Documentation = "https://github.com/SuplenC/kotodama";
+            PartOf = [ frontEnd.target ];
+            After = [ frontEnd.target ];
+            # Without a compositor to draw on, it would only fail.
+            ConditionEnvironment = "WAYLAND_DISPLAY";
+          };
+          Service = {
+            ExecStart = "${lib.getExe frontEnd.quickshellPackage} --path ${frontEndConfig}";
+            # Only this Quickshell's: the session's QML_IMPORT_PATH stays as it was.
+            Environment = [ "QML_IMPORT_PATH=${qmlImportPath}" ];
+            Restart = "on-failure";
+          };
+          Install.WantedBy = [ frontEnd.target ];
+        };
+      })
+      # A Quickshell config of the user's own, run by home-manager's
+      # `programs.quickshell` service, finds the module too.
+      (lib.mkIf ownQuickshell {
+        quickshell.Service.Environment = [ "QML_IMPORT_PATH=${qmlImportPath}" ];
+      })
+    ];
   };
 }

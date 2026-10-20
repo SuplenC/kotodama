@@ -3,8 +3,10 @@
 # needs a DRM device, which a container doesn't have, so it runs here the way
 # Hyprland tests itself: a virtio GPU, rendered in software, and Hyprland
 # started for a user logged in on a tty. It checks that an opened window is an
-# Item whose focus Action works, and that a bind added at runtime is in the
-# Shortcuts View that `kotodama open --view hyprland/shortcuts` opens.
+# Item whose focus Action works, that a bind added at runtime is in the
+# Shortcuts View that `kotodama open --view hyprland/shortcuts` opens, and that
+# the module's ready Front end starts with the session, loads the QML module
+# from the Nix output, and shows and hides on `kotodama toggle`.
 {
   pkgs,
   self,
@@ -50,7 +52,18 @@ pkgs.testers.runNixOSTest {
     home-manager.users.alice = {
       imports = [ self.homeModules.default ];
       home.stateVersion = "25.11";
-      programs.kotodama.enable = true;
+      programs.kotodama = {
+        enable = true;
+        frontEnd.enable = true;
+      };
+      # The session, as uwsm or home-manager's Hyprland module would start it
+      # once Hyprland has handed its environment to the user manager.
+      systemd.user.targets.vm-session.Unit = {
+        Description = "The VM's Hyprland session";
+        BindsTo = [ "graphical-session.target" ];
+        Wants = [ "graphical-session-pre.target" ];
+        After = [ "graphical-session-pre.target" ];
+      };
       # The Daemon, a systemd user service, finds Hyprland through the user
       # manager's environment, as a desktop's own Hyprland config would set it.
       xdg.configFile."hypr/hyprland.conf".text = ''
@@ -143,5 +156,26 @@ pkgs.testers.runNixOSTest {
         machine.wait_until_succeeds(as_alice("hyprctl -i 0 keyword bind SUPER, F9, exec, true"))
         user("kotodama open --view hyprland/shortcuts")
         machine.wait_until_succeeds("grep -qP '^SUPER \\+ F9\texec true$' /tmp/menu")
+
+    with subtest("the session starts the menu, Quickshell loads the QML module from the Nix output, and kotodama toggle shows and hides it"):
+        # The menu's layer-shell surface, which Hyprland lists only while it shows.
+        menu_shown = as_alice("hyprctl -i 0 layers -j") + " | grep -qE '\"namespace\": *\"kotodama\"'"
+        machine.fail(as_alice("systemctl --user is-active kotodama-menu.service"))
+        machine.fail(menu_shown)
+        user("systemctl --user start vm-session.target")
+        try:
+            machine.wait_for_unit("kotodama-menu.service", "alice")
+            # Until Quickshell has connected, the Daemon has no Front end to
+            # pass a request on to; opening an open menu changes nothing, so
+            # it is safe to retry.
+            machine.wait_until_succeeds(as_alice("kotodama open") + " && " + menu_shown)
+            user("kotodama toggle")
+            machine.wait_until_fails(menu_shown)
+            user("kotodama toggle")
+            machine.wait_until_succeeds(menu_shown)
+            user("kotodama toggle")
+            machine.wait_until_fails(menu_shown)
+        finally:
+            print(machine.execute("journalctl --no-pager --user-unit kotodama-menu.service")[1])
   '';
 }
