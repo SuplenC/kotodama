@@ -4,7 +4,6 @@
 //! them all, newest first, and clears them. What a password manager marks
 //! sensitive is never kept. See `items.rs` for the config table.
 
-use std::path::PathBuf;
 use std::process::ExitCode;
 use std::sync::mpsc::RecvTimeoutError;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -13,7 +12,7 @@ use kotodama_clipboard::copied::{self, Copied};
 use kotodama_clipboard::history::{Content, History, Limits};
 use kotodama_clipboard::items::{self, CLEAR, COPY, DELETE, DETAIL_VIEW, HISTORY, LIST_VIEW};
 use kotodama_clipboard::wayland::{Change, Clipboard};
-use kotodama_extension::{Connection, Event, Writer};
+use kotodama_extension::{Connection, Event, Writer, dirs};
 use kotodama_protocol::{Bytes, Clipboard as Paste, FromExtension, Outcome, ToExtension};
 
 const GONE: &str = "That clip is no longer in the clipboard history";
@@ -23,16 +22,6 @@ fn main() -> ExitCode {
 }
 
 /// `$XDG_STATE_HOME/kotodama/clipboard`.
-fn state_dir() -> Result<PathBuf, String> {
-    let state = match std::env::var_os("XDG_STATE_HOME").filter(|dir| !dir.is_empty()) {
-        Some(dir) => PathBuf::from(dir),
-        None => {
-            PathBuf::from(std::env::var_os("HOME").ok_or("HOME isn't set")?).join(".local/state")
-        }
-    };
-    Ok(state.join("kotodama/clipboard"))
-}
-
 fn now() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -40,7 +29,8 @@ fn now() -> u64 {
 }
 
 fn run() -> Result<(), String> {
-    let history = History::open(&state_dir()?);
+    let state = dirs::state("clipboard").ok_or("neither XDG_STATE_HOME nor HOME is set")?;
+    let history = History::open(&state);
     let Connection {
         writer,
         events,

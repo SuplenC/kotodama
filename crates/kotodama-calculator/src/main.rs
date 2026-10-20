@@ -11,7 +11,6 @@
 //! rates_url = "https://api.frankfurter.app/latest"
 //! ```
 
-use std::path::PathBuf;
 use std::process::ExitCode;
 use std::sync::mpsc::Sender;
 use std::thread;
@@ -19,7 +18,7 @@ use std::time::{Duration, Instant, SystemTime};
 
 use jiff::Zoned;
 use kotodama_calculator::{Answer, COPY, COPY_EXPRESSION, Calculator, Evaluation, Rates, rates};
-use kotodama_extension::{Connection, Event, STACK_SIZE, Writer, config};
+use kotodama_extension::{Connection, Event, STACK_SIZE, Writer, config, dirs};
 use kotodama_protocol::{Clipboard, FromExtension, Outcome, Table, ToExtension};
 
 /// The curl the rates are fetched with. A package may build in its path.
@@ -109,14 +108,6 @@ struct Exchange {
 }
 
 /// `$XDG_CACHE_HOME/kotodama/calculator/rates.json`.
-fn cache_path() -> Option<PathBuf> {
-    let home = std::env::var_os("XDG_CACHE_HOME")
-        .filter(|dir| !dir.is_empty())
-        .map(PathBuf::from)
-        .or_else(|| std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".cache")))?;
-    Some(home.join("kotodama/calculator/rates.json"))
-}
-
 /// A Live query waiting for exchange rates.
 struct Waiting {
     id: u64,
@@ -213,7 +204,7 @@ impl Extension {
     /// A query converted currency: loads the cached rates the first time, and
     /// fetches them if they are missing or more than a day old.
     fn want_rates(&mut self) {
-        let cache = cache_path();
+        let cache = dirs::cache("calculator").map(|dir| dir.join("rates.json"));
         if !self.exchange.read_cache {
             self.exchange.read_cache = true;
             if let Some((rates, fetched)) = cache.as_deref().and_then(rates::load) {

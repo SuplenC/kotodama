@@ -12,6 +12,7 @@
 //!   changed since the last time, and the ids of the ones gone.
 //! - [`config`] reads settings from the Extension's config table, logging the
 //!   ones of the wrong shape.
+//! - [`dirs`] finds where the Extension keeps its state and cache.
 //! - [`launch`] starts the programs Actions run, detached from the Extension.
 //! - `watch` (with the `watch` feature) watches directories, and acts once
 //!   they settle after a change.
@@ -69,6 +70,7 @@
 //! ```
 
 pub mod config;
+pub mod dirs;
 mod items;
 pub mod launch;
 #[cfg(feature = "watch")]
