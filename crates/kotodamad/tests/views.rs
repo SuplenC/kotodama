@@ -79,7 +79,7 @@ fn matches(message: &ToFrontEnd) -> (&str, Vec<(u32, Vec<u32>)>) {
 fn offered(extension: &str, id: &str) -> OfferedAction {
     OfferedAction {
         extension: extension.into(),
-        action: action(id),
+        action: Action::new(id, id),
     }
 }
 

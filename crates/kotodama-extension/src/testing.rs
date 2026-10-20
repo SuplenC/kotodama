@@ -1,7 +1,8 @@
-//! What the tests of an Extension share (feature `testing`, for
+//! What the tests of Extensions and the Daemon share (feature `testing`, for
 //! dev-dependencies only): [`Spawned`] runs the Extension as the Daemon does,
-//! over its stdio; [`install`] and [`connect`] set up the real Daemon, run in
-//! the test's process, and a Front end on its socket.
+//! over its stdio; [`install`] and [`connect`] set up the real Daemon, in the
+//! test's process or its own, and a Front end on its socket ([`front_end`] on
+//! a connection made already).
 
 use std::collections::BTreeMap;
 use std::fs;
@@ -172,6 +173,12 @@ pub fn connect(socket: &Path, read_timeout: Duration) -> Channel<UnixStream, Uni
         );
         thread::sleep(Duration::from_millis(10));
     };
+    front_end(stream, read_timeout)
+}
+
+/// A Front end on `stream`, a connection to the Daemon's socket made already,
+/// with reads timing out after `read_timeout`.
+pub fn front_end(stream: UnixStream, read_timeout: Duration) -> Channel<UnixStream, UnixStream> {
     stream.set_read_timeout(Some(read_timeout)).unwrap();
     Channel::handshake(
         stream.try_clone().unwrap(),

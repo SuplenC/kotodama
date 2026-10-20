@@ -702,8 +702,10 @@ fn an_extension_cant_bind_a_key_the_menu_keeps_for_itself() {
     let projects = h.up(1);
     let mut item = project("kotodama");
     item.actions[0].shortcut = Some("ctrl+z".into());
-    item.actions.push(action("panel").shortcut("Control+K"));
-    item.actions.push(action("close").shortcut("ctrl+w"));
+    item.actions
+        .push(Action::new("panel", "panel").shortcut("Control+K"));
+    item.actions
+        .push(Action::new("close", "close").shortcut("ctrl+w"));
     h.add(&projects, vec![item.clone()]);
     let ui = h.front_end();
 
@@ -2216,7 +2218,7 @@ fn an_alias_for_an_action_makes_it_primary() {
     );
     let apps = h.up(0);
     let mut firefox = app("Firefox");
-    firefox.actions.push(action("private"));
+    firefox.actions.push(Action::new("private", "private"));
     h.add(&apps, vec![firefox]);
     let ui = h.front_end();
 

@@ -8,11 +8,11 @@
 
 use std::fs;
 use std::io::{stdin, stdout};
-use std::os::unix::net::UnixStream;
 use std::process::{Command, Stdio};
 use std::thread;
 use std::time::{Duration, Instant};
 
+use kotodama_extension::testing;
 use kotodama_protocol::{
     Channel, FromExtension, FromFrontEnd, Hello, ToExtension, ToFrontEnd, WireFormat,
 };
@@ -28,18 +28,16 @@ fn main() {
     }
     let dir = tempfile::tempdir().unwrap();
     let path = |sub: &str| dir.path().join(sub);
-    let ext = path("config/kotodama/extensions/bench");
-    fs::create_dir_all(&ext).unwrap();
     fs::create_dir_all(path("runtime")).unwrap();
     let me = std::env::current_exe().unwrap();
-    fs::write(
-        ext.join("manifest.toml"),
-        format!(
+    testing::install(
+        &path("config/kotodama/extensions"),
+        "bench",
+        &format!(
             "name = \"bench\"\ncommand = [{:?}]",
             me.display().to_string()
         ),
-    )
-    .unwrap();
+    );
 
     let mut daemon = Command::new(env!("CARGO_BIN_EXE_kotodamad"))
         .env("XDG_RUNTIME_DIR", path("runtime"))
@@ -54,19 +52,7 @@ fn main() {
         .unwrap();
 
     let socket = path("runtime/kotodama.sock");
-    let stream = (0..500)
-        .find_map(|_| {
-            UnixStream::connect(&socket)
-                .map_err(|_| thread::sleep(Duration::from_millis(10)))
-                .ok()
-        })
-        .expect("the Daemon never opened its socket");
-    let mut ui = Channel::handshake(
-        stream.try_clone().unwrap(),
-        stream,
-        &Hello::new(&WireFormat::ALL),
-    )
-    .unwrap();
+    let mut ui = testing::connect(&socket, Duration::from_secs(10));
     let mut query = |text: &str| -> usize {
         ui.send(&FromFrontEnd::Query { text: text.into() }).unwrap();
         loop {

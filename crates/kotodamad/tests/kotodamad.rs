@@ -10,6 +10,7 @@ use std::process::{Child, Command};
 use std::thread;
 use std::time::{Duration, Instant};
 
+use kotodama_extension::testing;
 use kotodama_protocol::*;
 use tempfile::TempDir;
 
@@ -35,12 +36,7 @@ impl Daemon {
     /// A home with no Extensions or config yet; add them before `start`.
     fn home() -> TempDir {
         let root = TempDir::new().unwrap();
-        for dir in [
-            "runtime",
-            "config/kotodama/extensions",
-            "etc/kotodama",
-            "share",
-        ] {
+        for dir in ["runtime", EXTENSIONS, "etc/kotodama", "share"] {
             fs::create_dir_all(root.path().join(dir)).unwrap();
         }
         root
@@ -64,15 +60,10 @@ impl Daemon {
 
     fn connect(&self) -> Client {
         let socket = self.root.path().join("runtime/kotodama.sock");
-        let stream = wait_for("the socket", || UnixStream::connect(&socket).ok());
-        stream.set_read_timeout(Some(TIMEOUT)).unwrap();
-        let channel = Channel::handshake(
-            stream.try_clone().unwrap(),
-            stream,
-            &Hello::new(&WireFormat::ALL),
-        )
-        .unwrap();
-        Client { channel, shown: 0 }
+        Client {
+            channel: testing::connect(&socket, TIMEOUT),
+            shown: 0,
+        }
     }
 }
 
@@ -127,29 +118,35 @@ fn spawn_activated(root: &Path, listener: &std::os::unix::net::UnixListener) -> 
     command.spawn().unwrap()
 }
 
+/// The user's extension directory in a home.
+const EXTENSIONS: &str = "config/kotodama/extensions";
+
 fn extension_dir(root: &TempDir, name: &str) -> PathBuf {
-    root.path().join("config/kotodama/extensions").join(name)
+    root.path().join(EXTENSIONS).join(name)
 }
 
 /// Installs the recording test Extension as `name`, indexing `items`.
 fn install(root: &TempDir, name: &str, manifest_extra: &str, items: &[Item]) {
-    install_in(&extension_dir(root, name), name, manifest_extra, items);
+    install_in(&root.path().join(EXTENSIONS), name, manifest_extra, items);
 }
 
-/// Installs the recording test Extension as `name` in `dir`.
-fn install_in(dir: &Path, name: &str, manifest_extra: &str, items: &[Item]) {
-    fs::create_dir_all(dir).unwrap();
+/// Installs the recording test Extension as `name` in the extension
+/// directory `extensions`. The Manifest goes in last, so a Daemon watching
+/// finds the Extension whole.
+fn install_in(extensions: &Path, name: &str, manifest_extra: &str, items: &[Item]) {
+    let dir = extensions.join(name);
+    fs::create_dir_all(&dir).unwrap();
     fs::copy(fixture(), dir.join("extension.sh")).unwrap();
-    fs::write(
-        dir.join("manifest.toml"),
-        format!("name = \"{name}\"\ncommand = [\"extension.sh\"]\n{manifest_extra}"),
-    )
-    .unwrap();
     fs::write(
         dir.join("items.json"),
         serde_json::to_string(items).unwrap(),
     )
     .unwrap();
+    testing::install(
+        extensions,
+        name,
+        &format!("name = \"{name}\"\ncommand = [\"extension.sh\"]\n{manifest_extra}"),
+    );
 }
 
 fn wait_for<T>(what: &str, mut check: impl FnMut() -> Option<T>) -> T {
@@ -237,12 +234,7 @@ fn item(id: &str, title: &str) -> Item {
         identity: None,
         keywords: vec![],
         hidden: false,
-        actions: vec![Action {
-            id: "open".into(),
-            title: "Open".into(),
-            shortcut: None,
-            arguments: vec![],
-        }],
+        actions: vec![Action::new("open", "Open")],
     }
 }
 
@@ -352,11 +344,11 @@ fn an_extension_that_never_says_hello_is_killed_restarted_and_dies_with_the_daem
         .args(["+x", dir.join("hang.sh").to_str().unwrap()])
         .status()
         .unwrap();
-    fs::write(
-        dir.join("manifest.toml"),
+    testing::install(
+        &root.path().join(EXTENSIONS),
+        "silent",
         "name = \"silent\"\ncommand = [\"hang.sh\"]\n",
-    )
-    .unwrap();
+    );
     let daemon = Daemon::start(root);
     let mut ui = daemon.connect();
 
@@ -439,7 +431,7 @@ fn an_extension_a_profile_switch_brings_is_picked_up() {
     fs::remove_dir(root.path().join("share")).unwrap();
     fs::create_dir(root.path().join("gen-1")).unwrap();
     install_in(
-        &root.path().join("gen-2/kotodama/extensions/bookmarks"),
+        &root.path().join("gen-2/kotodama/extensions"),
         "bookmarks",
         "",
         &[item("kotodama", "Kotodama")],
@@ -654,14 +646,10 @@ fn under_socket_activation_the_daemon_serves_the_socket_it_is_handed_and_the_nex
     // Connects while no Daemon runs: the socket queues it.
     let waiting = UnixStream::connect(&socket).unwrap();
     daemon.child = spawn_activated(daemon.root.path(), &listener);
-    waiting.set_read_timeout(Some(TIMEOUT)).unwrap();
-    let channel = Channel::handshake(
-        waiting.try_clone().unwrap(),
-        waiting,
-        &Hello::new(&WireFormat::ALL),
-    )
-    .unwrap();
-    let mut ui = Client { channel, shown: 0 };
+    let mut ui = Client {
+        channel: testing::front_end(waiting, TIMEOUT),
+        shown: 0,
+    };
     ui.wait_for_titles("kotodama", &["Kotodama"]);
     assert!(socket.exists(), "the Daemon left systemd's socket in place");
 }

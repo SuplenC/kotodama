@@ -25,6 +25,7 @@ wayland-client = "0.31.15"
 wayland-protocols-misc = { version = "0.3.12", features = ["client"] }
 
 [dev-dependencies]
+kotodama-extension = { path = "../kotodama-extension", features = ["testing"] }
 # The ranking scenarios answer math with the real calculator, and fall back
 # on the real web search.
 kotodama-calculator = { path = "../kotodama-calculator" }

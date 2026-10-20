@@ -42,12 +42,7 @@ pub fn items() -> Vec<Item> {
                 identity: None,
                 keywords: vec![format!("app{n}")],
                 hidden: false,
-                actions: vec![Action {
-                    id: "open".into(),
-                    title: "Open".into(),
-                    shortcut: None,
-                    arguments: vec![],
-                }],
+                actions: vec![Action::new("open", "Open")],
                 title,
             }
         })
@@ -89,12 +84,7 @@ pub fn long_titles(n: usize, chars: usize, seed: u32) -> Vec<Item> {
                 identity: None,
                 keywords: vec![],
                 hidden: false,
-                actions: vec![Action {
-                    id: "paste".into(),
-                    title: "Paste".into(),
-                    shortcut: None,
-                    arguments: vec![],
-                }],
+                actions: vec![Action::new("paste", "Paste")],
                 title,
             }
         })
