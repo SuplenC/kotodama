@@ -23,6 +23,16 @@ cat >"$ext/items.json" <<'JSON'
 JSON
 printf '{"type":{"text":"Hello, Wayland!"}}' >"$ext/outcome.json"
 
+# A Live query whose Result comes after the Results it is asked with.
+notes="$XDG_CONFIG_HOME/kotodama/extensions/notes"
+mkdir -p "$notes"
+cp "$root/crates/kotodamad/tests/fixtures/recorder/extension.sh" "$notes/"
+printf 'name = "notes"\ncommand = ["extension.sh"]\n[live_query]\ntriggers = ["^zeb"]\ndebounce_ms = 20\n' >"$notes/manifest.toml"
+cat >"$notes/live.json" <<'JSON'
+[{"item":{"id":"zebra","kind":"url","url":"https://zebra","title":"Zebra crossing","actions":[{"id":"go","title":"Go"}]},"score":1.0,"answer":false}]
+JSON
+printf '{"type":{"text":"From notes"}}' >"$notes/outcome.json"
+
 # The window the user was in before opening the menu.
 spawn quickshell --path ../type-and-paste/client.qml
 wait_for_log quickshell.log "ready"
@@ -61,3 +71,11 @@ close
 open --query snip
 wtype -s 200 -k Return
 wait_for_log quickshell.log "typed: Hello, Wayland!"
+
+# A late Result runs once a frame has shown it: the menu confirms the Results
+# on screen, and the Daemon refuses one the user hasn't seen.
+mark=$(log_lines quickshell.log)
+open --query zebra
+wait_for_log quickshell.log "top: Zebra crossing" "$mark"
+wtype -s 200 -k Return
+wait_for_log quickshell.log "typed: Hello, Wayland!From notes"

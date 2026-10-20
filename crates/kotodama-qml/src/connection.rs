@@ -30,7 +30,8 @@ const PUSH_AFTER_POP: Duration = Duration::from_millis(16);
 /// What the connection hands the Qt thread.
 pub enum Update {
     Connected(Writer),
-    Rows(Vec<Row>),
+    /// The Results, and their version.
+    Rows(u32, Vec<Row>),
     Down(Vec<String>),
     Close,
     Open {
@@ -71,6 +72,15 @@ pub enum Update {
     JobProgress {
         extension: String,
         job: Job,
+    },
+    /// The change to the History the Toast offers to undo.
+    OfferUndo {
+        change: u64,
+        title: String,
+    },
+    /// The change can't be undone any more.
+    WithdrawUndo {
+        change: u64,
     },
     Disconnected,
 }
@@ -218,8 +228,8 @@ fn read(
 
 fn update(message: ToFrontEnd) -> Update {
     match message {
-        ToFrontEnd::Results { results } => {
-            Update::Rows(results.into_iter().map(Row::from).collect())
+        ToFrontEnd::Results { version, results } => {
+            Update::Rows(version, results.into_iter().map(Row::from).collect())
         }
         ToFrontEnd::Status { down } => Update::Down(down),
         ToFrontEnd::Close => Update::Close,
@@ -268,6 +278,8 @@ fn update(message: ToFrontEnd) -> Update {
             matches,
         },
         ToFrontEnd::JobProgress { extension, job } => Update::JobProgress { extension, job },
+        ToFrontEnd::OfferUndo { change, title } => Update::OfferUndo { change, title },
+        ToFrontEnd::WithdrawUndo { change } => Update::WithdrawUndo { change },
     }
 }
 

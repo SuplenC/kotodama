@@ -14,9 +14,9 @@ use std::sync::mpsc::{Sender, SyncSender, TrySendError};
 use std::time::{Duration, Instant};
 
 use kotodama_protocol::{
-    Action, ActionRef, CatalogEntry, Clipboard, FromExtension, FromFrontEnd, Item, ItemKind, Job,
-    JobState, KindName, LiveResult, NamespacedKind, OfferedAction, Outcome, ResultRef, ShownResult,
-    Table, ToExtension, ToFrontEnd, View, ViewContent,
+    Action, ActionRef, CatalogEntry, Clipboard, FORGET_SHORTCUT, FromExtension, FromFrontEnd, Item,
+    ItemKind, Job, JobState, KindName, LiveResult, NamespacedKind, OfferedAction, Outcome,
+    ResultRef, ShownResult, Table, ToExtension, ToFrontEnd, View, ViewContent,
 };
 use nucleo_matcher::pattern::{CaseMatching, Normalization, Pattern};
 use nucleo_matcher::{Config, Matcher};
@@ -35,6 +35,7 @@ use crate::keywords::{self, Keywords};
 use crate::kind_order::{KindOrder, KindPlaces};
 use crate::open_view::{Opening, ViewName};
 use crate::rank::{self, Haystack, Matched, Text, Tier, Tiers};
+use crate::reserved;
 use crate::segment::Edit;
 use crate::usage::{Entry, Used};
 use crate::views::{Open, Views};
@@ -139,6 +140,10 @@ pub enum Event {
 pub const MAX_RESULTS: usize = 50;
 /// How many rows a Front end shows until it says otherwise.
 const DEFAULT_ROWS: usize = 10;
+/// How long after a keystroke Late Results may still rerank the rows on
+/// screen, unless the selection moves first. Most Live queries answer
+/// within it, and the eye has barely found the top row by then.
+pub const RERANK_FOR: Duration = Duration::from_millis(150);
 /// How long to wait for Front ends to close before typing anyway.
 const CLOSE_TIMEOUT: Duration = Duration::from_millis(500);
 /// How long `kotodama open --view` waits for its View before opening the
@@ -416,7 +421,8 @@ impl Live {
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 enum Update {
     None,
-    /// Results changed under an unchanged query: the visible rows stay put.
+    /// Results changed under an unchanged query: ranked from scratch while
+    /// [`Session::reranks`], and otherwise below the rows on screen.
     Late,
     /// The query changed: rank from scratch.
     Fresh,
@@ -437,14 +443,25 @@ struct Session {
     /// What a perfect match of the query scores, which Live query scores are
     /// scaled to.
     max_score: u32,
-    /// How many rows, from the first, late Results may not move: those on
-    /// screen and those scrolled past.
+    /// How many rows, from the first, Late Results may not move once the
+    /// rerank is over: those on screen and those scrolled past.
     rows: usize,
+    /// When the query last changed.
+    typed: Instant,
+    /// Whether the user moved the selection since the query last changed.
+    selection_moved: bool,
     narrowing: Narrowing,
     /// By Extension.
     live: Vec<Live>,
     /// The Results last sent, in order, and whether each is an answer.
     shown: Vec<(Source, bool)>,
+    /// The version of the Results last sent.
+    version: u32,
+    /// The Results a late update of this query moved up a row or added, each
+    /// with the last version that did. Until a frame shows that version, the
+    /// row the user runs held something else, so a run confirmed in an
+    /// earlier one is refused.
+    risen: Vec<(Source, u32)>,
     /// The Result an Alias named, and the Alias: picking it counts for the
     /// Alias alone.
     via_alias: Option<(Source, String)>,
@@ -463,6 +480,39 @@ impl Session {
         if let Err(TrySendError::Full(_)) = self.sender.try_send(message) {
             self.hung.set(true);
         }
+    }
+
+    /// Whether Late Results that arrive at `now` rank with the rest, the rows
+    /// on screen included: until the selection moves or [`RERANK_FOR`] after
+    /// the keystroke.
+    fn reranks(&self, now: Instant) -> bool {
+        !self.selection_moved && now < self.typed + RERANK_FOR
+    }
+
+    /// Sends `results`, the rows of `shown`, as the next version. A late
+    /// update notes each Result it adds or moves up a row as risen in that
+    /// version.
+    fn send_results(&mut self, shown: Vec<(Source, bool)>, results: Vec<ShownResult>, fresh: bool) {
+        self.version = self.version.wrapping_add(1);
+        if fresh {
+            self.risen.clear();
+        } else {
+            for (row, &(source, _)) in shown.iter().enumerate() {
+                let was = self.shown.iter().position(|&(old, _)| old == source);
+                if was.is_some_and(|was| was <= row) {
+                    continue;
+                }
+                match self.risen.iter_mut().find(|(risen, _)| *risen == source) {
+                    Some((_, version)) => *version = self.version,
+                    None => self.risen.push((source, self.version)),
+                }
+            }
+        }
+        self.shown = shown;
+        self.send(ToFrontEnd::Results {
+            version: self.version,
+            results,
+        });
     }
 
     /// The filter typed into a list View, if any.
@@ -625,10 +675,37 @@ fn action_titled(id: &str, title: String) -> Action {
 /// undone by id, so one can be undone whatever changed after it.
 struct Undoable {
     id: u64,
-    /// What the Undo Result reads while it is the latest.
-    title: String,
+    done: Done,
     change: Change,
     until: Instant,
+}
+
+impl Undoable {
+    /// Offers a Front end to undo it.
+    fn offer(&self) -> ToFrontEnd {
+        ToFrontEnd::OfferUndo {
+            change: self.id,
+            title: self.done.offer.clone(),
+        }
+    }
+}
+
+/// What a change to the History did, in words.
+struct Done {
+    /// What a Front end's offer to undo it reads, as `Forgot “Firefox”`.
+    offer: String,
+    /// What the Undo Result reads while it is the latest.
+    undo: String,
+}
+
+impl Done {
+    #[must_use]
+    fn new(offer: impl Into<String>, undo: impl Into<String>) -> Self {
+        Done {
+            offer: offer.into(),
+            undo: undo.into(),
+        }
+    }
 }
 
 /// A Result the Empty query may show as one of the most used.
@@ -1069,10 +1146,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
         {
             self.deliver_output();
         }
-        if self.undos.first().is_some_and(|undo| undo.until <= now) {
-            self.undos.retain(|undo| undo.until > now);
-            self.load_undo_item();
-        }
+        self.expire_undos(now);
         self.open_overdue(now);
         self.release_held();
         self.flush(now);
@@ -1291,10 +1365,18 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
                 continue;
             }
             for contributed in &ext.found.manifest.contributed_actions {
+                let mut action = contributed.action.clone();
+                if reserved::release_actions([&mut action]) > 0 {
+                    log::warn!(
+                        "{}: dropped the key binding of `{}`, which the menu keeps for itself",
+                        ext.name(),
+                        action.id
+                    );
+                }
                 self.contributed
                     .entry(contributed.kind.as_str().to_owned())
                     .or_default()
-                    .push((ExtensionId(id), contributed.action.clone()));
+                    .push((ExtensionId(id), action));
             }
         }
         self.catalog_dirty = true;
@@ -1311,8 +1393,12 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
         }
     }
 
-    fn extension_message(&mut self, id: ExtensionId, message: FromExtension, now: Instant) {
+    fn extension_message(&mut self, id: ExtensionId, mut message: FromExtension, now: Instant) {
         let name = self.extensions[id.0].name().to_owned();
+        let released = reserved::release_message(&mut message);
+        if released > 0 {
+            log::warn!("{name}: dropped {released} key bindings the menu keeps for itself");
+        }
         match message {
             FromExtension::AddItems { mut items } => {
                 items.retain(|item| {
@@ -1800,9 +1886,13 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             pattern: Pattern::default(),
             max_score: 0,
             rows: DEFAULT_ROWS,
+            typed: self.started,
+            selection_moved: false,
             narrowing: Narrowing::default(),
             live: self.extensions.iter().map(|_| Live::default()).collect(),
             shown: Vec::new(),
+            version: 0,
+            risen: Vec::new(),
             via_alias: None,
             searched: false,
             update: Update::None,
@@ -1811,6 +1901,9 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
         session.send(ToFrontEnd::Status {
             down: self.down.clone(),
         });
+        if let Some(latest) = self.undos.last() {
+            session.send(latest.offer());
+        }
         for ((ext, _), job) in &self.jobs {
             session.send(ToFrontEnd::JobProgress {
                 extension: self.extensions[ext.0].name().to_owned(),
@@ -1858,13 +1951,21 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
                     session.rows = top as usize + rows as usize;
                 }
             }
+            FromFrontEnd::SelectionMoved => {
+                if let Some(session) = self.sessions.get_mut(&id) {
+                    session.selection_moved = true;
+                }
+            }
             FromFrontEnd::RunAction {
                 result,
+                shown,
                 action,
                 arguments,
             } => {
                 let daemons = action.extension == OWN;
-                let run = if daemons && action.id == FORGET {
+                let run = if self.unseen(id, &result, shown) {
+                    Err("that Result wasn't on screen yet".to_owned())
+                } else if daemons && action.id == FORGET {
                     self.forget_result(id, &result, now)
                 } else if daemons && action.id == CLEAR_EXTENSION_HISTORY {
                     self.clear_extension_history(id, &result, now)
@@ -1916,7 +2017,24 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
                 self.refresh_empty(Update::Fresh, Some(id));
                 self.ask_menus(id, ToFrontEnd::Toggle);
             }
+            FromFrontEnd::Undo { change } => self.undo(change),
         }
+    }
+
+    /// Whether a late update added `result` or moved it up a row in a later
+    /// version of the Results than `shown`, the one on screen when the user
+    /// chose it: the user hasn't seen it where it is.
+    fn unseen(&self, front_end: FrontEndId, result: &ResultRef, shown: u32) -> bool {
+        let Some(session) = self.sessions.get(&front_end) else {
+            return false;
+        };
+        let Some(source) = self.source_of(session, &result.extension, &result.id) else {
+            return false;
+        };
+        session
+            .risen
+            .iter()
+            .any(|&(risen, version)| risen == source && version > shown)
     }
 
     /// Tells the Front end why an Action it asked for didn't run.
@@ -2216,6 +2334,8 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
         session.query = text;
         session.searched = true;
         session.update = Update::Fresh;
+        session.typed = now;
+        session.selection_moved = false;
         for (ext_id, ext) in self.extensions.iter().enumerate() {
             let live = &mut session.live[ext_id];
             if let Some(query) = live.sent.take() {
@@ -2372,7 +2492,8 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
                 session.send(ToFrontEnd::Close);
                 let change = self.history.clear();
                 self.store.forget_usage(None);
-                self.changed("Undo clearing history".into(), change, now);
+                let done = Done::new("Cleared history", "Undo clearing history");
+                self.changed(done, change, now);
             }
             OwnAction::Undo => {
                 if let Some(latest) = self.undos.last().map(|undo| undo.id) {
@@ -2393,9 +2514,12 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
     ) -> Result<(), String> {
         let (session, item) = self.shown_item(front_end, result)?;
         let keys = self.history_keys(session, &result.extension, &item);
-        let title = format!("Undo forgetting “{}”", item.title);
+        let done = Done::new(
+            format!("Forgot “{}”", item.title),
+            format!("Undo forgetting “{}”", item.title),
+        );
         let change = self.history.forget(&keys);
-        self.changed(title, change, now);
+        self.changed(done, change, now);
         Ok(())
     }
 
@@ -2437,8 +2561,11 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
                 || (extension == OWN && aliases.contains(id))
         });
         self.store.forget_usage(Some(name));
-        let title = format!("Undo clearing the history of {name}");
-        self.changed(title, change, now);
+        let done = Done::new(
+            format!("Cleared the history of {name}"),
+            format!("Undo clearing the history of {name}"),
+        );
+        self.changed(done, change, now);
         Ok(())
     }
 
@@ -2491,20 +2618,23 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
     }
 
     /// Saves a change to the History, which can be undone for [`UNDO_FOR`],
-    /// and ranks every session again. A change of nothing is let go.
-    fn changed(&mut self, title: String, change: Change, now: Instant) {
+    /// offers every Front end to undo it, and ranks every session again. A
+    /// change of nothing is let go.
+    fn changed(&mut self, done: Done, change: Change, now: Instant) {
         if change.is_empty() {
             return;
         }
         self.store.save(&self.history);
         let id = self.next_id;
         self.next_id += 1;
-        self.undos.push(Undoable {
+        let undoable = Undoable {
             id,
-            title,
+            done,
             change,
             until: now + UNDO_FOR,
-        });
+        };
+        self.broadcast(|| undoable.offer());
+        self.undos.push(undoable);
         self.load_undo_item();
     }
 
@@ -2516,6 +2646,23 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
         let undo = self.undos.remove(n);
         self.history.undo(undo.change);
         self.store.save(&self.history);
+        self.broadcast(|| ToFrontEnd::WithdrawUndo { change: id });
+        self.load_undo_item();
+    }
+
+    /// Lets go of the changes to the History whose time to be undone ran
+    /// out, and withdraws the offers to undo them.
+    fn expire_undos(&mut self, now: Instant) {
+        if !self.undos.first().is_some_and(|undo| undo.until <= now) {
+            return;
+        }
+        let (expired, kept): (Vec<_>, Vec<_>) = std::mem::take(&mut self.undos)
+            .into_iter()
+            .partition(|undo| undo.until <= now);
+        self.undos = kept;
+        for undo in expired {
+            self.broadcast(|| ToFrontEnd::WithdrawUndo { change: undo.id });
+        }
         self.load_undo_item();
     }
 
@@ -2531,7 +2678,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
         }
         if let Some(latest) = self.undos.last() {
             self.own
-                .push(Own::new(undo_item(&latest.title), OwnAction::Undo));
+                .push(Own::new(undo_item(&latest.done.undo), OwnAction::Undo));
         }
         self.mark_late();
     }
@@ -2563,7 +2710,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
         if !remembered {
             return;
         }
-        let forget = action_titled(FORGET, "Forget".into());
+        let forget = action_titled(FORGET, "Forget".into()).shortcut(FORGET_SHORTCUT);
         if extension == OWN {
             item.actions.push(forget);
             return;
@@ -2837,21 +2984,22 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
         }
     }
 
-    /// Ranks one session's Results and sends them. Results that come late
-    /// never move the rows on screen (ADR 0003): those stay where they are,
-    /// and everything new goes below them, except an answer, which takes the
-    /// top row.
+    /// Ranks one session's Results and sends them. Late Results rank with the
+    /// rest while [`Session::reranks`]. After that the rows on
+    /// screen stay where they are, and everything new goes below them, except
+    /// an answer, which takes the top row.
     fn refresh(&mut self, id: FrontEndId, now: Instant) {
         let Some(mut session) = self.sessions.remove(&id) else {
             return;
         };
         let fresh = session.update == Update::Fresh;
+        let keep = !fresh && !session.reranks(now);
         session.update = Update::None;
 
         if session.query.is_empty() {
             session.narrowing.forget();
             let mut ranked = self.empty_query(&session, now);
-            if !fresh {
+            if keep {
                 // The rows on screen stay put, as for any query.
                 let visible: Vec<Source> = session
                     .shown
@@ -2864,12 +3012,12 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
                 ranked.splice(0..0, visible);
             }
             session.via_alias = None;
-            session.shown = ranked.iter().map(|&source| (source, false)).collect();
             let results = ranked
                 .iter()
                 .filter_map(|&source| self.row(&session, source, None))
                 .collect();
-            session.send(ToFrontEnd::Results { results });
+            let shown = ranked.into_iter().map(|source| (source, false)).collect();
+            session.send_results(shown, results, fresh);
             self.sessions.insert(id, session);
             return;
         }
@@ -2993,7 +3141,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
         answers.sort_unstable_by(Candidate::rank);
 
         let mut kept: Vec<Candidate> = Vec::new();
-        if !fresh {
+        if keep {
             let visible = session.shown.iter().take(session.rows);
             // A fallback on screen moves down for a real match come late: it
             // never ranks above one.
@@ -3016,11 +3164,6 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
         self.lead_with_direct_picks(&session, &mut candidates);
 
         let ranked: Vec<Candidate> = answers.into_iter().chain(kept).chain(candidates).collect();
-        session.shown = ranked
-            .iter()
-            .map(|candidate| (candidate.source, candidate.standing == Standing::Answer))
-            .collect();
-
         let results = ranked
             .iter()
             .filter_map(|candidate| {
@@ -3031,7 +3174,11 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
                 self.row(&session, candidate.source, primary)
             })
             .collect();
-        session.send(ToFrontEnd::Results { results });
+        let shown = ranked
+            .iter()
+            .map(|candidate| (candidate.source, candidate.standing == Standing::Answer))
+            .collect();
+        session.send_results(shown, results, fresh);
         self.sessions.insert(id, session);
     }
 
@@ -3073,7 +3220,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
     /// Adds the near misses of the session's query, Indexed items and the
     /// Daemon's own, to `candidates`, unless the real matches already fill the
     /// rows: near misses rank below every real match, so they would never be
-    /// seen, except those on screen when the query hasn't changed (ADR 0003).
+    /// seen, except those on screen when the query hasn't changed.
     /// `narrowed` is whether this search narrowed the last one's matches;
     /// then near misses are looked for among the last one's, if it looked for
     /// them and allowed as many typos. The candidates before `indexed` are the

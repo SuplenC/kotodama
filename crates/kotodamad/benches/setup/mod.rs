@@ -183,7 +183,7 @@ impl Setup {
             .results
             .try_iter()
             .filter_map(|message| match message {
-                ToFrontEnd::Results { results } => Some(results),
+                ToFrontEnd::Results { results, .. } => Some(results),
                 _ => None,
             })
             .last()

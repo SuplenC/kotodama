@@ -16,14 +16,21 @@ pub enum FromFrontEnd {
     /// The search text changed. The Daemon answers with [`ToFrontEnd::Results`],
     /// and again whenever late Results arrive.
     Query { text: String },
-    /// Which Results are on screen: `rows` of them, from the one at `top`. Results
-    /// that arrive after the list is shown go below these rows, so neither the
-    /// rows on screen nor any scrolled past ever move (ADR 0003). The Daemon
-    /// assumes the top 10 until told.
+    /// Which Results are on screen: `rows` of them, from the one at `top`. Once
+    /// the selection has moved, or 150 ms after the query changed, Late Results go
+    /// below these rows, so neither the rows on screen nor any
+    /// scrolled past move. The Daemon assumes the top 10 until told.
     Viewport { top: u32, rows: u32 },
+    /// The user moved the selection off the top row of the Results. Until the
+    /// query changes, Late Results go below the rows on screen.
+    SelectionMoved,
     /// Runs one Action of a Result's Action list.
     RunAction {
         result: ResultRef,
+        /// The [`ToFrontEnd::Results`] `version` on screen when the user chose
+        /// `result`. The Daemon refuses a Late Result that a later version
+        /// added or moved up a row: the user hasn't seen it there.
+        shown: u32,
         action: ActionRef,
         /// Argument values by Argument name.
         #[serde(default)]
@@ -64,6 +71,9 @@ pub enum FromFrontEnd {
     /// Asks every other Front end to open if it is closed and close if it is
     /// open, as `kotodama toggle` does.
     Toggle,
+    /// Undoes the change to the History that [`ToFrontEnd::OfferUndo`]
+    /// offered, as its key does. Nothing happens once it can't be undone.
+    Undo { change: u64 },
 }
 
 /// From the Daemon to a Front end.
@@ -73,6 +83,9 @@ pub enum ToFrontEnd {
     /// The whole ranked list for the current query, best first. It replaces the
     /// previous list.
     Results {
+        /// Counts up with every list sent to this Front end. It names the list
+        /// on screen in [`FromFrontEnd::RunAction`]'s `shown`.
+        version: u32,
         results: Vec<ShownResult>,
     },
     /// The Extensions that are down. Their Results are gone until they come back.
@@ -134,6 +147,20 @@ pub enum ToFrontEnd {
     },
     /// Open the menu if it is closed, or close it if it is open.
     Toggle,
+    /// The History just changed, as by Forget or "Clear history", and the
+    /// change can be undone: show `title`, such as `Forgot “Firefox”`, with
+    /// the key that sends [`FromFrontEnd::Undo`]. It takes the place of the
+    /// offer before it. Shown without taking the keys or the selection, until
+    /// [`ToFrontEnd::WithdrawUndo`] names the same `change`.
+    OfferUndo {
+        change: u64,
+        title: String,
+    },
+    /// The change can't be undone any more: it was undone, or its time ran
+    /// out. Hide its offer, if it is still shown.
+    WithdrawUndo {
+        change: u64,
+    },
 }
 
 /// One Result as the Front end shows it.

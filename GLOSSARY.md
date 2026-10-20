@@ -56,6 +56,10 @@ _Avoid_: Private item, internal item
 A query the Daemon forwards to an Extension as the user types, for sources that can't be indexed ahead of time, such as a calculator or web search.
 _Avoid_: Dynamic search, remote query
 
+**Late Result**:
+A Result that comes after the list for its query was first sent, such as a Live query's. Until the user moves the selection or 150 ms after the keystroke it reranks the rows on screen; after that it goes below them. Enter runs one only once a frame has shown it.
+_Avoid_: Delayed result, async result
+
 **Action**:
 Something the user can do to a Result; every Result has one primary Action and may have more, listed in the Action panel.
 _Avoid_: Command, handler, verb
@@ -75,6 +79,14 @@ _Avoid_: Suggestion, AI action, recommendation
 **Action panel**:
 The list of all Actions available for the selected Result.
 _Avoid_: Context menu, actions menu
+
+**Reserved key**:
+A key binding the Front end keeps for itself, such as Ctrl+K for the Action panel or Ctrl+Z for undo; the Daemon drops it from any Extension's Action that asks for it.
+_Avoid_: System shortcut, global key
+
+**Toast**:
+A short notice the Front end shows after Forget or "Clear history", with the key that undoes it; it never takes the keys or the selection, and goes once the change is undone or too old to be.
+_Avoid_: Snackbar, notification, popup
 
 **View**:
 A screen pushed on top of the search, such as a list, a form, a detail pane or a progress display; Esc pops it. Typing into a list filters it.

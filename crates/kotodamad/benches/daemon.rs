@@ -70,7 +70,7 @@ fn main() {
     let mut query = |text: &str| -> usize {
         ui.send(&FromFrontEnd::Query { text: text.into() }).unwrap();
         loop {
-            if let ToFrontEnd::Results { results } = ui.recv().unwrap().unwrap() {
+            if let ToFrontEnd::Results { results, .. } = ui.recv().unwrap().unwrap() {
                 return results.len();
             }
         }

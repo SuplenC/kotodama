@@ -23,7 +23,7 @@ use std::time::Instant;
 
 use cxx_qt::{CxxQtType, Initialize, Threading};
 use cxx_qt_lib::{QByteArray, QHash, QHashPair_i32_QByteArray, QModelIndex, QString, QVariant};
-use kotodama_protocol::{FromFrontEnd, ResultRef, Value};
+use kotodama_protocol::{FromFrontEnd, ResultRef, UNDO_SHORTCUT, Value};
 
 use connection::{Update, Writer};
 use rows::{Model, Row, Rows};
@@ -79,6 +79,9 @@ pub mod qobject {
         #[qproperty(i32, depth, READ, NOTIFY)]
         /// The jobs still running, oldest first. See `variant::jobs`.
         #[qproperty(QList_QVariant, jobs, READ, NOTIFY)]
+        /// The Toast: what the change to the History that can be undone did,
+        /// such as `Forgot “Firefox”`, or empty when there is none.
+        #[qproperty(QString, toast, READ, NOTIFY)]
         type KotodamaSearch = super::SearchRust;
 
         fn set_query(self: Pin<&mut KotodamaSearch>, query: QString);
@@ -142,9 +145,30 @@ pub mod qobject {
         #[qinvokable]
         fn select(self: Pin<&mut KotodamaSearch>, row: i32);
 
+        /// Undoes the change the Toast offers to undo, and hides it. False if
+        /// there is none, or the Daemon isn't there to undo it.
+        #[qinvokable]
+        fn undo(self: Pin<&mut KotodamaSearch>) -> bool;
+
+        /// Whether `key` (a `Qt::Key`) with `modifiers` held is the key that
+        /// undoes what the Toast offers to.
+        #[qinvokable]
+        #[cxx_name = "isUndoKey"]
+        fn is_undo_key(self: &KotodamaSearch, key: i32, modifiers: i32) -> bool;
+
         /// Tells the Daemon which rows are on screen.
         #[qinvokable]
         fn viewport(self: Pin<&mut KotodamaSearch>, top: i32, rows: i32);
+
+        /// The window is about to draw a frame of the model as it is now.
+        #[qinvokable]
+        #[cxx_name = "frameStarted"]
+        fn frame_started(self: Pin<&mut KotodamaSearch>);
+
+        /// The frame `frameStarted` began reached the screen: its Results are
+        /// the ones the user sees, and so the ones a run confirms.
+        #[qinvokable]
+        fn painted(self: Pin<&mut KotodamaSearch>);
 
         /// Answers `closeRequested` once the window is gone.
         #[qinvokable]
@@ -276,10 +300,26 @@ pub struct SearchRust {
     listed: Option<(String, String)>,
     /// The row the list has selected, by what it shows.
     selected: Option<ResultRef>,
+    /// Whether the user moved the selection off the top row of the Results
+    /// since the query last changed, and the Daemon knows.
+    selection_moved: bool,
+    /// The version of the Results in the model, or last in it while a list
+    /// View's Items are shown instead.
+    version: u32,
+    /// The version of the Results kept in `results`.
+    kept_version: u32,
+    /// The version of the Results in the frame being drawn.
+    drawing: u32,
+    /// The version of the Results in the last frame on screen, which a run
+    /// confirms to the Daemon.
+    on_screen: u32,
     views: Views,
     view: variant::Map,
     depth: i32,
     jobs: variant::List,
+    toast: QString,
+    /// The change to the History the Toast offers to undo.
+    offered: Option<u64>,
     writer: Option<Writer>,
     /// When the oldest query still waiting for its Results was sent. Results
     /// for a later query are measured from it too, so typing faster than the
@@ -299,10 +339,17 @@ impl Default for SearchRust {
             results: None,
             listed: None,
             selected: None,
+            selection_moved: false,
+            version: 0,
+            kept_version: 0,
+            drawing: 0,
+            on_screen: 0,
             views: Views::default(),
             view: variant::Map::default(),
             depth: 0,
             jobs: variant::List::default(),
+            toast: QString::default(),
+            offered: None,
             writer: None,
             asked: None,
         }
@@ -348,6 +395,7 @@ impl KotodamaSearch {
     fn send_query(mut self: Pin<&mut Self>, text: String) {
         let now = Instant::now();
         let mut this = self.as_mut().rust_mut();
+        this.selection_moved = false;
         if this.send(&FromFrontEnd::Query { text }) {
             this.asked.get_or_insert(now);
         }
@@ -374,6 +422,7 @@ impl KotodamaSearch {
         };
         let message = FromFrontEnd::RunAction {
             result: row.result.clone(),
+            shown: self.on_screen,
             action,
             arguments: Default::default(),
         };
@@ -444,7 +493,21 @@ impl KotodamaSearch {
 
     fn select(mut self: Pin<&mut Self>, row: i32) {
         let selected = self.row(row).map(|row| row.result.clone());
-        self.as_mut().rust_mut().selected = selected;
+        let mut this = self.as_mut().rust_mut();
+        this.selected = selected;
+        if row > 0 && this.listed.is_none() && !this.selection_moved {
+            this.selection_moved = this.send(&FromFrontEnd::SelectionMoved);
+        }
+    }
+
+    fn frame_started(mut self: Pin<&mut Self>) {
+        let version = self.version;
+        self.as_mut().rust_mut().drawing = version;
+    }
+
+    fn painted(mut self: Pin<&mut Self>) {
+        let drawn = self.drawing;
+        self.as_mut().rust_mut().on_screen = drawn;
     }
 
     fn viewport(mut self: Pin<&mut Self>, top: i32, rows: i32) {
@@ -453,6 +516,24 @@ impl KotodamaSearch {
             rows: rows.max(0) as u32,
         };
         self.as_mut().rust_mut().send(&message);
+    }
+
+    fn undo(mut self: Pin<&mut Self>) -> bool {
+        let Some(change) = self.offered else {
+            return false;
+        };
+        let sent = self
+            .as_mut()
+            .rust_mut()
+            .send(&FromFrontEnd::Undo { change });
+        if sent {
+            self.as_mut().set_toast(None);
+        }
+        sent
+    }
+
+    fn is_undo_key(&self, key: i32, modifiers: i32) -> bool {
+        shortcut::matches(UNDO_SHORTCUT, key, modifiers)
     }
 
     fn closed(mut self: Pin<&mut Self>) {
@@ -531,6 +612,12 @@ impl KotodamaSearch {
                 let mut this = self.as_mut().rust_mut();
                 this.writer = Some(writer);
                 this.asked = None;
+                // A Daemon that restarted counts its Results from the start.
+                this.version = 0;
+                this.kept_version = 0;
+                this.drawing = 0;
+                this.on_screen = 0;
+                this.selection_moved = false;
                 self.as_mut().set_connected(true);
                 // A Daemon that restarted has no idea what is typed. Even
                 // nothing typed has Results: those of the Empty query.
@@ -538,10 +625,13 @@ impl KotodamaSearch {
                 self.as_mut().send_query(text);
                 Shown::Same
             }
-            Update::Rows(rows) => {
+            Update::Rows(version, rows) => {
                 if self.results.is_some() {
-                    self.as_mut().rust_mut().results = Some(rows);
+                    let mut this = self.as_mut().rust_mut();
+                    this.results = Some(rows);
+                    this.kept_version = version;
                 } else {
+                    self.as_mut().rust_mut().version = version;
                     self.as_mut().replace(rows);
                 }
                 if let Some(asked) = self.as_mut().rust_mut().asked.take() {
@@ -643,7 +733,18 @@ impl KotodamaSearch {
                 self.as_mut().show_jobs();
                 Shown::Same
             }
+            Update::OfferUndo { change, title } => {
+                self.as_mut().set_toast(Some((change, title)));
+                Shown::Same
+            }
+            Update::WithdrawUndo { change } => {
+                if self.offered == Some(change) {
+                    self.as_mut().set_toast(None);
+                }
+                Shown::Same
+            }
             Update::Disconnected => {
+                self.as_mut().set_toast(None);
                 let mut this = self.as_mut().rust_mut();
                 this.writer = None;
                 this.asked = None;
@@ -686,13 +787,17 @@ impl KotodamaSearch {
         let Some(top) = top else {
             self.as_mut().rust_mut().listed = None;
             if let Some(results) = self.as_mut().rust_mut().results.take() {
+                let kept = self.kept_version;
+                self.as_mut().rust_mut().version = kept;
                 self.as_mut().replace(results);
             }
             return;
         };
         if self.results.is_none() {
             let results = self.rows.iter().cloned().collect();
-            self.as_mut().rust_mut().results = Some(results);
+            let mut this = self.as_mut().rust_mut();
+            this.results = Some(results);
+            this.kept_version = this.version;
         }
         let same = self.listed.as_ref() == Some(&top);
         self.as_mut().rust_mut().listed = Some(top);
@@ -723,6 +828,20 @@ impl KotodamaSearch {
         let jobs = variant::jobs(&self.views);
         self.as_mut().rust_mut().jobs = jobs;
         self.as_mut().jobs_changed();
+    }
+
+    /// Shows the Toast for a change to the History, or hides it.
+    fn set_toast(mut self: Pin<&mut Self>, offer: Option<(u64, String)>) {
+        let (offered, toast) = match offer {
+            Some((change, title)) => (Some(change), QString::from(&title)),
+            None => (None, QString::default()),
+        };
+        let mut this = self.as_mut().rust_mut();
+        this.offered = offered;
+        if this.toast != toast {
+            this.toast = toast;
+            self.as_mut().toast_changed();
+        }
     }
 
     fn set_connected(mut self: Pin<&mut Self>, connected: bool) {
