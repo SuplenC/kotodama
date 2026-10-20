@@ -72,6 +72,7 @@
 //! }
 //! ```
 
+mod closing;
 pub mod config;
 pub mod dbus;
 pub mod dirs;

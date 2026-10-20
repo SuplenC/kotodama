@@ -194,13 +194,13 @@ terminal = ["ghostty", "-e"]
 hidden = ["qt5ct", "qt6ct"]
 # Names to show instead of the app's own; it is still found by its own name too.
 names = { nvim = "Neovim" }
-# An app that exits within this many seconds of starting was most likely
+# An app that closes within this many seconds of starting was most likely
 # picked by mistake: its pick is taken back out of the History. 0 never
 # does; at most 30. The default is 5.
 withdraw_within = 5
 ```
 
-The check is best effort: an app that hands off to a copy already running, or a launcher script that starts the app and exits, exits right away too, and its pick is withdrawn although the app opened. Set `withdraw_within = 0` if that happens to apps you use.
+An app counts as closed once everything its launch started is gone: its whole scope, or without a user manager its process group. So a launcher script that starts the app and exits keeps the pick. A launch while a copy of the same program already runs keeps it too, since such a launch often only hands off to that copy. The check is still best effort: without a scope, a program that starts the app in a new session or process group and exits looks closed, and so does one that hands off to a copy running under another name, or to a D-Bus-activated service. Set `withdraw_within = 0` if that happens to apps you use.
 
 Its `manifest.toml` runs `./kotodama-apps`, so a package installs the binary next to it in `$XDG_DATA_DIRS/kotodama/extensions/apps/`.
 

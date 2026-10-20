@@ -5,6 +5,7 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::ops::{Deref, DerefMut};
 use std::os::unix::fs::{PermissionsExt, symlink};
+use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::thread;
@@ -660,10 +661,21 @@ fn a_prefix_that_only_makes_a_scope_is_passed_over() {
     assert!(!out.exists(), "the app ran through the prefix");
 }
 
+/// Writes a shell script named `name` in `dir`, running `body`, and returns
+/// its path. Named for its test alone, so no other test's process looks like
+/// a copy of it already running.
+fn script(dir: &Path, name: &str, body: &str) -> String {
+    let path = dir.join(name);
+    fs::write(&path, format!("#!/bin/sh\n{body}\n")).unwrap();
+    fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).unwrap();
+    path.display().to_string()
+}
+
 #[test]
 fn an_app_that_exits_right_after_it_starts_has_its_pick_withdrawn() {
     let dir = data_dirs();
-    install(dir.path(), "system", "oops.desktop", &app("Oops", "true"));
+    let oops = script(dir.path(), "kotodama-lone-oops", "exit 0");
+    install(dir.path(), "system", "oops.desktop", &app("Oops", &oops));
     let mut apps = Apps::configured(dir, Table::new());
     apps.added();
 
@@ -683,7 +695,8 @@ fn an_app_that_runs_longer_than_withdraw_within_keeps_its_pick() {
         "slow.desktop",
         &app("Slow", "sleep 0.6"),
     );
-    install(dir.path(), "system", "quick.desktop", &app("Quick", "true"));
+    let quick = script(dir.path(), "kotodama-quick", "exit 0");
+    install(dir.path(), "system", "quick.desktop", &app("Quick", &quick));
     let mut apps = Apps::configured(
         dir,
         Table::from([("withdraw_within".into(), Value::Float(0.3))]),
@@ -718,6 +731,61 @@ fn an_app_still_running_keeps_its_pick() {
 
     assert_eq!(apps.run_as(5, "long", "open"), Outcome::Close);
     apps.quiet();
+}
+
+#[test]
+fn a_launcher_that_leaves_the_app_running_and_exits_keeps_its_pick() {
+    let dir = data_dirs();
+    // Starts the "app" in the background, as a launcher script does, and
+    // exits at once.
+    let launcher = script(dir.path(), "kotodama-launcher", "sleep 3 &\nexit 0");
+    install(
+        dir.path(),
+        "system",
+        "launched.desktop",
+        &app("Launched", &launcher),
+    );
+    let mut apps = Apps::configured(
+        dir,
+        Table::from([("withdraw_within".into(), Value::Integer(1))]),
+    );
+    apps.added();
+
+    assert_eq!(apps.run_as(6, "launched", "open"), Outcome::Close);
+    // Past `withdraw_within`, with the app it left still running.
+    thread::sleep(Duration::from_millis(1200));
+    apps.quiet();
+}
+
+#[test]
+fn a_launch_that_hands_off_to_a_copy_already_running_keeps_its_pick() {
+    let dir = data_dirs();
+    // The second launch of a single-instance app: it tells the copy that
+    // runs already to open a window, and exits at once.
+    let handoff = script(dir.path(), "kotodama-handoff", "exit 0");
+    install(
+        dir.path(),
+        "system",
+        "single.desktop",
+        &app("Single", &handoff),
+    );
+    let mut running = Command::new("sh")
+        .arg0("kotodama-handoff")
+        // Not `exec`ed away by the shell, so the name it runs under stays.
+        .args(["-c", "sleep 3; :"])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .unwrap();
+    // Start times count in clock ticks, of 10 ms.
+    thread::sleep(Duration::from_millis(50));
+    let mut apps = Apps::configured(dir, Table::new());
+    apps.added();
+
+    assert_eq!(apps.run_as(8, "single", "open"), Outcome::Close);
+    apps.quiet();
+    running.kill().unwrap();
+    running.wait().unwrap();
 }
 
 #[test]

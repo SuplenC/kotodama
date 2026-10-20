@@ -10,7 +10,7 @@
 use std::io::{self, Read};
 use std::os::unix::process::CommandExt;
 use std::path::Path;
-use std::process::{Child, Command, ExitStatus, Stdio};
+use std::process::{Command, ExitStatus, Stdio};
 use std::sync::mpsc;
 use std::thread;
 use std::time::{Duration, Instant};
@@ -18,6 +18,7 @@ use std::time::{Duration, Instant};
 use kotodama_protocol::launch_command;
 
 use crate::Chain;
+use crate::scope::Launched;
 
 /// Small: the threads only wait for the program, or read its output.
 const SMALL_STACK: usize = 64 * 1024;
@@ -57,7 +58,7 @@ fn command(argv: &[String], dir: Option<&Path>) -> io::Result<Command> {
 
 /// Spawns `command`, which runs `argv`, in a scope of its own if it gets one.
 /// The error says what went wrong in words for the user.
-fn spawn(command: &mut Command, argv: &[String]) -> io::Result<Child> {
+fn spawn(command: &mut Command, argv: &[String]) -> io::Result<Launched> {
     let program = argv.first().map_or("", String::as_str);
     let named = program.to_owned();
     crate::scope::spawn(command, move |err| {
@@ -69,26 +70,40 @@ fn spawn(command: &mut Command, argv: &[String]) -> io::Result<Child> {
 /// Starts `argv`, in `dir` if given, and leaves it running. A thread reaps it
 /// when it exits. The error says what went wrong in words for the user.
 pub fn launch(argv: &[String], dir: Option<&Path>) -> io::Result<()> {
-    launch_timed(argv, dir, |_| {})
+    launch_watched(argv, dir, "", Duration::ZERO, || {})
 }
 
-/// Starts `argv` as [`launch`] does, and calls `exited` with how long it ran
-/// once it exits, on the thread that reaps it.
-pub fn launch_timed(
+/// Starts `argv` as [`launch`] does, and calls `closed` on the thread that
+/// reaps it if the app it starts, the program `app`, closed within `within`:
+/// everything the launch started ended by then, its whole scope or process
+/// group, so a launcher that starts the app and exits doesn't count. Nor
+/// does a launch while a copy of `app` already ran, which a single-instance
+/// app hands off to and exits. A zero `within` never calls it.
+pub fn launch_watched(
     argv: &[String],
     dir: Option<&Path>,
-    exited: impl FnOnce(Duration) + Send + 'static,
+    app: &str,
+    within: Duration,
+    closed: impl FnOnce() + Send + 'static,
 ) -> io::Result<()> {
-    let mut child = spawn(&mut command(argv, dir)?, argv)?;
-    let started = Instant::now();
+    let Launched { mut child, cgroup } = spawn(&mut command(argv, dir)?, argv)?;
+    let deadline = Instant::now() + within;
+    let app = app.to_owned();
     // It runs either way; without the thread it stays a zombie once it exits,
     // which is better than reporting a failure.
     if let Err(err) = thread::Builder::new()
         .name("reap".into())
         .stack_size(SMALL_STACK)
         .spawn(move || {
-            if child.wait().is_ok() {
-                exited(started.elapsed());
+            let pid = child.id();
+            // Looked for before the wait, while the process's start time,
+            // what came before it, can still be read.
+            let watched = !within.is_zero() && !crate::closing::ran_before(&app, pid);
+            if child.wait().is_ok()
+                && watched
+                && crate::closing::ended_by(cgroup.as_deref(), pid, deadline)
+            {
+                closed();
             }
         })
     {
@@ -117,7 +132,7 @@ pub fn background(
     let (reader, writer) = io::pipe()?;
     let mut command = command(argv, dir)?;
     command.stdout(writer.try_clone()?).stderr(writer);
-    let mut child = spawn(&mut command, argv)?;
+    let mut child = spawn(&mut command, argv)?.child;
     // The command holds the pipe's write ends too; only the child's may
     // keep it open.
     drop(command);

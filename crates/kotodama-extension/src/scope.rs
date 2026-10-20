@@ -25,8 +25,9 @@
 #[cfg(target_os = "linux")]
 pub use linux::spawn;
 
-use std::path::Path;
-use std::process::Command;
+use std::io;
+use std::path::{Path, PathBuf};
+use std::process::{Child, Command};
 
 use kotodama_protocol::{LAUNCH_PREFIX, LAUNCH_SCOPED, SCOPE_PREFIX};
 
@@ -71,17 +72,44 @@ fn has_user_manager(_socket: &Path) -> bool {
     false
 }
 
+/// A program started by [`spawn`].
+#[derive(Debug)]
+pub struct Launched {
+    pub child: Child,
+    /// The directory of its scope's cgroup, when it got a scope.
+    pub cgroup: Option<PathBuf>,
+}
+
+impl Launched {
+    fn unscoped(child: Child) -> Launched {
+        Launched {
+            child,
+            cgroup: None,
+        }
+    }
+}
+
+/// Whether no process is left in the cgroup at `cgroup`, as when a scope
+/// emptied and went. Unreadable for another reason, it counts as not empty.
+#[must_use]
+pub fn is_empty(cgroup: &Path) -> bool {
+    match std::fs::read(cgroup.join("cgroup.procs")) {
+        Ok(procs) => procs.iter().all(u8::is_ascii_whitespace),
+        Err(err) => err.kind() == io::ErrorKind::NotFound,
+    }
+}
+
 /// Spawns `command`. Without systemd there is no scope to start it in.
 ///
 /// # Errors
 ///
-/// When it can't be started, as [`std::process::Command::spawn`].
+/// When it can't be started, as [`Command::spawn`].
 #[cfg(not(target_os = "linux"))]
 pub fn spawn(
-    command: &mut std::process::Command,
+    command: &mut Command,
     _unscoped: impl FnOnce(crate::dbus::Error) + Send + 'static,
-) -> std::io::Result<std::process::Child> {
-    command.spawn()
+) -> io::Result<Launched> {
+    command.spawn().map(Launched::unscoped)
 }
 
 /// The unit name of the scope for the program `program` with process id
@@ -113,13 +141,15 @@ mod linux {
     use std::io::{self, Read, Write};
     use std::os::fd::{AsRawFd, RawFd};
     use std::os::unix::process::CommandExt;
-    use std::process::{Child, Command};
+    use std::path::PathBuf;
+    use std::process::Command;
+    use std::sync::mpsc;
     use std::thread;
     use std::time::{Duration, Instant};
 
     use kotodama_protocol::launch_prefix;
 
-    use super::unit_name;
+    use super::{Launched, unit_name};
     use crate::dbus::{Bus, Call, Error, Marshal, Message};
 
     /// Small: the thread only makes one D-Bus call.
@@ -144,16 +174,16 @@ mod linux {
     pub fn spawn(
         command: &mut Command,
         unscoped: impl FnOnce(Error) + Send + 'static,
-    ) -> io::Result<Child> {
+    ) -> io::Result<Launched> {
         if launch_prefix().is_some() {
-            return command.spawn();
+            return command.spawn().map(Launched::unscoped);
         }
         match Bus::user_manager() {
             Ok(manager) => spawn_scoped(command, manager, unscoped),
-            Err(err) if err.is_absent() => command.spawn(),
+            Err(err) if err.is_absent() => command.spawn().map(Launched::unscoped),
             Err(err) => {
                 unscoped(err);
-                command.spawn()
+                command.spawn().map(Launched::unscoped)
             }
         }
     }
@@ -163,11 +193,12 @@ mod linux {
         command: &mut Command,
         manager: Bus,
         unscoped: impl FnOnce(Error) + Send + 'static,
-    ) -> io::Result<Child> {
+    ) -> io::Result<Launched> {
         let program = command.get_program().to_string_lossy().into_owned();
         let description = description(command);
         let (mut pid_reader, pid_writer) = io::pipe()?;
         let (go_reader, mut go_writer) = io::pipe()?;
+        let (found, cgroup) = mpsc::channel();
         let mover = thread::Builder::new()
             .name("scope".into())
             .stack_size(SCOPE_STACK)
@@ -179,6 +210,13 @@ mod linux {
                 }
                 let pid = u32::from_ne_bytes(pid);
                 let scoped = start_scope(manager, &unit_name(&program, pid), &description, pid);
+                if scoped.is_ok()
+                    && let Some(dir) = cgroup_of(pid)
+                {
+                    // Sent before the child runs, so it is there once
+                    // `spawn` returns.
+                    let _ = found.send(dir);
+                }
                 // The child runs once it reads this, whether or not it got
                 // its scope.
                 let _ = go_writer.write_all(&[1]);
@@ -187,7 +225,7 @@ mod linux {
                 }
             });
         if mover.is_err() {
-            return command.spawn();
+            return command.spawn().map(Launched::unscoped);
         }
         let (pid_fd, go_fd) = (pid_writer.as_raw_fd(), go_reader.as_raw_fd());
         // SAFETY: the hook runs in the child between fork and exec, and only
@@ -205,7 +243,18 @@ mod linux {
         // `spawn`, it would wait forever.
         let child = command.spawn();
         drop((pid_writer, go_reader));
-        child
+        Ok(Launched {
+            child: child?,
+            cgroup: cgroup.try_recv().ok(),
+        })
+    }
+
+    /// The directory of the cgroup process `pid` is in, in the unified
+    /// hierarchy.
+    fn cgroup_of(pid: u32) -> Option<PathBuf> {
+        let cgroups = std::fs::read_to_string(format!("/proc/{pid}/cgroup")).ok()?;
+        let path = cgroups.lines().find_map(|line| line.strip_prefix("0::"))?;
+        Some(PathBuf::from(format!("/sys/fs/cgroup{path}")))
     }
 
     /// In the child: sends its process id down `pid_fd`, then waits for a
@@ -410,11 +459,13 @@ mod tests {
             let (ours, peer) = manager(Duration::from_millis(300), "done");
             let (errors, unscoped) = mpsc::channel();
             let started = Instant::now();
-            let child = spawn_scoped(&mut echo_pid(), bus(ours), move |err| {
+            let launched = spawn_scoped(&mut echo_pid(), bus(ours), move |err| {
                 let _ = errors.send(err.to_string());
             })
             .unwrap();
             assert!(started.elapsed() >= Duration::from_millis(300));
+            assert!(launched.cgroup.is_some(), "the scope's cgroup is known");
+            let child = launched.child;
             let pid = child.id();
             let output = child.wait_with_output().unwrap();
             assert!(output.status.success());
@@ -439,7 +490,8 @@ mod tests {
             let child = spawn_scoped(&mut echo_pid(), bus(ours), move |err| {
                 let _ = errors.send(err.to_string());
             })
-            .unwrap();
+            .unwrap()
+            .child;
             assert!(child.wait_with_output().unwrap().status.success());
             peer.join().unwrap();
             let err = unscoped.recv_timeout(Duration::from_secs(2)).unwrap();

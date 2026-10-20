@@ -123,6 +123,7 @@ fn launch(command: Vec<String>) {
             kotodama_extension::scope::spawn(&mut process, move |err| {
                 log::warn!("{named} runs without a scope of its own: {}", Chain(&err));
             })
+            .map(|launched| launched.child)
         });
         match started {
             Ok(mut child) => {

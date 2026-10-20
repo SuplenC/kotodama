@@ -9,7 +9,7 @@
 //! hidden = ["qt5ct", "qt6ct"]
 //! # Names to show instead of the app's own, by desktop id.
 //! names = { nvim = "Neovim" }
-//! # An app that exits within this many seconds of starting was picked by
+//! # An app that closes within this many seconds of starting was picked by
 //! # mistake: its pick is withdrawn. 0 never withdraws one; at most 30.
 //! withdraw_within = 5
 //! ```
@@ -48,8 +48,9 @@ pub struct Settings {
     pub hidden: HashSet<String>,
     /// Names by app id, without `.desktop`.
     pub names: HashMap<String, String>,
-    /// An app that exits this soon after it starts has its pick withdrawn.
-    /// Zero never withdraws one.
+    /// An app whose launch closes this soon after it starts, with no copy of
+    /// it running from before, has its pick withdrawn. Zero never withdraws
+    /// one.
     pub withdraw_within: Duration,
 }
 

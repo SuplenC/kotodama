@@ -29,7 +29,7 @@ const SETTLE: Duration = Duration::from_millis(200);
 enum Own {
     /// An `applications` directory changed, and these are the apps now.
     Scanned(BTreeMap<String, App>),
-    /// The app the run `invocation` started exited soon after it started.
+    /// The app the run `invocation` started closed soon after it started.
     ExitedSoon { invocation: u64 },
 }
 
@@ -147,10 +147,9 @@ impl Extension {
     }
 
     /// Starts the app, after the terminal if it runs in one, in its working
-    /// directory if it names one. If it exits within
-    /// [`Settings::withdraw_within`], the run's pick is withdrawn: this
-    /// tells a mistake only when the process started is the app, not a
-    /// launcher that hands off to another process and exits.
+    /// directory if it names one. If it closes within
+    /// [`Settings::withdraw_within`], everything it started gone, and no
+    /// copy of it ran before, the run's pick is withdrawn.
     fn run(&self, invocation: u64, id: &str, action: &str) -> Result<(), String> {
         let app = self
             .apps
@@ -164,13 +163,19 @@ impl Extension {
             &[]
         };
         let argv: Vec<String> = terminal.iter().chain(command).cloned().collect();
-        let within = self.settings.withdraw_within;
         let exits = self.exits.clone();
-        launch::launch_timed(&argv, app.dir.as_deref(), move |ran| {
-            if ran < within {
+        // The app's own program, not the terminal's: the terminal runs
+        // anyway when another of its windows is open.
+        let program = command.first().map_or("", String::as_str);
+        launch::launch_watched(
+            &argv,
+            app.dir.as_deref(),
+            program,
+            self.settings.withdraw_within,
+            move || {
                 let _ = exits.send(Event::Own(Own::ExitedSoon { invocation }));
-            }
-        })
+            },
+        )
         .map_err(|err| err.to_string())
     }
 }
