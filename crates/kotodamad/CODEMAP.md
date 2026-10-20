@@ -5,7 +5,7 @@ The Daemon. Maintained by hand: fix stale lines when you find them, and update t
 - `lib.rs:run`: wires paths, config, discovery, watchers, server and the main loop.
 - `main.rs`: binary entry; calls `run`.
 - `daemon.rs`: the state machine. `Daemon::handle(Event)` is the one entry point; `Event`, `Output`, `Launcher`/`Desktop` traits.
-  - `Candidate` and `Candidate::rank`: the full Result order (Tier, then Learned choices/Frecency, then kind order; ADR 0006, 0011).
+  - `Candidate` and `Candidate::rank`: the full Result order (`Standing`: answers first, fallbacks last, ADR 0016; then Tier, then Learned choices/Frecency, then kind order; ADR 0006, 0011).
   - `Session`: per-Front-end state (query, shown Results, list View filters); `FromFrontEnd::Viewport` handling keeps visible rows stable (ADR 0003).
   - Views: `Daemon::filter_view` and `send_filtered` (a list View's filter, or `ToExtension::FilterView` when it filters itself), `view_contributed` (Contributed actions by Item kind), `front_end_up` re-sends the open Views to a Front end that connects. Hidden Items (ADR 0015) live in `Daemon::hidden`, outside the Index, for `--view` alone.
   - `Daemon::query`, `Daemon::empty_query`: searching, and what shows before typing. `Daemon::refresh` narrows a search to the last one's matches (`Narrowing`, forgotten on the empty query); `Daemon::add_near_misses` adds Near misses when real matches leave rows empty (ADR 0013); `Daemon::add_fallbacks` adds a Fallback's Live results (`[live_query] fallback`), last, after `learn`, and asks it the query, under the same condition (ADR 0016). `Daemon::picked` never makes a Fallback's Result a Learned choice.

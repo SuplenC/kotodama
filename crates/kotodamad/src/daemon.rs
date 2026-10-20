@@ -197,11 +197,24 @@ struct Extension {
     hung: Cell<bool>,
     /// Asked the Launcher to stop this run; its ExtensionDown is on its way.
     stopping: bool,
+    /// The Manifest's `live_query.fallback`, read once per Manifest: every
+    /// refresh asks it.
+    fallback: bool,
+}
+
+/// Whether `found`'s Manifest makes it a fallback, such as web search.
+fn is_fallback(found: &Found) -> bool {
+    found
+        .manifest
+        .live_query
+        .as_ref()
+        .is_some_and(|live| live.fallback)
 }
 
 impl Extension {
     fn new(found: Found, now: Instant) -> Self {
         Extension {
+            fallback: is_fallback(&found),
             found,
             generation: 0,
             state: State::Down { retry_at: now },
@@ -254,11 +267,7 @@ impl Extension {
     /// A fallback, such as web search: also asked what real matches leave
     /// rows empty for, and its results, but for an answer, rank last.
     fn fallback(&self) -> bool {
-        self.found
-            .manifest
-            .live_query
-            .as_ref()
-            .is_some_and(|live| live.fallback)
+        self.fallback
     }
 
     /// The Live query to send for `query`: the query without its prefix, and
@@ -304,9 +313,7 @@ enum Class {
 #[derive(Clone, Copy)]
 struct Candidate {
     source: Source,
-    answer: bool,
-    /// A fallback Extension's result, which ranks below every real match.
-    fallback: bool,
+    standing: Standing,
     class: Class,
     /// How well it matches, as [`Tier::coarse`] gives it, after Frecency
     /// lifted it.
@@ -331,12 +338,26 @@ struct Candidate {
     len: u32,
 }
 
+/// Where a Candidate stands before anything else is compared: answers
+/// first, fallbacks last.
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum Standing {
+    /// A Live query's answer, such as the calculator's result.
+    Answer,
+    Match,
+    /// A fallback Extension's result, below every real match, near misses
+    /// included (ADR 0016).
+    Fallback,
+}
+
+// Ranking sorts thousands of Candidates a keystroke: they stay small.
+const _: () = assert!(size_of::<Candidate>() <= 48);
+
 impl Candidate {
     fn new(source: Source, tier: Tier, kind: u8, score: u32, len: u32) -> Self {
         Candidate {
             source,
-            answer: false,
-            fallback: false,
+            standing: Standing::Match,
             class: Class::Rest,
             tier: tier.coarse(),
             frecency: 0.0,
@@ -352,10 +373,8 @@ impl Candidate {
     /// Answers first and fallbacks last, then by class, how well it
     /// matches, Frecency, its Item kind, and nucleo's score.
     fn rank(&self, other: &Candidate) -> std::cmp::Ordering {
-        other
-            .answer
-            .cmp(&self.answer)
-            .then(self.fallback.cmp(&other.fallback))
+        self.standing
+            .cmp(&other.standing)
             .then(other.class.cmp(&self.class))
             .then(other.tier.cmp(&self.tier))
             .then(other.frecency.total_cmp(&self.frecency))
@@ -1990,6 +2009,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
                         continue;
                     }
                     log::info!("extension {} changed; restarting it", found.manifest.name);
+                    ext.fallback = is_fallback(&found);
                     ext.found = found;
                     ext.failures = 0;
                     if !removed {
@@ -2771,9 +2791,14 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
                     score,
                     len,
                 );
-                candidate.answer = result.answer;
-                if fallback && !result.answer {
-                    candidate.fallback = true;
+                candidate.standing = if result.answer {
+                    Standing::Answer
+                } else if fallback {
+                    Standing::Fallback
+                } else {
+                    Standing::Match
+                };
+                if candidate.standing == Standing::Fallback {
                     fallbacks.push(candidate);
                 } else {
                     candidates.push(candidate);
@@ -2806,10 +2831,11 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
 
         let mut answers: Vec<Candidate> = Vec::new();
         candidates.retain(|candidate| {
-            if candidate.answer {
+            let answer = candidate.standing == Standing::Answer;
+            if answer {
                 answers.push(*candidate);
             }
-            !candidate.answer
+            !answer
         });
         answers.sort_unstable_by(Candidate::rank);
 
@@ -2821,7 +2847,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             for (source, _) in visible.filter(|(_, answer)| !answer) {
                 if let Some(at) = candidates
                     .iter()
-                    .position(|c| c.source == *source && !c.fallback)
+                    .position(|c| c.source == *source && c.standing != Standing::Fallback)
                 {
                     kept.push(candidates.swap_remove(at));
                 }
@@ -2839,7 +2865,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
         let ranked: Vec<Candidate> = answers.into_iter().chain(kept).chain(candidates).collect();
         session.shown = ranked
             .iter()
-            .map(|candidate| (candidate.source, candidate.answer))
+            .map(|candidate| (candidate.source, candidate.standing == Standing::Answer))
             .collect();
 
         let results = ranked
