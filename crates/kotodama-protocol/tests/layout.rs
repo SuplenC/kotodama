@@ -492,6 +492,7 @@ fn from_front_end() -> Vec<FromFrontEnd> {
             view: Some("view".into()),
         },
         FromFrontEnd::Toggle,
+        FromFrontEnd::Undo { change: 7 },
     ]
 }
 
@@ -555,6 +556,11 @@ fn to_front_end() -> Vec<ToFrontEnd> {
             view: Some("view".into()),
         },
         ToFrontEnd::Toggle,
+        ToFrontEnd::OfferUndo {
+            change: 7,
+            title: "Forgot “Firefox”".into(),
+        },
+        ToFrontEnd::WithdrawUndo { change: 7 },
     ]
 }
 

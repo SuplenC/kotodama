@@ -88,10 +88,28 @@ PanelWindow {
         menu.focusView();
     }
 
+    // Ctrl and no other modifier: the menu's own Ctrl keys leave Ctrl+Shift+K
+    // and the like to the Actions' key bindings.
+    function ctrlOnly(event) {
+        return (event.modifiers & (Qt.ControlModifier | Qt.ShiftModifier | Qt.AltModifier | Qt.MetaModifier)) === Qt.ControlModifier;
+    }
+
+    // While the Toast shows, its key undoes what it offers to, whatever has
+    // the keys; otherwise the key is the text box's own undo. True if
+    // `event` was it.
+    function undoKey(event) {
+        if (search.toast === "" || !search.isUndoKey(event.key, event.modifiers))
+            return false;
+        search.undo();
+        return true;
+    }
+
     // The keys every View shares. True if `event` was one of them.
     function key(event) {
-        const ctrl = event.modifiers & Qt.ControlModifier;
+        const ctrl = menu.ctrlOnly(event);
         const enter = event.key === Qt.Key_Return || event.key === Qt.Key_Enter;
+        if (menu.undoKey(event))
+            return true;
         if (event.key === Qt.Key_Escape) {
             // Esc clears a list's filter first, then pops the View.
             if (menu.kind === "list" && filter.text !== "")
@@ -143,9 +161,10 @@ PanelWindow {
     anchors.top: true
     margins.top: top
     // The surface keeps one size, so typing never waits on a resize; the
-    // panel inside grows with the Results.
+    // panel inside grows with the Results. The Toast's row is kept even
+    // while it is hidden, so showing it doesn't resize the surface either.
     implicitWidth: menuWidth
-    implicitHeight: field.height + maxRows * rowHeight + footer.height + 16
+    implicitHeight: field.height + maxRows * rowHeight + footer.height + rowHeight * 0.7 + 16
     exclusionMode: ExclusionMode.Ignore
     color: "transparent"
     WlrLayershell.layer: WlrLayer.Overlay
@@ -205,7 +224,7 @@ PanelWindow {
     Rectangle {
         id: panel
         width: parent.width
-        height: field.height + jobs.height + body.height + footer.height
+        height: field.height + jobs.height + body.height + footer.height + toast.height
         color: menu.background
         radius: menu.radius
         border.color: menu.border
@@ -711,6 +730,41 @@ PanelWindow {
             text: menu.failure !== "" ? menu.failure : search.down.length > 0 ? "Unavailable: " + search.down.join(", ") : ""
         }
 
+        // The Toast: what Forget or "Clear history" just did, and the key that
+        // undoes it. It never takes the keys or the selection, and goes when
+        // the Daemon withdraws it, once the change is undone or too old to be.
+        Item {
+            id: toast
+            anchors.top: footer.bottom
+            width: parent.width
+            height: search.toast === "" ? 0 : menu.rowHeight * 0.7
+            visible: search.toast !== ""
+
+            Text {
+                anchors.left: parent.left
+                anchors.leftMargin: 18
+                anchors.right: undoHint.left
+                anchors.rightMargin: 12
+                anchors.verticalCenter: parent.verticalCenter
+                elide: Text.ElideRight
+                text: search.toast
+                color: menu.foreground
+                font.family: menu.fontFamily
+                font.pixelSize: menu.fontSize - 3
+            }
+
+            Text {
+                id: undoHint
+                anchors.right: parent.right
+                anchors.rightMargin: 18
+                anchors.verticalCenter: parent.verticalCenter
+                text: "Ctrl+Z  Undo"
+                color: menu.accent
+                font.family: menu.fontFamily
+                font.pixelSize: menu.fontSize - 3
+            }
+        }
+
         // The Action panel: Ctrl+K lists the selected Result's Actions, the
         // Item's own first, then the Contributed ones under the Extension that
         // offers each. Up and Down choose, Enter runs, Esc or Ctrl+K closes it.
@@ -728,8 +782,11 @@ PanelWindow {
             border.width: 1
 
             Keys.onPressed: event => {
-                const ctrl = event.modifiers & Qt.ControlModifier;
-                if (event.key === Qt.Key_Escape || (ctrl && event.key === Qt.Key_K)) {
+                const ctrl = menu.ctrlOnly(event);
+                // Undo may move the Result the panel is for.
+                if (menu.undoKey(event)) {
+                    menu.closeActions();
+                } else if (event.key === Qt.Key_Escape || (ctrl && event.key === Qt.Key_K)) {
                     menu.closeActions();
                 } else if (event.key === Qt.Key_Down || (ctrl && event.key === Qt.Key_N)) {
                     actionList.current = Math.min(menu.actions.length - 1, actionList.current + 1);

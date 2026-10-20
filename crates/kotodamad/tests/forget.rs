@@ -7,7 +7,7 @@ use std::time::Duration;
 
 use common::*;
 use kotodama_protocol::*;
-use kotodamad::daemon::{CLEAR_EXTENSION_HISTORY, FORGET, UNDO, UNDO_FOR};
+use kotodamad::daemon::{CLEAR_EXTENSION_HISTORY, Event, FORGET, FrontEndId, UNDO, UNDO_FOR};
 use kotodamad::history::{History, IDENTITIES};
 
 fn apps() -> Vec<Item> {
@@ -349,4 +349,164 @@ fn a_picked_quicklink_offers_forget_among_its_own_actions() {
 
     run_daemon_action(&mut h, &ui, "kotodama", "quicklink:gh", FORGET);
     assert!(saved(&h).is_empty());
+}
+
+/// The offers to undo, and their withdrawals, sent to a Front end since it
+/// was last drained.
+fn undo_offers(ui: &FrontEnd) -> Vec<ToFrontEnd> {
+    ui.drain()
+        .into_iter()
+        .filter(|message| {
+            matches!(
+                message,
+                ToFrontEnd::OfferUndo { .. } | ToFrontEnd::WithdrawUndo { .. }
+            )
+        })
+        .collect()
+}
+
+/// The change the one offer in `offers` names.
+fn offered(offers: &[ToFrontEnd], title: &str) -> u64 {
+    match offers {
+        [
+            ToFrontEnd::OfferUndo {
+                change,
+                title: offer,
+            },
+        ] if offer == title => *change,
+        other => panic!("expected one offer of {title:?}, got {other:?}"),
+    }
+}
+
+#[test]
+fn forget_has_a_key_binding() {
+    let mut h = Harness::new(vec![plain("apps")]);
+    let ext = h.up(0);
+    h.add(&ext, apps());
+    let ui = h.front_end();
+    pick(&mut h, &ui, "fi", "apps", "firefox");
+
+    let row = row(&mut h, &ui, "fi", "apps", "firefox");
+
+    let forget = row
+        .contributed
+        .iter()
+        .find(|offered| offered.action.id == FORGET)
+        .expect("Forget is offered");
+    assert_eq!(forget.action.shortcut.as_deref(), Some(FORGET_SHORTCUT));
+}
+
+#[test]
+fn every_front_end_is_offered_to_undo_a_forget_and_the_offer_undoes_it() {
+    let mut h = Harness::new(vec![plain("apps")]);
+    let ext = h.up(0);
+    h.add(&ext, apps());
+    let ui = h.front_end();
+    let other = h.front_end();
+    for _ in 0..3 {
+        pick(&mut h, &ui, "fi", "apps", "firefox");
+    }
+    let before = kept(&saved(&h));
+    other.drain();
+
+    run_daemon_action(&mut h, &ui, "apps", "firefox", FORGET);
+    let change = offered(&undo_offers(&ui), "Forgot “Firefox”");
+    assert_eq!(offered(&undo_offers(&other), "Forgot “Firefox”"), change);
+    assert_ne!(first(&mut h, &ui, "fi"), "Firefox");
+
+    h.front_end_sends(&ui, FromFrontEnd::Undo { change });
+    assert_eq!(kept(&saved(&h)), before);
+    for front_end in [&ui, &other] {
+        assert_eq!(
+            undo_offers(front_end),
+            [ToFrontEnd::WithdrawUndo { change }]
+        );
+    }
+    assert_eq!(first(&mut h, &ui, "fi"), "Firefox");
+    assert!(undo_row(&mut h, &ui).is_none(), "undone once");
+}
+
+#[test]
+fn clearing_offers_to_undo_it_in_words_of_its_own() {
+    let mut h = Harness::new(vec![plain("apps")]);
+    let ext = h.up(0);
+    h.add(&ext, apps());
+    let ui = h.front_end();
+    pick(&mut h, &ui, "fi", "apps", "firefox");
+
+    run_daemon_action(&mut h, &ui, "apps", "firefox", CLEAR_EXTENSION_HISTORY);
+    offered(&undo_offers(&ui), "Cleared the history of apps");
+    undo(&mut h, &ui);
+
+    h.query(&ui, "clear history");
+    run(&mut h, &ui, "kotodama", "clear-history", "kotodama", "run");
+    offered(&undo_offers(&ui), "Cleared history");
+}
+
+#[test]
+fn the_offer_is_withdrawn_when_its_time_runs_out() {
+    let mut h = Harness::new(vec![plain("apps")]);
+    let ext = h.up(0);
+    h.add(&ext, apps());
+    let ui = h.front_end();
+    pick(&mut h, &ui, "fi", "apps", "firefox");
+    run_daemon_action(&mut h, &ui, "apps", "firefox", FORGET);
+    let change = offered(&undo_offers(&ui), "Forgot “Firefox”");
+
+    h.advance(UNDO_FOR);
+
+    assert_eq!(undo_offers(&ui), [ToFrontEnd::WithdrawUndo { change }]);
+    h.front_end_sends(&ui, FromFrontEnd::Undo { change });
+    assert!(saved(&h).picks("apps", "firefox").is_none(), "too late");
+}
+
+#[test]
+fn undoing_through_the_undo_result_withdraws_the_offer() {
+    let mut h = Harness::new(vec![plain("apps")]);
+    let ext = h.up(0);
+    h.add(&ext, apps());
+    let ui = h.front_end();
+    pick(&mut h, &ui, "fi", "apps", "firefox");
+    run_daemon_action(&mut h, &ui, "apps", "firefox", FORGET);
+    let change = offered(&undo_offers(&ui), "Forgot “Firefox”");
+    let row = undo_row(&mut h, &ui).expect("an Undo Result");
+
+    run(
+        &mut h,
+        &ui,
+        "kotodama",
+        UNDO,
+        "kotodama",
+        &row.item.actions[0].id,
+    );
+
+    assert_eq!(undo_offers(&ui), [ToFrontEnd::WithdrawUndo { change }]);
+}
+
+#[test]
+fn a_front_end_that_connects_is_offered_the_latest_change() {
+    let mut h = Harness::new(vec![plain("apps")]);
+    let ext = h.up(0);
+    h.add(&ext, apps());
+    let ui = h.front_end();
+    pick(&mut h, &ui, "fi", "apps", "firefox");
+    pick(&mut h, &ui, "sh", "apps", "fish");
+    run_daemon_action(&mut h, &ui, "apps", "firefox", FORGET);
+    run_daemon_action(&mut h, &ui, "apps", "fish", FORGET);
+    let (sender, offers) = std::sync::mpsc::sync_channel(64);
+
+    h.event(Event::FrontEndUp {
+        front_end: FrontEndId(99),
+        sender,
+        disconnect: Box::new(|| {}),
+    });
+
+    let offers: Vec<_> = offers
+        .try_iter()
+        .filter(|message| matches!(message, ToFrontEnd::OfferUndo { .. }))
+        .collect();
+    let [ToFrontEnd::OfferUndo { title, .. }] = offers.as_slice() else {
+        panic!("one offer, got {offers:?}");
+    };
+    assert_eq!(title, "Forgot “Fish”");
 }

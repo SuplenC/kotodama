@@ -15,9 +15,9 @@ use std::sync::mpsc::{Sender, SyncSender, TrySendError};
 use std::time::{Duration, Instant};
 
 use kotodama_protocol::{
-    Action, ActionRef, CatalogEntry, Clipboard, FromExtension, FromFrontEnd, Item, ItemKind, Job,
-    JobState, KindName, LiveResult, NamespacedKind, OfferedAction, Outcome, ResultRef, ShownResult,
-    Table, ToExtension, ToFrontEnd, View, ViewContent,
+    Action, ActionRef, CatalogEntry, Clipboard, FORGET_SHORTCUT, FromExtension, FromFrontEnd, Item,
+    ItemKind, Job, JobState, KindName, LiveResult, NamespacedKind, OfferedAction, Outcome,
+    ResultRef, ShownResult, Table, ToExtension, ToFrontEnd, View, ViewContent,
 };
 use nucleo_matcher::pattern::{CaseMatching, Normalization, Pattern};
 use nucleo_matcher::{Config, Matcher};
@@ -36,6 +36,7 @@ use crate::keywords::{self, Alias, Keywords};
 use crate::kind_order::{KindOrder, KindPlaces};
 use crate::open_view::{Opening, ViewName};
 use crate::rank::{self, Haystack, Matched, Text, Tier, Tiers};
+use crate::reserved;
 use crate::segment::Edit;
 use crate::usage::{Entry, Used};
 use crate::views::{Open, Views};
@@ -645,10 +646,37 @@ fn action_titled(id: &str, title: String) -> Action {
 /// undone by id, so one can be undone whatever changed after it.
 struct Undoable {
     id: u64,
-    /// What the Undo Result reads while it is the latest.
-    title: String,
+    done: Done,
     change: Change,
     until: Instant,
+}
+
+impl Undoable {
+    /// Offers a Front end to undo it.
+    fn offer(&self) -> ToFrontEnd {
+        ToFrontEnd::OfferUndo {
+            change: self.id,
+            title: self.done.offer.clone(),
+        }
+    }
+}
+
+/// What a change to the History did, in words.
+struct Done {
+    /// What a Front end's offer to undo it reads, as `Forgot “Firefox”`.
+    offer: String,
+    /// What the Undo Result reads while it is the latest.
+    undo: String,
+}
+
+impl Done {
+    #[must_use]
+    fn new(offer: impl Into<String>, undo: impl Into<String>) -> Self {
+        Done {
+            offer: offer.into(),
+            undo: undo.into(),
+        }
+    }
 }
 
 /// A Result the Empty query may show as one of the most used.
@@ -1079,10 +1107,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
         {
             self.deliver_output();
         }
-        if self.undos.first().is_some_and(|undo| undo.until <= now) {
-            self.undos.retain(|undo| undo.until > now);
-            self.load_undo_item();
-        }
+        self.expire_undos(now);
         self.open_overdue(now);
         self.release_held();
         self.flush(now);
@@ -1310,10 +1335,18 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
                 continue;
             }
             for contributed in &ext.found.manifest.contributed_actions {
+                let mut action = contributed.action.clone();
+                if reserved::release_actions([&mut action]) > 0 {
+                    log::warn!(
+                        "{}: dropped the key binding of `{}`, which the menu keeps for itself",
+                        ext.name(),
+                        action.id
+                    );
+                }
                 self.contributed
                     .entry(contributed.kind.as_str().to_owned())
                     .or_default()
-                    .push((ExtensionId(id), contributed.action.clone()));
+                    .push((ExtensionId(id), action));
             }
         }
         self.catalog_dirty = true;
@@ -1330,8 +1363,12 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
         }
     }
 
-    fn extension_message(&mut self, id: ExtensionId, message: FromExtension, now: Instant) {
+    fn extension_message(&mut self, id: ExtensionId, mut message: FromExtension, now: Instant) {
         let name = self.extensions[id.0].name().to_owned();
+        let released = reserved::release_message(&mut message);
+        if released > 0 {
+            log::warn!("{name}: dropped {released} key bindings the menu keeps for itself");
+        }
         match message {
             FromExtension::AddItems { mut items } => {
                 items.retain(|item| {
@@ -1830,6 +1867,9 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
         session.send(ToFrontEnd::Status {
             down: self.down.clone(),
         });
+        if let Some(latest) = self.undos.last() {
+            session.send(latest.offer());
+        }
         for ((ext, _), job) in &self.jobs {
             session.send(ToFrontEnd::JobProgress {
                 extension: self.extensions[ext.0].name().to_owned(),
@@ -1935,6 +1975,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
                 self.refresh_empty(Update::Fresh, Some(id));
                 self.ask_menus(id, ToFrontEnd::Toggle);
             }
+            FromFrontEnd::Undo { change } => self.undo(change),
         }
     }
 
@@ -2391,7 +2432,8 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
                 session.send(ToFrontEnd::Close);
                 let change = self.history.clear();
                 self.store.forget_usage(None);
-                self.changed("Undo clearing history".into(), change, now);
+                let done = Done::new("Cleared history", "Undo clearing history");
+                self.changed(done, change, now);
             }
             OwnAction::Undo => {
                 if let Some(latest) = self.undos.last().map(|undo| undo.id) {
@@ -2412,9 +2454,12 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
     ) -> Result<(), String> {
         let (session, item) = self.shown_item(front_end, result)?;
         let keys = self.history_keys(session, &result.extension, &item);
-        let title = format!("Undo forgetting “{}”", item.title);
+        let done = Done::new(
+            format!("Forgot “{}”", item.title),
+            format!("Undo forgetting “{}”", item.title),
+        );
         let change = self.history.forget(&keys);
-        self.changed(title, change, now);
+        self.changed(done, change, now);
         Ok(())
     }
 
@@ -2456,8 +2501,11 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
                 || (extension == OWN && aliases.contains(id))
         });
         self.store.forget_usage(Some(name));
-        let title = format!("Undo clearing the history of {name}");
-        self.changed(title, change, now);
+        let done = Done::new(
+            format!("Cleared the history of {name}"),
+            format!("Undo clearing the history of {name}"),
+        );
+        self.changed(done, change, now);
         Ok(())
     }
 
@@ -2510,20 +2558,23 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
     }
 
     /// Saves a change to the History, which can be undone for [`UNDO_FOR`],
-    /// and ranks every session again. A change of nothing is let go.
-    fn changed(&mut self, title: String, change: Change, now: Instant) {
+    /// offers every Front end to undo it, and ranks every session again. A
+    /// change of nothing is let go.
+    fn changed(&mut self, done: Done, change: Change, now: Instant) {
         if change.is_empty() {
             return;
         }
         self.store.save(&self.history);
         let id = self.next_id;
         self.next_id += 1;
-        self.undos.push(Undoable {
+        let undoable = Undoable {
             id,
-            title,
+            done,
             change,
             until: now + UNDO_FOR,
-        });
+        };
+        self.broadcast(|| undoable.offer());
+        self.undos.push(undoable);
         self.load_undo_item();
     }
 
@@ -2535,6 +2586,23 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
         let undo = self.undos.remove(n);
         self.history.undo(undo.change);
         self.store.save(&self.history);
+        self.broadcast(|| ToFrontEnd::WithdrawUndo { change: id });
+        self.load_undo_item();
+    }
+
+    /// Lets go of the changes to the History whose time to be undone ran
+    /// out, and withdraws the offers to undo them.
+    fn expire_undos(&mut self, now: Instant) {
+        if !self.undos.first().is_some_and(|undo| undo.until <= now) {
+            return;
+        }
+        let (expired, kept): (Vec<_>, Vec<_>) = std::mem::take(&mut self.undos)
+            .into_iter()
+            .partition(|undo| undo.until <= now);
+        self.undos = kept;
+        for undo in expired {
+            self.broadcast(|| ToFrontEnd::WithdrawUndo { change: undo.id });
+        }
         self.load_undo_item();
     }
 
@@ -2550,7 +2618,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
         }
         if let Some(latest) = self.undos.last() {
             self.own
-                .push(Own::new(undo_item(&latest.title), OwnAction::Undo));
+                .push(Own::new(undo_item(&latest.done.undo), OwnAction::Undo));
         }
         self.mark_late();
     }
@@ -2582,7 +2650,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
         if !remembered {
             return;
         }
-        let forget = action_titled(FORGET, "Forget".into());
+        let forget = action_titled(FORGET, "Forget".into()).shortcut(FORGET_SHORTCUT);
         if extension == OWN {
             item.actions.push(forget);
             return;

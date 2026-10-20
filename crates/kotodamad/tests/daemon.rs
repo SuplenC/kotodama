@@ -342,7 +342,7 @@ fn an_item_added_while_typing_is_found_by_the_next_keystroke() {
 fn pinner() -> Found {
     manifest(
         "name = \"pinner\"\ncommand = [\"x\"]\naction_catalog = true\n\
-         [[contributed_actions]]\nkind = \"project\"\nid = \"pin\"\ntitle = \"Pin a version here\"\nshortcut = \"ctrl+p\"",
+         [[contributed_actions]]\nkind = \"project\"\nid = \"pin\"\ntitle = \"Pin a version here\"\nshortcut = \"ctrl+o\"",
     )
 }
 
@@ -395,13 +395,66 @@ fn when_shortcuts_clash_the_owners_binding_wins() {
     h.up(0);
     let projects = h.up(1);
     let mut item = project("kotodama");
-    item.actions[0].shortcut = Some("ctrl+p".into());
+    item.actions[0].shortcut = Some("ctrl+o".into());
     h.add(&projects, vec![item]);
     let ui = h.front_end();
 
     let row = &h.query(&ui, "kotodama")[0];
-    assert_eq!(row.item.actions[0].shortcut.as_deref(), Some("ctrl+p"));
+    assert_eq!(row.item.actions[0].shortcut.as_deref(), Some("ctrl+o"));
     assert_eq!(row.contributed[0].action.shortcut, None);
+}
+
+#[test]
+fn an_extension_cant_bind_a_key_the_menu_keeps_for_itself() {
+    let forgetter = manifest(
+        "name = \"forgetter\"\ncommand = [\"x\"]\n\
+         [[contributed_actions]]\nkind = \"project\"\nid = \"drop\"\ntitle = \"Drop\"\nshortcut = \"Shift+Ctrl+Backspace\"",
+    );
+    let mut h = Harness::new(vec![forgetter, projects()]);
+    h.up(0);
+    let projects = h.up(1);
+    let mut item = project("kotodama");
+    item.actions[0].shortcut = Some("ctrl+z".into());
+    item.actions.push(action("panel").shortcut("Control+K"));
+    item.actions.push(action("close").shortcut("ctrl+w"));
+    h.add(&projects, vec![item.clone()]);
+    let ui = h.front_end();
+
+    let row = &h.query(&ui, "kotodama")[0];
+    let bound: Vec<_> = row
+        .item
+        .actions
+        .iter()
+        .map(|action| action.shortcut.as_deref())
+        .collect();
+    assert_eq!(bound, [None, None, Some("ctrl+w")]);
+    assert_eq!(row.contributed[0].action.id, "drop");
+    assert_eq!(row.contributed[0].action.shortcut, None);
+
+    h.send(
+        &projects,
+        FromExtension::PushView(View {
+            id: "list".into(),
+            title: "List".into(),
+            content: ViewContent::List {
+                items: vec![item],
+                filters_itself: false,
+            },
+        }),
+    );
+    let pushed = ui.drain().into_iter().find_map(|message| match message {
+        ToFrontEnd::PushView { view, .. } => Some(view),
+        _ => None,
+    });
+    let Some(View {
+        content: ViewContent::List { items, .. },
+        ..
+    }) = pushed
+    else {
+        panic!("the list View is pushed");
+    };
+    assert_eq!(items[0].actions[0].shortcut, None);
+    assert_eq!(items[0].actions[2].shortcut.as_deref(), Some("ctrl+w"));
 }
 
 #[test]

@@ -64,6 +64,9 @@ pub enum FromFrontEnd {
     /// Asks every other Front end to open if it is closed and close if it is
     /// open, as `kotodama toggle` does.
     Toggle,
+    /// Undoes the change to the History that [`ToFrontEnd::OfferUndo`]
+    /// offered, as its key does. Nothing happens once it can't be undone.
+    Undo { change: u64 },
 }
 
 /// From the Daemon to a Front end.
@@ -134,6 +137,20 @@ pub enum ToFrontEnd {
     },
     /// Open the menu if it is closed, or close it if it is open.
     Toggle,
+    /// The History just changed, as by Forget or "Clear history", and the
+    /// change can be undone: show `title`, such as `Forgot “Firefox”`, with
+    /// the key that sends [`FromFrontEnd::Undo`]. It takes the place of the
+    /// offer before it. Shown without taking the keys or the selection, until
+    /// [`ToFrontEnd::WithdrawUndo`] names the same `change`.
+    OfferUndo {
+        change: u64,
+        title: String,
+    },
+    /// The change can't be undone any more: it was undone, or its time ran
+    /// out. Hide its offer, if it is still shown.
+    WithdrawUndo {
+        change: u64,
+    },
 }
 
 /// One Result as the Front end shows it.
