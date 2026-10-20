@@ -9,7 +9,7 @@ use std::path::PathBuf;
 use std::sync::mpsc::{self, Receiver};
 use std::time::{Duration, Instant};
 
-use criterion::{BatchSize, Criterion, criterion_group, criterion_main};
+use criterion::{Criterion, criterion_group, criterion_main};
 use kotodama_protocol::{
     FromExtension, FromFrontEnd, Item, Manifest, Table, ToFrontEnd, View, ViewContent, WireFormat,
 };
@@ -51,6 +51,10 @@ const COMMAND: FrontEndId = FrontEndId(1);
 struct Setup {
     daemon: Daemon<Nothing, Nothing, Nothing>,
     results: Receiver<ToFrontEnd>,
+    /// What the indexing thread sends, as the real Daemon has it.
+    indexed: Receiver<Event>,
+    /// Batches sent and not indexed yet.
+    pending: usize,
     buf: Vec<u8>,
 }
 
@@ -106,12 +110,17 @@ impl Setup {
                 now,
             );
         }
+        let (events, indexed) = mpsc::channel();
+        daemon.index_in_background(events);
         let mut setup = Setup {
             daemon,
             results: mpsc::sync_channel(1).1,
+            indexed,
+            pending: 0,
             buf: Vec::new(),
         };
-        setup.add(APPS, items);
+        setup.send(APPS, items);
+        setup.settle();
         let (sender, results) = mpsc::sync_channel(64);
         setup.daemon.handle(
             Event::FrontEndUp {
@@ -135,7 +144,8 @@ impl Setup {
         setup
     }
 
-    fn add(&mut self, extension: ExtensionId, items: Vec<Item>) {
+    /// Sends a batch of Items, which the indexing thread takes.
+    fn send(&mut self, extension: ExtensionId, items: Vec<Item>) {
         self.daemon.handle(
             Event::FromExtension {
                 extension,
@@ -144,6 +154,17 @@ impl Setup {
             },
             Instant::now(),
         );
+        self.pending += 1;
+    }
+
+    /// Waits for each batch sent to be indexed, and puts it in.
+    fn settle(&mut self) {
+        while self.pending > 0 {
+            let indexed = self.indexed.recv().unwrap();
+            self.daemon.handle(indexed, Instant::now());
+            self.pending -= 1;
+        }
+        self.results.try_iter().for_each(drop);
     }
 
     /// Sends one query and encodes its Results as the socket writer would.
@@ -264,18 +285,52 @@ fn bench(c: &mut Criterion) {
     group.bench_function("keystroke_behind_1k_batch", |b| {
         let batches = [1, 2].map(|seed| corpus::long_titles(1000, 60, seed));
         let mut n = 0;
-        b.iter_batched(
-            || {
+        b.iter_custom(|iters| {
+            let mut total = Duration::ZERO;
+            for _ in 0..iters {
+                setup.settle();
                 n += 1;
-                (n, batches[n % 2].clone())
-            },
-            |(n, batch)| {
-                setup.add(CLIPBOARD, batch);
-                black_box(setup.query(if n.is_multiple_of(2) { "f" } else { "t" }))
-            },
-            BatchSize::SmallInput,
-        )
+                let batch = batches[n % 2].clone();
+                let start = Instant::now();
+                setup.send(CLIPBOARD, batch);
+                black_box(setup.query(if n.is_multiple_of(2) { "f" } else { "t" }));
+                total += start.elapsed();
+            }
+            total
+        });
+        setup.settle();
     });
+    group.finish();
+
+    // How long a batch takes to show: from an Extension sending it to its
+    // new version being ready on the indexing thread. A batch of new clips,
+    // and the apps scanned again.
+    let mut group = c.benchmark_group("staleness");
+    let clips = corpus::long_titles(1000, 60, 1);
+    let apps = corpus::items();
+    for (name, extension, batch) in [
+        ("1k_clips", CLIPBOARD, &clips),
+        ("10k_apps_rescanned", APPS, &apps),
+    ] {
+        group.bench_function(name, |b| {
+            b.iter_custom(|iters| {
+                let mut total = Duration::ZERO;
+                for _ in 0..iters {
+                    let batch = batch.clone();
+                    let start = Instant::now();
+                    setup.send(extension, batch);
+                    let indexed = setup.indexed.recv().unwrap();
+                    total += start.elapsed();
+                    setup.daemon.handle(indexed, Instant::now());
+                    setup.pending -= 1;
+                }
+                total
+            })
+        });
+    }
+    group.finish();
+
+    let mut group = c.benchmark_group("query_10k_items");
     // Opening the menu: the Results most used at this time of day.
     let mut setup = Setup::picked();
     group.bench_function("empty_query_2k_picked", |b| {

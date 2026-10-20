@@ -9,7 +9,7 @@
 
 use std::cell::Cell;
 use std::collections::{BTreeMap, HashMap, HashSet};
-use std::sync::mpsc::{SyncSender, TrySendError};
+use std::sync::mpsc::{Sender, SyncSender, TrySendError};
 use std::time::{Duration, Instant};
 
 use kotodama_protocol::{
@@ -29,6 +29,7 @@ use crate::history::{
     Change, Habit, History, IDENTITIES, Picks, ResultKey, Settings, Store, query_key,
 };
 use crate::index::{Index, Slot};
+use crate::indexer::{Indexed, Indexer};
 use crate::keywords::{self, Keywords};
 use crate::kind_order::KindOrder;
 use crate::open_view::{Opening, ViewName};
@@ -125,6 +126,9 @@ pub enum Event {
     Config(Table),
     /// The Extension directories changed: these are all the Extensions now.
     Extensions(Vec<Found>),
+    /// A new version of an Extension's Items, indexed off the keystroke path
+    /// (see [`Daemon::index_in_background`]).
+    Indexed(Indexed),
 }
 
 /// How many Results a Front end gets for one query.
@@ -690,6 +694,11 @@ struct PendingOutput {
 pub struct Daemon<L, D, S> {
     extensions: Vec<Extension>,
     index: Index,
+    /// Indexes Extensions' Items off the keystroke path, if started.
+    indexer: Option<Indexer>,
+    /// By Extension, the last change made before its Items were last
+    /// cleared: a version holding no later one is stale.
+    stale: Vec<u64>,
     matcher: Matcher,
     sessions: BTreeMap<FrontEndId, Session>,
     live_queries: HashMap<u64, (FrontEndId, ExtensionId)>,
@@ -752,6 +761,8 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
     ) -> Self {
         let mut daemon = Daemon {
             index: Index::new(found.len()),
+            indexer: None,
+            stale: vec![0; found.len()],
             extensions: found
                 .into_iter()
                 .map(|found| Extension::new(found, now))
@@ -809,6 +820,13 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
         &self.history
     }
 
+    /// Indexes Extensions' Items on a thread of its own from now on, which
+    /// sends each new version to `events` as an [`Event::Indexed`]. Until
+    /// then, and in tests, a change to them is made as its event is handled.
+    pub fn index_in_background(&mut self, events: Sender<Event>) {
+        self.indexer = Some(Indexer::start(events));
+    }
+
     /// Replaces the wall clock, which starts as the system's.
     pub fn set_clock(&mut self, clock: Clock) {
         self.clock = clock;
@@ -862,6 +880,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             Event::FrontEndDown { front_end } => self.front_end_down(front_end),
             Event::Config(config) => self.set_config(config),
             Event::Extensions(found) => self.set_extensions(found, now),
+            Event::Indexed(indexed) => self.indexed(indexed, now),
         }
         self.release_held();
         self.flush(now);
@@ -1022,6 +1041,9 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
         if self.index.clear(id) {
             self.mark_late();
         }
+        if let Some(indexer) = &mut self.indexer {
+            self.stale[id.0] = indexer.clear(id);
+        }
         self.live_queries.retain(|_, (_, ext)| *ext != id);
         // Its running jobs won't finish now.
         let stopped: Vec<String> = self
@@ -1148,9 +1170,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
                         hidden.remove(&item.id);
                     }
                 }
-                self.index.edit(id, Edit::Add(items));
-                self.items_changed();
-                self.run_openings(now);
+                self.edit_items(id, Edit::Add(items), now);
             }
             FromExtension::RemoveItems { ids } => {
                 if let Some(hidden) = self.hidden.get_mut(&id) {
@@ -1158,8 +1178,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
                         hidden.remove(item);
                     }
                 }
-                self.index.edit(id, Edit::Remove(ids));
-                self.items_changed();
+                self.edit_items(id, Edit::Remove(ids), now);
             }
             FromExtension::LiveResults {
                 live_query,
@@ -1217,6 +1236,37 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
                 self.catalog = Some(catalog);
             }
         }
+    }
+
+    /// Changes an Extension's Items: here and now, or on the indexing
+    /// thread, whose new version comes back as an [`Event::Indexed`].
+    fn edit_items(&mut self, id: ExtensionId, edit: Edit, now: Instant) {
+        match &mut self.indexer {
+            Some(indexer) => {
+                indexer.edit(id, edit);
+            }
+            None => {
+                self.index.edit(id, edit);
+                self.items_changed();
+                self.run_openings(now);
+            }
+        }
+    }
+
+    /// Puts in a new version of an Extension's Items, unless they were
+    /// cleared since.
+    fn indexed(&mut self, indexed: Indexed, now: Instant) {
+        let Indexed {
+            extension,
+            change,
+            segment,
+        } = indexed;
+        if change <= self.stale[extension.0] {
+            return;
+        }
+        self.index.replace(extension, segment);
+        self.items_changed();
+        self.run_openings(now);
     }
 
     /// Replaces an open View. Each menu filtering a list View is sent the
@@ -1859,6 +1909,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
                     let id = ExtensionId(self.extensions.len());
                     self.extensions.push(Extension::new(found, now));
                     self.index.add_extension();
+                    self.stale.push(0);
                     for session in self.sessions.values_mut() {
                         session.live.push(Live::default());
                     }

@@ -89,9 +89,9 @@ pub struct Segment {
     items: Vec<Option<Arc<Item>>>,
     /// Rows free to take.
     free: Vec<Row>,
-    /// Rows emptied by the change being made, free from the next one on: a
-    /// Front end may show the Item that was there until it has seen this
-    /// change, and a new Item in its row would take its place on screen.
+    /// Rows emptied in this version, free from the next one on: a Front end
+    /// may show the Item that was there until it has seen this version, and
+    /// a new Item in its row would take its place on screen.
     freed: Vec<Row>,
     ids: HashMap<String, Row>,
     /// The rows whose Item has a keyword, by it in lowercase.
@@ -103,10 +103,14 @@ pub struct Segment {
 }
 
 impl Segment {
-    /// Makes one change, as one step: the rows emptied by the last change
-    /// are free from now on.
-    pub fn edit(&mut self, edit: Edit) {
+    /// Starts the next version of the Segment, which Front ends will see
+    /// whole: the rows emptied in the last one are free from now on.
+    pub fn next_version(&mut self) {
         self.free.append(&mut self.freed);
+    }
+
+    /// Makes one change within this version.
+    pub fn edit(&mut self, edit: Edit) {
         match edit {
             Edit::Add(items) => {
                 for item in items {

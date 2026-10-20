@@ -55,7 +55,9 @@ impl Index {
     /// Makes one change to an Extension's Items, here and now.
     pub fn edit(&mut self, extension: ExtensionId, edit: Edit) {
         self.version += 1;
-        Arc::make_mut(&mut self.segments[extension.0]).edit(edit);
+        let segment = Arc::make_mut(&mut self.segments[extension.0]);
+        segment.next_version();
+        segment.edit(edit);
     }
 
     /// Puts in an Extension's Segment, built elsewhere.

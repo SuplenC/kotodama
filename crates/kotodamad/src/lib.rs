@@ -11,6 +11,7 @@ pub mod empty_query;
 pub mod history;
 mod host;
 mod index;
+mod indexer;
 pub mod keywords;
 pub mod kind_order;
 mod link;
@@ -66,6 +67,7 @@ pub fn run(paths: &Paths) -> Result<(), String> {
         .map_err(|err| log::error!("not watching the Extension directories: {err}"))
         .ok();
     server::serve(listener, events_tx.clone());
+    let indexed = events_tx.clone();
 
     let mut daemon = Daemon::new(
         found,
@@ -76,6 +78,7 @@ pub fn run(paths: &Paths) -> Result<(), String> {
         history::Disk::new(paths.history.clone(), paths.usage_log.clone()),
         Instant::now(),
     );
+    daemon.index_in_background(indexed);
     loop {
         let event = match daemon.next_deadline() {
             Some(deadline) => {
