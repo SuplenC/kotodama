@@ -59,6 +59,8 @@ jobs:
                 case $measured in *" ${crate%%/*} "*) latency=true ;; esac
                 ;;
               scripts/qml-module) rust=true e2e=true latency=true ;;
+              # Read only by `just check`, which `test` runs.
+              .config/rustfmt.toml | clippy.toml | scripts/comments | scripts/fmt | scripts/restyled-crates) rust=true ;;
               nix/home-manager.nix | nix/tests/*) rust=true e2e=true nix=true ;;
               docker/* | .config/nextest.toml | scripts/dev-image | scripts/tests/* | \
                 .github/workflows/release-please.yml | release-please-config.json | \
