@@ -10,6 +10,7 @@ mod scan;
 
 use std::collections::BTreeMap;
 use std::process::ExitCode;
+use std::sync::mpsc::Sender;
 use std::time::Duration;
 
 use kotodama_extension::watch::{RecursiveMode, Watcher};
@@ -24,8 +25,13 @@ use scan::{App, Environment};
 /// whole.
 const SETTLE: Duration = Duration::from_millis(200);
 
-/// An `applications` directory changed, and these are the apps now.
-struct Scanned(BTreeMap<String, App>);
+/// What the Extension's own threads send it.
+enum Own {
+    /// An `applications` directory changed, and these are the apps now.
+    Scanned(BTreeMap<String, App>),
+    /// The app the run `invocation` started closed soon after it started.
+    ExitedSoon { invocation: u64 },
+}
 
 fn main() -> ExitCode {
     kotodama_extension::main("kotodama-apps", run)
@@ -38,6 +44,7 @@ fn run() -> Result<(), kotodama_protocol::Error> {
         received,
     } = kotodama_extension::connect()?;
 
+    let exits = events.clone();
     // Rescans happen on the watching thread, so an Action never waits for one.
     let dirs = scan::application_dirs();
     let env = Environment::from_env();
@@ -56,7 +63,7 @@ fn run() -> Result<(), kotodama_protocol::Error> {
         {
             let dirs = dirs.clone();
             move |_| {
-                let _ = events.send(Event::Own(Scanned(scan::scan(&dirs, &env))));
+                let _ = events.send(Event::Own(Own::Scanned(scan::scan(&dirs, &env))));
             }
         },
     )
@@ -72,13 +79,19 @@ fn run() -> Result<(), kotodama_protocol::Error> {
         settings: Settings::default(),
         configured: false,
         sent: SentItems::default(),
+        exits,
     };
     for event in received {
         match event {
             Event::Message(message) => extension.message(message)?,
-            Event::Own(Scanned(apps)) => {
+            Event::Own(Own::Scanned(apps)) => {
                 extension.apps = apps;
                 extension.publish()?;
+            }
+            Event::Own(Own::ExitedSoon { invocation }) => {
+                extension
+                    .writer
+                    .send(&FromExtension::WithdrawPick { invocation })?;
             }
             Event::Hangup => break,
         }
@@ -93,6 +106,8 @@ struct Extension {
     /// Whether the config has arrived. No Items are sent before it.
     configured: bool,
     sent: SentItems,
+    /// Where the threads reaping launched apps say one exited soon.
+    exits: Sender<Event<Own>>,
 }
 
 impl Extension {
@@ -109,7 +124,7 @@ impl Extension {
                 item,
                 ..
             } => {
-                let outcome = match self.run(&item.id, &action) {
+                let outcome = match self.run(invocation, &item.id, &action) {
                     Ok(()) => Outcome::Close,
                     Err(message) => Outcome::Failed { message },
                 };
@@ -132,8 +147,10 @@ impl Extension {
     }
 
     /// Starts the app, after the terminal if it runs in one, in its working
-    /// directory if it names one.
-    fn run(&self, id: &str, action: &str) -> Result<(), String> {
+    /// directory if it names one. If it closes within
+    /// [`Settings::withdraw_within`], everything it started gone, and no
+    /// copy of it ran before, the run's pick is withdrawn.
+    fn run(&self, invocation: u64, id: &str, action: &str) -> Result<(), String> {
         let app = self
             .apps
             .get(id)
@@ -146,6 +163,19 @@ impl Extension {
             &[]
         };
         let argv: Vec<String> = terminal.iter().chain(command).cloned().collect();
-        launch::launch(&argv, app.dir.as_deref()).map_err(|err| err.to_string())
+        let exits = self.exits.clone();
+        // The app's own program, not the terminal's: the terminal runs
+        // anyway when another of its windows is open.
+        let program = command.first().map_or("", String::as_str);
+        launch::launch_watched(
+            &argv,
+            app.dir.as_deref(),
+            program,
+            self.settings.withdraw_within,
+            move || {
+                let _ = exits.send(Event::Own(Own::ExitedSoon { invocation }));
+            },
+        )
+        .map_err(|err| err.to_string())
     }
 }

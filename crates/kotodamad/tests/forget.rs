@@ -1,5 +1,6 @@
 //! Forgetting what the History learned: one Result, one Extension's Results,
-//! or everything, and undoing each for a short while after.
+//! or everything, and undoing each for a short while after; and an
+//! Extension withdrawing the pick a run of its Action made.
 
 mod common;
 
@@ -7,6 +8,7 @@ use std::time::Duration;
 
 use common::*;
 use kotodama_protocol::*;
+use kotodamad::clock::Clock;
 use kotodamad::daemon::{CLEAR_EXTENSION_HISTORY, Event, FORGET, FrontEndId, UNDO, UNDO_FOR};
 use kotodamad::history::{History, IDENTITIES};
 
@@ -511,4 +513,155 @@ fn a_front_end_that_connects_is_offered_the_latest_change() {
         panic!("one offer, got {offers:?}");
     };
     assert_eq!(title, "Forgot “Fish”");
+}
+
+/// Runs the primary Action of `owner`'s Result `id` with `query` typed, as
+/// [`pick`] does, and returns the run's invocation, as `ext` was asked it.
+fn launch(h: &mut Harness, ui: &FrontEnd, ext: &Ext, query: &str, owner: &str, id: &str) -> u64 {
+    ext.drain();
+    pick(h, ui, query, owner, id);
+    ext.drain()
+        .into_iter()
+        .find_map(|message| match message {
+            ToExtension::RunAction { invocation, .. } => Some(invocation),
+            _ => None,
+        })
+        .expect("the Extension was asked to run the Action")
+}
+
+#[test]
+fn a_withdrawn_pick_leaves_the_history_exactly_as_it_was_before_the_pick() {
+    let mut h = Harness::new(vec![plain("apps")]);
+    let ext = h.up(0);
+    h.add(&ext, apps().into_iter().map(identified).collect());
+    let ui = h.front_end();
+    for hour in [8, 13, 20] {
+        h.advance_to(hour);
+        pick(&mut h, &ui, "fi", "apps", "firefox");
+        pick(&mut h, &ui, "fi", "apps", "fish");
+        pick(&mut h, &ui, "f", "apps", "files");
+    }
+    h.advance_to(9);
+    let before = kept(&saved(&h));
+    let empty = titles(&h.query(&ui, "")).join(", ");
+    let searched = titles(&h.query(&ui, "fi")).join(", ");
+
+    // The Learned choice's pick, one that takes over from it, and one for a
+    // query it was never picked for.
+    for (query, id) in [("fi", "firefox"), ("fi", "fish"), ("fil", "files")] {
+        let invocation = launch(&mut h, &ui, &ext, query, "apps", id);
+        assert_ne!(kept(&saved(&h)), before, "{id} picked");
+        h.send(&ext, FromExtension::WithdrawPick { invocation });
+        assert_eq!(kept(&saved(&h)), before, "{id} withdrawn");
+    }
+
+    assert_eq!(titles(&h.query(&ui, "")).join(", "), empty);
+    assert_eq!(titles(&h.query(&ui, "fi")).join(", "), searched);
+}
+
+#[test]
+fn a_withdrawn_pick_ranks_as_if_it_was_never_made_later_on() {
+    let mut h = Harness::new(vec![plain("apps")]);
+    let ext = h.up(0);
+    h.add(&ext, apps());
+    let ui = h.front_end();
+    let mut unpicked = Harness::new(vec![plain("apps")]);
+    let unpicked_ext = unpicked.up(0);
+    unpicked.add(&unpicked_ext, apps());
+    let unpicked_ui = unpicked.front_end();
+    for hour in [8, 13, 20] {
+        for h in [&mut h, &mut unpicked] {
+            h.advance_to(hour);
+        }
+        pick(&mut h, &ui, "fi", "apps", "firefox");
+        pick(&mut unpicked, &unpicked_ui, "fi", "apps", "firefox");
+        pick(&mut h, &ui, "sh", "apps", "fish");
+        pick(&mut unpicked, &unpicked_ui, "sh", "apps", "fish");
+    }
+
+    for _ in 0..3 {
+        let invocation = launch(&mut h, &ui, &ext, "fi", "apps", "fish");
+        h.send(&ext, FromExtension::WithdrawPick { invocation });
+    }
+
+    for hour in [9, 21] {
+        for h in [&mut h, &mut unpicked] {
+            h.advance_to(hour);
+        }
+        for query in ["", "f", "fi"] {
+            assert_eq!(
+                titles(&h.query(&ui, query)),
+                titles(&unpicked.query(&unpicked_ui, query)),
+                "{query:?} at {hour}:00"
+            );
+        }
+    }
+}
+
+#[test]
+fn a_pick_is_never_offered_to_undo_and_withdrawing_it_offers_nothing() {
+    let mut h = Harness::new(vec![plain("apps")]);
+    let ext = h.up(0);
+    h.add(&ext, apps());
+    let ui = h.front_end();
+
+    let invocation = launch(&mut h, &ui, &ext, "fi", "apps", "firefox");
+    assert_eq!(undo_offers(&ui), []);
+    assert!(undo_row(&mut h, &ui).is_none());
+    h.front_end_sends(&ui, FromFrontEnd::Undo { change: invocation });
+    assert!(
+        saved(&h).picks("apps", "firefox").is_some(),
+        "not the user's to undo"
+    );
+
+    h.send(&ext, FromExtension::WithdrawPick { invocation });
+    assert_eq!(undo_offers(&ui), []);
+    assert!(saved(&h).is_empty());
+}
+
+#[test]
+fn only_the_extension_that_ran_the_action_withdraws_its_pick_and_only_for_a_while() {
+    let mut h = Harness::new(vec![plain("apps"), plain("other")]);
+    let ext = h.up(0);
+    let other = h.up(1);
+    h.add(&ext, apps());
+    let ui = h.front_end();
+
+    let invocation = launch(&mut h, &ui, &ext, "fi", "apps", "firefox");
+    h.send(&other, FromExtension::WithdrawPick { invocation });
+    assert!(
+        saved(&h).picks("apps", "firefox").is_some(),
+        "another Extension's"
+    );
+    h.send(
+        &ext,
+        FromExtension::WithdrawPick {
+            invocation: invocation + 100,
+        },
+    );
+    assert!(
+        saved(&h).picks("apps", "firefox").is_some(),
+        "another run's"
+    );
+
+    h.advance(UNDO_FOR);
+    h.send(&ext, FromExtension::WithdrawPick { invocation });
+    assert!(saved(&h).picks("apps", "firefox").is_some(), "too late");
+}
+
+#[test]
+fn withdrawing_the_first_of_two_launches_keeps_the_second() {
+    let mut h = Harness::new(vec![plain("apps")]);
+    let ext = h.up(0);
+    h.add(&ext, apps());
+    let ui = h.front_end();
+
+    let first = launch(&mut h, &ui, &ext, "fi", "apps", "firefox");
+    h.advance(Duration::from_secs(5));
+    launch(&mut h, &ui, &ext, "fi", "apps", "firefox");
+    h.send(&ext, FromExtension::WithdrawPick { invocation: first });
+
+    let when = Clock::starting_at(START).when(h.elapsed());
+    let frecency = saved(&h).frecency("apps", "firefox", when);
+    assert!((frecency - 1.0).abs() < 1e-3, "one pick left: {frecency}");
 }

@@ -454,6 +454,7 @@ fn from_extension() -> Vec<FromExtension> {
         },
         FromExtension::JobProgress(job()),
         FromExtension::RequestActionCatalog,
+        FromExtension::WithdrawPick { invocation: 5 },
     ]
 }
 

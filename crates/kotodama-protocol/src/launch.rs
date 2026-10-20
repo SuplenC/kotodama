@@ -13,12 +13,36 @@ use std::process::Command;
 /// it from the Daemon's environment.
 ///
 /// Under systemd every process the Daemon starts sits in its service's
-/// cgroup, so stopping the service would kill the user's apps with it. The
-/// Daemon's unit therefore sets the prefix to `systemd-run --user --scope …`,
-/// which gives each program a scope of its own.
+/// cgroup, so stopping the service would kill the user's apps with it.
+/// When the prefix isn't set, the Daemon and the Rust Extensions therefore
+/// ask the user manager for a scope for each program
+/// (`kotodama_extension::scope`). Setting it, even empty, replaces that
+/// scope: for another way to start apps, such as `uwsm app --`, or for none.
 pub const LAUNCH_PREFIX: &str = "KOTODAMA_LAUNCH_PREFIX";
 
-/// A command that runs `argv` after the launch prefix, if one is set. Fails if
+/// Set, beside [`LAUNCH_PREFIX`], when the prefix is only there to give
+/// each program a scope: the Daemon then hands Extensions [`SCOPE_PREFIX`],
+/// so one that starts programs through the prefix gets the scope too. A
+/// launcher that asks for the scope itself ignores such a prefix
+/// ([`launch_prefix`]).
+pub const LAUNCH_SCOPED: &str = "KOTODAMA_LAUNCH_SCOPED";
+
+/// The launch prefix that gives a program a scope of its own, for
+/// Extensions that don't ask the user manager for one themselves.
+pub const SCOPE_PREFIX: &str = "systemd-run --user --scope --slice=app.slice --collect --quiet";
+
+/// The launch prefix in effect: [`LAUNCH_PREFIX`], unless it is unset or
+/// only stands in for a scope ([`LAUNCH_SCOPED`]).
+#[must_use]
+pub fn launch_prefix() -> Option<String> {
+    if env::var_os(LAUNCH_SCOPED).is_some() {
+        return None;
+    }
+    env::var(LAUNCH_PREFIX).ok()
+}
+
+/// A command that runs `argv` after the launch prefix ([`launch_prefix`]), if
+/// one is in effect. Fails if
 /// `argv` is empty, or if its program isn't found, as starting it without a
 /// prefix would: with one, the prefix itself would start, and the error
 /// would be lost.
@@ -26,7 +50,7 @@ pub fn launch_command(argv: &[String]) -> io::Result<Command> {
     let (program, args) = argv
         .split_first()
         .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "nothing to run"))?;
-    let prefix = env::var(LAUNCH_PREFIX).unwrap_or_default();
+    let prefix = launch_prefix().unwrap_or_default();
     let mut words = prefix.split_whitespace();
     let Some(first) = words.next() else {
         let mut command = Command::new(program);

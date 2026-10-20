@@ -62,6 +62,7 @@ impl Launcher for Processes {
         // when the Daemon started before.
         #[cfg(target_os = "linux")]
         kotodama_extension::runtime::pass_wayland_display(&mut command);
+        kotodama_extension::scope::pass_scope_prefix(&mut command);
         die_with_daemon(&mut command);
         let mut child = match command.spawn() {
             Ok(child) => child,

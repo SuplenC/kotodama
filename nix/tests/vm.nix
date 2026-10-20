@@ -20,7 +20,7 @@ let
       export LC_ALL=C
       send() { printf '%d\n%s' "''${#1}" "$1"; }
       read_frame() { IFS= read -r len && IFS= read -r -N "$len" frame; }
-      send '{"version":8,"formats":["json"]}'
+      send '{"version":9,"formats":["json"]}'
       read_frame # the Daemon's hello
       read_frame # the config
       send '{"job_progress":{"id":"${name}","title":"${title}","state":"succeeded"}}'
@@ -133,7 +133,7 @@ pkgs.testers.runNixOSTest {
         return machine.execute(as_alice(f"systemctl --user is-active {unit}"))[0] == 0
 
     def pgrep(program):
-        # systemd-run starts the program by its full path.
+        # The program may be named by its full path.
         return f"pgrep -u alice -f '(^|/){program}$'"
 
     def cgroup_of(program):
@@ -196,6 +196,7 @@ pkgs.testers.runNixOSTest {
             machine.wait_until_succeeds(pgrep(program))
             cgroup = cgroup_of(program)
             assert "kotodamad.service" not in cgroup, f"{program} runs in the Daemon's cgroup: {cgroup}"
+            assert "/app.slice/app-kotodama-sleep-" in cgroup, f"{program} has no scope of its own: {cgroup}"
 
     with subtest("stopping the Daemon leaves them running, and the next toggle brings it back"):
         user("systemctl --user stop kotodamad.service")

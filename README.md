@@ -59,7 +59,7 @@ The Nix package's `kotodamad` puts its Bundled extensions first on its own `XDG_
 
 `kotodamad` serves Front ends on `$XDG_RUNTIME_DIR/kotodama.sock`. It finds Extensions in `$XDG_DATA_DIRS/kotodama/extensions/*/manifest.toml` and `~/.config/kotodama/extensions/*/manifest.toml`, starts each one, and restarts it with backoff when it stops or hangs. Extensions installed, changed or removed while it runs are picked up without a restart. Its config is every top-level `*.toml` in `$XDG_CONFIG_DIRS/kotodama/`, then `~/.config/kotodama/`, merged in order and reloaded when a file changes. `KOTODAMA_LOG=debug` logs more. Under systemd socket activation (`kotodamad.socket`) it serves the socket systemd hands it instead of binding its own.
 
-Apps, Quicklinks and every other program started for the user run after the words in `KOTODAMA_LAUNCH_PREFIX`, if it is set. Extensions inherit it from the Daemon and should do the same. The systemd unit sets it to `systemd-run --user --scope --slice=app.slice --collect --quiet`, so each program gets a scope of its own and outlives a stop or restart of the Daemon, whose service would otherwise take every process in its cgroup down with it. A prefix such as `uwsm app --` works too. The words are split on whitespace, so the prefix can't contain a path with spaces.
+Apps, Quicklinks and every other program started for the user get a systemd scope of their own in `app.slice`, asked of the user manager over D-Bus as `systemd-run --user --scope` would, so each outlives a stop or restart of the Daemon, whose service would otherwise take every process in its cgroup down with it. The program moves into its scope before it runs, so what it starts at once lands there too. Without a user manager, programs start without a scope. `KOTODAMA_LAUNCH_PREFIX`, when set, replaces the scope: programs run after its words instead, such as `uwsm app --`, or start directly when it is empty. Extensions inherit it from the Daemon and should do the same; the Rust ones get both through `kotodama-extension`. When the Daemon has no prefix and there is a user manager, it hands Extensions `systemd-run --user --scope --slice=app.slice --collect --quiet` as their prefix, with `KOTODAMA_LAUNCH_SCOPED=1`, so an Extension in any language that starts programs through the prefix gets the scope too; one that asks for the scope itself, as the Rust ones do, ignores a prefix marked so. The words are split on whitespace, so the prefix can't contain a path with spaces.
 
 ### Ranking that learns
 
@@ -177,7 +177,7 @@ The `latency` e2e test types into the real menu with 10k Indexed items and fails
 
 ## Bundled extensions
 
-The Bundled extensions are written in Rust on `kotodama-extension` (`crates/kotodama-extension`), which any Rust Extension can use too. It does the handshake on stdio and reads the Daemon's messages on a thread of its own into one channel, which the Extension's own threads send to as well. It keeps resident memory down, sends Indexed items as changes, reads config settings and logs the ones of the wrong shape, starts programs through the launch prefix, detached from the Extension, and, with its `watch` feature, watches directories and acts once they settle after a change. Its crate docs show a whole Extension.
+The Bundled extensions are written in Rust on `kotodama-extension` (`crates/kotodama-extension`), which any Rust Extension can use too. It does the handshake on stdio and reads the Daemon's messages on a thread of its own into one channel, which the Extension's own threads send to as well. It keeps resident memory down, sends Indexed items as changes, reads config settings and logs the ones of the wrong shape, starts programs detached from the Extension, each in a systemd scope of its own or through the launch prefix, and, with its `watch` feature, watches directories and acts once they settle after a change. Its crate docs show a whole Extension.
 
 ### Apps
 
@@ -194,7 +194,13 @@ terminal = ["ghostty", "-e"]
 hidden = ["qt5ct", "qt6ct"]
 # Names to show instead of the app's own; it is still found by its own name too.
 names = { nvim = "Neovim" }
+# An app that closes within this many seconds of starting was most likely
+# picked by mistake: its pick is taken back out of the History. 0 never
+# does; at most 30. The default is 5.
+withdraw_within = 5
 ```
+
+An app counts as closed once everything its launch started is gone: its whole scope, or without a user manager its process group. So a launcher script that starts the app and exits keeps the pick. A launch while a copy of the same program already runs keeps it too, since such a launch often only hands off to that copy. The check is still best effort: without a scope, a program that starts the app in a new session or process group and exits looks closed, and so does one that hands off to a copy running under another name, or to a D-Bus-activated service. Set `withdraw_within = 0` if that happens to apps you use.
 
 Its `manifest.toml` runs `./kotodama-apps`, so a package installs the binary next to it in `$XDG_DATA_DIRS/kotodama/extensions/apps/`.
 

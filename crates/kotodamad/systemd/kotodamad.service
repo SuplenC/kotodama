@@ -9,6 +9,6 @@ After=kotodamad.socket
 [Service]
 ExecStart=@bindir@/kotodamad
 # Every program the Daemon or an Extension starts for the user gets a scope of
-# its own, so stopping or restarting the Daemon doesn't kill the user's apps.
-Environment="KOTODAMA_LAUNCH_PREFIX=systemd-run --user --scope --slice=app.slice --collect --quiet"
+# its own from the user manager, so stopping or restarting the Daemon doesn't
+# kill the user's apps. Setting KOTODAMA_LAUNCH_PREFIX here replaces that.
 Restart=on-failure

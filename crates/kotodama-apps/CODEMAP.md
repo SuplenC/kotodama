@@ -6,3 +6,4 @@ A Bundled extension. Maintained by hand: fix stale lines when you find them, and
 - `entry.rs` (`.desktop` parsing)
 - `exec.rs` (`Exec` field codes)
 - `items.rs` (`Settings`, Items)
+- `main.rs`: `Extension::run` launches with `launch_watched`; an app whose whole launch closes within `withdraw_within`, with no copy of its program running from before, sends `WithdrawPick` (`Own::ExitedSoon`).

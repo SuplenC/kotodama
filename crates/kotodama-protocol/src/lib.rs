@@ -44,7 +44,7 @@ pub use item::{
     Action, Argument, Item, ItemKind, ItemRef, KindName, NamespacedKind, SHARED_KINDS,
     is_valid_name,
 };
-pub use launch::{LAUNCH_PREFIX, launch_command};
+pub use launch::{LAUNCH_PREFIX, LAUNCH_SCOPED, SCOPE_PREFIX, launch_command, launch_prefix};
 pub use manifest::{ContributedAction, LiveQueries, Manifest};
 pub use message::{CatalogEntry, Clipboard, FromExtension, LiveResult, Outcome, ToExtension};
 pub use shortcut::{FORGET_SHORTCUT, RESERVED_SHORTCUTS, UNDO_SHORTCUT, is_reserved_shortcut};

@@ -1,9 +1,11 @@
 //! Starting the programs Actions run, detached from the Extension, and
 //! programs in the background, reporting how they ended.
 //!
-//! Each runs through the launch prefix ([`launch_command`]), with no stdio of
-//! the Extension's, which carries the protocol, and in a process group of its
-//! own, so a signal to the Extension's group doesn't reach it.
+//! Each runs through the launch prefix ([`launch_command`]) if one is set,
+//! else in a systemd scope of its own when there is a user manager to make
+//! one ([`crate::scope`]); with no stdio of the Extension's, which carries
+//! the protocol; and in a process group of its own, so a signal to the
+//! Extension's group doesn't reach it.
 
 use std::io::{self, Read};
 use std::os::unix::process::CommandExt;
@@ -11,9 +13,12 @@ use std::path::Path;
 use std::process::{Command, ExitStatus, Stdio};
 use std::sync::mpsc;
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use kotodama_protocol::launch_command;
+
+use crate::Chain;
+use crate::scope::Launched;
 
 /// Small: the threads only wait for the program, or read its output.
 const SMALL_STACK: usize = 64 * 1024;
@@ -51,24 +56,55 @@ fn command(argv: &[String], dir: Option<&Path>) -> io::Result<Command> {
     Ok(command)
 }
 
-fn spawn_error(argv: &[String], err: io::Error) -> io::Error {
+/// Spawns `command`, which runs `argv`, in a scope of its own if it gets one.
+/// The error says what went wrong in words for the user.
+fn spawn(command: &mut Command, argv: &[String]) -> io::Result<Launched> {
     let program = argv.first().map_or("", String::as_str);
-    io::Error::new(err.kind(), format!("couldn't start {program}: {err}"))
+    let named = program.to_owned();
+    crate::scope::spawn(command, move |err| {
+        crate::log!("{named} runs without a scope of its own: {}", Chain(&err));
+    })
+    .map_err(|err| io::Error::new(err.kind(), format!("couldn't start {program}: {err}")))
 }
 
 /// Starts `argv`, in `dir` if given, and leaves it running. A thread reaps it
 /// when it exits. The error says what went wrong in words for the user.
 pub fn launch(argv: &[String], dir: Option<&Path>) -> io::Result<()> {
-    let mut child = command(argv, dir)?
-        .spawn()
-        .map_err(|err| spawn_error(argv, err))?;
+    launch_watched(argv, dir, "", Duration::ZERO, || {})
+}
+
+/// Starts `argv` as [`launch`] does, and calls `closed` on the thread that
+/// reaps it if the app it starts, the program `app`, closed within `within`:
+/// everything the launch started ended by then, its whole scope or process
+/// group, so a launcher that starts the app and exits doesn't count. Nor
+/// does a launch while a copy of `app` already ran, which a single-instance
+/// app hands off to and exits. A zero `within` never calls it.
+pub fn launch_watched(
+    argv: &[String],
+    dir: Option<&Path>,
+    app: &str,
+    within: Duration,
+    closed: impl FnOnce() + Send + 'static,
+) -> io::Result<()> {
+    let Launched { mut child, cgroup } = spawn(&mut command(argv, dir)?, argv)?;
+    let deadline = Instant::now() + within;
+    let app = app.to_owned();
     // It runs either way; without the thread it stays a zombie once it exits,
     // which is better than reporting a failure.
     if let Err(err) = thread::Builder::new()
         .name("reap".into())
         .stack_size(SMALL_STACK)
         .spawn(move || {
-            let _ = child.wait();
+            let pid = child.id();
+            // Looked for before the wait, while the process's start time,
+            // what came before it, can still be read.
+            let watched = !within.is_zero() && !crate::closing::ran_before(&app, pid);
+            if child.wait().is_ok()
+                && watched
+                && crate::closing::ended_by(cgroup.as_deref(), pid, deadline)
+            {
+                closed();
+            }
         })
     {
         crate::log!("won't reap {}: {err}", argv[0]);
@@ -96,7 +132,7 @@ pub fn background(
     let (reader, writer) = io::pipe()?;
     let mut command = command(argv, dir)?;
     command.stdout(writer.try_clone()?).stderr(writer);
-    let mut child = command.spawn().map_err(|err| spawn_error(argv, err))?;
+    let mut child = spawn(&mut command, argv)?.child;
     // The command holds the pipe's write ends too; only the child's may
     // keep it open.
     drop(command);

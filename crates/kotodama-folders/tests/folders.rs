@@ -44,7 +44,7 @@ impl Folders {
         let extension = Spawned::start(
             Command::new(env!("CARGO_BIN_EXE_kotodama-folders"))
                 .env("HOME", home.path())
-                .env_remove("KOTODAMA_LAUNCH_PREFIX"),
+                .env("KOTODAMA_LAUNCH_PREFIX", ""),
             WAIT,
         );
         Folders { extension, home }

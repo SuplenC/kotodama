@@ -103,6 +103,16 @@ pub enum FromExtension {
     JobProgress(Job),
     /// Asks for the Action catalog; allowed only if the Manifest says so.
     RequestActionCatalog,
+    /// Withdraws the pick that running an Action made, as when an app the
+    /// Action launched closed right after: the History becomes as if the user
+    /// had never picked the Result. Only the Extension that ran the Action may
+    /// withdraw its pick, for a minute after [`ToExtension::RunAction`].
+    /// Withdrawing a pick the Daemon doesn't know, or one it no longer keeps,
+    /// does nothing.
+    WithdrawPick {
+        /// The `invocation` of the [`ToExtension::RunAction`] that ran it.
+        invocation: u64,
+    },
 }
 
 /// One Live query result.

@@ -829,6 +829,7 @@ dependencies = [
  "libc",
  "notify",
  "tempfile",
+ "thiserror 2.0.21",
  "wayland-client",
  "wayland-protocols",
  "wayland-protocols-wlr",

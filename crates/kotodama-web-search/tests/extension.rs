@@ -19,7 +19,7 @@ fn start(config: &str, path: &Path) -> Spawned {
     let mut web = Spawned::start(
         Command::new(env!("CARGO_BIN_EXE_kotodama-web-search"))
             .env("PATH", format!("{}:{search}", path.display()))
-            .env_remove("KOTODAMA_LAUNCH_PREFIX"),
+            .env("KOTODAMA_LAUNCH_PREFIX", ""),
         WAIT,
     );
     web.send(ToExtension::Config(toml::from_str(config).unwrap()));
