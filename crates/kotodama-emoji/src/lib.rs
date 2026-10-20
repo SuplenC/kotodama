@@ -6,6 +6,8 @@
 //! read in place: a [`Character`] borrows its text from it, so nothing is
 //! copied until Items are made of them.
 
+#![forbid(unsafe_code)]
+
 use kotodama_protocol::{Action, Clipboard, Item, ItemKind, NamespacedKind, Outcome};
 
 /// One character per line: the character, its name, its keywords separated by

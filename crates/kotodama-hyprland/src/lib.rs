@@ -2,6 +2,8 @@
 //! Shortcuts View ([`binds`]), its open windows ([`windows`]) kept up to date
 //! from its events ([`events`]), and its two sockets ([`hyprland`]).
 
+#![forbid(unsafe_code)]
+
 pub mod binds;
 pub mod events;
 pub mod hyprland;

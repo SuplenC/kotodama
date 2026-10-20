@@ -14,6 +14,8 @@
 //! decimal_separator = "comma"
 //! ```
 
+#![forbid(unsafe_code)]
+
 use std::process::ExitCode;
 use std::sync::mpsc::Sender;
 use std::thread;

@@ -10,6 +10,8 @@
 //! `--view <extension>/<item>` opens the menu on the View that Item's primary
 //! Action pushes (ADR 0014).
 
+#![forbid(unsafe_code)]
+
 use std::os::unix::net::UnixStream;
 use std::process::ExitCode;
 use std::time::Duration;

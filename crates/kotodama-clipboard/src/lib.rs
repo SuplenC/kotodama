@@ -3,6 +3,8 @@
 //! shows as. `main.rs` speaks the protocol, and `wayland.rs` watches the
 //! clipboard.
 
+#![forbid(unsafe_code)]
+
 pub mod copied;
 pub mod history;
 pub mod items;

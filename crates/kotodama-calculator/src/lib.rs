@@ -2,6 +2,8 @@
 //! currency through fend, and dates and time zones of its own (see
 //! [`dates`]). `main.rs` speaks the protocol around it.
 
+#![forbid(unsafe_code)]
+
 mod dates;
 mod locale;
 mod math;

@@ -15,6 +15,8 @@
 //! ]
 //! ```
 
+#![forbid(unsafe_code)]
+
 use std::process::ExitCode;
 
 use kotodama_extension::{Connection, Event, launch};
