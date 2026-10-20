@@ -18,7 +18,7 @@ are in [docs/adr/](docs/adr/).
 - [`crates/kotodama-folders/`](crates/kotodama-folders/CODEMAP.md): Bundled extension, git projects and scripts from configured folders.
 - `e2e/`: end-to-end tests against headless sway (`e2e/run`, `e2e/lib.sh`, one dir per test).
 - `nix/`: `package.nix` (the package and Bundled extension layout), `home-manager.nix`, `tests/` (NixOS VM and QML module checks).
-- `scripts/`: dev environment (`dev-env`, `dev-image`), bench runners (`bench-run`, `bench-compare`), `has-crates`/`has-benches`, `qml-module`, `tests/` (script tests).
+- `scripts/`: dev environment (`dev-env`, `dev-image`), bench runners (`bench-run`, `bench-compare`, `bench-crates`), `has-crates`/`has-benches`, `qml-module`, `tests/` (script tests).
 - `docker/`: the dev image for machines without Nix (`just image`).
 - `examples/shell-extension/`: a minimal Extension in shell, also run by `kotodama-protocol/tests/shell_extension.rs`.
 - `docs/adr/`: decisions, one file per ADR named for the area it governs. `docs/agents/`: how agents use issues, labels and domain docs.
@@ -52,7 +52,7 @@ are in [docs/adr/](docs/adr/).
 - `just shell`, `just image`.
 
 CI (`.github/workflows/ci.yml`):
-- On PRs, `changes` gates the jobs below by path (docs-only runs none); `ci` is the single required check.
-- On PRs and main: `test` (check + test, x86 and arm), `e2e` (both arches, no `latency` on PRs), `bench` (base vs this commit; fails on +50% time, +10% Daemon memory).
+- On PRs, `changes` gates the jobs below by path (docs-only runs none; `bench` only for the crates `scripts/bench-crates` lists, lockfiles, scripts and CI); `ci` is the single required check.
+- On PRs and main: `test` (check + test, x86 and arm), `e2e` (both arches, no `latency` on PRs), `bench` (base vs this commit; fails on +50% time, +10% Daemon memory). On main, `bench` runs both commits on one runner and caches the results as `bench-results-<sha>`; a PR compares against its base's cached results with shorter criterion times, reruns the base on its own runner only when a timing fails, and runs both commits when nothing is cached.
 - Push only: `nixos-vm` (VM and QML module checks). Main only: `image` (dev image), cargo cache saves.
 - `release-please.yml`: release PRs from Conventional Commits.
