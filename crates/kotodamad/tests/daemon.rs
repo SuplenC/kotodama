@@ -200,6 +200,37 @@ fn a_late_result_goes_below_the_visible_rows_however_well_it_scores() {
 }
 
 #[test]
+fn late_results_keep_a_near_miss_on_screen_though_real_matches_now_fill_the_rows() {
+    let mut h = Harness::new(vec![plain("apps"), web()]);
+    let apps = h.up(0);
+    let web = h.up(1);
+    h.add(&apps, vec![app("G Stream Deck"), app("G Steam")]);
+    let ui = h.front_end();
+    h.front_end_sends(&ui, FromFrontEnd::Viewport { top: 0, rows: 2 });
+
+    assert_eq!(
+        titles(&h.query(&ui, "g stream")),
+        ["G Stream Deck", "G Steam"]
+    );
+    h.advance(Duration::from_millis(100));
+    let (id, ..) = live_queries(&web)[0].clone();
+    h.send(
+        &web,
+        FromExtension::LiveResults {
+            live_query: id,
+            results: vec![
+                live("stream one", 1.0, false),
+                live("stream two", 1.0, false),
+            ],
+            done: true,
+        },
+    );
+
+    let rows = ui.results().unwrap();
+    assert_eq!(titles(&rows)[..2], ["G Stream Deck", "G Steam"]);
+}
+
+#[test]
 fn below_the_visible_rows_live_results_compete_with_indexed_items_on_score() {
     let mut h = Harness::new(vec![plain("apps"), web()]);
     let apps = h.up(0);

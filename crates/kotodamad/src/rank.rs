@@ -423,6 +423,9 @@ impl Tiers {
             || (!haystack.words.is_empty() && self.nearly(haystack.words.slice(..), None, query))
     }
 
+    /// Whether each word of the query matches one folded text, or a word of
+    /// it starts with the query's word but for as many typos as that may
+    /// have. `original` gives the case, as for [`Tiers::text`].
     fn nearly(&mut self, folded: Utf32Str, original: Option<&str>, query: &Query) -> bool {
         // Asked only of what doesn't match, so a one-word query's word
         // doesn't, and only the words starting with its first letter count.
@@ -437,8 +440,9 @@ impl Tiers {
         })
     }
 
-    /// [`Tiers::typo`] straight from a folded text, without [`Tiers::load`]:
-    /// only the words starting with `word`'s first letter are copied out.
+    /// [`Tiers::typo`] of a folded text. An ASCII text is read without
+    /// [`Tiers::load`]: only the words starting with `word`'s first letter are
+    /// copied out.
     fn typo_in(
         &mut self,
         folded: Utf32Str,
@@ -446,7 +450,15 @@ impl Tiers {
         word: &[char],
         whole: bool,
     ) -> bool {
+        let Utf32Str::Ascii(bytes) = folded else {
+            self.load(folded, original);
+            return self.typo(word, whole);
+        };
         let typos = typos(word.len());
+        // Most texts: look only where the first letter is.
+        let Ok(first) = u8::try_from(word[0]) else {
+            return false;
+        };
         if typos == 0 {
             return false;
         }
@@ -455,55 +467,22 @@ impl Tiers {
         let cases = original
             .filter(|original| original.len() == folded.len())
             .map(str::as_bytes);
-        if let Utf32Str::Ascii(bytes) = folded {
-            // Most texts: look only where the first letter is.
-            let Ok(first) = u8::try_from(word[0]) else {
-                return false;
-            };
-            for at in (0..bytes.len()).filter(|&at| bytes[at] == first) {
-                let starts = at == 0
-                    || !bytes[at - 1].is_ascii_alphanumeric()
-                    || cases.is_some_and(|cases| {
-                        cases[at].is_ascii_uppercase() && cases[at - 1].is_ascii_lowercase()
-                    });
-                if !starts {
-                    continue;
-                }
-                self.chars.clear();
-                self.chars.extend(
-                    bytes[at..]
-                        .iter()
-                        .take_while(|b| b.is_ascii_alphanumeric())
-                        .take(word.len() + typos + 1)
-                        .map(|&b| char::from(b)),
-                );
-                if within(word, &self.chars, typos, whole, &mut self.distances) {
-                    return true;
-                }
-            }
-            return false;
-        }
-        let mut prev = None;
-        for (at, c) in folded.chars().enumerate() {
-            let camel = cases.is_some_and(|cases| {
-                at > 0 && cases[at].is_ascii_uppercase() && cases[at - 1].is_ascii_lowercase()
-            });
-            let starts = c == word[0]
-                && c.is_alphanumeric()
-                && (camel || prev.is_none_or(|p: char| !p.is_alphanumeric()));
-            prev = Some(c);
+        for at in (0..bytes.len()).filter(|&at| bytes[at] == first) {
+            let starts = at == 0
+                || !bytes[at - 1].is_ascii_alphanumeric()
+                || cases.is_some_and(|cases| {
+                    cases[at].is_ascii_uppercase() && cases[at - 1].is_ascii_lowercase()
+                });
             if !starts {
                 continue;
             }
-            // One letter more than `within` looks at tells it the word is
-            // longer.
             self.chars.clear();
             self.chars.extend(
-                folded
-                    .slice(at..)
-                    .chars()
-                    .take_while(|c| c.is_alphanumeric())
-                    .take(word.len() + typos + 1),
+                bytes[at..]
+                    .iter()
+                    .take_while(|b| b.is_ascii_alphanumeric())
+                    .take(word.len() + typos + 1)
+                    .map(|&b| char::from(b)),
             );
             if within(word, &self.chars, typos, whole, &mut self.distances) {
                 return true;

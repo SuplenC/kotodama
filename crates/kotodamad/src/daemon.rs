@@ -2178,7 +2178,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
                 ));
             }
         }
-        let indexed = self.add_near_misses(&mut session, &mut candidates, indexed, narrow);
+        let indexed = self.add_near_misses(&mut session, &mut candidates, indexed, narrow, fresh);
         let primary = self.learn(&mut session, &mut candidates, indexed, now);
 
         let mut answers: Vec<Candidate> = Vec::new();
@@ -2231,78 +2231,98 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
     /// Adds the near misses of the session's query, Indexed items and the
     /// Daemon's own, to `candidates`, unless the real matches already fill the
     /// rows: near misses rank below every real match, so they would never be
-    /// seen. `narrowed` is whether this search narrowed the last one's
-    /// matches; then near misses are looked for among the last one's, if it
-    /// looked for them and allowed as many typos. The candidates before
-    /// `indexed` are the Indexed items, in slot order, and stay so; returns how
-    /// many there are now.
+    /// seen, except those on screen when the query hasn't changed (ADR 0003).
+    /// `narrowed` is whether this search narrowed the last one's matches;
+    /// then near misses are looked for among the last one's, if it looked for
+    /// them and allowed as many typos. The candidates before `indexed` are the
+    /// Indexed items, in slot order, and stay so; returns how many there are
+    /// now.
     fn add_near_misses(
         &mut self,
         session: &mut Session,
         candidates: &mut Vec<Candidate>,
         indexed: usize,
         narrowed: bool,
+        fresh: bool,
     ) -> usize {
         let last = session.nearly_for.take();
         let narrow =
             narrowed && last.is_some_and(|last| last.narrows_near_misses_of(&session.folded));
+        let typos = session.folded.tolerates_typos();
+        let look = typos && candidates.len() < session.rows;
         let mut nearly = std::mem::take(&mut session.nearly);
-        if candidates.len() >= session.rows || !session.folded.tolerates_typos() {
-            nearly.clear();
-            session.nearly = nearly;
-            return indexed;
-        }
-        let (within, initials) = if narrow {
-            (&nearly[..], 0)
-        } else {
-            (&[][..], session.folded.typo_initials())
+
+        let Daemon {
+            index,
+            own,
+            tiers,
+            kinds,
+            ..
+        } = self;
+        let folded = &session.folded;
+        let known = &candidates[..];
+        // The near miss `source` is, unless it is a candidate already.
+        let mut near_miss = |source: Source| {
+            let (haystack, item) = match source {
+                Source::Indexed(slot) => {
+                    if known[..indexed]
+                        .binary_search_by_key(&source, |c| c.source)
+                        .is_ok()
+                    {
+                        return None;
+                    }
+                    let entry = index.entry(slot)?;
+                    (&entry.haystack, &entry.item)
+                }
+                Source::Own(n) => {
+                    if known[indexed..].iter().any(|c| c.source == source) {
+                        return None;
+                    }
+                    let own = own.get(n as usize)?;
+                    (&own.haystack, &own.item)
+                }
+                Source::Live(..) => return None,
+            };
+            tiers.near_miss(haystack, item, folded).then(|| {
+                let len = haystack.title.len() as u32;
+                Candidate::new(source, Tier::NearMiss, kinds.place(&item.kind), 0, len)
+            })
         };
-        let all = self.index.starting_with(initials);
         let mut found = Vec::new();
-        for slot in within.iter().copied().chain(all) {
-            let source = Source::Indexed(slot);
-            if let Some(entry) = self.index.entry(slot)
-                && candidates[..indexed]
-                    .binary_search_by_key(&source, |c| c.source)
-                    .is_err()
-                && self
-                    .tiers
-                    .near_miss(&entry.haystack, &entry.item, &session.folded)
-            {
-                found.push(Candidate::new(
-                    source,
-                    Tier::NearMiss,
-                    self.kinds.place(&entry.item.kind),
-                    0,
-                    entry.haystack.title.len() as u32,
-                ));
-            }
+        if look {
+            let (within, all) = if narrow {
+                (&nearly[..], None)
+            } else {
+                (&[][..], Some(index.starting_with(folded.typo_initials())))
+            };
+            let slots = within.iter().copied().chain(all.into_iter().flatten());
+            let own = (0..own.len() as u32).map(Source::Own);
+            found.extend(
+                slots
+                    .map(Source::Indexed)
+                    .chain(own)
+                    .filter_map(&mut near_miss),
+            );
+        } else if typos && !fresh {
+            let shown = session.shown.iter().take(session.rows);
+            found.extend(shown.filter_map(|&(source, _)| near_miss(source)));
         }
-        for (n, own) in self.own.iter().enumerate() {
-            let source = Source::Own(n as u32);
-            if !candidates[indexed..].iter().any(|c| c.source == source)
-                && self
-                    .tiers
-                    .near_miss(&own.haystack, &own.item, &session.folded)
-            {
-                candidates.push(Candidate::new(
-                    source,
-                    Tier::NearMiss,
-                    self.kinds.place(&own.item.kind),
-                    0,
-                    own.haystack.title.len() as u32,
-                ));
-            }
-        }
+
         nearly.clear();
-        nearly.extend(&session.narrowed);
-        nearly.extend(found.iter().filter_map(|candidate| match candidate.source {
-            Source::Indexed(slot) => Some(slot),
-            _ => None,
-        }));
-        nearly.sort_unstable();
+        if look {
+            nearly.extend(&session.narrowed);
+            nearly.extend(found.iter().filter_map(|candidate| match candidate.source {
+                Source::Indexed(slot) => Some(slot),
+                _ => None,
+            }));
+            nearly.sort_unstable();
+            session.nearly_for = Some(session.folded.clone());
+        }
         session.nearly = nearly;
-        session.nearly_for = Some(session.folded.clone());
+        // The Indexed items first, in slot order, then the Daemon's own.
+        found.sort_unstable_by_key(|candidate| candidate.source);
+        let own = found.partition_point(|candidate| matches!(candidate.source, Source::Indexed(_)));
+        candidates.extend(found.drain(own..));
         let added = found.len();
         candidates.splice(indexed..indexed, found);
         let indexed = indexed + added;
