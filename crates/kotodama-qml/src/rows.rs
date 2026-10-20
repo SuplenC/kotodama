@@ -208,7 +208,7 @@ mod tests {
     fn offered(extension: &str, id: &str, title: &str) -> OfferedAction {
         OfferedAction {
             extension: extension.into(),
-            action: kotodama_protocol::Action::new(id, title),
+            action: Action::new(id, title),
         }
     }
 
@@ -229,8 +229,8 @@ mod tests {
                 hidden: false,
                 identity: None,
                 actions: vec![
-                    kotodama_protocol::Action::new("open", "Open"),
-                    kotodama_protocol::Action::new("term", "Open in terminal"),
+                    Action::new("open", "Open"),
+                    Action::new("term", "Open in terminal"),
                 ],
             },
             contributed: vec![
@@ -269,8 +269,7 @@ mod tests {
 
     #[test]
     fn a_contributed_shortcut_an_items_own_action_binds_is_left_to_the_own_one() {
-        let mut open = action("open", "Open");
-        open.shortcut = Some("ctrl+o".into());
+        let open = Action::new("open", "Open").shortcut("ctrl+o");
         let item = Item {
             id: "https://example.com".into(),
             kind: ItemKind::Url {

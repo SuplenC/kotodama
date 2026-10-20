@@ -67,9 +67,9 @@ impl Spawned {
         self.writer = None;
     }
 
-    /// The next message, waiting `wait` for it.
-    pub fn recv_timeout(&self, wait: Duration) -> Result<FromExtension, RecvTimeoutError> {
-        self.received.recv_timeout(wait)
+    /// The next message, waiting up to `timeout` for it.
+    pub fn recv_timeout(&self, timeout: Duration) -> Result<FromExtension, RecvTimeoutError> {
+        self.received.recv_timeout(timeout)
     }
 
     /// The next message; panics if none comes in time.

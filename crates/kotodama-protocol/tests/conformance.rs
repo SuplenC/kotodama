@@ -23,12 +23,7 @@ fn round_trip<T: Serialize + DeserializeOwned + PartialEq + Debug>(message: &T) 
 }
 
 fn action(id: &str) -> Action {
-    Action {
-        id: id.into(),
-        title: id.into(),
-        shortcut: None,
-        arguments: vec![],
-    }
+    Action::new(id, id)
 }
 
 fn items() -> Vec<Item> {
