@@ -4,7 +4,7 @@ Status: accepted (2026-10-20)
 
 A typo used to mean no Result at all: nucleo matches the query's letters in order, so `fierfox` and `calculater` found nothing. Users expect a typo to still find what they meant (T4–T7), yet a real match to come first (T8), and short queries not to match everything (T9).
 
-A word of the query may now have one typo per 4 letters: a letter missing, extra or wrong, or two neighbouring letters swapped (the optimal string alignment distance). The word is compared with the start of each word of an Item's title and keywords, so `firefx` finds Firefox before the last letter is typed. A Result found only this way is a Near miss, a Tier below Scattered (amending ADR 0006). Frecency never lifts a Near miss, so every real match ranks above it, however much the Near miss is used. A Learned choice or an Alias still applies to it, because the user asked for it.
+A word of the query may now have one typo per 4 letters: a letter missing, extra or wrong, or two neighbouring letters swapped (the optimal string alignment distance). The word is compared with the start of each word of an Item's title and keywords, so `firefx` finds Firefox before the last letter is typed. A Result found only this way is a Near miss, a Tier below Scattered (amending ADR 0006). Frecency never lifts a Near miss, so every real match ranks above it, however much the Near miss is used. A Learned choice or an Alias still applies to it, because the user asked for it. A Near miss highlights the start of each word of its title that a word of the query nearly matches, so the user sees why it is there.
 
 Speed comes first, so:
 

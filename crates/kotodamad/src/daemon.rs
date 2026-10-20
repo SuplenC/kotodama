@@ -2827,6 +2827,15 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             self.highlights.dedup();
         } else {
             self.highlights.clear();
+            // A near miss: the words it nearly matches.
+            if session.folded.tolerates_typos() {
+                self.tiers.near_miss_highlights(
+                    haystack,
+                    &item.title,
+                    &session.folded,
+                    &mut self.highlights,
+                );
+            }
         }
         let mut item = item.clone();
         if let Source::Own(n) = source

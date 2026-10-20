@@ -560,7 +560,7 @@ impl Tiers {
                     .take(word.len() + typos + 1)
                     .map(|&b| char::from(b)),
             );
-            if within(word, &self.chars, typos, whole, &mut self.distances) {
+            if within(word, &self.chars, typos, whole, &mut self.distances).is_some() {
                 return true;
             }
         }
@@ -573,28 +573,50 @@ impl Tiers {
     /// from nearly matching most words.
     fn typo(&mut self, word: &[char], whole: bool) -> bool {
         let typos = typos(word.len());
-        if typos == 0 {
-            return false;
-        }
-        for &at in &self.starts {
-            if self.chars[at] != word[0] {
-                continue;
+        typos > 0 && self.nearest(word, whole, typos).is_some()
+    }
+
+    /// Where the first word of the loaded text that starts with `word`, but
+    /// for at most `typos` typos, starts, and how many of its letters `word`
+    /// stands for.
+    fn nearest(&mut self, word: &[char], whole: bool, typos: usize) -> Option<(usize, usize)> {
+        let Tiers {
+            chars,
+            starts,
+            distances,
+        } = self;
+        starts
+            .iter()
+            .filter(|&&at| chars[at] == word[0])
+            .find_map(|&at| {
+                let len = chars[at..]
+                    .iter()
+                    .position(|c| !c.is_alphanumeric())
+                    .unwrap_or(chars.len() - at);
+                within(word, &chars[at..at + len], typos, whole, distances).map(|len| (at, len))
+            })
+    }
+
+    /// Adds to `highlights` where in a folded title, its case in `original`,
+    /// each word of the query starts a word of it, but for as many typos as
+    /// the word may have: why a near miss is one.
+    pub fn near_miss_highlights(
+        &mut self,
+        folded: Utf32Str,
+        original: &str,
+        query: &Query,
+        highlights: &mut Vec<u32>,
+    ) {
+        self.load(folded, Some(original));
+        let last = query.words.len().saturating_sub(1);
+        for (n, word) in query.words.iter().enumerate() {
+            let whole = n == last && query.last_is_whole;
+            if let Some((at, len)) = self.nearest(word, whole, typos(word.len())) {
+                highlights.extend((at..at + len).map(|at| at as u32));
             }
-            let len = self.chars[at..]
-                .iter()
-                .position(|c| !c.is_alphanumeric())
-                .unwrap_or(self.chars.len() - at);
-            if within(
-                word,
-                &self.chars[at..at + len],
-                typos,
-                whole,
-                &mut self.distances,
-            ) {
-                return true;
-            }
         }
-        false
+        highlights.sort_unstable();
+        highlights.dedup();
     }
 
     /// How well one folded text matches: the worst of the query's words, or
@@ -689,22 +711,23 @@ impl Tiers {
     }
 }
 
-/// Whether `text`, or with `whole` false a start of it, is `word` but for at
-/// most `typos` letters missing, extra or wrong, or swapped with the next one
-/// (the optimal string alignment distance). `distances` holds the table, a
-/// row per letter of `word`.
+/// How many letters of `text` are `word` but for at most `typos` letters
+/// missing, extra or wrong, or swapped with the next one (the optimal string
+/// alignment distance): all of them with `whole`, else those of the start
+/// nearest `word`, the longest of equally near ones. `None` if none is near
+/// enough. `distances` holds the table, a row per letter of `word`.
 fn within(
     word: &[char],
     text: &[char],
     typos: usize,
     whole: bool,
     distances: &mut Vec<usize>,
-) -> bool {
+) -> Option<usize> {
     // A longer start has more letters than typos to spare, and a shorter text
     // too few.
     let n = text.len().min(word.len() + typos);
     if (whole && text.len() > n) || text.len() + typos < word.len() {
-        return false;
+        return None;
     }
     // Only the cells at most `typos` off the diagonal can be within reach; the
     // rest hold `beyond`, as any distance past `typos` does.
@@ -731,15 +754,19 @@ fn within(
         }
         // No later row does better than this one's best.
         if best > typos {
-            return false;
+            return None;
         }
     }
     let last = &d[word.len() * width..];
     if whole {
-        last[n] <= typos
-    } else {
-        last.iter().any(|&cost| cost <= typos)
+        return (last[n] <= typos).then_some(n);
     }
+    let (cost, len) = last
+        .iter()
+        .enumerate()
+        .map(|(len, &cost)| (cost, std::cmp::Reverse(len)))
+        .min()?;
+    (cost <= typos).then_some(len.0)
 }
 
 /// [`Tiers::text`] for a one-letter query, without its buffers: the text is

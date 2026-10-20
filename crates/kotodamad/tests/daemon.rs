@@ -41,6 +41,23 @@ fn indexed_items_are_found_by_a_fuzzy_query_best_match_first() {
     assert_eq!(titles(&h.query(&ui, "fi")).len(), 3);
 }
 
+#[test]
+fn a_near_miss_highlights_the_words_it_nearly_matches() {
+    let mut h = Harness::new(vec![plain("apps")]);
+    let apps = h.up(0);
+    h.add(&apps, vec![app("Visual Studio Code"), app("Steam")]);
+    let ui = h.front_end();
+
+    let rows = h.query(&ui, "visaul studoi");
+    assert_eq!(titles(&rows), ["Visual Studio Code"]);
+    assert_eq!(rows[0].highlights, [0, 1, 2, 3, 4, 5, 7, 8, 9, 10, 11, 12]);
+
+    // A word may start a longer one: "steem" is "steam" with a wrong letter.
+    let rows = h.query(&ui, "steem");
+    assert_eq!(titles(&rows), ["Steam"]);
+    assert_eq!(rows[0].highlights, [0, 1, 2, 3, 4]);
+}
+
 fn calculator() -> Found {
     manifest(
         "name = \"calc\"\ncommand = [\"x\"]\n[live_query]\ntriggers = ['^[0-9]']\ndebounce_ms = 0",
