@@ -9,7 +9,8 @@ use std::time::{Duration, Instant};
 
 use common::*;
 use kotodama_protocol::*;
-use kotodamad::daemon::{Event, HOT_CAPACITY, RERANK_FOR};
+use kotodamad::daemon::RERANK_FOR;
+use kotodamad::daemon::{Event, HOT_CAPACITY};
 
 /// How long a change may take to show: about one frame of a slow typist.
 const STALENESS: Duration = Duration::from_millis(50);

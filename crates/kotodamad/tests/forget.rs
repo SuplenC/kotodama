@@ -48,8 +48,10 @@ fn daemon_actions(row: &ShownResult) -> Vec<&str> {
         .collect()
 }
 
-/// Runs one of the Daemon's own Actions on a Result, from the Action panel.
+/// Runs one of the Daemon's own Actions on a Result, from the Action panel of
+/// the Results on screen: the last the Daemon sent.
 fn run_daemon_action(h: &mut Harness, ui: &FrontEnd, owner: &str, id: &str, action: &str) {
+    ui.drain();
     run(h, ui, owner, id, "kotodama", action);
 }
 

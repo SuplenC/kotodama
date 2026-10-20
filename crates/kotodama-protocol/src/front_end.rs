@@ -17,19 +17,19 @@ pub enum FromFrontEnd {
     /// and again whenever late Results arrive.
     Query { text: String },
     /// Which Results are on screen: `rows` of them, from the one at `top`. Once
-    /// the selection has moved, or 150 ms after the query changed, Results that
-    /// arrive late go below these rows, so neither the rows on screen nor any
+    /// the selection has moved, or 150 ms after the query changed, Late Results go
+    /// below these rows, so neither the rows on screen nor any
     /// scrolled past move. The Daemon assumes the top 10 until told.
     Viewport { top: u32, rows: u32 },
     /// The user moved the selection off the top row of the Results. Until the
-    /// query changes, Results that arrive late go below the rows on screen.
+    /// query changes, Late Results go below the rows on screen.
     SelectionMoved,
     /// Runs one Action of a Result's Action list.
     RunAction {
         result: ResultRef,
         /// The [`ToFrontEnd::Results`] `version` on screen when the user chose
-        /// `result`. The Daemon refuses a Result that first came in a later
-        /// version: the user hasn't seen it.
+        /// `result`. The Daemon refuses a Late Result that a later version
+        /// added or moved up a row: the user hasn't seen it there.
         shown: u32,
         action: ActionRef,
         /// Argument values by Argument name.

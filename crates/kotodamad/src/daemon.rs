@@ -139,8 +139,8 @@ pub enum Event {
 pub const MAX_RESULTS: usize = 50;
 /// How many rows a Front end shows until it says otherwise.
 const DEFAULT_ROWS: usize = 10;
-/// How long after a keystroke Results that arrive late may still rerank the
-/// rows on screen, unless the selection moves first. Most Live queries answer
+/// How long after a keystroke Late Results may still rerank the rows on
+/// screen, unless the selection moves first. Most Live queries answer
 /// within it, and the eye has barely found the top row by then.
 pub const RERANK_FOR: Duration = Duration::from_millis(150);
 /// How long to wait for Front ends to close before typing anyway.
@@ -442,7 +442,7 @@ struct Session {
     /// What a perfect match of the query scores, which Live query scores are
     /// scaled to.
     max_score: u32,
-    /// How many rows, from the first, late Results may not move once the
+    /// How many rows, from the first, Late Results may not move once the
     /// rerank is over: those on screen and those scrolled past.
     rows: usize,
     /// When the query last changed.
@@ -456,9 +456,11 @@ struct Session {
     shown: Vec<(Source, bool)>,
     /// The version of the Results last sent.
     version: u32,
-    /// The Results that came late for this query, each with the version it
-    /// was first sent in. A run confirmed in an earlier version is refused.
-    late: Vec<(Source, u32)>,
+    /// The Results a late update of this query moved up a row or added, each
+    /// with the last version that did. Until a frame shows that version, the
+    /// row the user runs held something else, so a run confirmed in an
+    /// earlier one is refused.
+    risen: Vec<(Source, u32)>,
     /// The Result an Alias named, and the Alias: picking it counts for the
     /// Alias alone.
     via_alias: Option<(Source, String)>,
@@ -479,7 +481,7 @@ impl Session {
         }
     }
 
-    /// Whether Results that arrive late at `now` rank with the rest, the rows
+    /// Whether Late Results that arrive at `now` rank with the rest, the rows
     /// on screen included: until the selection moves or [`RERANK_FOR`] after
     /// the keystroke.
     fn reranks(&self, now: Instant) -> bool {
@@ -487,16 +489,21 @@ impl Session {
     }
 
     /// Sends `results`, the rows of `shown`, as the next version. A late
-    /// update notes each Result it adds as first sent in that version.
+    /// update notes each Result it adds or moves up a row as risen in that
+    /// version.
     fn send_results(&mut self, shown: Vec<(Source, bool)>, results: Vec<ShownResult>, fresh: bool) {
         self.version = self.version.wrapping_add(1);
         if fresh {
-            self.late.clear();
+            self.risen.clear();
         } else {
-            for &(source, _) in &shown {
-                let was_shown = self.shown.iter().any(|&(old, _)| old == source);
-                if !was_shown && !self.late.iter().any(|&(late, _)| late == source) {
-                    self.late.push((source, self.version));
+            for (row, &(source, _)) in shown.iter().enumerate() {
+                let was = self.shown.iter().position(|&(old, _)| old == source);
+                if was.is_some_and(|was| was <= row) {
+                    continue;
+                }
+                match self.risen.iter_mut().find(|(risen, _)| *risen == source) {
+                    Some((_, version)) => *version = self.version,
+                    None => self.risen.push((source, self.version)),
                 }
             }
         }
@@ -1833,7 +1840,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             live: self.extensions.iter().map(|_| Live::default()).collect(),
             shown: Vec::new(),
             version: 0,
-            late: Vec::new(),
+            risen: Vec::new(),
             via_alias: None,
             searched: false,
             update: Update::None,
@@ -1958,8 +1965,9 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
         }
     }
 
-    /// Whether `result` came late, in a later version of the Results than
-    /// `shown`, the one on screen when the user chose it.
+    /// Whether a late update added `result` or moved it up a row in a later
+    /// version of the Results than `shown`, the one on screen when the user
+    /// chose it: the user hasn't seen it where it is.
     fn unseen(&self, front_end: FrontEndId, result: &ResultRef, shown: u32) -> bool {
         let Some(session) = self.sessions.get(&front_end) else {
             return false;
@@ -1968,9 +1976,9 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             return false;
         };
         session
-            .late
+            .risen
             .iter()
-            .any(|&(late, version)| late == source && version > shown)
+            .any(|&(risen, version)| risen == source && version > shown)
     }
 
     /// Tells the Front end why an Action it asked for didn't run.
@@ -2893,8 +2901,8 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
         }
     }
 
-    /// Ranks one session's Results and sends them. Results that come late
-    /// rank with the rest while [`Session::reranks`]. After that the rows on
+    /// Ranks one session's Results and sends them. Late Results rank with the
+    /// rest while [`Session::reranks`]. After that the rows on
     /// screen stay where they are, and everything new goes below them, except
     /// an answer, which takes the top row.
     fn refresh(&mut self, id: FrontEndId, now: Instant) {
