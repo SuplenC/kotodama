@@ -17,21 +17,86 @@ defaults:
     shell: bash
 
 jobs:
+  # check and test, and e2e, run as separate jobs so they overlap. Each restores
+  # a cargo cache (the registry and target/) keyed on the lockfiles; only runs
+  # on main save it, so PRs start from main's build without filling the
+  # repository's cache quota.
   test:
-    name: check, test, e2e (${{ matrix.runner }})
+    name: check, test (${{ matrix.runner }})
     strategy:
       fail-fast: false
       matrix:
         runner: [ubuntu-latest, ubuntu-24.04-arm]
     runs-on: ${{ matrix.runner }}
+    env:
+      CARGO_INCREMENTAL: 0
     steps:
       - uses: actions/checkout@v7
       - uses: ./.github/actions/setup-nix
         with:
           cachix-auth-token: ${{ secrets.CACHIX_AUTH_TOKEN }}
+      # The lockfiles pin every dependency and, through the flake, the toolchain,
+      # so an exact hit rebuilds only the workspace's own crates. A miss falls
+      # back to the newest cache of the same job.
+      - id: cargo-cache
+        uses: actions/cache/restore@v6
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            target
+          key: cargo-test-${{ matrix.runner }}-${{ hashFiles('Cargo.lock', 'flake.lock') }}
+          restore-keys: cargo-test-${{ matrix.runner }}-
       - run: nix develop --command just check
       - run: nix develop --command just test
+      - if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.cargo-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            target
+          key: ${{ steps.cargo-cache.outputs.cache-primary-key }}
+
+  e2e:
+    name: e2e (${{ matrix.runner }})
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-latest, ubuntu-24.04-arm]
+    runs-on: ${{ matrix.runner }}
+    env:
+      CARGO_INCREMENTAL: 0
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup-nix
+        with:
+          cachix-auth-token: ${{ secrets.CACHIX_AUTH_TOKEN }}
+      # The lockfiles pin every dependency and, through the flake, the toolchain,
+      # so an exact hit rebuilds only the workspace's own crates. A miss falls
+      # back to the newest cache of the same job.
+      - id: cargo-cache
+        uses: actions/cache/restore@v6
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            target
+          key: cargo-e2e-${{ matrix.runner }}-${{ hashFiles('Cargo.lock', 'flake.lock') }}
+          restore-keys: cargo-e2e-${{ matrix.runner }}-
       - run: nix develop --command just e2e
+      - if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.cargo-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            target
+          key: ${{ steps.cargo-cache.outputs.cache-primary-key }}
       - if: failure()
         uses: actions/upload-artifact@v7
         with:
@@ -90,7 +155,7 @@ jobs:
   # The image only copies files onto nixos/nix, so both platforms build without emulation.
   image:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    needs: test
+    needs: [test, e2e]
     runs-on: ubuntu-latest
     permissions:
       contents: read
