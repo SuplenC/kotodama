@@ -76,6 +76,14 @@ _Avoid_: Suggestion, AI action, recommendation
 The list of all Actions available for the selected Result.
 _Avoid_: Context menu, actions menu
 
+**Reserved key**:
+A key binding the Front end keeps for itself, such as Ctrl+K for the Action panel or Ctrl+Z for undo; the Daemon drops it from any Extension's Action that asks for it.
+_Avoid_: System shortcut, global key
+
+**Toast**:
+A short notice the Front end shows after Forget or "Clear history", with the key that undoes it; it never takes the keys or the selection, and goes once the change is undone or too old to be.
+_Avoid_: Snackbar, notification, popup
+
 **View**:
 A screen pushed on top of the search, such as a list, a form, a detail pane or a progress display; Esc pops it. Typing into a list filters it.
 _Avoid_: Page, panel, mode, screen

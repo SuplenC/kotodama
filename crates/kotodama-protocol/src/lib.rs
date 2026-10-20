@@ -29,6 +29,7 @@ mod item;
 mod launch;
 mod manifest;
 mod message;
+mod shortcut;
 mod value;
 mod view;
 mod wire;
@@ -46,6 +47,7 @@ pub use item::{
 pub use launch::{LAUNCH_PREFIX, launch_command};
 pub use manifest::{ContributedAction, LiveQueries, Manifest};
 pub use message::{CatalogEntry, Clipboard, FromExtension, LiveResult, Outcome, ToExtension};
+pub use shortcut::{FORGET_SHORTCUT, RESERVED_SHORTCUTS, UNDO_SHORTCUT, is_reserved_shortcut};
 pub use value::{Bytes, Fraction, Table, Value};
 pub use view::{
     FormField, FormInput, Job, JobState, MetadataEntry, SelectOption, View, ViewContent,
