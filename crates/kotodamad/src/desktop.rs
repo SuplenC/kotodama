@@ -93,7 +93,7 @@ const CONTROL: u32 = 1 << 2;
 /// periods of a busy machine (CFS aims to run every runnable thread within
 /// about 24 ms on 8 CPUs).
 #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
-pub const SETTLE: Duration = Duration::from_millis(50);
+const SETTLE: Duration = Duration::from_millis(50);
 
 /// How much longer keys wait, given when the request to send them came.
 #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
@@ -108,6 +108,8 @@ fn launch(command: Vec<String>) {
         return;
     };
     let started = launch_command(&command).and_then(|mut process| {
+        #[cfg(target_os = "linux")]
+        kotodama_extension::runtime::pass_wayland_display(&mut process);
         process
             .stdin(Stdio::null())
             .stdout(Stdio::null())

@@ -58,6 +58,10 @@ impl Launcher for Processes {
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::inherit());
+        // An Extension started once the compositor is there finds it, even
+        // when the Daemon started before.
+        #[cfg(target_os = "linux")]
+        kotodama_extension::runtime::pass_wayland_display(&mut command);
         die_with_daemon(&mut command);
         let mut child = match command.spawn() {
             Ok(child) => child,

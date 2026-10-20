@@ -38,6 +38,8 @@ fn command(argv: &[String], dir: Option<&Path>) -> io::Result<Command> {
         ));
     }
     let mut command = launch_command(argv)?;
+    #[cfg(target_os = "linux")]
+    crate::runtime::pass_wayland_display(&mut command);
     if let Some(dir) = dir {
         command.current_dir(dir);
     }

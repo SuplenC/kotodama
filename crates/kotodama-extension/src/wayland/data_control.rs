@@ -132,7 +132,9 @@ impl Offer {
     }
 }
 
-/// The MIME types an offer has announced so far.
+/// The MIME types an offer has announced so far. Public only for
+/// [`delegate_data_control!`](crate::delegate_data_control).
+#[doc(hidden)]
 #[derive(Default)]
 pub struct OfferMimes(Mutex<Vec<String>>);
 
@@ -149,7 +151,9 @@ impl OfferMimes {
     }
 }
 
-/// What a source we made serves.
+/// What a source we made serves. Public only for
+/// [`delegate_data_control!`](crate::delegate_data_control).
+#[doc(hidden)]
 pub struct SourceData(Arc<Vec<u8>>);
 
 impl SourceData {
@@ -157,12 +161,15 @@ impl SourceData {
     /// hold up the event queue.
     fn send(&self, fd: OwnedFd) {
         let data = Arc::clone(&self.0);
-        let _ = thread::Builder::new()
+        if let Err(err) = thread::Builder::new()
             .name("paste".into())
             .stack_size(STACK)
             .spawn(move || {
                 let _ = File::from(fd).write_all(&data);
-            });
+            })
+        {
+            crate::log!("couldn't start a thread to paste from: {err}");
+        }
     }
 }
 

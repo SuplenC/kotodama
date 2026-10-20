@@ -7,8 +7,7 @@
 //! compositor is the `wayland-N` socket in `$XDG_RUNTIME_DIR`, which every
 //! compositor makes there (see [`crate::runtime`]).
 
-use std::ffi::{OsStr, OsString};
-use std::os::unix::fs::FileTypeExt;
+use std::ffi::OsString;
 use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
 
@@ -28,6 +27,8 @@ impl Display {
         Display::new(std::env::var_os("WAYLAND_DISPLAY"), crate::runtime::dir())
     }
 
+    /// The display named `name` (`WAYLAND_DISPLAY`; empty is none), with
+    /// `runtime` as `XDG_RUNTIME_DIR`.
     pub fn new(name: Option<OsString>, runtime: Option<PathBuf>) -> Display {
         Display {
             name: name.filter(|name| !name.is_empty()),
@@ -45,23 +46,10 @@ impl Display {
                 self.runtime.iter().map(|dir| dir.join(path)).collect()
             };
         }
-        let Some(entries) = self.runtime.as_ref().and_then(|dir| dir.read_dir().ok()) else {
-            return Vec::new();
-        };
-        let mut found: Vec<(u32, PathBuf)> = entries
-            .flatten()
-            .filter_map(|entry| {
-                let number = display_number(&entry.file_name())?;
-                // Follows a link, so a socket linked in counts.
-                let path = entry.path();
-                path.metadata()
-                    .ok()
-                    .filter(|meta| meta.file_type().is_socket())
-                    .map(|_| (number, path))
-            })
-            .collect();
-        found.sort_unstable();
-        found.into_iter().map(|(_, path)| path).collect()
+        self.runtime
+            .as_deref()
+            .map(crate::runtime::wayland_sockets)
+            .unwrap_or_default()
     }
 
     /// Connects to the first socket that takes the connection.
@@ -105,11 +93,6 @@ impl Display {
             waiting,
         )
     }
-}
-
-/// `N` of a `wayland-N` socket.
-fn display_number(name: &OsStr) -> Option<u32> {
-    name.to_str()?.strip_prefix("wayland-")?.parse().ok()
 }
 
 #[cfg(test)]

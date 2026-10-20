@@ -47,7 +47,7 @@ mod linux {
     use std::sync::Arc;
     use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
     use std::thread;
-    use std::time::Duration;
+    use std::time::{Duration, Instant};
 
     use kotodama_extension::wayland::{DataControl, DataControlHandler, Display, Offer};
     use rustix::event::{PollFd, PollFlags, Timespec};
@@ -67,8 +67,9 @@ mod linux {
     const READ_TIMEOUT: Duration = Duration::from_secs(5);
     const STACK: usize = 256 * 1024;
 
-    /// What to put on the clipboard, and where to say it is there.
-    type Request = (Vec<String>, Vec<u8>, Sender<()>);
+    /// What to put on the clipboard, until when (`set` has given up after),
+    /// and where to say it is there.
+    type Request = (Vec<String>, Vec<u8>, Instant, Sender<()>);
 
     /// The watched clipboard. Dropping it stops the watching, once the
     /// compositor is there.
@@ -101,13 +102,21 @@ mod linux {
                 .stack_size(STACK)
                 .spawn(move || {
                     let mut waited = false;
-                    let (queue, state) = Display::from_env().wait(
+                    let connected = Display::from_env().wait(
                         |conn| connect(&conn, reads.clone()),
                         |err| {
                             waited = true;
                             kotodama_extension::log!("waiting for the compositor: {err}");
                         },
                     );
+                    let (queue, state) = match connected {
+                        Ok(connected) => connected,
+                        // Waiting longer won't help.
+                        Err(err) => {
+                            kotodama_extension::log!("not watching the clipboard: {err}");
+                            return;
+                        }
+                    };
                     if waited {
                         kotodama_extension::log!("watching the clipboard");
                     }
@@ -125,7 +134,7 @@ mod linux {
         /// or isn't there yet, fails it.
         pub fn set(&self, mimes: Vec<String>, data: Vec<u8>) -> Result<(), String> {
             let (done, copied) = mpsc::channel();
-            if self.requests.send((mimes, data, done)).is_err()
+            if self.requests.send((mimes, data, Instant::now() + READ_TIMEOUT, done)).is_err()
                 || rustix::io::write(&self.wake, &[1]).is_err()
             {
                 return Err("lost the connection to the compositor".into());
@@ -141,24 +150,29 @@ mod linux {
     }
 
     /// Binds the clipboard on a new connection, and takes in what it holds.
+    /// The outer error is worth another try; the inner one, a compositor
+    /// with no data-control, is not.
     fn connect(
         conn: &Connection,
         reads: Sender<(String, OwnedFd)>,
-    ) -> Result<(EventQueue<State>, State), String> {
+    ) -> Result<Result<(EventQueue<State>, State), String>, String> {
         let (globals, mut queue) =
             registry_queue_init::<State>(conn).map_err(|err| err.to_string())?;
         let qh = queue.handle();
         let seat: wl_seat::WlSeat = globals
             .bind(&qh, 1..=1, ())
             .map_err(|err| format!("no seat: {err}"))?;
-        let control = DataControl::bind(&globals, &seat, &qh)?;
+        let control = match DataControl::bind(&globals, &seat, &qh) {
+            Ok(control) => control,
+            Err(err) => return Ok(Err(err)),
+        };
         let mut state = State {
             control,
             reads,
             finished: false,
         };
         queue.roundtrip(&mut state).map_err(|err| err.to_string())?;
-        Ok((queue, state))
+        Ok(Ok((queue, state)))
     }
 
     /// Dispatches Wayland events and sets the clipboard when asked, until
@@ -204,7 +218,13 @@ mod linux {
                     return;
                 }
                 let mut waiting = Vec::new();
-                for (mimes, data, done) in inbox.try_iter() {
+                let now = Instant::now();
+                for (mimes, data, until, done) in inbox.try_iter() {
+                    // Asked before the compositor was there, and failed
+                    // since: setting it now would undo a later copy.
+                    if until < now {
+                        continue;
+                    }
                     state.control.set_selection(mimes, data, &qh);
                     waiting.push(done);
                 }
