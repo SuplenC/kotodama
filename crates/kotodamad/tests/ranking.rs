@@ -260,7 +260,9 @@ fn the_kind_of_result_never_beats_a_better_match() {
 #[test]
 fn a_well_used_file_beats_a_never_used_app() {
     let mut w = World::with(vec![app("Notebook"), file("notes.txt")], "");
-    w.daily(3, "notes.txt", "notes.txt");
+    // Through a query that teaches `note` no Learned choice, and too little to
+    // lift it a Tier: only its Frecency counts.
+    w.daily(3, "txt", "notes.txt");
     assert_eq!(rows(&mut w, "note"), ["notes.txt", "Notebook"]);
 }
 
