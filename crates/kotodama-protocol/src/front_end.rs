@@ -80,6 +80,7 @@ pub enum FromFrontEnd {
     /// Empty query shows what is used at this time of day, so the Daemon
     /// answers with new [`ToFrontEnd::Results`] when the query is empty and
     /// the time of day has moved to another part since it last ranked them.
+    /// It also warms the CPU cache with what the first keystroke reads.
     Shown,
 }
 

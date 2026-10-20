@@ -91,7 +91,7 @@ fn bench(c: &mut Criterion) {
                     setup.send(extension, batch);
                     let indexed = setup.indexed.recv().unwrap();
                     total += start.elapsed();
-                    setup.daemon.handle(indexed, Instant::now());
+                    setup.daemon.handle(indexed, setup.now);
                     setup.pending -= 1;
                 }
                 total

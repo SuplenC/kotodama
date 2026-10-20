@@ -6,6 +6,7 @@
 //! in tests as on a real clock.
 
 use std::collections::HashMap;
+use std::hash::{BuildHasherDefault, DefaultHasher};
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, Sender};
 use std::{fs, io};
@@ -153,16 +154,22 @@ pub type ResultKey = (String, String);
 /// History. No Extension can be named this.
 pub const IDENTITIES: &str = "*";
 
+/// A map by name that hashes with fixed keys rather than a random seed per
+/// process: SipHash as fast as `HashMap`'s own, but a lookup runs the same
+/// instructions in every Daemon, so the empty query's instruction count is
+/// the same from run to run.
+type ByName<V> = HashMap<String, V, BuildHasherDefault<DefaultHasher>>;
+
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct History {
     /// By Extension name, then Item id; or by [`IDENTITIES`], then Identity.
     /// An Item with an Identity is kept both ways: its Identity's picks rank
     /// it, and its own put it ahead of the same thing from another Extension.
     #[serde(default)]
-    picks: HashMap<String, HashMap<String, Picks>>,
+    picks: ByName<ByName<Picks>>,
     /// By query, as [`query_key`] gives it.
     #[serde(default)]
-    learned: HashMap<String, Learned>,
+    learned: ByName<Learned>,
     #[serde(skip)]
     settings: Settings,
     /// Bumped on every change, so a cache built from the History knows when it
@@ -914,7 +921,7 @@ impl History {
     /// Forgets the weakest Results and the least recent queries past the caps,
     /// into `change`.
     fn trim(&mut self, change: &mut Change) {
-        let results: usize = self.picks.values().map(HashMap::len).sum();
+        let results: usize = self.picks.values().map(ByName::len).sum();
         if results > MAX_RESULTS {
             let at = self.picked().map(|(.., p)| p.at).max().unwrap_or(0);
             let half_life = self.settings.half_life_secs;
