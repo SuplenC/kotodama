@@ -97,6 +97,19 @@ impl KindOrder {
         order
     }
 
+    /// Where Results of the kind named `name` rank on an equal match, lowest
+    /// first.
+    pub fn place_named(&self, name: &str) -> u8 {
+        match SHARED_KINDS.iter().position(|&shared| shared == name) {
+            Some(n) => self.shared[n],
+            None => self
+                .namespaced
+                .iter()
+                .find(|(namespaced, _)| namespaced == name)
+                .map_or(self.others, |&(_, place)| place),
+        }
+    }
+
     /// Where Results of `kind` rank on an equal match, lowest first.
     pub fn place(&self, kind: &ItemKind) -> u8 {
         match kind {

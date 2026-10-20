@@ -18,6 +18,7 @@ mod notify;
 mod open_view;
 pub mod paths;
 pub mod rank;
+mod segment;
 mod server;
 pub mod usage;
 mod views;

@@ -18,7 +18,7 @@ use kotodama_protocol::{
     Table, ToExtension, ToFrontEnd, View, ViewContent,
 };
 use nucleo_matcher::pattern::{CaseMatching, Normalization, Pattern};
-use nucleo_matcher::{Config, Matcher, Utf32Str};
+use nucleo_matcher::{Config, Matcher};
 
 use crate::arguments;
 use crate::clock::{Clock, When};
@@ -32,7 +32,8 @@ use crate::index::{Index, Slot};
 use crate::keywords::{self, Keywords};
 use crate::kind_order::KindOrder;
 use crate::open_view::{Opening, ViewName};
-use crate::rank::{self, Haystack, Matched, Tier, Tiers};
+use crate::rank::{self, Haystack, Matched, Text, Tier, Tiers};
+use crate::segment::Edit;
 use crate::usage::{Entry, Used};
 use crate::views::{Open, Views};
 
@@ -1125,36 +1126,39 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
     fn extension_message(&mut self, id: ExtensionId, message: FromExtension, now: Instant) {
         let name = self.extensions[id.0].name().to_owned();
         match message {
-            FromExtension::AddItems { items } => {
-                for item in items {
-                    if item.kind.extension().is_some_and(|owner| owner != name) {
+            FromExtension::AddItems { mut items } => {
+                items.retain(|item| {
+                    let theirs = item.kind.extension().is_some_and(|owner| owner != name);
+                    if theirs {
                         log::warn!(
                             "{name}: Item `{}` has another Extension's kind `{}`",
                             item.id,
                             item.kind.name()
                         );
-                        continue;
                     }
-                    let hidden = self.hidden.entry(id).or_default();
+                    !theirs
+                });
+                // A hidden Item is kept out of the index: the Segment drops
+                // it, and the Daemon keeps it for `kotodama open --view`.
+                let hidden = self.hidden.entry(id).or_default();
+                for item in &items {
                     if item.hidden {
-                        self.index.remove(id, &item.id);
-                        hidden.insert(item.id.clone(), item);
+                        hidden.insert(item.id.clone(), item.clone());
                     } else {
                         hidden.remove(&item.id);
-                        self.index.add(id, item);
                     }
                 }
+                self.index.edit(id, Edit::Add(items));
                 self.items_changed();
                 self.run_openings(now);
             }
             FromExtension::RemoveItems { ids } => {
-                let mut hidden = self.hidden.get_mut(&id);
-                for item in ids {
-                    if let Some(hidden) = hidden.as_mut() {
-                        hidden.remove(&item);
+                if let Some(hidden) = self.hidden.get_mut(&id) {
+                    for item in &ids {
+                        hidden.remove(item);
                     }
-                    self.index.remove(id, &item);
                 }
+                self.index.edit(id, Edit::Remove(ids));
                 self.items_changed();
             }
             FromExtension::LiveResults {
@@ -1742,8 +1746,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
         let Some(item) = self
             .index
             .find(ext_id, &view.item)
-            .and_then(|slot| self.index.entry(slot))
-            .map(|entry| &entry.item)
+            .and_then(|slot| self.index.item(slot))
             .or_else(|| self.hidden.get(&ext_id)?.get(&view.item))
         else {
             return if now.duration_since(since) < OPEN_VIEW_TIMEOUT {
@@ -1941,7 +1944,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
         let owner = self.extension_named(&result.extension).ok_or_else(gone)?;
         let session = self.sessions.get(&front_end).ok_or_else(gone)?;
         let searched = match self.index.find(owner, &result.id) {
-            Some(slot) => self.index.entry(slot).map(|entry| &entry.item),
+            Some(slot) => self.index.item(slot),
             None => session.live[owner.0]
                 .results
                 .iter()
@@ -2569,13 +2572,11 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             self.scored.iter().map(|&(slot, ..)| slot),
         );
         for &(slot, score, matched) in &self.scored {
-            if let Some(entry) = self.index.entry(slot)
-                && let Some(tier) =
-                    self.tiers
-                        .item(&entry.haystack, &entry.item, &session.folded, matched)
+            if let Some(texts) = self.index.texts(slot)
+                && let Some(tier) = self.tiers.texts(texts, &session.folded, matched)
             {
-                let len = entry.haystack.title.len() as u32;
-                let kind = self.kinds.place(&entry.item.kind);
+                let len = self.index.title_len(slot);
+                let kind = self.kinds.place_named(self.index.kind(slot));
                 candidates.push(Candidate::new(
                     Source::Indexed(slot),
                     tier,
@@ -2768,7 +2769,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
         let known = &candidates[..];
         // The near miss `source` is, unless it is a candidate already.
         let mut near_miss = |source: Source| {
-            let (haystack, item) = match source {
+            let (texts, kind, len) = match source {
                 Source::Indexed(slot) => {
                     if known[..indexed]
                         .binary_search_by_key(&source, |c| c.source)
@@ -2776,22 +2777,23 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
                     {
                         return None;
                     }
-                    let entry = index.entry(slot)?;
-                    (&entry.haystack, &entry.item)
+                    let texts = index.texts(slot)?;
+                    let kind = kinds.place_named(index.kind(slot));
+                    (texts, kind, index.title_len(slot))
                 }
                 Source::Own(n) => {
                     if known[indexed..].iter().any(|c| c.source == source) {
                         return None;
                     }
                     let own = own.get(n as usize)?;
-                    (&own.haystack, &own.item)
+                    let len = own.haystack.title.len() as u32;
+                    (own.haystack.texts(), kinds.place(&own.item.kind), len)
                 }
                 Source::Live(..) => return None,
             };
-            tiers.near_miss(haystack, item, folded).then(|| {
-                let len = haystack.title.len() as u32;
-                Candidate::new(source, Tier::NearMiss, kinds.place(&item.kind), 0, len)
-            })
+            tiers
+                .near_miss_texts(texts, folded)
+                .then(|| Candidate::new(source, Tier::NearMiss, kind, 0, len))
         };
         let mut found = Vec::new();
         if look {
@@ -2917,7 +2919,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
                 frecency: None,
             });
         }
-        for &slot in self.index.keyed(first) {
+        for slot in self.index.keyed(first) {
             named.push(Keyword {
                 source: Source::Indexed(slot),
                 alias: false,
@@ -3127,14 +3129,14 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
         for (extension, id, picks) in self.history.picked() {
             if extension == IDENTITIES {
                 let slots = self.index.identified(id);
-                frecent.extend(slots.iter().map(|&slot| (slot, picks, Counts::Shared)));
+                frecent.extend(slots.map(|slot| (slot, picks, Counts::Shared)));
             } else if let Some(ext) = self.extension_named(extension)
                 && let Some(slot) = self.index.find(ext, id)
             {
                 let identified = self
                     .index
-                    .entry(slot)
-                    .is_some_and(|entry| entry.item.identity.is_some());
+                    .item(slot)
+                    .is_some_and(|item| item.identity.is_some());
                 let counts = if identified {
                     Counts::Direct
                 } else {
@@ -3176,12 +3178,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
         if extension != IDENTITIES {
             return self.source_of(session, extension, id).into_iter().collect();
         }
-        let indexed = self
-            .index
-            .identified(id)
-            .iter()
-            .copied()
-            .map(Source::Indexed);
+        let indexed = self.index.identified(id).map(Source::Indexed);
         let live = session.live.iter().enumerate().flat_map(|(ext, live)| {
             live.results
                 .iter()
@@ -3242,8 +3239,8 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
     fn item<'a>(&'a self, session: &'a Session, source: Source) -> Option<(&'a str, &'a Item)> {
         match source {
             Source::Indexed(slot) => {
-                let entry = self.index.entry(slot)?;
-                Some((self.extensions[entry.extension.0].name(), &entry.item))
+                let item = self.index.item(slot)?;
+                Some((self.extensions[slot.extension().0].name(), item))
             }
             Source::Live(ext, n) => Some((
                 self.extensions[ext.0].name(),
@@ -3261,30 +3258,33 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
         source: Source,
         primary: Option<&str>,
     ) -> Option<ShownResult> {
-        let live_title;
-        let (owner, item, haystack): (Option<ExtensionId>, &Item, Utf32Str) = match source {
-            Source::Indexed(slot) => {
-                let entry = self.index.entry(slot)?;
-                (
-                    Some(entry.extension),
-                    &entry.item,
-                    entry.haystack.title.slice(..),
-                )
-            }
+        let (live_title, mut live_starts);
+        let (owner, item, title): (Option<ExtensionId>, &Item, Text) = match source {
+            Source::Indexed(slot) => (
+                Some(slot.extension()),
+                self.index.item(slot)?,
+                self.index.texts(slot)?.title,
+            ),
             Source::Live(ext, n) => {
                 let item = &session.live[ext.0].results.get(n as usize)?.item;
                 live_title = rank::folded(&item.title);
-                (Some(ext), item, live_title.slice(..))
+                live_starts = Vec::new();
+                rank::word_starts(live_title.slice(..), Some(&item.title), &mut live_starts);
+                let title = Text {
+                    chars: live_title.slice(..),
+                    starts: &live_starts,
+                };
+                (Some(ext), item, title)
             }
             Source::Own(n) => {
                 let own = self.own.get(n as usize)?;
-                (None, &own.item, own.haystack.title.slice(..))
+                (None, &own.item, own.haystack.texts().title)
             }
         };
         self.highlights.clear();
         if session
             .pattern
-            .indices(haystack, &mut self.matcher, &mut self.highlights)
+            .indices(title.chars, &mut self.matcher, &mut self.highlights)
             .is_some()
         {
             self.highlights.sort_unstable();
@@ -3293,12 +3293,8 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             self.highlights.clear();
             // A near miss: the words it nearly matches.
             if session.folded.tolerates_typos() {
-                self.tiers.near_miss_highlights(
-                    haystack,
-                    &item.title,
-                    &session.folded,
-                    &mut self.highlights,
-                );
+                self.tiers
+                    .near_miss_highlights(title, &session.folded, &mut self.highlights);
             }
         }
         let mut item = item.clone();
