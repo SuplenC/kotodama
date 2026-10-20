@@ -32,9 +32,9 @@ use crate::history::{
 };
 use crate::index::{Index, ItemRef, Slot};
 use crate::indexer::{Indexed, Indexer, Kept, Plan};
-use crate::most_used::{Ahead, Counts, Other, Picked, Usage, Versions};
 use crate::keywords::{self, Alias, Keywords};
 use crate::kind_order::{KindOrder, KindPlaces};
+use crate::most_used::{Ahead, Counts, Other, Picked, Usage, Versions};
 use crate::narrowing::Narrowing;
 use crate::open_view::{Opening, ViewName};
 use crate::pick::{self, PICK, Pick};
@@ -384,18 +384,20 @@ impl Candidate {
 
     /// Answers first and fallbacks last, then by class, how well it
     /// matches, Frecency, its Item kind, and nucleo's score.
+    /// Lazy: most pairs differ in the first few keys, and a keystroke compares
+    /// thousands of pairs.
     fn rank(&self, other: &Candidate) -> std::cmp::Ordering {
         self.standing
             .cmp(&other.standing)
-            .then(other.class.cmp(&self.class))
-            .then(other.tier.cmp(&self.tier))
-            .then(other.frecency.total_cmp(&self.frecency))
-            .then(other.fine.cmp(&self.fine))
-            .then(self.by_alias.cmp(&other.by_alias))
-            .then(self.kind.cmp(&other.kind))
-            .then(other.score.cmp(&self.score))
-            .then(self.len.cmp(&other.len))
-            .then(self.source.cmp(&other.source))
+            .then_with(|| other.class.cmp(&self.class))
+            .then_with(|| other.tier.cmp(&self.tier))
+            .then_with(|| other.frecency.total_cmp(&self.frecency))
+            .then_with(|| other.fine.cmp(&self.fine))
+            .then_with(|| self.by_alias.cmp(&other.by_alias))
+            .then_with(|| self.kind.cmp(&other.kind))
+            .then_with(|| other.score.cmp(&self.score))
+            .then_with(|| self.len.cmp(&other.len))
+            .then_with(|| self.source.cmp(&other.source))
     }
 }
 
@@ -747,7 +749,6 @@ impl Done {
     }
 }
 
-/// A Result the Empty query may show as one of the most used.
 /// A Result the query names by a keyword.
 struct Keyword {
     source: Source,
@@ -1058,7 +1059,11 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
     /// The versions of what the Empty query and the hot Items are worked
     /// out from: the Index, the History, and the rest (`ranks_version`).
     fn versions(&self) -> Versions {
-        (self.index.version(), self.history.version(), self.ranks_version)
+        (
+            self.index.version(),
+            self.history.version(),
+            self.ranks_version,
+        )
     }
 
     /// Works out the hot Items, up to the hot capacity, and reads their
@@ -3992,7 +3997,10 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
         frecent.sort_unstable_by_key(|&(slot, ..)| slot);
         let picks: Vec<Picks> = frecent.iter().map(|&(_, picks, ..)| picks).collect();
         self.frecent = Arc::new(Picked {
-            slots: frecent.iter().map(|&(slot, _, counts, _)| (slot, counts)).collect(),
+            slots: frecent
+                .iter()
+                .map(|&(slot, _, counts, _)| (slot, counts))
+                .collect(),
             groups: frecent.iter().map(|&(.., group)| group).collect(),
             picks: Frecent::new(&picks, half_life),
         });
