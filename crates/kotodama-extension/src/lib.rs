@@ -231,11 +231,25 @@ pub fn name() -> &'static str {
     })
 }
 
-/// Writes a line to stderr, after the Extension's [`name`]. An Extension's
-/// stderr is the Daemon's, which goes to its log.
+/// Logs a warning. In a program that installed a `log` logger, such as the
+/// Daemon, it goes to that logger at warn level, under its filter and format.
+/// Otherwise it is a line on stderr after the Extension's [`name`]; an
+/// Extension's stderr is the Daemon's, which goes to its log.
 #[macro_export]
 macro_rules! log {
     ($($arg:tt)*) => {
-        ::std::eprintln!("{}: {}", $crate::name(), ::std::format_args!($($arg)*))
+        $crate::warn(::std::format_args!($($arg)*), &mut ::std::io::stderr())
     };
+}
+
+/// What [`log!`] runs: `message` to the `log` logger at warn level if one is
+/// installed, else a line on `fallback`. A logger counts as installed once the
+/// program set a max level above `Off`, where `log` starts.
+#[doc(hidden)]
+pub fn warn(message: std::fmt::Arguments<'_>, fallback: &mut dyn io::Write) {
+    if log::max_level() == log::LevelFilter::Off {
+        let _ = writeln!(fallback, "{}: {message}", name());
+    } else {
+        log::warn!("{message}");
+    }
 }

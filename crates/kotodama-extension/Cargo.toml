@@ -18,6 +18,7 @@ wayland = ["dep:wayland-client", "dep:wayland-protocols", "dep:wayland-protocols
 
 [dependencies]
 kotodama-protocol = { path = "../kotodama-protocol" }
+log = "0.4.34"
 notify = { version = "8", optional = true }
 thiserror = "2.0.21"
 
