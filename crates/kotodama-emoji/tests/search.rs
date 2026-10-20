@@ -1,5 +1,6 @@
 //! Searching emoji and symbols through the real Daemon.
 
+#[path = "support/menu.rs"]
 mod menu;
 
 use menu::Menu;
@@ -34,10 +35,7 @@ fn keyboard_symbols_are_found_by_their_key() {
     let mut menu = Menu::start("");
     for (query, symbol) in [("command", "⌘"), ("option", "⌥"), ("shift", "⇧")] {
         let ids = menu.ids(query);
-        assert!(
-            ids.iter().take(3).any(|id| id == symbol),
-            "{query}: {ids:?}"
-        );
+        assert!(ids.iter().take(3).any(|id| id == symbol), "{query}: {ids:?}");
     }
 }
 

@@ -9,14 +9,26 @@
 //! # medium-dark or dark. Unset, emoji are their default yellow.
 //! skin_tone = "medium"
 //! ```
+//!
+//! # Owns
+//!
+//! - The protocol loop, and the `skin_tone` setting.
+//!
+//! # Not here
+//!
+//! - The characters, their Items and what each Action does: the library, `lib.rs`.
 
 #![forbid(unsafe_code)]
 
 use std::process::ExitCode;
 
 use kotodama_emoji::Tone;
-use kotodama_extension::{Connection, Event, config};
-use kotodama_protocol::{FromExtension, Table, ToExtension};
+use kotodama_extension::Connection;
+use kotodama_extension::Event;
+use kotodama_extension::config;
+use kotodama_protocol::FromExtension;
+use kotodama_protocol::Table;
+use kotodama_protocol::ToExtension;
 
 fn main() -> ExitCode {
     kotodama_extension::main("kotodama-emoji", run)
@@ -24,9 +36,7 @@ fn main() -> ExitCode {
 
 fn run() -> Result<(), kotodama_protocol::Error> {
     let Connection {
-        mut writer,
-        received,
-        ..
+        mut writer, received, ..
     } = kotodama_extension::connect::<()>()?;
     // The characters never change, so they are sent once, whatever the config.
     writer.send(&FromExtension::AddItems {
