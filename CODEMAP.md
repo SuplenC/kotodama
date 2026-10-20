@@ -23,11 +23,11 @@ are in [docs/adr/](docs/adr/).
 - [`crates/kotodama-web-search/`](crates/kotodama-web-search/CODEMAP.md): Bundled extension, the fallback: web searches for what nothing matches, and addresses opened.
 - `e2e/`: end-to-end tests against headless sway (`e2e/run`, `e2e/lib.sh`, one dir per test).
 - `nix/`: `package.nix` (the package and Bundled extension layout; crane builds its dependencies as a derivation of their own), `gungraun-runner.nix` (pinned runner for the instruction-counting benches), `home-manager.nix`, `tests/` (NixOS VM, Hyprland VM and QML module checks).
-- `scripts/`: dev environment (`dev-env`, `dev-image`), bench runners (`bench-run` for criterion, `bench-instructions` for gungraun, `bench-compare`, `bench-crates`), `path-deps` (a crate's workspace dependencies), `has-crates`, `qml-module`, `tests/` (script tests).
+- `scripts/`: dev environment (`dev-env`, `dev-image`), bench runners (`bench-run` for criterion, `bench-instructions` for gungraun, `bench-compare`, `bench-crates`), `path-deps` (a crate's workspace dependencies), `has-crates`, `qml-module`, style checks (`restyled-crates`: the crates that opted into the code-quality guide's tools; `fmt`: the nightly rustfmt for them, and with `--check` stable rustfmt for the rest; `comments`: the comment check), `tests/` (script tests).
 - `docker/`: the dev image for machines without Nix (`just image`).
 - `examples/shell-extension/`: a minimal Extension in shell, also run by `kotodama-protocol/tests/shell_extension.rs`.
 - `docs/adr/`: decisions, one file per ADR named for the area it governs. `docs/agents/`: how agents use issues, labels and domain docs.
-- Root: `flake.nix` (dev shell, packages, `overlays.default`, `checks`), `justfile`, `release-please-config.json`, `GLOSSARY.md`.
+- Root: `flake.nix` (dev shell, packages, `overlays.default`, `checks`; `rustfmt-nightly` for `scripts/fmt`), `justfile`, `Cargo.toml` (`[workspace.lints]`), `clippy.toml`, `.config/rustfmt.toml` (the restyled crates' formatting), `release-please-config.json`, `GLOSSARY.md`.
 
 ## Where to change X
 
@@ -51,7 +51,9 @@ are in [docs/adr/](docs/adr/).
 - Script tests: `scripts/tests/*.sh`.
 
 `just` recipes (all run in `scripts/dev-env`):
-- `just check`: nixfmt, shellcheck, `just --fmt`, actionlint, `cargo fmt --check`, clippy `-D warnings`.
+- `just check`: nixfmt, shellcheck, `just --fmt`, actionlint, `scripts/fmt --check` (stable rustfmt's defaults, the nightly rustfmt for restyled crates), `just comments`, clippy `-D warnings`.
+- `just fmt`: formats the restyled crates (`scripts/restyled-crates`) with the nightly rustfmt; touches no other crate.
+- `just comments`: `scripts/comments` over the restyled crates.
 - `just test`: script tests, `cargo nextest run --workspace`, doc tests.
 - `just bench`: `cargo bench --workspace` (with the gungraun benches; Valgrind and `gungraun-runner` are in the dev shell).
 - `just e2e [--update] [test...]`: `e2e/run`.
