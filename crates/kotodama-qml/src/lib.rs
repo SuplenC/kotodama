@@ -23,10 +23,10 @@ use std::time::Instant;
 
 use cxx_qt::{CxxQtType, Initialize, Threading};
 use cxx_qt_lib::{QByteArray, QHash, QHashPair_i32_QByteArray, QModelIndex, QString, QVariant};
-use kotodama_protocol::{FromFrontEnd, Value};
+use kotodama_protocol::{FromFrontEnd, ResultRef, Value};
 
 use connection::{Update, Writer};
-use rows::{Replace, Row};
+use rows::{Model, Row, Rows};
 use views::{Open, Shown, Views};
 
 #[cxx_qt::bridge]
@@ -137,6 +137,11 @@ pub mod qobject {
         #[qinvokable]
         fn submit(self: Pin<&mut KotodamaSearch>) -> bool;
 
+        /// The row the list has selected, which a list View keeps selected as
+        /// its rows change while its Item is listed. See `selectRow`.
+        #[qinvokable]
+        fn select(self: Pin<&mut KotodamaSearch>, row: i32);
+
         /// Tells the Daemon which rows are on screen.
         #[qinvokable]
         fn viewport(self: Pin<&mut KotodamaSearch>, top: i32, rows: i32);
@@ -162,6 +167,12 @@ pub mod qobject {
         #[qsignal]
         #[cxx_name = "toggleRequested"]
         fn toggle_requested(self: Pin<&mut KotodamaSearch>);
+
+        /// A list View's rows changed: select `row`, where the Item selected
+        /// went, or the top row if it went away.
+        #[qsignal]
+        #[cxx_name = "selectRow"]
+        fn select_row(self: Pin<&mut KotodamaSearch>, row: i32);
 
         #[qsignal]
         #[cxx_name = "actionFailed"]
@@ -209,6 +220,20 @@ pub mod qobject {
         #[inherit]
         #[cxx_name = "endRemoveRows"]
         unsafe fn end_remove_rows(self: Pin<&mut KotodamaSearch>);
+
+        #[inherit]
+        #[cxx_name = "beginMoveRows"]
+        unsafe fn begin_move_rows(
+            self: Pin<&mut KotodamaSearch>,
+            source_parent: &QModelIndex,
+            source_first: i32,
+            source_last: i32,
+            destination_parent: &QModelIndex,
+            destination_child: i32,
+        ) -> bool;
+        #[inherit]
+        #[cxx_name = "endMoveRows"]
+        unsafe fn end_move_rows(self: Pin<&mut KotodamaSearch>);
     }
 
     extern "RustQt" {
@@ -244,9 +269,13 @@ pub struct SearchRust {
     /// model showing them.
     latency: i32,
     /// What the list shows: the Results, or the Items of the list View on top.
-    rows: Vec<Row>,
+    rows: Rows,
     /// The Results, kept here while a list View's Items are shown instead.
     results: Option<Vec<Row>>,
+    /// The list View whose Items are shown, by Extension and id.
+    listed: Option<(String, String)>,
+    /// The row the list has selected, by what it shows.
+    selected: Option<ResultRef>,
     views: Views,
     view: variant::Map,
     depth: i32,
@@ -266,8 +295,10 @@ impl Default for SearchRust {
             connected: false,
             down: QStringList::default(),
             latency: 0,
-            rows: Vec::new(),
+            rows: Rows::default(),
             results: None,
+            listed: None,
+            selected: None,
             views: Views::default(),
             view: variant::Map::default(),
             depth: 0,
@@ -409,6 +440,11 @@ impl KotodamaSearch {
             return false;
         };
         self.as_mut().rust_mut().send(&message)
+    }
+
+    fn select(mut self: Pin<&mut Self>, row: i32) {
+        let selected = self.row(row).map(|row| row.result.clone());
+        self.as_mut().rust_mut().selected = selected;
     }
 
     fn viewport(mut self: Pin<&mut Self>, top: i32, rows: i32) {
@@ -642,20 +678,41 @@ impl KotodamaSearch {
     /// Shows the rows of the list View on top, or the Results if there is
     /// none.
     fn show_rows(mut self: Pin<&mut Self>) {
-        let items = self.views.top().and_then(Open::rows);
-        match items {
-            Some(items) => {
-                if self.results.is_none() {
-                    let results = self.rows.clone();
-                    self.as_mut().rust_mut().results = Some(results);
-                }
-                self.as_mut().replace(items);
+        let top = self
+            .views
+            .top()
+            .filter(|open| open.is_list())
+            .map(|open| (open.extension.clone(), open.view.id.clone()));
+        let Some(top) = top else {
+            self.as_mut().rust_mut().listed = None;
+            if let Some(results) = self.as_mut().rust_mut().results.take() {
+                self.as_mut().replace(results);
             }
-            None => {
-                if let Some(results) = self.as_mut().rust_mut().results.take() {
-                    self.as_mut().replace(results);
-                }
-            }
+            return;
+        };
+        if self.results.is_none() {
+            let results = self.rows.iter().cloned().collect();
+            self.as_mut().rust_mut().results = Some(results);
+        }
+        let same = self.listed.as_ref() == Some(&top);
+        self.as_mut().rust_mut().listed = Some(top);
+        // The rows are made from the Views while the model changes, so they
+        // are set aside meanwhile; nothing a view does on the model's signals
+        // reaches them.
+        let views = std::mem::take(&mut self.as_mut().rust_mut().views);
+        if let Some(listed) = views.top().and_then(Open::listed) {
+            rows::diff(&mut Signals(self.as_mut()), &listed);
+        }
+        self.as_mut().rust_mut().views = views;
+        if same {
+            let row = self
+                .selected
+                .as_ref()
+                .and_then(|selected| self.rows.iter().position(|row| row.result == *selected))
+                .unwrap_or(0);
+            let selected = self.rows.get(row).map(|row| row.result.clone());
+            self.as_mut().rust_mut().selected = selected;
+            self.as_mut().select_row(row as i32);
         }
     }
 
@@ -672,42 +729,10 @@ impl KotodamaSearch {
         }
     }
 
-    /// Puts `rows` in place of the current rows: those both lists have change
-    /// in place, and the rest are inserted or removed, so the view keeps its
-    /// delegates and its current row.
-    fn replace(mut self: Pin<&mut Self>, mut rows: Vec<Row>) {
-        let plan = Replace::new(self.rows.len(), rows.len());
-        let root = QModelIndex::default();
-        if !plan.removed.is_empty() {
-            // SAFETY: the rows are removed between begin and end, as Qt requires.
-            unsafe {
-                self.as_mut().begin_remove_rows(
-                    &root,
-                    plan.removed.start as i32,
-                    plan.removed.end as i32 - 1,
-                );
-                self.as_mut().rust_mut().rows.truncate(plan.removed.start);
-                self.as_mut().end_remove_rows();
-            }
-        }
-        let tail = rows.split_off(plan.changed.end);
-        self.as_mut()
-            .rust_mut()
-            .rows
-            .splice(plan.changed.clone(), rows);
-        self.as_mut().rows_changed(plan.changed, &[]);
-        if !plan.inserted.is_empty() {
-            // SAFETY: the rows are inserted between begin and end, as Qt requires.
-            unsafe {
-                self.as_mut().begin_insert_rows(
-                    &root,
-                    plan.inserted.start as i32,
-                    plan.inserted.end as i32 - 1,
-                );
-                self.as_mut().rust_mut().rows.extend(tail);
-                self.as_mut().end_insert_rows();
-            }
-        }
+    /// Puts the Results in place of the current rows, by position: see
+    /// [`rows::replace`].
+    fn replace(self: Pin<&mut Self>, rows: Vec<Row>) {
+        rows::replace(&mut Signals(self), rows);
     }
 
     /// Tells views the rows in `range` changed, in `roles` or, if empty, in all.
@@ -723,6 +748,73 @@ impl KotodamaSearch {
             changed.append(role);
         }
         self.as_mut().data_changed(&first, &last, &changed);
+    }
+}
+
+/// The model's rows, changed between the signals Qt requires around each
+/// change.
+struct Signals<'a>(Pin<&'a mut KotodamaSearch>);
+
+impl Model for Signals<'_> {
+    fn rows(&mut self) -> &mut Rows {
+        &mut self.0.as_mut().rust_mut().get_mut().rows
+    }
+
+    fn begin_remove(&mut self, rows: std::ops::Range<usize>) {
+        // SAFETY: `rows::diff` and `rows::replace` remove the rows before
+        // `end_remove`, as Qt requires.
+        unsafe {
+            self.0.as_mut().begin_remove_rows(
+                &QModelIndex::default(),
+                rows.start as i32,
+                rows.end as i32 - 1,
+            );
+        }
+    }
+
+    fn end_remove(&mut self) {
+        // SAFETY: after a `begin_remove`.
+        unsafe { self.0.as_mut().end_remove_rows() }
+    }
+
+    fn begin_insert(&mut self, rows: std::ops::Range<usize>) {
+        // SAFETY: the rows are inserted before `end_insert`, as Qt requires.
+        unsafe {
+            self.0.as_mut().begin_insert_rows(
+                &QModelIndex::default(),
+                rows.start as i32,
+                rows.end as i32 - 1,
+            );
+        }
+    }
+
+    fn end_insert(&mut self) {
+        // SAFETY: after a `begin_insert`.
+        unsafe { self.0.as_mut().end_insert_rows() }
+    }
+
+    fn begin_move(&mut self, from: usize, before: usize) {
+        let root = QModelIndex::default();
+        // SAFETY: the row moves before `end_move`, as Qt requires; `before`
+        // is never `from` or `from + 1`, the moves Qt refuses.
+        unsafe {
+            self.0.as_mut().begin_move_rows(
+                &root,
+                from as i32,
+                from as i32,
+                &root,
+                before as i32,
+            );
+        }
+    }
+
+    fn end_move(&mut self) {
+        // SAFETY: after a `begin_move`.
+        unsafe { self.0.as_mut().end_move_rows() }
+    }
+
+    fn changed(&mut self, rows: std::ops::Range<usize>) {
+        self.0.as_mut().rows_changed(rows, &[]);
     }
 }
 

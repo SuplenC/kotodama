@@ -176,6 +176,15 @@ PanelWindow {
             }
         }
         onActionFailed: message => menu.failure = message
+        // A list View's rows changed: its selected Item is at `row`, or the
+        // top row is selected, as in the search, if it went away.
+        onSelectRow: row => {
+            list.currentIndex = row;
+            if (row === 0)
+                list.positionViewAtBeginning();
+            else
+                list.positionViewAtIndex(row, ListView.Contain);
+        }
         onDepthChanged: {
             menu.actions = [];
             list.currentIndex = 0;
@@ -251,12 +260,9 @@ PanelWindow {
                 selectionColor: menu.selection
                 font.family: menu.fontFamily
                 font.pixelSize: menu.fontSize + 3
-                onTextChanged: {
-                    if (search.filter(text)) {
-                        list.currentIndex = 0;
-                        list.positionViewAtBeginning();
-                    }
-                }
+                // The selection stays where it is until the matches come;
+                // see onSelectRow.
+                onTextChanged: search.filter(text)
 
                 Text {
                     anchors.fill: parent
@@ -359,6 +365,8 @@ PanelWindow {
                     if (currentIndex < 0 && count > 0)
                         currentIndex = 0;
                 }
+                // A list View's filter keeps the selected Item selected.
+                onCurrentIndexChanged: search.select(currentIndex)
 
                 // Late Results go below the rows on screen (ADR 0003), so the
                 // Daemon is told which those are.
