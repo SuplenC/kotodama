@@ -113,8 +113,11 @@ pub struct LiveResult {
     /// onto the scale it ranks Indexed items on.
     pub score: Fraction,
     /// Marks the one result that answers the query outright, such as a
-    /// calculator's sum. The Daemon puts it in the top row. Only an Extension
-    /// whose Live query debounce is 0 may send one.
+    /// calculator's sum. The Daemon puts it in the top row, and its History
+    /// keeps nothing of it: running it adds to neither Frecency nor Learned
+    /// choices, only to the Usage log. Only an Extension whose Live query
+    /// debounce is 0 may send one; a result the History should learn is not
+    /// an answer.
     #[serde(default)]
     pub answer: bool,
 }
