@@ -154,7 +154,7 @@ pub const MAX_LIVE_RESULTS: usize = 500;
 pub const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// How many Items are hot at most: kept resident, and read when the menu
-/// opens (ADR 0016).
+/// opens (ADR 0017).
 pub const HOT_CAPACITY: usize = 256;
 /// How far ahead of a time of day the Items picked then turn hot.
 const HOT_LEAD_SECS: i64 = 15 * 60;

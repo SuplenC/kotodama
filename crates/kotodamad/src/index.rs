@@ -4,7 +4,7 @@
 //!
 //! What a search reads is all in memory. The rest of an Item is read back
 //! off its Shelf when a Result shows it, and stays resident while it is hot
-//! or was shown lately (ADR 0016).
+//! or was shown lately (ADR 0017).
 
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;

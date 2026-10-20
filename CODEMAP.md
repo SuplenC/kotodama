@@ -42,9 +42,9 @@ are in [docs/adr/](docs/adr/).
 ## Tests and checks
 
 - Unit tests: `#[cfg(test)]` modules in each `src/*.rs`.
-- Integration: `crates/*/tests/*.rs`. Daemon: `kotodamad/tests/` (`common/` helpers, `fixtures/recorder`, `ranking.rs`, `interaction.rs`, `open_view.rs`, `views.rs`, `config.rs`, `forget.rs`). Protocol: `layout.rs`, `conformance.rs`, `shell_extension.rs`. Bundled extensions share `kotodama-extension`'s `testing` feature (`Spawned`, in-process Daemon setup).
+- Integration: `crates/*/tests/*.rs`. Daemon: `kotodamad/tests/` (`common/` helpers, `fixtures/recorder`, `ranking.rs`, `interaction.rs`, `open_view.rs`, `views.rs`, `config.rs`, `forget.rs`, `reads_first.rs`: off-path indexing, hot Items and a property test against a full search). Protocol: `layout.rs`, `conformance.rs`, `shell_extension.rs`. Bundled extensions share `kotodama-extension`'s `testing` feature (`Spawned`, in-process Daemon setup).
 - e2e: `e2e/*/test.sh` under headless sway, which `e2e/run` gives a virtual keyboard for the whole run (without one, windows bind no keyboard and lose keys). `e2e/type-and-paste/client.qml` is the window typed into; it logs `ready` once it has the keys. `latency` is skipped on PRs. `emoji` types an emoji in a configured skin tone, and a symbol, into a test client. `open-view` checks `kotodama open --view` shows the View in the first frame (its `shell.qml` logs the top View as the window maps). `views` checks list View filtering and that no View change shows the search between two Views.
-- Benches: `kotodamad/benches/{query,daemon}.rs` (+ `corpus/`), `kotodama-protocol/benches/batch.rs`, `kotodama-calculator/benches/answer.rs`, `kotodama-clipboard/benches/search.rs`, `kotodama-emoji/benches/search.rs`.
+- Benches: `kotodamad/benches/{query,daemon,memory}.rs` (+ `corpus/`; `memory.rs` is the heap per Indexed item), `kotodama-protocol/benches/batch.rs`, `kotodama-calculator/benches/answer.rs`, `kotodama-clipboard/benches/search.rs`, `kotodama-emoji/benches/search.rs`.
 - Nix: `nix/tests/vm.nix` (NixOS VM, `front-end.py`), `nix/tests/hyprland.nix` (Hyprland in a NixOS VM with a virtio GPU: windows, binds, `--view hyprland/shortcuts`), `nix/tests/qml-module.nix`; `flake.nix` `checks`.
 - Script tests: `scripts/tests/*.sh`.
 

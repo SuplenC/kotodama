@@ -1,4 +1,4 @@
-//! Indexing off the keystroke path (ADR 0016): Extensions' changes to their
+//! Indexing off the keystroke path (ADR 0017): Extensions' changes to their
 //! Items are made on a thread of their own, into a new version of each
 //! changed Extension's Segment, which the Daemon puts in whole between two
 //! events. A keystroke never waits for a change, and never sees half of one.

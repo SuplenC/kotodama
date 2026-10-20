@@ -1,7 +1,7 @@
 //! One Extension's Indexed items, laid out for scanning: what a keystroke
 //! reads is worked out once, when an Item arrives, and kept in dense arrays
 //! and one arena of text, so a search runs down them without following a
-//! pointer per Item (ADR 0016).
+//! pointer per Item (ADR 0017).
 //!
 //! A Segment is built off the keystroke path and then only read, so a search
 //! can share it with the thread building the next one. Each Extension has its

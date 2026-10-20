@@ -530,7 +530,7 @@ impl Haystack {
 /// Past this many characters, a text is scored by nucleo's greedy match, in
 /// time that grows with the text, rather than its optimal match, in time that
 /// grows with the text times the query: long clipboard entries would
-/// otherwise make every keystroke slower (ADR 0016). Both match the same
+/// otherwise make every keystroke slower (ADR 0017). Both match the same
 /// texts; only the score, a late tie-break, may differ.
 pub const OPTIMAL_CHARS: usize = 64;
 

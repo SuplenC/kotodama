@@ -1,5 +1,5 @@
 //! Items' payload: everything a Result shows of an Item but a search never
-//! reads, kept encoded and off the heap (ADR 0016). A Shelf holds the
+//! reads, kept encoded and off the heap (ADR 0017). A Shelf holds the
 //! payloads of one Extension's Items, in a file the kernel pages in when a
 //! row is shown, or encoded in memory when there is no file to use.
 //!
