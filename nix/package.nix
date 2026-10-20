@@ -15,6 +15,11 @@
 let
   # cxx-qt-build finds Qt through qmake, and needs one prefix with every module.
   qt = qt6.env "kotodama-qt-${qt6.qtbase.version}" [ qt6.qtdeclarative ];
+  # What the QML module links against at run time: QtQml and QtCore.
+  qtLibs = lib.makeLibraryPath [
+    qt6.qtbase
+    qt6.qtdeclarative
+  ];
 in
 rustPlatform.buildRustPackage {
   pname = "kotodama";
@@ -51,6 +56,8 @@ rustPlatform.buildRustPackage {
   };
   # Quickshell loads the QML module as a plugin: there is no Qt app to wrap.
   dontWrapQtApps = true;
+  # The build-time Qt environment stays out of every output (see postInstall).
+  disallowedReferences = [ qt ];
   # CI runs the tests in the dev shell, where they have the processes and the
   # headless compositor they need.
   doCheck = false;
@@ -63,6 +70,12 @@ rustPlatform.buildRustPackage {
     cp "$qmldir" "$(dirname "$qmldir")/plugin.qmltypes" $module/
     mv $out/lib/libkotodama_qml.so $module/libKotodama.so
     rmdir $out/lib
+    # The linker found Qt in the one-prefix environment above, so the module's
+    # runpath names it, and the environment holds every Qt module's dev output:
+    # a 1.1 GiB closure (#52). Point the runpath at the Qt libraries
+    # themselves, the same store paths Quickshell loads.
+    rpath=$(patchelf --print-rpath $module/libKotodama.so)
+    patchelf --set-rpath "''${rpath//"${qt}/lib"/"${qtLibs}"}" $module/libKotodama.so
 
     # Each Bundled extension's manifest runs its binary, beside it.
     for name in apps calculator clipboard folders; do
