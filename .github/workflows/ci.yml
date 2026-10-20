@@ -323,7 +323,7 @@ jobs:
       - uses: ./.github/actions/setup-nix
         with:
           cachix-auth-token: ${{ secrets.CACHIX_AUTH_TOKEN }}
-      - run: nix build -L .#checks.x86_64-linux.nixos-vm .#checks.x86_64-linux.hyprland-vm .#checks.x86_64-linux.qml-module
+      - run: nix build -L .#checks.x86_64-linux.nixos-vm .#checks.x86_64-linux.hyprland-vm .#checks.x86_64-linux.qml-module .#checks.x86_64-linux.home-manager-ai
 
   # Counts the instructions the Daemon runs per keystroke
   # (scripts/bench-instructions), for the base commit and this one, and fails

@@ -164,6 +164,8 @@
         # Socket activation and the home-manager module, in a NixOS VM. CI runs
         # it on x86_64, which has KVM.
         nixos-vm = import ./nix/tests/vm.nix { inherit pkgs self home-manager; };
+        # The `[extensions.ai]` the home-manager module's typed options write.
+        home-manager-ai = import ./nix/tests/home-manager-ai.nix { inherit pkgs self home-manager; };
         # The Hyprland Extension live: Hyprland needs a DRM device, so it runs
         # in a NixOS VM with a virtio GPU, the way Hyprland tests itself.
         hyprland-vm = import ./nix/tests/hyprland.nix { inherit pkgs self home-manager; };

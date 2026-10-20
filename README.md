@@ -320,6 +320,19 @@ effort = "low"
 debounce_ms = 600
 ```
 
+With home-manager, `programs.kotodama.extensions.ai` sets the same keys as typed options; an option left unset is left out, so the Extension's default applies. Keep the key out of the Nix store: point `apiKeyFile` at a secret read at runtime (an absolute path as a string, never a Nix path, which would be copied into the store), or set `apiKeyCommand`.
+
+```nix
+programs.kotodama.extensions.ai = {
+  apiKeyFile = "/run/agenix/anthropic";   # api_key_command = [ "cat" path ]
+  # apiKeyCommand = [ "pass" "show" "anthropic" ];   # or this, not both
+  url = "https://api.anthropic.com/v1/messages";
+  model = "claude-haiku-5-5";
+  effort = "low";
+  debounceMs = 600;
+};
+```
+
 What goes to the model is the query and the Action catalog (each Action's title, Item kind, Arguments and Extension), never Items, the clipboard, file paths or anything else the menu shows. Its Manifest sets `action_catalog = true`, the only way it learns which Actions exist, as for any Extension. A query that changes, or a View left, kills the request in flight. Requests go through `curl`, so the Extension carries no TLS stack; it idles at 2.5 MiB resident. A proposal runs on the one Indexed item of its kind that offers the Action; when several do, or the Action is a Contributed action that needs an Item, the menu says to pick one in the search. Its `manifest.toml` runs `./kotodama-ai`, so a package installs the binary next to it in `$XDG_DATA_DIRS/kotodama/extensions/ai/`.
 
 ### Folder sources
