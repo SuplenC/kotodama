@@ -249,21 +249,20 @@ impl Index {
     /// The slots, in order, whose Item has a word starting with one of
     /// `initials`, as [`Haystack::initials`](crate::rank::Haystack::initials)
     /// gives them.
-    pub fn starting_with(&self, initials: Letters) -> impl Iterator<Item = Slot> + '_ {
-        self.segments
-            .iter()
-            .enumerate()
-            .flat_map(move |(n, segment)| {
-                segment
-                    .initials()
-                    .iter()
-                    .enumerate()
-                    .filter(move |&(_, &item)| item.meets(initials))
-                    .map(move |(row, _)| Slot {
+    pub fn starting_with(&self, initials: Letters) -> Vec<Slot> {
+        let mut slots = Vec::new();
+        for (n, segment) in self.segments.iter().enumerate() {
+            segment.rows_where(
+                |_, starts| Letters::meet_block(starts, initials),
+                |row| {
+                    slots.push(Slot {
                         segment: n as u32,
-                        row: row as Row,
+                        row,
                     })
-            })
+                },
+            );
+        }
+        slots
     }
 
     /// The whole Item in `slot`, read back off its Shelf unless it is
@@ -526,21 +525,23 @@ impl Index {
             }
             None => {
                 for (n, segment) in self.segments.iter().enumerate() {
-                    // Both dense: a row is passed over on them alone, without
-                    // reading its keys.
-                    let rows = segment.every_letter().iter().zip(segment.initials());
-                    for (row, (&letters, &initials)) in rows.enumerate() {
-                        if filter.may_match(letters, initials)
-                            && let Some((ranked, score, matched)) =
-                                segment.score(row as Row, pattern, matcher, filter)
-                        {
-                            let slot = Slot {
-                                segment: n as u32,
-                                row: row as Row,
-                            };
-                            found(slot, ranked, score, matched);
-                        }
-                    }
+                    // Two passes: the rows' dense letters alone, a block at a
+                    // time in one vectorised loop, then only the rows that
+                    // pass are scored.
+                    segment.rows_where(
+                        |letters, initials| filter.may_match_block(letters, initials),
+                        |row| {
+                            if let Some((ranked, score, matched)) =
+                                segment.score(row, pattern, matcher, filter)
+                            {
+                                let slot = Slot {
+                                    segment: n as u32,
+                                    row,
+                                };
+                                found(slot, ranked, score, matched);
+                            }
+                        },
+                    );
                 }
             }
         }

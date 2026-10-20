@@ -63,7 +63,6 @@ impl Setup {
 
     /// With 2000 Items picked, the most the History keeps, at every time of
     /// day over a month.
-    #[allow(dead_code)] // query.rs alone
     pub fn picked() -> Self {
         let mut history = History::default();
         let start = std::time::SystemTime::now()

@@ -182,8 +182,9 @@ const SHARES: f64 = 10_000.0;
 /// How often, how recently and at what times of day one Result was picked.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Picks {
-    /// The decayed number of picks, as of `at`.
-    score: f64,
+    /// The decayed number of picks, as of `at`. An `f32`, so `history.json`
+    /// keeps its shortest form: ranking needs no more digits.
+    score: f32,
     at: u64,
     /// How the picks fall across the day: in [`PARTS`] parts from midnight,
     /// each as its share of `score`, out of [`SHARES`]. All zero when it isn't
@@ -254,7 +255,7 @@ impl Picks {
     /// The decayed number of picks at time `at`: every pick counts 1 when
     /// made, and half as much every `half_life` seconds after.
     fn count(&self, at: u64, half_life: f64) -> f64 {
-        decay(self.score, self.at, at, half_life)
+        decay(f64::from(self.score), self.at, at, half_life)
     }
 
     /// The Frecency at `when`: the decayed number of picks, which count less
@@ -305,9 +306,127 @@ impl Picks {
         for (part, near) in parts(when.time_of_day) {
             counts[part] += near;
         }
-        self.score = before + 1.0;
+        let score = before + 1.0;
+        self.score = score as f32;
         self.at = when.at;
-        self.parts = counts.map(|count| (count / self.score * SHARES).round() as u16);
+        self.parts = counts.map(|count| (count / score * SHARES).round() as u16);
+    }
+}
+
+/// The Picks of many Results, as a struct of arrays, so their Habits or
+/// Frecency at one time come out of one vectorised loop. Each one's picks are
+/// decayed to the latest pick's time when it is made, so a time only
+/// multiplies them by one factor, rather than raising a power per Result.
+#[derive(Clone, Debug, Default)]
+pub struct Frecent {
+    /// The half-life `decayed` was worked out with.
+    half_life: f64,
+    /// When the latest pick was made: what `decayed` is decayed to.
+    latest: u64,
+    /// Each one's decayed number of picks as of `latest`.
+    decayed: Vec<f64>,
+    /// Each one's decayed number of picks as of its last pick, which it
+    /// never counts more than, even at a time before that.
+    score: Vec<f64>,
+    at: Vec<u64>,
+    /// Each one's share of each part of the day, a column a part, as
+    /// [`Picks`] keeps them.
+    parts: [Vec<u16>; PARTS],
+    /// Each one's largest share: 0 when the shares aren't known.
+    most: Vec<u16>,
+}
+
+impl Frecent {
+    /// `picks`, decayed at `half_life`.
+    pub fn new(picks: &[Picks], half_life: f64) -> Self {
+        let latest = picks.iter().map(|picks| picks.at).max().unwrap_or(0);
+        let mut frecent = Frecent {
+            half_life,
+            latest,
+            ..Frecent::default()
+        };
+        for picks in picks {
+            frecent.decayed.push(picks.count(latest, half_life));
+            frecent.score.push(picks.score.into());
+            frecent.at.push(picks.at);
+            for (column, &share) in frecent.parts.iter_mut().zip(&picks.parts) {
+                column.push(share);
+            }
+            frecent
+                .most
+                .push(picks.parts.iter().copied().max().unwrap_or(0));
+        }
+        frecent
+    }
+
+    /// The half-life it decays at.
+    pub fn half_life(&self) -> f64 {
+        self.half_life
+    }
+
+    /// The `n`th Picks, as kept.
+    pub fn picks(&self, n: usize) -> Picks {
+        Picks {
+            score: self.score[n] as f32,
+            at: self.at[n],
+            parts: std::array::from_fn(|part| self.parts[part][n]),
+        }
+    }
+
+    /// Each one's Habit at `when`, as [`Picks::habit`] works it out, into
+    /// `habits`.
+    pub fn habits(&self, when: When, habits: &mut Vec<Habit>) {
+        self.each(when, habits, |count, usual| Habit {
+            near_now: count * usual,
+            overall: count,
+        });
+    }
+
+    /// Each one's Frecency at `when`, as [`Picks::frecency`] works it out
+    /// with `time_of_day` as [`Settings::time_of_day`], into `frecency`.
+    pub fn frecency(&self, when: When, time_of_day: f64, frecency: &mut Vec<f64>) {
+        self.each(when, frecency, |count, usual| {
+            count * (1.0 - time_of_day * (1.0 - usual))
+        });
+    }
+
+    /// `with` each one's decayed number of picks at `when` and how usual
+    /// `when`'s time of day is for picking it, as [`Picks::usual`] has it,
+    /// into `out`.
+    #[inline]
+    fn each<T: Copy + Default>(&self, when: When, out: &mut Vec<T>, with: impl Fn(f64, f64) -> T) {
+        // What a pick made at `latest` counts at `when`: more than 1 when is
+        // before it, which `score` caps, as `decay` does.
+        let elapsed = when.at as f64 - self.latest as f64;
+        let factor = 0.5f64.powf(elapsed / self.half_life);
+        let [(first, near_first), (second, near_second)] = parts(when.time_of_day);
+        let whole = near_first * near_first + near_second * near_second;
+        let len = self.decayed.len();
+        out.clear();
+        out.resize(len, T::default());
+        // Sliced to one length, so the loop reads them without bounds checks.
+        let (out, decayed, score) = (&mut out[..len], &self.decayed[..len], &self.score[..len]);
+        let (first, second, most) = (
+            &self.parts[first][..len],
+            &self.parts[second][..len],
+            &self.most[..len],
+        );
+        // HAZARD: vectorised (NEON `fmul`/`fdiv`/`fcmgt`, SSE2
+        // `mulpd`/`divpd`): no branch, call or early exit in this loop. It is
+        // the empty query's per-Result work: 25k instructions for 2,000
+        // Results, where a `powf` each took 160k.
+        for n in 0..len {
+            let count = decayed[n] * factor;
+            let count = if count < score[n] { count } else { score[n] };
+            let read = near_first * f64::from(first[n]) + near_second * f64::from(second[n]);
+            let usual = read / (whole * f64::from(most[n]));
+            let usual = if most[n] == 0 || usual > 1.0 {
+                1.0
+            } else {
+                usual
+            };
+            out[n] = with(count, usual);
+        }
     }
 }
 
@@ -320,9 +439,10 @@ fn decay(score: f64, then: u64, at: u64, half_life: f64) -> f64 {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 struct Learned {
     choice: Option<ResultKey>,
-    /// The decayed number of picks of the choice, as of `at`.
+    /// The decayed number of picks of the choice, as of `at`. An `f32`, as
+    /// [`Picks`] keeps its score.
     #[serde(default)]
-    strength: f64,
+    strength: f32,
     /// The Results ranked above the choice when it was picked, most recent
     /// first. The choice ranks above these even when they match exactly.
     #[serde(default)]
@@ -412,7 +532,8 @@ impl History {
             });
             let picked = |key: &ResultKey| key.0 == extension && key.1 == id;
             if learned.choice.as_ref().is_some_and(picked) {
-                learned.strength = decay(learned.strength, learned.at, at, half_life) + 1.0;
+                learned.strength =
+                    (decay(learned.strength.into(), learned.at, at, half_life) + 1.0) as f32;
                 learned.contenders.clear();
                 for key in above.iter().rev() {
                     learned.passed_over.retain(|old| old != key);
@@ -431,11 +552,12 @@ impl History {
                 };
                 if count >= needed {
                     learned.choice = Some((extension.to_owned(), id.to_owned()));
-                    learned.strength = f64::from(count);
+                    learned.strength = f32::from(count);
                     learned.passed_over = above.iter().take(PASSED_OVER).cloned().collect();
                     learned.contenders.clear();
                 } else {
-                    learned.strength = decay(learned.strength, learned.at, at, half_life);
+                    learned.strength =
+                        decay(learned.strength.into(), learned.at, at, half_life) as f32;
                     learned.contenders.truncate(CONTENDERS - 1);
                     learned
                         .contenders
@@ -609,7 +731,7 @@ impl History {
                         extension,
                         id,
                         strength: decay(
-                            learned.strength,
+                            learned.strength.into(),
                             learned.at,
                             at,
                             self.settings.half_life_secs,
@@ -836,6 +958,105 @@ mod tests {
         When {
             at: 1_792_368_000 + day * DAY_SECS + u64::from(hour),
             time_of_day: hour,
+        }
+    }
+
+    /// 2,000 Results, the most the History keeps, picked one to seven
+    /// times each over two months at all times of day, some for a query.
+    fn picked_2000() -> History {
+        let mut history = History::default();
+        for n in 0..2000u64 {
+            for k in 0..1 + n % 7 {
+                let day = (n * 13 + k * 5) % 60;
+                let hour = ((n * 7 + k * 11) % 24) as u32 * HOUR + (n % 3600) as u32;
+                let id = format!("item-{n}");
+                if n % 10 == 0 {
+                    history.pick("apps", &id, &format!("q{}", n % 50), &[], when(day, hour));
+                } else {
+                    history.touch("apps", &id, when(day, hour));
+                }
+            }
+        }
+        history
+    }
+
+    /// Every Result, by its Frecency and Habit at `when`, then the Learned
+    /// choices for a few queries, each with what it counts.
+    fn ranked(history: &History, when: When) -> Vec<String> {
+        let half_life = history.settings.half_life_secs;
+        let mut results: Vec<_> = history
+            .picked()
+            .map(|(_, id, picks)| {
+                let habit = picks.habit(when, half_life);
+                let frecency = picks.frecency(when, &history.settings);
+                (frecency, habit.near_now, habit.overall, id.to_owned())
+            })
+            .collect();
+        results.sort_by(|a, b| {
+            b.0.total_cmp(&a.0)
+                .then(b.1.total_cmp(&a.1))
+                .then(a.3.cmp(&b.3))
+        });
+        let learned = (0..50)
+            .flat_map(|n| history.learned(&format!("q{n}"), when.at))
+            .map(|choice| format!("{}/{} {}", choice.extension, choice.id, choice.strength));
+        results
+            .into_iter()
+            .map(|(frecency, near_now, overall, id)| {
+                format!("{id} {frecency} {near_now} {overall}")
+            })
+            .chain(learned)
+            .collect()
+    }
+
+    #[test]
+    fn a_saved_and_reloaded_history_ranks_identically() {
+        let history = picked_2000();
+        let json = serde_json::to_string(&history).expect("the History encodes");
+        let reloaded: History = serde_json::from_str(&json).expect("the History decodes");
+        for at in [when(60, 9 * HOUR), when(75, 22 * HOUR + 1234)] {
+            assert_eq!(ranked(&reloaded, at), ranked(&history, at));
+        }
+    }
+
+    #[test]
+    fn a_history_kept_with_full_precision_scores_loads() {
+        let history: History = serde_json::from_str(
+            r#"{"picks":{"apps":{"firefox":{"score":481.8121234736919,"at":1792368000}}},
+            "learned":{"fi":{"choice":["apps","firefox"],"strength":3.141592653589793,
+            "contenders":[],"at":1792368000}}}"#,
+        )
+        .expect("an old History decodes");
+        let at = when(0, 0);
+        assert_eq!(
+            history
+                .picks("apps", "firefox")
+                .expect("the picks are kept")
+                .count(at.at, DAY),
+            481.8121337890625
+        );
+        assert_eq!(history.learned("fi", at.at)[0].strength, 3.1415927410125732);
+    }
+
+    #[test]
+    fn decayed_together_picks_count_as_each_on_its_own() {
+        let history = picked_2000();
+        let picks: Vec<Picks> = history.picked().map(|(.., picks)| picks).collect();
+        let settings = history.settings;
+        let frecent = Frecent::new(&picks, settings.half_life_secs);
+        let (mut habits, mut frecency) = (Vec::new(), Vec::new());
+        // Also before some of the picks: a clock set back.
+        for at in [when(30, 3 * HOUR), when(60, 9 * HOUR), when(400, 17 * HOUR)] {
+            frecent.habits(at, &mut habits);
+            frecent.frecency(at, settings.time_of_day, &mut frecency);
+            for (n, picks) in picks.iter().enumerate() {
+                let alone = picks.habit(at, settings.half_life_secs);
+                let close = |a: f64, b: f64| (a - b).abs() <= 1e-12 * b.abs().max(1.0);
+                assert!(close(habits[n].overall, alone.overall), "{n}");
+                assert!(close(habits[n].near_now, alone.near_now), "{n}");
+                assert!(close(frecency[n], picks.frecency(at, &settings)), "{n}");
+                assert_eq!(frecent.picks(n), *picks);
+            }
         }
     }
 

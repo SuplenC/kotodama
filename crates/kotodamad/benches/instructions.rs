@@ -44,6 +44,24 @@ fn keystroke((mut setup, query): (Setup, &'static str)) -> Setup {
     setup
 }
 
-library_benchmark_group!(name = query_10k_items, benchmarks = [keystroke]);
+/// The menu opening on 2,000 Items picked, with the Results most used then
+/// shown once already: what the empty query costs from then on.
+fn picked_then_empty() -> Setup {
+    let mut setup = Setup::picked();
+    setup.query("");
+    setup
+}
+
+#[library_benchmark(setup = picked_then_empty, teardown = drop_setup)]
+#[bench::empty_query_2k_picked()]
+fn empty_query(mut setup: Setup) -> Setup {
+    black_box(setup.query(black_box("")));
+    setup
+}
+
+library_benchmark_group!(
+    name = query_10k_items,
+    benchmarks = [keystroke, empty_query]
+);
 
 main!(library_benchmark_groups = query_10k_items);
