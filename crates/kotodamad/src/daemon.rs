@@ -2874,6 +2874,8 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
                 _ => None,
             }));
             nearly.sort_unstable();
+            // A slot can be both a match and a near miss of another word.
+            nearly.dedup();
             session.narrowing.nearly_for = Some(session.folded.clone());
         }
         session.narrowing.nearly = nearly;

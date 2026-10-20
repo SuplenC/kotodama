@@ -139,15 +139,14 @@ impl Query {
     /// one, matches or nearly matches this one. So it does when each word
     /// that `longer` lengthens allows as many typos, for a word's start is no
     /// nearer a longer word. Not when this query asked for a whole word,
-    /// which `longer` may not.
+    /// which `longer` may not, nor when a word of one letter, which only
+    /// matches at a word's start, grows to one that matches anywhere.
     pub fn narrows_near_misses_of(&self, longer: &Query) -> bool {
         !self.last_is_whole
             && longer.words.len() >= self.words.len()
-            && self
-                .words
-                .iter()
-                .zip(&longer.words)
-                .all(|(word, longer)| typos(word.len()) == typos(longer.len()))
+            && self.words.iter().zip(&longer.words).all(|(word, longer)| {
+                typos(word.len()) == typos(longer.len()) && (word.len() > 1 || longer.len() == 1)
+            })
     }
 
     /// Whether the query is long enough for subtitles to be searched.
