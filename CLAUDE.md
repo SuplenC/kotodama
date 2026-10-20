@@ -22,3 +22,4 @@ Speed and memory use come first. Every design choice is measured against keystro
 
 - **Commits**: [Conventional Commits](https://www.conventionalcommits.org/). `<type>(<scope>)?: <description>`, types `feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert`; `!` or a `BREAKING CHANGE:` footer for breaking changes.
 - **Branches**: [Conventional Branch](https://conventional-branch.github.io/). `<type>/<description>`, types `feature|bugfix|hotfix|release|chore`; lowercase, hyphens only (dots allowed in `release/` versions), e.g. `feature/issue-12-clipboard-history`.
+- **Linear branches**: a branch never merges main into itself. Bring it up to date with `git rebase origin/main` and push with `git push --force-with-lease`; CI's `linear` job fails a pull request whose branch has a merge commit. The pull request itself lands with a merge commit, never squashed.

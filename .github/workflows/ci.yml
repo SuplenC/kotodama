@@ -76,6 +76,26 @@ jobs:
   # a cargo cache (the registry and target/) keyed on the lockfiles; only runs
   # on main save it, so PRs start from main's build without filling the
   # repository's cache quota.
+  linear:
+    # A branch is rebased onto main, never merged with it: main gets one
+    # merge commit per pull request and none from inside a branch.
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          merges=$(git log --merges --oneline "$BASE..$HEAD")
+          if [ -n "$merges" ]; then
+            echo "::error::The branch has merge commits. Rebase it onto main instead (git rebase origin/main):"
+            echo "$merges"
+            exit 1
+          fi
+
   test:
     name: check, test (${{ matrix.runner }})
     needs: changes
@@ -382,7 +402,7 @@ jobs:
   # The one required check: fails if a job it needs failed or was cancelled, and
   # passes when each succeeded or was skipped as not needed.
   ci:
-    needs: [changes, test, e2e, bench, instructions, nixos-vm]
+    needs: [changes, linear, test, e2e, bench, instructions, nixos-vm]
     if: always()
     runs-on: ubuntu-latest
     steps:

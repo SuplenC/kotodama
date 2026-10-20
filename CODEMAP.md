@@ -59,6 +59,7 @@ are in [docs/adr/](docs/adr/).
 
 CI (`.github/workflows/ci.yml`):
 - On PRs, `changes` gates the jobs below by path (docs-only runs none; `bench` and `instructions` only for the crates `scripts/bench-crates` lists, lockfiles, scripts and CI; e2e `latency` for the crates the Daemon, `kotodama` and the QML module build on and the e2e harness; `nixos-vm` for crates, lockfiles, the flake and `nix/`); `ci` is the single required check.
+- On PRs, `linear` fails a branch with a merge commit: branches are rebased onto main, never merged with it.
 - On PRs and main: `test` (check + test, x86 and arm), `e2e` (both arches; `latency` as gated above), `bench` (base vs this commit; fails on +50% time, +10% Daemon memory). On main, `bench` runs both commits on one runner and caches the results as `bench-results-<sha>`; a PR compares against its base's cached results with shorter criterion times, reruns the base on its own runner only when a timing fails, and runs both commits when nothing is cached. `instructions` (`scripts/bench-instructions`: base vs this commit on one runner; fails on +5% instructions). `nixos-vm` (the NixOS VM, Hyprland VM and QML module checks; the package's dependencies come from Cachix).
 - Main only: `image` (dev image), cargo cache saves.
 - `release-please.yml`: release PRs from Conventional Commits.
