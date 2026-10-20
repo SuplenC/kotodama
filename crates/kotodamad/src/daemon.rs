@@ -28,7 +28,7 @@ use crate::config::extension_table;
 use crate::discovery::Found;
 use crate::empty_query::EmptyQuery;
 use crate::history::{
-    Change, Frecent, Habit, History, IDENTITIES, Picks, ResultKey, Settings, Store, query_key,
+    self, Change, Frecent, Habit, History, IDENTITIES, Picks, ResultKey, Settings, Store, query_key,
 };
 use crate::index::{Index, ItemRef, Slot};
 use crate::indexer::{Indexed, Indexer, Kept, Plan};
@@ -473,6 +473,9 @@ struct Session {
     /// never does, and gets no Results.
     searched: bool,
     update: Update,
+    /// The part of the day the Empty query was last ranked in, as
+    /// [`history::part_of_day`] names it.
+    empty_ranked_in: Option<(u64, u32)>,
     /// What is typed into each open list View the Daemon filters, by its
     /// Extension and id; never empty.
     filters: Vec<(ExtensionId, String, String)>,
@@ -1930,6 +1933,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             via_alias: None,
             searched: false,
             update: Update::None,
+            empty_ranked_in: None,
             filters: Vec::new(),
         };
         session.send(ToFrontEnd::Status {
@@ -2052,6 +2056,20 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
                 self.ask_menus(id, ToFrontEnd::Toggle);
             }
             FromFrontEnd::Undo { change } => self.undo(change),
+            FromFrontEnd::Shown => self.shown(id, now),
+        }
+    }
+
+    /// A Front end's menu became visible: its Empty query is ranked again
+    /// if it was last ranked in another part of the day.
+    fn shown(&mut self, id: FrontEndId, now: Instant) {
+        let part = history::part_of_day(self.when(now));
+        if let Some(session) = self.sessions.get_mut(&id)
+            && session.searched
+            && session.query.is_empty()
+            && session.empty_ranked_in != Some(part)
+        {
+            session.update = Update::Fresh;
         }
     }
 
@@ -3038,7 +3056,9 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
 
         if session.query.is_empty() {
             session.narrowing.forget();
-            let mut ranked = self.empty_query(&session, now);
+            let when = self.when(now);
+            session.empty_ranked_in = Some(history::part_of_day(when));
+            let mut ranked = self.empty_query(&session, when);
             if keep {
                 // The rows on screen stay put, as for any query.
                 let visible: Vec<Source> = session
@@ -3556,8 +3576,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
     /// picks near this time of day, then by all their picks; an Alias's
     /// picks count for the Result it names. Of the Results of one Identity,
     /// the one picked through most stands for it.
-    fn empty_query(&mut self, session: &Session, now: Instant) -> Vec<Source> {
-        let when = self.when(now);
+    fn empty_query(&mut self, session: &Session, when: When) -> Vec<Source> {
         let half_life = self.history.settings().half_life_secs;
         let mut most: Vec<MostUsed> = Vec::new();
         if self.empty_query.most_used > 0 && !self.history.is_empty() {

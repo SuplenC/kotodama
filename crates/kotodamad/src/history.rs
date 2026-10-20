@@ -208,6 +208,18 @@ fn parts(time_of_day: u32) -> [(usize, f64); 2] {
     [(first, 1.0 - after), ((first + 1) % PARTS, after)]
 }
 
+/// The part of the day `when` falls in: when it started, in seconds since
+/// the Unix epoch, and which of the day's parts it is. The same for every
+/// time in one part of one day, and different for another part, the same
+/// part on another day, or the same moment in another time zone.
+pub fn part_of_day(when: When) -> (u64, u32) {
+    let part_secs = (DAY_SECS / PARTS as u64) as u32;
+    let started = when
+        .at
+        .saturating_sub(u64::from(when.time_of_day % part_secs));
+    (started, when.time_of_day / part_secs)
+}
+
 /// How much a Result was picked, as the empty query ranks it.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Habit {
@@ -958,6 +970,21 @@ mod tests {
         When {
             at: 1_792_368_000 + day * DAY_SECS + u64::from(hour),
             time_of_day: hour,
+        }
+    }
+
+    #[test]
+    fn a_part_of_the_day_starts_every_three_hours_of_local_time() {
+        let nine = when(0, 9 * HOUR);
+        assert_eq!(part_of_day(nine), part_of_day(when(0, 11 * HOUR + 3599)));
+        assert_ne!(part_of_day(nine), part_of_day(when(0, 12 * HOUR)));
+        assert_ne!(part_of_day(nine), part_of_day(when(1, 9 * HOUR)));
+        for ahead in [HOUR / 2, 3 * HOUR] {
+            let in_another_zone = When {
+                time_of_day: nine.time_of_day + ahead,
+                ..nine
+            };
+            assert_ne!(part_of_day(nine), part_of_day(in_another_zone), "{ahead}");
         }
     }
 

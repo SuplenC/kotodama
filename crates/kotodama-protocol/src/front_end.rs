@@ -74,6 +74,13 @@ pub enum FromFrontEnd {
     /// Undoes the change to the History that [`ToFrontEnd::OfferUndo`]
     /// offered, as its key does. Nothing happens once it can't be undone.
     Undo { change: u64 },
+    /// The menu became visible, however it opened: on [`ToFrontEnd::Open`]
+    /// or [`ToFrontEnd::Toggle`], on the Front end's own keybind, or again
+    /// after a View closed it. A Front end should send it every time. The
+    /// Empty query shows what is used at this time of day, so the Daemon
+    /// answers with new [`ToFrontEnd::Results`] when the query is empty and
+    /// the time of day has moved to another part since it last ranked them.
+    Shown,
 }
 
 /// From the Daemon to a Front end.

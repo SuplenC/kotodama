@@ -913,6 +913,52 @@ fn the_empty_query_shows_the_three_most_used_at_this_time_of_day_then_the_menu()
     );
 }
 
+/// Z1: however the menu opens, it shows what is used at that time of day.
+#[test]
+fn showing_the_menu_in_another_part_of_the_day_ranks_the_empty_query_again() {
+    let mut w = World::new(HABITS);
+    habits(&mut w);
+    w.at(8);
+    assert_eq!(rows(&mut w, ""), ["Mail", "News", "Calendar"]);
+
+    w.later(Duration::from_secs(30 * 60));
+    w.h.front_end_sends(&w.ui, FromFrontEnd::Shown);
+    assert!(
+        w.ui.results().is_none(),
+        "shown in the same part of the day"
+    );
+
+    w.at(20);
+    assert!(w.ui.results().is_none(), "nothing is ranked while hidden");
+    w.h.front_end_sends(&w.ui, FromFrontEnd::Shown);
+    let evening = w.ui.results().expect("shown in the evening");
+    assert_eq!(titles(&evening), ["Music", "Editor", "Games"]);
+
+    w.later(Duration::from_secs(50 * 60));
+    w.h.front_end_sends(&w.ui, FromFrontEnd::Shown);
+    assert!(w.ui.results().is_none(), "shown again in the same part");
+
+    w.later(DAY);
+    w.h.front_end_sends(&w.ui, FromFrontEnd::Shown);
+    assert!(
+        w.ui.results().is_some(),
+        "shown in the same part a day later"
+    );
+}
+
+/// Z1: showing the menu leaves a typed query's Results alone.
+#[test]
+fn showing_the_menu_on_a_typed_query_ranks_nothing_again() {
+    let mut w = World::new(HABITS);
+    habits(&mut w);
+    w.at(8);
+    rows(&mut w, "m");
+
+    w.at(20);
+    w.h.front_end_sends(&w.ui, FromFrontEnd::Shown);
+    assert!(w.ui.results().is_none());
+}
+
 /// Z1: at a time of day nothing is picked at, the most used overall.
 #[test]
 fn at_a_time_of_day_nothing_is_used_at_the_empty_query_shows_the_most_used() {
