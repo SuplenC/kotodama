@@ -182,8 +182,8 @@ const SHARES: f64 = 10_000.0;
 /// How often, how recently and at what times of day one Result was picked.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Picks {
-    /// The decayed number of picks, as of `at`. An `f32`, so the History
-    /// file keeps its shortest form: ranking needs no more digits.
+    /// The decayed number of picks, as of `at`. An `f32`, so `history.json`
+    /// keeps its shortest form: ranking needs no more digits.
     score: f32,
     at: u64,
     /// How the picks fall across the day: in [`PARTS`] parts from midnight,
@@ -411,9 +411,10 @@ impl Frecent {
             &self.parts[second][..len],
             &self.most[..len],
         );
-        // HAZARD: vectorised (NEON `fmul`/`fdiv`/`fcmeq`, SSE2
+        // HAZARD: vectorised (NEON `fmul`/`fdiv`/`fcmgt`, SSE2
         // `mulpd`/`divpd`): no branch, call or early exit in this loop. It is
-        // the empty query's per-Result work.
+        // the empty query's per-Result work: 25k instructions for 2,000
+        // Results, where a `powf` each took 160k.
         for n in 0..len {
             let count = decayed[n] * factor;
             let count = if count < score[n] { count } else { score[n] };
@@ -1011,8 +1012,8 @@ mod tests {
     #[test]
     fn a_saved_and_reloaded_history_ranks_identically() {
         let history = picked_2000();
-        let json = serde_json::to_string(&history).unwrap();
-        let reloaded: History = serde_json::from_str(&json).unwrap();
+        let json = serde_json::to_string(&history).expect("the History encodes");
+        let reloaded: History = serde_json::from_str(&json).expect("the History decodes");
         for at in [when(60, 9 * HOUR), when(75, 22 * HOUR + 1234)] {
             assert_eq!(ranked(&reloaded, at), ranked(&history, at));
         }
@@ -1025,10 +1026,13 @@ mod tests {
             "learned":{"fi":{"choice":["apps","firefox"],"strength":3.141592653589793,
             "contenders":[],"at":1792368000}}}"#,
         )
-        .unwrap();
+        .expect("an old History decodes");
         let at = when(0, 0);
         assert_eq!(
-            history.picks("apps", "firefox").unwrap().count(at.at, DAY),
+            history
+                .picks("apps", "firefox")
+                .expect("the picks are kept")
+                .count(at.at, DAY),
             481.8121337890625
         );
         assert_eq!(history.learned("fi", at.at)[0].strength, 3.1415927410125732);

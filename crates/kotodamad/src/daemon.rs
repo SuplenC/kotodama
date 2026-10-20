@@ -778,6 +778,7 @@ pub struct Daemon<L, D, S> {
     /// What the picks of `frecent` count for at one time, in its order: kept
     /// from one query to the next.
     habits: Vec<Habit>,
+    /// The same for a search's Frecency.
     frecencies: Vec<f64>,
     /// The slots the last search matched.
     scored: Vec<Slot>,
