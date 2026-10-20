@@ -8,12 +8,17 @@
     url = "github:nix-community/home-manager";
     inputs.nixpkgs.follows = "nixpkgs";
   };
+  # Builds the package's dependencies in a derivation of their own, which
+  # changes only with the lockfile, so Cachix serves it and a change to the
+  # workspace rebuilds only the workspace's crates.
+  inputs.crane.url = "github:ipetkov/crane";
 
   outputs =
     {
       self,
       nixpkgs,
       home-manager,
+      crane,
     }:
     let
       systems = [
@@ -26,7 +31,7 @@
       packages = forAllSystems (
         pkgs:
         let
-          kotodama = pkgs.callPackage ./nix/package.nix { };
+          kotodama = pkgs.callPackage ./nix/package.nix { craneLib = crane.mkLib pkgs; };
         in
         {
           default = kotodama;
@@ -42,7 +47,7 @@
       # `pkgs.kotodama`, built with the nixpkgs it is applied to: with the
       # nixpkgs a Quickshell comes from, the QML module uses that Quickshell's Qt.
       overlays.default = final: _prev: {
-        kotodama = final.callPackage ./nix/package.nix { };
+        kotodama = final.callPackage ./nix/package.nix { craneLib = crane.mkLib final; };
       };
 
       homeModules.default = import ./nix/home-manager.nix self;
