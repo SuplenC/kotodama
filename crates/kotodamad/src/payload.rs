@@ -1,7 +1,7 @@
 //! Items' payload: everything a Result shows of an Item but a search never
-//! reads, kept encoded and off the heap (ADR 0017). A Shelf holds the
-//! payloads of one Extension's Items, in a file the kernel pages in when a
-//! row is shown, or encoded in memory when there is no file to use.
+//! reads, kept encoded (ADR 0017). A Shelf holds the payloads of one
+//! Extension's Items, in a file the kernel pages in when a row is shown, or
+//! in memory when there is no file to use.
 //!
 //! A Shelf is only appended to: the versions of a Segment built one after
 //! another share it, and each reads only what was there when it was built.
@@ -84,15 +84,22 @@ impl Shelf {
 
     /// Reads the bytes at `place` into `buf`.
     pub fn read(&self, place: Place, buf: &mut Vec<u8>) -> io::Result<()> {
+        self.read_up_to(place.at, place.end(), buf)
+    }
+
+    /// Reads the bytes from `start` up to `end` into `buf`: a whole Shelf
+    /// may be longer than one payload can.
+    pub fn read_up_to(&self, start: u64, end: u64, buf: &mut Vec<u8>) -> io::Result<()> {
+        let len = usize::try_from(end - start).map_err(|_| io::ErrorKind::OutOfMemory)?;
         buf.clear();
-        buf.resize(place.len as usize, 0);
+        buf.resize(len, 0);
         match &self.store {
-            Store::File(file) => std::os::unix::fs::FileExt::read_exact_at(file, buf, place.at),
+            Store::File(file) => std::os::unix::fs::FileExt::read_exact_at(file, buf, start),
             Store::Memory(memory) => {
                 let memory = memory.read().unwrap_or_else(|err| err.into_inner());
-                let at = place.at as usize;
+                let at = start as usize;
                 let bytes = memory
-                    .get(at..at + place.len as usize)
+                    .get(at..at + len)
                     .ok_or(io::ErrorKind::UnexpectedEof)?;
                 buf.copy_from_slice(bytes);
                 Ok(())

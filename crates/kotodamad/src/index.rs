@@ -315,13 +315,17 @@ impl Index {
 
     /// The title's length in characters, of an Item that is there.
     pub fn title_len(&self, slot: Slot) -> u32 {
-        self.segments[slot.segment as usize].title_len(slot.row)
+        self.segments
+            .get(slot.segment as usize)
+            .map_or(0, |segment| segment.title_len(slot.row))
     }
 
     /// The name of the kind of an Item that is there.
     pub fn kind(&self, slot: Slot) -> &str {
-        let segment = &self.segments[slot.segment as usize];
-        &segment.kinds()[segment.kind(slot.row)]
+        self.segments
+            .get(slot.segment as usize)
+            .and_then(|segment| segment.kinds().get(segment.kind(slot.row)))
+            .map_or("", String::as_str)
     }
 
     /// Every Identity one Extension's Items have.

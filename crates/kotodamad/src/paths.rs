@@ -21,21 +21,10 @@ pub struct Paths {
 impl Paths {
     pub fn from_env() -> Result<Self, String> {
         let socket = kotodama_protocol::socket_path().ok_or("XDG_RUNTIME_DIR isn't set")?;
-        let config_home = match env::var_os("XDG_CONFIG_HOME").filter(|dir| !dir.is_empty()) {
-            Some(dir) => PathBuf::from(dir),
-            None => PathBuf::from(env::var_os("HOME").ok_or("HOME isn't set")?).join(".config"),
-        };
+        let config_home = xdg_home("XDG_CONFIG_HOME", ".config")?;
         let user = config_home.join("kotodama");
-        let state_home = match env::var_os("XDG_STATE_HOME").filter(|dir| !dir.is_empty()) {
-            Some(dir) => PathBuf::from(dir),
-            None => {
-                PathBuf::from(env::var_os("HOME").ok_or("HOME isn't set")?).join(".local/state")
-            }
-        };
-        let cache_home = match env::var_os("XDG_CACHE_HOME").filter(|dir| !dir.is_empty()) {
-            Some(dir) => PathBuf::from(dir),
-            None => PathBuf::from(env::var_os("HOME").ok_or("HOME isn't set")?).join(".cache"),
-        };
+        let state_home = xdg_home("XDG_STATE_HOME", ".local/state")?;
+        let cache_home = xdg_home("XDG_CACHE_HOME", ".cache")?;
 
         let mut config_dirs = search_path("XDG_CONFIG_DIRS", "/etc/xdg");
         config_dirs.push(user.clone());
@@ -54,6 +43,14 @@ impl Paths {
             usage_log: state_home.join("kotodama/usage.jsonl"),
             cache: cache_home.join("kotodama"),
         })
+    }
+}
+
+/// `$var`, or `fallback` in the home directory when it is unset or empty.
+fn xdg_home(var: &str, fallback: &str) -> Result<PathBuf, String> {
+    match env::var_os(var).filter(|dir| !dir.is_empty()) {
+        Some(dir) => Ok(PathBuf::from(dir)),
+        None => Ok(PathBuf::from(env::var_os("HOME").ok_or("HOME isn't set")?).join(fallback)),
     }
 }
 

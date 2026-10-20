@@ -365,13 +365,7 @@ impl Segment {
         let memory = Shelf::in_memory();
         let mut before = Vec::new();
         let moved = shelf
-            .read(
-                Place {
-                    at: 0,
-                    len: shelved.at as u32,
-                },
-                &mut before,
-            )
+            .read_up_to(0, shelved.at, &mut before)
             .and_then(|()| memory.put(0, &before))
             .and_then(|()| memory.put(shelved.at, &shelved.bytes));
         if let Err(err) = moved {
@@ -389,13 +383,7 @@ impl Segment {
             return Ok(());
         };
         let mut all = Vec::new();
-        old.read(
-            Place {
-                at: 0,
-                len: self.end as u32,
-            },
-            &mut all,
-        )?;
+        old.read_up_to(0, self.end, &mut all)?;
         let mut kept = Vec::with_capacity(all.len().saturating_sub(self.shelf_garbage as usize));
         let mut places = Vec::with_capacity(self.held.len());
         for held in &self.held {
@@ -566,12 +554,16 @@ impl Segment {
 
     /// The title's length in characters.
     pub fn title_len(&self, row: Row) -> u32 {
-        self.keys[row as usize].title.len() as u32
+        self.keys
+            .get(row as usize)
+            .map_or(0, |keys| keys.title.len() as u32)
     }
 
     /// The kind of the Item in `row`, as an index into [`Segment::kinds`].
     pub fn kind(&self, row: Row) -> usize {
-        self.keys[row as usize].kind.into()
+        self.keys
+            .get(row as usize)
+            .map_or(usize::MAX, |keys| keys.kind.into())
     }
 
     /// The names of the kinds of Item the Segment has held.
