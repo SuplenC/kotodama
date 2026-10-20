@@ -247,8 +247,8 @@ impl Filter {
                 // `pcmpeqd`/`pand`): no branch, call or early exit here. It
                 // is the first pass of every search over all the rows; see
                 // `Index::search`.
-                for k in 0..BLOCK {
-                    bits |= Mask::from(letters[k].0 & wanted == wanted) << k;
+                for (k, letters) in letters.iter().enumerate() {
+                    bits |= Mask::from(letters.0 & wanted == wanted) << k;
                 }
                 bits
             }
@@ -476,8 +476,8 @@ impl Letters {
     pub fn meet_block(sets: &[Letters; BLOCK], other: Letters) -> Mask {
         let mut bits = 0;
         // HAZARD: vectorised, as in `Filter::may_match_block`.
-        for k in 0..BLOCK {
-            bits |= Mask::from(sets[k].0 & other.0 != 0) << k;
+        for (k, set) in sets.iter().enumerate() {
+            bits |= Mask::from(set.0 & other.0 != 0) << k;
         }
         bits
     }
@@ -1180,7 +1180,16 @@ mod tests {
             assert_eq!(fold_text(&c.to_string()), fold(c).to_string(), "{c:?}");
         }
         let words = [
-            "getUserName", "VSCode", "a", "x1", "-", "Files", "web-Storm", "HTTPServer", "", " ",
+            "getUserName",
+            "VSCode",
+            "a",
+            "x1",
+            "-",
+            "Files",
+            "web-Storm",
+            "HTTPServer",
+            "",
+            " ",
         ];
         // Texts across a block of bytes, too.
         for n in 0..400usize {

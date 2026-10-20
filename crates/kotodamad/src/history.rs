@@ -352,7 +352,9 @@ impl Frecent {
             for (column, &share) in frecent.parts.iter_mut().zip(&picks.parts) {
                 column.push(share);
             }
-            frecent.most.push(picks.parts.iter().copied().max().unwrap_or(0));
+            frecent
+                .most
+                .push(picks.parts.iter().copied().max().unwrap_or(0));
         }
         frecent
     }
@@ -417,7 +419,11 @@ impl Frecent {
             let count = if count < score[n] { count } else { score[n] };
             let read = near_first * f64::from(first[n]) + near_second * f64::from(second[n]);
             let usual = read / (whole * f64::from(most[n]));
-            let usual = if most[n] == 0 || usual > 1.0 { 1.0 } else { usual };
+            let usual = if most[n] == 0 || usual > 1.0 {
+                1.0
+            } else {
+                usual
+            };
             out[n] = with(count, usual);
         }
     }
@@ -525,7 +531,8 @@ impl History {
             });
             let picked = |key: &ResultKey| key.0 == extension && key.1 == id;
             if learned.choice.as_ref().is_some_and(picked) {
-                learned.strength = (decay(learned.strength.into(), learned.at, at, half_life) + 1.0) as f32;
+                learned.strength =
+                    (decay(learned.strength.into(), learned.at, at, half_life) + 1.0) as f32;
                 learned.contenders.clear();
                 for key in above.iter().rev() {
                     learned.passed_over.retain(|old| old != key);
@@ -972,9 +979,9 @@ mod tests {
         history
     }
 
-    /// Every Result, by its Frecency and Habit at `when`, and the Learned
-    /// choices for a few queries.
-    fn ranked(history: &History, when: When) -> (Vec<(f64, f64, f64, String)>, Vec<String>) {
+    /// Every Result, by its Frecency and Habit at `when`, then the Learned
+    /// choices for a few queries, each with what it counts.
+    fn ranked(history: &History, when: When) -> Vec<String> {
         let half_life = history.settings.half_life_secs;
         let mut results: Vec<_> = history
             .picked()
@@ -984,12 +991,21 @@ mod tests {
                 (frecency, habit.near_now, habit.overall, id.to_owned())
             })
             .collect();
-        results.sort_by(|a, b| b.0.total_cmp(&a.0).then(b.1.total_cmp(&a.1)).then(a.3.cmp(&b.3)));
+        results.sort_by(|a, b| {
+            b.0.total_cmp(&a.0)
+                .then(b.1.total_cmp(&a.1))
+                .then(a.3.cmp(&b.3))
+        });
         let learned = (0..50)
             .flat_map(|n| history.learned(&format!("q{n}"), when.at))
-            .map(|choice| format!("{}/{} {}", choice.extension, choice.id, choice.strength))
-            .collect();
-        (results, learned)
+            .map(|choice| format!("{}/{} {}", choice.extension, choice.id, choice.strength));
+        results
+            .into_iter()
+            .map(|(frecency, near_now, overall, id)| {
+                format!("{id} {frecency} {near_now} {overall}")
+            })
+            .chain(learned)
+            .collect()
     }
 
     #[test]
@@ -1011,7 +1027,10 @@ mod tests {
         )
         .unwrap();
         let at = when(0, 0);
-        assert_eq!(history.picks("apps", "firefox").unwrap().count(at.at, DAY), 481.8121337890625);
+        assert_eq!(
+            history.picks("apps", "firefox").unwrap().count(at.at, DAY),
+            481.8121337890625
+        );
         assert_eq!(history.learned("fi", at.at)[0].strength, 3.1415927410125732);
     }
 

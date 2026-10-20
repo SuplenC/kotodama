@@ -59,6 +59,9 @@ fn empty_query(mut setup: Setup) -> Setup {
     setup
 }
 
-library_benchmark_group!(name = query_10k_items, benchmarks = [keystroke, empty_query]);
+library_benchmark_group!(
+    name = query_10k_items,
+    benchmarks = [keystroke, empty_query]
+);
 
 main!(library_benchmark_groups = query_10k_items);

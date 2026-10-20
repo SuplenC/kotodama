@@ -21,7 +21,7 @@ use nucleo_matcher::pattern::Pattern;
 use nucleo_matcher::{Matcher, Utf32Str, Utf32String};
 
 use crate::payload::{Place, Shelf, encode};
-use crate::rank::{BLOCK, Filter, Mask, Folded, Letters, Matched, Searched, Text, Texts};
+use crate::rank::{BLOCK, Filter, Folded, Letters, Mask, Matched, Searched, Text, Texts};
 
 /// Where an Item lives in its Segment. Stable until the Item is removed, and
 /// not taken by another Item until the change after that.
@@ -591,7 +591,11 @@ impl Segment {
             last.0[..letters_left.len()].copy_from_slice(letters_left);
             last.1[..initials_left.len()].copy_from_slice(initials_left);
             let filled = (1 << letters_left.len()) - 1;
-            each_bit(test(&last.0, &last.1) & filled, letters.len() * BLOCK, &mut found);
+            each_bit(
+                test(&last.0, &last.1) & filled,
+                letters.len() * BLOCK,
+                &mut found,
+            );
         }
     }
 
