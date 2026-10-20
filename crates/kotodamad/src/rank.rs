@@ -120,7 +120,32 @@ impl Query {
 
     /// Whether any word is long enough to have a typo.
     pub fn tolerates_typos(&self) -> bool {
-        self.words.iter().any(|word| typos(word.len()) > 0)
+        self.typo_initials() != 0
+    }
+
+    /// The first letters of the words long enough to have a typo, as
+    /// [`Haystack::initials`] gives them: a near miss has a word starting
+    /// with one of them.
+    pub fn typo_initials(&self) -> u64 {
+        self.words
+            .iter()
+            .filter(|word| typos(word.len()) > 0)
+            .fold(0, |set, word| set | initial(word[0]))
+    }
+
+    /// Whether whatever nearly matches `longer`, a query that adds to this
+    /// one, matches or nearly matches this one. So it does when each word
+    /// that `longer` lengthens allows as many typos, for a word's start is no
+    /// nearer a longer word. Not when this query asked for a whole word,
+    /// which `longer` may not.
+    pub fn narrows_near_misses_of(&self, longer: &Query) -> bool {
+        !self.last_is_whole
+            && longer.words.len() >= self.words.len()
+            && self
+                .words
+                .iter()
+                .zip(&longer.words)
+                .all(|(word, longer)| typos(word.len()) == typos(longer.len()))
     }
 
     /// Whether the query is long enough for subtitles to be searched.
@@ -301,11 +326,25 @@ impl Haystack {
     }
 
     /// Whether the title and keywords have enough of each word's letters for
-    /// the Item to be a near miss: each letter they lack takes a typo.
+    /// the Item to be a near miss: each letter they lack takes a typo, and a
+    /// word that could have one must start a word of theirs, as one with a
+    /// typo does.
     fn may_nearly_match(&self, query: &Query) -> bool {
-        query.words.iter().zip(&query.letters).all(|(word, &letters)| {
-            (letters & !self.letters).count_ones() as usize <= typos(word.len())
-        })
+        let letters = query
+            .words
+            .iter()
+            .zip(&query.letters)
+            .all(|(word, &letters)| {
+                (letters & !self.letters).count_ones() as usize <= typos(word.len())
+            });
+        letters && self.initials & query.typo_initials() != 0
+    }
+
+    /// The letters words of the title and keywords start with: one of 36 bits
+    /// for each ASCII letter or digit, and one shared by every other
+    /// character, which is always set.
+    pub fn initials(&self) -> u64 {
+        self.initials
     }
 }
 
@@ -385,6 +424,11 @@ impl Tiers {
     }
 
     fn nearly(&mut self, folded: Utf32Str, original: Option<&str>, query: &Query) -> bool {
+        // Asked only of what doesn't match, so a one-word query's word
+        // doesn't, and only the words starting with its first letter count.
+        if let [word] = query.words.as_slice() {
+            return self.typo_in(folded, original, word, query.last_is_whole);
+        }
         self.load(folded, original);
         let last = query.words.len() - 1;
         query.words.iter().enumerate().all(|(n, word)| {
@@ -393,14 +437,94 @@ impl Tiers {
         })
     }
 
+    /// [`Tiers::typo`] straight from a folded text, without [`Tiers::load`]:
+    /// only the words starting with `word`'s first letter are copied out.
+    fn typo_in(
+        &mut self,
+        folded: Utf32Str,
+        original: Option<&str>,
+        word: &[char],
+        whole: bool,
+    ) -> bool {
+        let typos = typos(word.len());
+        if typos == 0 {
+            return false;
+        }
+        // As `load` reads them: the original's case counts only where it has
+        // as many bytes as the folded text has characters, so it is ASCII.
+        let cases = original
+            .filter(|original| original.len() == folded.len())
+            .map(str::as_bytes);
+        if let Utf32Str::Ascii(bytes) = folded {
+            // Most texts: look only where the first letter is.
+            let Ok(first) = u8::try_from(word[0]) else {
+                return false;
+            };
+            for at in (0..bytes.len()).filter(|&at| bytes[at] == first) {
+                let starts = at == 0
+                    || !bytes[at - 1].is_ascii_alphanumeric()
+                    || cases.is_some_and(|cases| {
+                        cases[at].is_ascii_uppercase() && cases[at - 1].is_ascii_lowercase()
+                    });
+                if !starts {
+                    continue;
+                }
+                self.chars.clear();
+                self.chars.extend(
+                    bytes[at..]
+                        .iter()
+                        .take_while(|b| b.is_ascii_alphanumeric())
+                        .take(word.len() + typos + 1)
+                        .map(|&b| char::from(b)),
+                );
+                if within(word, &self.chars, typos, whole, &mut self.distances) {
+                    return true;
+                }
+            }
+            return false;
+        }
+        let mut prev = None;
+        for (at, c) in folded.chars().enumerate() {
+            let camel = cases.is_some_and(|cases| {
+                at > 0 && cases[at].is_ascii_uppercase() && cases[at - 1].is_ascii_lowercase()
+            });
+            let starts = c == word[0]
+                && c.is_alphanumeric()
+                && (camel || prev.is_none_or(|p: char| !p.is_alphanumeric()));
+            prev = Some(c);
+            if !starts {
+                continue;
+            }
+            // One letter more than `within` looks at tells it the word is
+            // longer.
+            self.chars.clear();
+            self.chars.extend(
+                folded
+                    .slice(at..)
+                    .chars()
+                    .take_while(|c| c.is_alphanumeric())
+                    .take(word.len() + typos + 1),
+            );
+            if within(word, &self.chars, typos, whole, &mut self.distances) {
+                return true;
+            }
+        }
+        false
+    }
+
     /// Whether a word of the text, or with `whole` false the start of one, is
-    /// `word` but for as many typos as it may have.
+    /// `word` but for as many typos as it may have. The first letter is never
+    /// one: people rarely mistype it, and holding to it keeps short queries
+    /// from nearly matching most words.
     fn typo(&mut self, word: &[char], whole: bool) -> bool {
         let typos = typos(word.len());
         if typos == 0 {
             return false;
         }
         for &at in &self.starts {
+            if self.chars[at] != word[0] {
+                continue;
+            }
             let len = self.chars[at..]
                 .iter()
                 .position(|c| !c.is_alphanumeric())
@@ -521,27 +645,33 @@ fn within(
     whole: bool,
     distances: &mut Vec<usize>,
 ) -> bool {
-    // A longer start has more letters than typos to spare.
+    // A longer start has more letters than typos to spare, and a shorter text
+    // too few.
     let n = text.len().min(word.len() + typos);
-    if whole && text.len() > n {
+    if (whole && text.len() > n) || text.len() + typos < word.len() {
         return false;
     }
+    // Only the cells at most `typos` off the diagonal can be within reach; the
+    // rest hold `beyond`, as any distance past `typos` does.
+    let beyond = typos + 1;
     let width = n + 1;
     let d = distances;
     d.clear();
-    d.extend(0..width);
+    d.extend((0..width).map(|j| j.min(beyond)));
     for i in 1..=word.len() {
-        d.push(i);
-        let mut best = i;
-        for j in 1..=n {
-            let above = (i - 1) * width + j;
+        let row = d.len();
+        d.resize(row + width, beyond);
+        d[row] = i.min(beyond);
+        let mut best = d[row];
+        for j in i.saturating_sub(typos).max(1)..=(i + typos).min(n) {
+            let above = row - width + j;
             let mut cost = (d[above - 1] + usize::from(word[i - 1] != text[j - 1]))
                 .min(d[above] + 1)
-                .min(d[i * width + j - 1] + 1);
+                .min(d[row + j - 1] + 1);
             if i > 1 && j > 1 && word[i - 1] == text[j - 2] && word[i - 2] == text[j - 1] {
                 cost = cost.min(d[above - width - 2] + 1);
             }
-            d.push(cost);
+            d[row + j] = cost.min(beyond);
             best = best.min(cost);
         }
         // No later row does better than this one's best.

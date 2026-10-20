@@ -33,7 +33,8 @@ fn indexed_items_are_found_by_a_fuzzy_query_best_match_first() {
     let ui = h.front_end();
 
     let rows = h.query(&ui, "firef");
-    assert_eq!(titles(&rows), ["Firefox"]);
+    // Fire Alarm is a near miss: "fire" with an extra letter.
+    assert_eq!(titles(&rows), ["Firefox", "Fire Alarm"]);
     assert_eq!(rows[0].extension, "apps");
     assert_eq!(rows[0].highlights, [0, 1, 2, 3, 4]);
 

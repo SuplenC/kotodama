@@ -388,7 +388,11 @@ fn use_never_lifts_a_near_miss_above_a_real_match() {
 #[test]
 fn a_query_has_at_most_one_typo_per_four_letters() {
     let mut w = World::new(&["Firefox", "Calculator"]);
-    assert_eq!(rows(&mut w, "fri"), Vec::<String>::new(), "3 letters, no typo");
+    assert_eq!(
+        rows(&mut w, "fri"),
+        Vec::<String>::new(),
+        "3 letters, no typo"
+    );
     assert_eq!(rows(&mut w, "frie"), ["Firefox"], "4 letters, one typo");
     assert_eq!(
         rows(&mut w, "cakcuka"),
@@ -408,6 +412,15 @@ fn every_word_may_have_its_typos() {
         Vec::<String>::new(),
         "3 letters of a word, no typo, however long the query"
     );
+}
+
+/// T9: people rarely mistype the first letter, and holding to it keeps a
+/// short query from nearly matching most words.
+#[test]
+fn the_first_letter_is_never_a_typo() {
+    let mut w = World::new(&["Firefox"]);
+    assert_eq!(rows(&mut w, "virefox"), Vec::<String>::new());
+    assert_eq!(rows(&mut w, "ifrefox"), Vec::<String>::new());
 }
 
 /// Near misses rank below every real match, so they aren't looked for once
@@ -1190,7 +1203,32 @@ const QUERIES: &[&str] = &[
     "fi ",
     "mon sys",
     "dis",
+    "firfox",
+    "fierfox",
+    "calculater",
+    "stream",
+    "termnal",
+    "setings",
+    "sistem monitr",
 ];
+
+/// From the second letter on: typed on from one letter, matches inside words
+/// are lost (#80).
+#[test]
+fn typing_a_query_letter_by_letter_gives_the_rows_typing_it_at_once_does() {
+    let mut typed = World::new(DESKTOP);
+    for query in QUERIES {
+        let mut letters = String::new();
+        for c in query.chars() {
+            letters.push(c);
+            if letters.chars().count() < 2 {
+                continue;
+            }
+            let rows = rows(&mut typed, &letters);
+            assert_eq!(rows, World::new(DESKTOP).rows(&letters), "{letters:?}");
+        }
+    }
+}
 
 #[test]
 fn the_same_query_gives_the_same_rows() {

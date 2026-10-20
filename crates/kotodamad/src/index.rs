@@ -32,6 +32,10 @@ impl Entry {
 #[derive(Default)]
 pub struct Index {
     slots: Vec<Option<Entry>>,
+    /// The word initials of each slot's Item, as [`Haystack::initials`] gives
+    /// them, or 0 for an empty slot. Kept apart from the Entries, so looking
+    /// for near misses passes over most slots without reading them.
+    initials: Vec<u64>,
     free: Vec<Slot>,
     /// Each Extension's Items by id.
     ids: Vec<HashMap<String, Slot>>,
@@ -88,6 +92,12 @@ impl Index {
                 slot
             }
         };
+        if self.initials.len() <= slot as usize {
+            self.initials.resize(slot as usize + 1, 0);
+        }
+        self.initials[slot as usize] = self
+            .entry(slot)
+            .map_or(0, |entry| entry.haystack.initials());
         if let Some(keyword) = keyword {
             self.keywords.entry(keyword).or_default().push(slot);
         }
@@ -110,6 +120,7 @@ impl Index {
     fn empty(&mut self, slot: Slot) {
         self.unkey(slot);
         self.slots[slot as usize] = None;
+        self.initials[slot as usize] = 0;
         self.free.push(slot);
     }
 
@@ -154,9 +165,14 @@ impl Index {
         self.ids[extension.0].get(id).copied()
     }
 
-    /// How many slots there are, empty or not: every slot is below this.
-    pub fn slots(&self) -> Slot {
-        self.slots.len() as Slot
+    /// The slots, in order, whose Item has a word starting with one of
+    /// `initials`, as [`Haystack::initials`] gives them.
+    pub fn starting_with(&self, initials: u64) -> impl Iterator<Item = Slot> {
+        self.initials
+            .iter()
+            .enumerate()
+            .filter(move |&(_, &item)| item & initials != 0)
+            .map(|(slot, _)| slot as Slot)
     }
 
     pub fn entry(&self, slot: Slot) -> Option<&Entry> {
