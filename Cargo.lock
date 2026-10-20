@@ -710,8 +710,6 @@ dependencies = [
  "serde_json",
  "tempfile",
  "wayland-client",
- "wayland-protocols",
- "wayland-protocols-wlr",
 ]
 
 [[package]]
@@ -732,6 +730,9 @@ dependencies = [
  "libc",
  "notify",
  "tempfile",
+ "wayland-client",
+ "wayland-protocols",
+ "wayland-protocols-wlr",
 ]
 
 [[package]]
@@ -814,7 +815,6 @@ dependencies = [
  "toml",
  "wayland-client",
  "wayland-protocols-misc",
- "wayland-protocols-wlr",
 ]
 
 [[package]]

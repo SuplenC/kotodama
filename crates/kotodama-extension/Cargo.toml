@@ -11,6 +11,10 @@ repository.workspace = true
 watch = ["dep:notify"]
 # The shared test harness. For dev-dependencies only.
 testing = []
+# Finding the compositor, and the clipboard's data-control protocols, for the
+# Daemon and the clipboard Extension. Brings in the Wayland crates, on Linux
+# only. Off unless asked for.
+wayland = ["dep:wayland-client", "dep:wayland-protocols", "dep:wayland-protocols-wlr"]
 
 [dependencies]
 kotodama-protocol = { path = "../kotodama-protocol" }
@@ -18,6 +22,9 @@ notify = { version = "8", optional = true }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 libc = "0.2"
+wayland-client = { version = "0.31.15", optional = true }
+wayland-protocols = { version = "0.32.13", features = ["client", "staging"], optional = true }
+wayland-protocols-wlr = { version = "0.3.12", features = ["client"], optional = true }
 
 [dev-dependencies]
 tempfile = "3.27.0"
