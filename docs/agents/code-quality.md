@@ -12,6 +12,17 @@ Speed and memory come first (`CLAUDE.md`). On a hot path (anything between a key
 - **It says why, once.** A comment above the code names what it is optimising and the number, so the next reader does not "clean it up": `// HAZARD: one pass over the keys, no iterator adapters. This loop is 40% of first_keystroke's instructions.`
 - **It stays on the hot path.** Everything around it (setup, config, errors, tests) still follows the guide.
 
+## Write for the vectoriser
+
+Hot loops are written so the compiler can turn them into SIMD on its own: SSE2 on every x86-64 CPU, NEON on every aarch64 CPU. The same binary runs everywhere, so nothing forces wider instructions. Source: kotodama.
+
+- **No intrinsics, no `target-cpu=native`, no `-C target-feature`** in the build. If wider instructions (AVX2) ever pay off, they come through runtime dispatch (e.g. the `multiversion` crate) with the baseline loop as the fallback, and a measurement in the PR.
+- **Dense arrays of plain integers or floats** (`Vec<u64>`, `Vec<f32>`), a struct of arrays rather than an array of structs, for anything a hot loop reads per row.
+- **Fixed-size chunks**: `chunks_exact(8)` plus the remainder, so the loop has a known trip count.
+- **No calls, early exits or branches inside the loop body.** A comparison produces a mask (`(row & q) == q` as a bit, `bool as u64`), and the work on the survivors happens in a second pass over the set bits (`trailing_zeros`).
+- **Libraries that already pick SIMD at run time** (`memchr`, nucleo's matcher) are used as they are, not reimplemented.
+- **The instruction-count gate is the check.** A loop that stops vectorising shows up as a jump in the `instructions` job; a comment above a vectorised loop says it is one, so nobody adds a branch to it.
+
 ## Formatting and layout
 
 - **Imports: three blocks, one item per `use`.** `std`, then external crates, then `crate`/`super`/`self`, a blank line between; one item per line. Source: kotodama (from castello F1, F2).
