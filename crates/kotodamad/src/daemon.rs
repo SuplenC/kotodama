@@ -31,6 +31,7 @@ use crate::history::{
 use crate::index::{Index, Slot};
 use crate::keywords::{self, Keywords};
 use crate::kind_order::KindOrder;
+use crate::open_view::{Opening, ViewName};
 use crate::rank::{self, Haystack, Matched, Tier, Tiers};
 use crate::usage::{Entry, Used};
 
@@ -579,22 +580,6 @@ struct ArgumentForm {
     arguments: BTreeMap<String, String>,
 }
 
-/// `kotodama open --view`, holding the menus back until the View is there,
-/// so their first frame shows it (ADR 0013).
-struct Opening {
-    /// The `kotodama` command that asked; the menus open everywhere else.
-    from: FrontEndId,
-    query: String,
-    /// `<extension>/<item id>`, as given.
-    view: String,
-    /// The Item's primary Action, once it runs: its invocation and Extension.
-    /// `None` while the Extension starts or hasn't indexed the Item yet.
-    running: Option<(u64, ExtensionId)>,
-    /// The menus opened on the search before the Action was done.
-    opened: bool,
-    deadline: Instant,
-}
-
 struct PendingOutput {
     output: Output,
     /// The Front ends that haven't answered Close yet.
@@ -624,6 +609,9 @@ pub struct Daemon<L, D, S> {
     views: BTreeMap<(ExtensionId, String), Vec<Item>>,
     pending_output: Option<PendingOutput>,
     openings: Vec<Opening>,
+    /// What other Front ends asked the menus while an Opening was awaited,
+    /// passed on once none is, so the search never shows before its View.
+    held: Vec<(FrontEndId, ToFrontEnd)>,
     launcher: L,
     desktop: D,
     store: S,
@@ -680,6 +668,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             views: BTreeMap::new(),
             pending_output: None,
             openings: Vec::new(),
+            held: Vec::new(),
             launcher,
             desktop,
             store,
@@ -770,6 +759,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             Event::Config(config) => self.set_config(config),
             Event::Extensions(found) => self.set_extensions(found, now),
         }
+        self.release_held();
         self.flush(now);
     }
 
@@ -804,6 +794,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             self.load_undo_item();
         }
         self.open_overdue(now);
+        self.release_held();
         self.flush(now);
     }
 
@@ -823,7 +814,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
         let opening = self
             .openings
             .iter()
-            .filter(|opening| !opening.opened)
+            .filter(|opening| opening.awaited())
             .map(|opening| opening.deadline);
         restarts
             .chain(live)
@@ -980,9 +971,15 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             *ext != id
         });
         // A View it was asked to open won't come now.
-        let (stopped, waiting) = std::mem::take(&mut self.openings)
-            .into_iter()
-            .partition(|opening| opening.running.is_some_and(|(_, ext)| ext == id));
+        let invocations = &self.invocations;
+        let (stopped, waiting) =
+            std::mem::take(&mut self.openings)
+                .into_iter()
+                .partition(|opening| {
+                    opening
+                        .running
+                        .is_some_and(|running| !invocations.contains_key(&running))
+                });
         self.openings = waiting;
         for opening in stopped {
             let failure = format!("{name} stopped before its View opened");
@@ -1156,29 +1153,28 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
     }
 
     fn action_done(&mut self, id: ExtensionId, invocation: u64, outcome: Outcome, now: Instant) {
-        if let Some(n) = self
-            .openings
-            .iter()
-            .position(|opening| opening.running == Some((invocation, id)))
-        {
-            let opening = self.openings.swap_remove(n);
-            match outcome {
-                Outcome::KeepOpen => self.open_menus(&opening, None),
-                Outcome::Failed { message } => self.open_menus(&opening, Some(message)),
-                // Closes a menu that was open already, or opened late.
-                Outcome::Close => self.broadcast(|| ToFrontEnd::Close),
-                Outcome::Type { text } => self.output(Output::Type(text), now),
-                Outcome::Paste(clipboard) => self.output(Output::Paste(clipboard), now),
-                Outcome::Copy(clipboard) => self.copy(clipboard),
-            }
-            return;
-        }
         if self.invocations.get(&invocation).map(|&(_, ext)| ext) != Some(id) {
             return;
         }
         let Some((front_end, _)) = self.invocations.remove(&invocation) else {
             return;
         };
+        // Run for `kotodama open --view`, it answers the menus rather than
+        // the command; what it types or copies goes out as for any Action.
+        if let Some(n) = self
+            .openings
+            .iter()
+            .position(|opening| opening.running == Some(invocation))
+        {
+            let opening = self.openings.swap_remove(n);
+            match outcome {
+                Outcome::KeepOpen => return self.open_menus(&opening, None),
+                Outcome::Failed { message } => return self.open_menus(&opening, Some(message)),
+                // Closes a menu that was open already, or opened late.
+                Outcome::Close => return self.broadcast(|| ToFrontEnd::Close),
+                _ => {}
+            }
+        }
         let session = self.sessions.get(&front_end);
         match outcome {
             Outcome::Close => {
@@ -1354,26 +1350,13 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             FromFrontEnd::Open { query, view } => {
                 self.refresh_empty(Update::Fresh, Some(id));
                 match view {
-                    Some(view) => {
-                        self.openings.push(Opening {
-                            from: id,
-                            query,
-                            view,
-                            running: None,
-                            opened: false,
-                            deadline: now + OPEN_VIEW_TIMEOUT,
-                        });
-                        self.run_openings(now);
-                    }
-                    None => self.broadcast_from(id, || ToFrontEnd::Open {
-                        query: query.clone(),
-                        view: None,
-                    }),
+                    Some(text) => self.open_on_view(id, query, &text, now),
+                    None => self.ask_menus(id, ToFrontEnd::Open { query, view: None }),
                 }
             }
             FromFrontEnd::Toggle => {
                 self.refresh_empty(Update::Fresh, Some(id));
-                self.broadcast_from(id, || ToFrontEnd::Toggle);
+                self.ask_menus(id, ToFrontEnd::Toggle);
             }
         }
     }
@@ -1425,6 +1408,50 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
         }
     }
 
+    /// Passes `message` on to every menu but `from`'s, or holds it back
+    /// while the menus wait on a View.
+    fn ask_menus(&mut self, from: FrontEndId, message: ToFrontEnd) {
+        if self.openings.iter().any(Opening::awaited) {
+            self.held.push((from, message));
+        } else {
+            self.broadcast_from(from, || message.clone());
+        }
+    }
+
+    /// Passes on what was held back, once no View is awaited.
+    fn release_held(&mut self) {
+        if self.held.is_empty() || self.openings.iter().any(Opening::awaited) {
+            return;
+        }
+        for (from, message) in std::mem::take(&mut self.held) {
+            self.broadcast_from(from, || message.clone());
+        }
+    }
+
+    /// `kotodama open --view <text>`: the menus wait until the View is there.
+    fn open_on_view(&mut self, from: FrontEndId, query: String, text: &str, now: Instant) {
+        let Some(view) = ViewName::parse(text) else {
+            let failure = format!("No View `{text}`; name one as <extension>/<item>");
+            self.broadcast_from(from, || ToFrontEnd::Open {
+                query: query.clone(),
+                view: Some(text.to_owned()),
+            });
+            self.broadcast_from(from, || ToFrontEnd::ActionFailed {
+                message: failure.clone(),
+            });
+            return;
+        };
+        self.openings.push(Opening {
+            from,
+            query,
+            view,
+            running: None,
+            opened: false,
+            deadline: now + OPEN_VIEW_TIMEOUT,
+        });
+        self.run_openings(now);
+    }
+
     /// Runs the primary Action of each Item `kotodama open --view` waits on,
     /// once its Extension has indexed it. One that can't run opens the menus
     /// on the search, saying why. Not recorded as a pick: it wasn't picked
@@ -1436,8 +1463,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
                 n += 1;
                 continue;
             }
-            let view = self.openings[n].view.clone();
-            match self.run_opening(&view, now) {
+            match self.run_opening(n, now) {
                 Ok(running) => {
                     self.openings[n].running = running;
                     n += 1;
@@ -1450,25 +1476,21 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
         }
     }
 
-    /// Runs the primary Action of the Item `view` names, as
-    /// `<extension>/<item id>`: its invocation and Extension, or `None` while
-    /// the Extension starts, or started so recently that the Item may still
-    /// be on its way.
-    fn run_opening(
-        &mut self,
-        view: &str,
-        now: Instant,
-    ) -> Result<Option<(u64, ExtensionId)>, String> {
+    /// Runs the primary Action of the `n`th Opening's Item: its invocation,
+    /// or `None` while the Extension starts, or started so recently that the
+    /// Item may still be on its way.
+    fn run_opening(&mut self, n: usize, now: Instant) -> Result<Option<u64>, String> {
+        let opening = &self.openings[n];
+        let view = &opening.view;
         let no_view = || format!("No View `{view}`; name one as <extension>/<item>");
-        let (name, id) = view.split_once('/').ok_or_else(no_view)?;
-        let ext_id = self.extension_named(name).ok_or_else(no_view)?;
+        let ext_id = self.extension_named(&view.extension).ok_or_else(no_view)?;
         let ext = &self.extensions[ext_id.0];
         let State::Up { since, .. } = ext.state else {
             return Ok(None);
         };
         let Some(item) = self
             .index
-            .find(ext_id, id)
+            .find(ext_id, &view.item)
             .and_then(|slot| self.index.entry(slot))
             .map(|entry| &entry.item)
         else {
@@ -1491,8 +1513,10 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
         }) {
             return Err(format!("{} stopped answering", ext.name()));
         }
+        let from = opening.from;
         self.next_id += 1;
-        Ok(Some((invocation, ext_id)))
+        self.invocations.insert(invocation, (from, ext_id));
+        Ok(Some(invocation))
     }
 
     /// Opens the menus for `kotodama open --view`, unless they opened when it
@@ -1501,7 +1525,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
         if !opening.opened {
             self.broadcast_from(opening.from, || ToFrontEnd::Open {
                 query: opening.query.clone(),
-                view: Some(opening.view.clone()),
+                view: Some(opening.view.to_string()),
             });
         }
         if let Some(message) = failure {
@@ -1518,7 +1542,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
         let mut n = 0;
         while n < self.openings.len() {
             let opening = &mut self.openings[n];
-            if opening.opened || opening.deadline > now {
+            if !opening.awaited() || opening.deadline > now {
                 n += 1;
             } else if opening.running.is_some() {
                 self.open_menus(&self.openings[n], None);

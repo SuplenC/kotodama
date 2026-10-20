@@ -15,6 +15,7 @@ pub mod keywords;
 pub mod kind_order;
 mod link;
 mod notify;
+mod open_view;
 pub mod paths;
 pub mod rank;
 mod server;

@@ -287,3 +287,61 @@ fn an_extension_that_stops_before_its_view_is_there_opens_the_search_and_says_so
         ]
     );
 }
+
+#[test]
+fn a_toggle_or_open_while_a_view_is_awaited_waits_for_it_so_the_search_never_shows_first() {
+    let (mut h, git, menu, command) = git();
+    let other = h.front_end();
+    open_on(&mut h, &command, "git/branches");
+    let invocation = ran(&git, "list", "branches");
+
+    h.front_end_sends(&other, FromFrontEnd::Toggle);
+    let fir = FromFrontEnd::Open {
+        query: "fir".into(),
+        view: None,
+    };
+    h.front_end_sends(&other, fir);
+    assert_eq!(sent(&menu), [], "held back with the View");
+
+    h.send(&git, FromExtension::PushView(branches_view()));
+    done(&mut h, &git, invocation, Outcome::KeepOpen);
+    assert_eq!(
+        sent(&menu),
+        [
+            ToFrontEnd::PushView {
+                extension: "git".into(),
+                view: branches_view(),
+            },
+            opened("git/branches"),
+            ToFrontEnd::Toggle,
+            ToFrontEnd::Open {
+                query: "fir".into(),
+                view: None,
+            },
+        ],
+        "in the order they were asked for"
+    );
+    assert!(
+        !sent(&other).contains(&ToFrontEnd::Toggle),
+        "never to the asker"
+    );
+
+    h.front_end_sends(&other, FromFrontEnd::Toggle);
+    assert_eq!(
+        sent(&menu),
+        [ToFrontEnd::Toggle],
+        "nothing awaited any more"
+    );
+}
+
+#[test]
+fn a_toggle_held_back_goes_through_once_the_menus_open_on_the_search_without_the_view() {
+    let (mut h, git, menu, command) = git();
+    open_on(&mut h, &command, "git/branches");
+    ran(&git, "list", "branches");
+    h.front_end_sends(&command, FromFrontEnd::Toggle);
+    assert_eq!(sent(&menu), []);
+
+    h.advance(Duration::from_secs(1));
+    assert_eq!(sent(&menu), [opened("git/branches"), ToFrontEnd::Toggle]);
+}
