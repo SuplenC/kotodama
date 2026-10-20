@@ -49,7 +49,7 @@ pub enum FromFrontEnd {
         query: String,
         /// A View to open on, as `<extension>/<item id>`: the Daemon runs that
         /// Item's primary Action, and passes the request on only once the
-        /// View it pushes is there, or after a second without it (ADR 0013).
+        /// View it pushes is there, or after a second without it (ADR 0014).
         view: Option<String>,
     },
     /// Asks every other Front end to open if it is closed and close if it is

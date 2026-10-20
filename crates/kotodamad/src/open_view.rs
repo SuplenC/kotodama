@@ -1,5 +1,5 @@
 //! `kotodama open --view <extension>/<item>`: what it names, and the request
-//! the Daemon holds back from the menus until the View is there (ADR 0013).
+//! the Daemon holds back from the menus until the View is there (ADR 0014).
 
 use std::fmt;
 use std::time::Instant;

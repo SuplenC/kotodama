@@ -1,4 +1,4 @@
-# 13. `kotodama open --view` names an Item whose primary Action pushes the View
+# 14. `kotodama open --view` names an Item whose primary Action pushes the View
 
 Status: accepted (2026-10-20)
 

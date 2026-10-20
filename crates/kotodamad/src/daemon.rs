@@ -132,7 +132,7 @@ const DEFAULT_ROWS: usize = 10;
 /// How long to wait for Front ends to close before typing anyway.
 const CLOSE_TIMEOUT: Duration = Duration::from_millis(500);
 /// How long `kotodama open --view` waits for its View before opening the
-/// menus on the search instead (ADR 0013). It covers starting the Extension,
+/// menus on the search instead (ADR 0014). It covers starting the Extension,
 /// as when the keypress also started the Daemon.
 const OPEN_VIEW_TIMEOUT: Duration = Duration::from_secs(1);
 /// The first restart delay after a crash; each crash in a row doubles it.
