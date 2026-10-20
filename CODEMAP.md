@@ -16,6 +16,7 @@ are in [docs/adr/](docs/adr/).
 - [`crates/kotodama-apps/`](crates/kotodama-apps/CODEMAP.md): Bundled extension, desktop apps from `.desktop` files.
 - [`crates/kotodama-calculator/`](crates/kotodama-calculator/CODEMAP.md): Bundled extension, math, units, currency, dates.
 - [`crates/kotodama-clipboard/`](crates/kotodama-clipboard/CODEMAP.md): Bundled extension, clipboard history.
+- [`crates/kotodama-emoji/`](crates/kotodama-emoji/CODEMAP.md): Bundled extension, emoji (with skin tones) and symbols, typed or copied.
 - [`crates/kotodama-folders/`](crates/kotodama-folders/CODEMAP.md): Bundled extension, git projects and scripts from configured folders.
 - `e2e/`: end-to-end tests against headless sway (`e2e/run`, `e2e/lib.sh`, one dir per test).
 - `nix/`: `package.nix` (the package and Bundled extension layout), `home-manager.nix`, `tests/` (NixOS VM and QML module checks).
@@ -40,8 +41,8 @@ are in [docs/adr/](docs/adr/).
 
 - Unit tests: `#[cfg(test)]` modules in each `src/*.rs`.
 - Integration: `crates/*/tests/*.rs`. Daemon: `kotodamad/tests/` (`common/` helpers, `fixtures/recorder`, `ranking.rs`, `interaction.rs`, `open_view.rs`, `config.rs`, `forget.rs`). Protocol: `layout.rs`, `conformance.rs`, `shell_extension.rs`.
-- e2e: `e2e/*/test.sh` under headless sway. `latency` is skipped on PRs. `open-view` checks `kotodama open --view` shows the View in the first frame (its `shell.qml` logs the top View as the window maps).
-- Benches: `kotodamad/benches/{query,daemon}.rs` (+ `corpus/`), `kotodama-protocol/benches/batch.rs`, `kotodama-calculator/benches/answer.rs`, `kotodama-clipboard/benches/search.rs`.
+- e2e: `e2e/*/test.sh` under headless sway. `latency` is skipped on PRs. `emoji` types an emoji, a symbol and a skin tone into a test client. `open-view` checks `kotodama open --view` shows the View in the first frame (its `shell.qml` logs the top View as the window maps).
+- Benches: `kotodamad/benches/{query,daemon}.rs` (+ `corpus/`), `kotodama-protocol/benches/batch.rs`, `kotodama-calculator/benches/answer.rs`, `kotodama-clipboard/benches/search.rs`, `kotodama-emoji/benches/search.rs`.
 - Nix: `nix/tests/vm.nix` (NixOS VM, `front-end.py`), `nix/tests/qml-module.nix`; `flake.nix` `checks`.
 - Script tests: `scripts/tests/*.sh`.
 

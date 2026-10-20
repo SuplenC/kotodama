@@ -8,7 +8,7 @@ Kotodama is a command menu for Wayland desktops. You type, and it finds and does
 - **A Quickshell QML module** written in Rust (cxx-qt) gives QML a native result model. QML only draws the results.
 - **Extensions** are separate processes in any language. They speak a protocol whose wire format is negotiated (JSON, MessagePack or postcard), so a crashing Extension never takes down the menu.
 
-Status: early. The protocol, the Daemon, the Quickshell Front end and the apps, clipboard history and calculator Bundled extensions work; Views, the Action panel and the other Bundled extensions are next. See `docs/adr/0001-architecture.md` and the issues.
+Status: early. The protocol, the Daemon, the Quickshell Front end and the apps, clipboard history, calculator and emoji Bundled extensions work; Views, the Action panel and the other Bundled extensions are next. See `docs/adr/0001-architecture.md` and the issues.
 
 ## Installing
 
@@ -223,6 +223,21 @@ network = true
 # Where the rates come from: frankfurter's API, or anything answering like it.
 rates_url = "https://api.frankfurter.app/latest"
 ```
+
+### Emoji and symbols
+
+`kotodama-emoji` (`crates/kotodama-emoji`, Extension name `emoji`) makes every emoji and the common symbols Items of kind `emoji.character`: arrows, math, punctuation and keyboard keys (⌘ ⌥ ⌃ ⇧ ⎋ ⏎ ⌫). Each is titled with the character and its CLDR name ("👍 Thumbs up") and found by the name and its CLDR keywords, so `thumbs` and `like` find 👍, `arrow right` finds →, and `command` finds ⌘. Its primary Action, "Type", has the Daemon type the character into the window the menu was opened from; "Copy" puts it on the clipboard. An emoji with skin tones is one Item, with an Action to type each tone ("Type 👍🏽") after those two.
+
+```toml
+[extensions.emoji]
+# The skin tone "Type" and "Copy" use: light, medium-light, medium, medium-dark
+# or dark. Unset, emoji are their default yellow.
+skin_tone = "medium"
+```
+
+The characters are Indexed items, sent once at start, so the Daemon searches them with everything else and ranks them by Frecency, with no round trip on a keystroke. They are Unicode Emoji 17 and CLDR 48's English names and keywords (Unicode License v3, `data/LICENSE-UNICODE`), kept compact in `data/emoji.tsv` (`data/update.sh` regenerates it), built into the binary and read in place.
+
+Its `manifest.toml` runs `./kotodama-emoji`, so a package installs the binary next to it in `$XDG_DATA_DIRS/kotodama/extensions/emoji/`.
 
 ### Folder sources
 

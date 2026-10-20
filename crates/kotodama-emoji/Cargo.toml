@@ -1,0 +1,22 @@
+[package]
+name = "kotodama-emoji"
+version.workspace = true
+description = "The emoji Bundled extension: emoji, with skin tones, and symbols as Indexed items that type or copy themselves"
+edition.workspace = true
+# The code is the workspace's; data/emoji.tsv is drawn from Unicode's emoji
+# data and CLDR (see data/LICENSE-UNICODE).
+license = "Apache-2.0 AND Unicode-3.0"
+repository.workspace = true
+
+[dependencies]
+kotodama-extension = { path = "../kotodama-extension" }
+kotodama-protocol = { path = "../kotodama-protocol" }
+
+[dev-dependencies]
+# The search tests and benchmark run the real Daemon in process.
+kotodamad = { path = "../kotodamad" }
+tempfile = "3.27.0"
+
+[[bench]]
+name = "search"
+harness = false
