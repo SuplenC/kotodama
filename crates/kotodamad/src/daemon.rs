@@ -332,7 +332,8 @@ struct Candidate {
     /// Identity: of the Results of one Identity, the one picked through most
     /// goes first (see [`Daemon::lead_with_direct_picks`]).
     direct: f64,
-    /// How well it matches, to break a tie: initials beat a word start.
+    /// How well it matches, to break a tie: initials beat a word start, and
+    /// an exact title beats an exact keyword.
     fine: Tier,
     /// Named by an Alias rather than by its own title or keyword, which wins
     /// a tie.
@@ -3577,7 +3578,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             let named = match passed_over {
                 None => true,
                 Some(passed_over) => {
-                    candidate.fine == Tier::Exact
+                    candidate.fine.coarse() == Tier::Exact.coarse()
                         && !self.history_key(session, candidate.source).is_some_and(
                             |(extension, id)| {
                                 passed_over.iter().any(|(e, i)| e == extension && i == id)

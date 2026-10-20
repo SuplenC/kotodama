@@ -29,7 +29,11 @@ pub enum Tier {
     /// The query is the first letters of consecutive words, as `vsc` is of
     /// Visual Studio Code. Ranks as a word start, ahead of one on a tie.
     Initials,
-    /// The whole title, or one of the Item's keywords, is the query.
+    /// One of the Item's keywords is the query. Ranks as exact, behind an
+    /// exact title on a tie.
+    Keyword,
+    /// The whole title is the query, past any symbols that lead it, as
+    /// `fire` is of `🔥 Fire`.
     Exact,
 }
 
@@ -41,7 +45,7 @@ impl Tier {
             Tier::Scattered => 1,
             Tier::Inside => 2,
             Tier::WordStart | Tier::Initials => 3,
-            Tier::Exact => 4,
+            Tier::Keyword | Tier::Exact => 4,
         }
     }
 }
@@ -885,18 +889,20 @@ impl Tiers {
         self.texts(haystack.texts(), query, matched)
     }
 
-    /// How well an Item matches: the best of its title and its keywords, or
-    /// failing those, its subtitle. A subtitle counts only for a query of at
-    /// least [`SUBTITLE_LETTERS`] letters, only at word starts, and then only
-    /// as [`Tier::Inside`]. Only the texts in `matched` are looked at. `None`
-    /// if nothing matches well enough.
+    /// How well an Item matches: the best of its title and its keywords, where
+    /// an exact keyword is [`Tier::Keyword`], or failing those, its subtitle.
+    /// A subtitle counts only for a query of at least [`SUBTITLE_LETTERS`]
+    /// letters, only at word starts, and then only as [`Tier::Inside`]. Only
+    /// the texts in `matched` are looked at. `None` if nothing matches well
+    /// enough.
     pub fn texts(&mut self, texts: Texts, query: &Query, matched: Matched) -> Option<Tier> {
         let mut best = None;
         if matched.title {
             best = self.text(texts.title, query);
         }
         if matched.words && best < Some(Tier::Exact) && !texts.words.is_empty() {
-            best = best.max(self.text(texts.words, query));
+            let words = self.text(texts.words, query);
+            best = best.max(words.map(|tier| tier.min(Tier::Keyword)));
         }
         if best.is_none()
             && matched.subtitle
@@ -1013,8 +1019,8 @@ impl Tiers {
 
     /// How well one folded text matches: the worst of the query's words, or
     /// `Exact` if the whole text, or one of its parts between
-    /// [`SEPARATOR`]s, is the query. A one-letter word only matches at the
-    /// start of a word.
+    /// [`SEPARATOR`]s, is the query, with or without any symbols that lead it.
+    /// A one-letter word only matches at the start of a word.
     fn text(&mut self, text: Text, query: &Query) -> Option<Tier> {
         if query.is_empty() {
             return None;
@@ -1038,13 +1044,29 @@ impl Tiers {
 }
 
 /// Whether a folded text, or one of its parts between [`SEPARATOR`]s, is
-/// `whole`.
+/// `whole`, with or without any symbols that lead it.
 fn is_exact(chars: Utf32Str, whole: &[char]) -> bool {
     with_chars!(chars, |chars| {
+        let is = |part: &[_]| part.len() == whole.len() && starts_with(part, 0, whole);
         chars
             .split(|c| c.char() == SEPARATOR)
-            .any(|part| part.len() == whole.len() && starts_with(part, 0, whole))
+            .any(|part| is(part) || is(past_symbols(part)))
     })
+}
+
+/// What follows the symbols that lead a folded text and the space after
+/// them, as `fire` follows `🔥 ` in `🔥 fire`: an Extension may show a
+/// character before a name. The whole text if no symbol leads it.
+#[inline]
+fn past_symbols<C: Char>(chars: &[C]) -> &[C] {
+    let symbols = chars
+        .iter()
+        .take_while(|c| !c.char().is_alphanumeric() && c.char() != ' ')
+        .count();
+    match chars.get(symbols) {
+        Some(c) if symbols > 0 && c.char() == ' ' => &chars[symbols + 1..],
+        _ => chars,
+    }
 }
 
 /// How well one word of a query matches a folded text.
@@ -1251,6 +1273,16 @@ mod tests {
         assert_eq!(tier("Color Decoder", "code"), Some(Tier::Inside));
         assert_eq!(tier("Color Dev", "code"), Some(Tier::Scattered));
         assert_eq!(tier("Firefox", "alarm"), None);
+    }
+
+    #[test]
+    fn symbols_before_a_title_do_not_keep_it_from_being_exact() {
+        assert_eq!(tier("🔥 Fire", "fire"), Some(Tier::Exact));
+        assert_eq!(tier("❤️‍🔥 Heart on fire", "heart on fire"), Some(Tier::Exact));
+        assert_eq!(tier("- Fire", "fire"), Some(Tier::Exact));
+        assert_eq!(tier("🔥 Fire", "🔥 fire"), Some(Tier::Exact));
+        assert_eq!(tier("~/fire", "fire"), Some(Tier::WordStart));
+        assert_eq!(tier("Fire 🔥", "fire"), Some(Tier::WordStart));
     }
 
     #[test]

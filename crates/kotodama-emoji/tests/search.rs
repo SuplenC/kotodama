@@ -12,6 +12,16 @@ fn thumbs_finds_thumbs_up_first() {
     assert!(menu.ids("thumbs").contains(&"👎".to_owned()));
 }
 
+// Regression: #121.
+#[test]
+fn the_emoji_named_as_the_query_comes_first() {
+    let mut menu = Menu::start("");
+    for (query, emoji) in [("fire", "🔥"), ("bird", "🐦")] {
+        let ids = menu.ids(query);
+        assert_eq!(ids[0], emoji, "{query}: {ids:?}");
+    }
+}
+
 #[test]
 fn arrow_right_finds_the_right_arrow() {
     let mut menu = Menu::start("");
