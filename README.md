@@ -39,6 +39,39 @@ The flake builds Kotodama once and splits it into outputs, each also a package o
 }
 ```
 
+Every config table below also has typed options, so a typo or a value of the wrong type fails the build rather than being logged at runtime. They merge into `settings`, and an option left unset is left out, so the default applies. The Quicklinks and Aliases, keyed by your own names, stay in `settings`.
+
+| Option | Config key |
+| --- | --- |
+| `history.{picksToLearn, picksToTakeOver, halfLifeDays, liftThreshold, timeOfDay, usageLog}` | `[history]` |
+| `emptyQuery.{mostUsed, menu}` | `[empty_query]` |
+| `ranking.kinds` | `[ranking]` |
+| `quicklinkDefaults.opener` | `[quicklink_defaults]` |
+| `extensions.apps.{terminal, hidden, names, withdrawWithin}` | `[extensions.apps]` |
+| `extensions.clipboard.{maxEntries, maxAgeDays}` | `[extensions.clipboard]` |
+| `extensions.calculator.{network, ratesUrl, decimalSeparator}` | `[extensions.calculator]` |
+| `extensions.emoji.skinTone` | `[extensions.emoji]` |
+| `extensions.web-search.engines` | `[extensions.web-search]` |
+| `extensions.ai.{apiKeyCommand, apiKeyFile, url, model, effort, debounceMs}` | `[extensions.ai]` (see [AI](#ai)) |
+| `extensions.folders.{folders, terminal, open, shell, lazygit, fileManager, copyPath}` | `[extensions.folders]` |
+
+Each option is the key in camelCase. `decimalSeparator`, `skinTone` and a folder's `kind` take only the values their Extension knows, and numbers are checked against the ranges the tables below give. The Hyprland Extension has no settings.
+
+```nix
+programs.kotodama = {
+  history.usageLog = true;
+  emptyQuery.menu = [ { extension = "apps"; item = "firefox"; } ];
+  quicklinkDefaults.opener = [ "firefox" "--new-tab" ];
+  extensions = {
+    apps.hidden = [ "qt5ct" ];
+    calculator.decimalSeparator = "comma";
+    emoji.skinTone = "medium";
+    folders.folders = [ { path = "~/Projects"; kind = "projects"; depth = 2; } ];
+    web-search.engines = [ { name = "Kagi"; url = "https://kagi.com/search?q={query}"; } ];
+  };
+};
+```
+
 The module installs the package and enables `kotodamad.socket`. On NixOS without home-manager, add the package to `systemd.packages` and `environment.systemPackages`, and set `systemd.user.sockets.kotodamad.wantedBy = [ "sockets.target" ]`.
 
 The QML module links against Qt, so it shares Qt with a Quickshell built from the same nixpkgs. With a Quickshell from any other nixpkgs (another channel, or Quickshell's own flake), Kotodama's package brings a second Qt, about 760 MiB. Build Kotodama with your Quickshell's nixpkgs instead, and only the 4 MiB module is new:
