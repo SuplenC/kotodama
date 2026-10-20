@@ -320,3 +320,33 @@ fn undo_keeps_what_was_picked_since() {
     assert!(history.picks("apps", "firefox").is_some(), "put back");
     assert_eq!(first(&mut h, &ui, "fi"), "Firefox");
 }
+
+#[test]
+fn clearing_an_empty_history_leaves_nothing_to_undo() {
+    let mut h = Harness::new(vec![plain("apps")]);
+    let ext = h.up(0);
+    h.add(&ext, apps());
+    let ui = h.front_end();
+    h.query(&ui, "clear history");
+    run(&mut h, &ui, "kotodama", "clear-history", "kotodama", "run");
+    assert!(undo_row(&mut h, &ui).is_none());
+}
+
+#[test]
+fn a_picked_quicklink_offers_forget_among_its_own_actions() {
+    let mut h = Harness::with_config(
+        vec![],
+        config("[quicklinks.gh]\ntitle = \"GitHub\"\nurl = \"https://github.com\""),
+    );
+    let ui = h.front_end();
+    h.query(&ui, "gh");
+    run(&mut h, &ui, "kotodama", "quicklink:gh", "kotodama", "open");
+    ui.drain();
+    let row = row(&mut h, &ui, "gh", "kotodama", "quicklink:gh");
+    assert_eq!(row.contributed, []);
+    let actions: Vec<&str> = row.item.actions.iter().map(|a| a.id.as_str()).collect();
+    assert_eq!(actions, ["open", FORGET]);
+
+    run_daemon_action(&mut h, &ui, "kotodama", "quicklink:gh", FORGET);
+    assert!(saved(&h).is_empty());
+}

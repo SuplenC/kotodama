@@ -458,25 +458,17 @@ fn undo_item(title: &str) -> Item {
         keyword: None,
         identity: None,
         keywords: Vec::new(),
-        actions: vec![Action {
-            id: "run".into(),
-            title: "Undo".into(),
-            shortcut: None,
-            arguments: Vec::new(),
-        }],
+        actions: vec![action_titled("run", "Undo".into())],
     }
 }
 
-/// One of the Actions the Daemon offers on Results.
-fn offered(id: &str, title: String) -> OfferedAction {
-    OfferedAction {
-        extension: OWN.to_owned(),
-        action: Action {
-            id: id.to_owned(),
-            title,
-            shortcut: None,
-            arguments: Vec::new(),
-        },
+/// An Action that takes no Arguments and has no shortcut.
+fn action_titled(id: &str, title: String) -> Action {
+    Action {
+        id: id.to_owned(),
+        title,
+        shortcut: None,
+        arguments: Vec::new(),
     }
 }
 
@@ -1240,10 +1232,11 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
                 action,
                 arguments,
             } => {
-                let run = if action.extension == OWN
-                    && matches!(action.id.as_str(), FORGET | CLEAR_EXTENSION_HISTORY)
-                {
-                    self.forget(id, &result, &action.id, now)
+                let daemons = action.extension == OWN;
+                let run = if daemons && action.id == FORGET {
+                    self.forget_result(id, &result, now)
+                } else if daemons && action.id == CLEAR_EXTENSION_HISTORY {
+                    self.clear_extension_history(id, &result, now)
                 } else if result.extension == OWN {
                     self.run_own(id, &result, &action, arguments, now)
                 } else {
@@ -1603,37 +1596,46 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
         Ok(())
     }
 
-    /// Runs one of the Actions the Daemon offers on every Result: forgets
-    /// the Result, or clears its Extension's history. The menu stays open.
-    fn forget(
+    /// Forgets one Result: everything the History keeps for it. The menu
+    /// stays open.
+    fn forget_result(
         &mut self,
         front_end: FrontEndId,
         result: &ResultRef,
-        action: &str,
         now: Instant,
     ) -> Result<(), String> {
-        let gone = || "that Result is gone".to_owned();
-        let session = self.sessions.get(&front_end).ok_or_else(gone)?;
-        let source = self
-            .source_of(session, &result.extension, &result.id)
-            .ok_or_else(gone)?;
-        let (_, item) = self.item(session, source).ok_or_else(gone)?;
-        if action == FORGET {
-            let keys = self.history_keys(session, &result.extension, item);
-            let title = format!("Undo forgetting “{}”", item.title);
-            let change = self.history.forget(&keys);
-            self.changed(title, change, now);
-            return Ok(());
-        }
+        let (session, item) = self.shown_item(front_end, result)?;
+        let keys = self.history_keys(session, &result.extension, item);
+        let title = format!("Undo forgetting “{}”", item.title);
+        let change = self.history.forget(&keys);
+        self.changed(title, change, now);
+        Ok(())
+    }
+
+    /// Forgets every Result of the Extension that owns `result`, the things
+    /// they stand for, and the Aliases that name them. The menu stays open.
+    fn clear_extension_history(
+        &mut self,
+        front_end: FrontEndId,
+        result: &ResultRef,
+        now: Instant,
+    ) -> Result<(), String> {
         let name = result.extension.as_str();
+        let (_, item) = self.shown_item(front_end, result)?;
         let ext = self
             .extension_named(name)
-            .ok_or_else(|| format!("`{}` has no Action `{action}`", item.title))?;
-        // The things its Items stand for go too, whoever else offers them.
+            .ok_or_else(|| format!("`{}` has no Action `{CLEAR_EXTENSION_HISTORY}`", item.title))?;
+        let live = self
+            .sessions
+            .get(&front_end)
+            .map(|session| session.live[ext.0].results.as_slice())
+            .unwrap_or_default();
+        // Their Identities go too, whoever else offers them: the History
+        // doesn't know which Extension a pick of one came through.
         let identities: HashSet<&str> = self
             .index
             .items(ext)
-            .chain(session.live[ext.0].results.iter().map(|live| &live.item))
+            .chain(live.iter().map(|live| &live.item))
             .filter_map(|item| item.identity.as_deref())
             .collect();
         let aliases: HashSet<String> = self
@@ -1648,10 +1650,38 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
                 || (extension == IDENTITIES && identities.contains(id))
                 || (extension == OWN && aliases.contains(id))
         });
-        self.store.forget_usage(Some(&result.extension));
-        let title = format!("Undo clearing the history of {}", result.extension);
+        self.store.forget_usage(Some(name));
+        let title = format!("Undo clearing the history of {name}");
         self.changed(title, change, now);
         Ok(())
+    }
+
+    /// The Item of a Result shown in a Front end's session, with the session.
+    fn shown_item(
+        &self,
+        front_end: FrontEndId,
+        result: &ResultRef,
+    ) -> Result<(&Session, &Item), String> {
+        let gone = || "that Result is gone".to_owned();
+        let session = self.sessions.get(&front_end).ok_or_else(gone)?;
+        let source = self
+            .source_of(session, &result.extension, &result.id)
+            .ok_or_else(gone)?;
+        let (_, item) = self.item(session, source).ok_or_else(gone)?;
+        Ok((session, item))
+    }
+
+    /// The ids the picks of the Aliases that name a Result are kept under.
+    fn alias_ids<'a>(
+        &'a self,
+        extension: &'a str,
+        id: &'a str,
+    ) -> impl Iterator<Item = String> + 'a {
+        self.keywords
+            .aliases
+            .iter()
+            .filter(move |(_, alias)| alias.extension == extension && alias.item == id)
+            .map(|(keyword, _)| alias_id(keyword))
     }
 
     /// Everything the History may keep for one Result: its own picks, its
@@ -1667,17 +1697,19 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
                 }
             }
         }
-        for (keyword, alias) in &self.keywords.aliases {
-            if alias.extension == extension && alias.item == item.id {
-                keys.push((OWN.to_owned(), alias_id(keyword)));
-            }
-        }
+        keys.extend(
+            self.alias_ids(extension, &item.id)
+                .map(|id| (OWN.to_owned(), id)),
+        );
         keys
     }
 
     /// Saves a change to the History, which can be undone for [`UNDO_FOR`],
-    /// and ranks every session again. Returns the id to undo it by.
-    fn changed(&mut self, title: String, change: Change, now: Instant) -> u64 {
+    /// and ranks every session again. A change of nothing is let go.
+    fn changed(&mut self, title: String, change: Change, now: Instant) {
+        if change.is_empty() {
+            return;
+        }
         self.store.save(&self.history);
         let id = self.next_id;
         self.next_id += 1;
@@ -1688,7 +1720,6 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             until: now + UNDO_FOR,
         });
         self.load_undo_item();
-        id
     }
 
     /// Undoes the change `id` to the History, if it can still be undone.
@@ -1719,10 +1750,18 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
         self.mark_late();
     }
 
-    /// Adds the Actions the Daemon offers on a Result: Forget, while the
-    /// History keeps anything for it, and clearing its Extension's history,
-    /// while it keeps anything for that Extension.
-    fn offer_forgetting(&self, extension: &str, item: &Item, offers: &mut Vec<OfferedAction>) {
+    /// Adds the Actions the Daemon offers on a Result the History keeps
+    /// anything for: Forget, and clearing its Extension's history. They go
+    /// with the Item's own Actions on the Daemon's own Results (ADR 0005),
+    /// and after the Contributed actions on the rest. Only Results with
+    /// history get them, so a row costs nothing more until something is
+    /// picked through it.
+    fn offer_forgetting(
+        &self,
+        extension: &str,
+        item: &mut Item,
+        contributed: &mut Vec<OfferedAction>,
+    ) {
         if self.history.is_empty() {
             return;
         }
@@ -1732,17 +1771,26 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
                 .identity
                 .as_deref()
                 .is_some_and(|identity| picked(IDENTITIES, identity))
-            || self.keywords.aliases.iter().any(|(keyword, alias)| {
-                alias.extension == extension
-                    && alias.item == item.id
-                    && picked(OWN, &alias_id(keyword))
-            });
-        if remembered {
-            offers.push(offered(FORGET, "Forget".into()));
+            || self
+                .alias_ids(extension, &item.id)
+                .any(|alias| picked(OWN, &alias));
+        if !remembered {
+            return;
         }
-        if extension != OWN && self.history.has_extension(extension) {
-            let title = format!("Clear the history of {extension}");
-            offers.push(offered(CLEAR_EXTENSION_HISTORY, title));
+        let forget = action_titled(FORGET, "Forget".into());
+        if extension == OWN {
+            item.actions.push(forget);
+            return;
+        }
+        let clear = action_titled(
+            CLEAR_EXTENSION_HISTORY,
+            format!("Clear the history of {extension}"),
+        );
+        for action in [forget, clear] {
+            contributed.push(OfferedAction {
+                extension: OWN.to_owned(),
+                action,
+            });
         }
     }
 
@@ -2603,7 +2651,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             ),
             None => (OWN.to_owned(), Vec::new()),
         };
-        self.offer_forgetting(&extension, &item, &mut contributed);
+        self.offer_forgetting(&extension, &mut item, &mut contributed);
         Some(ShownResult {
             extension,
             item,

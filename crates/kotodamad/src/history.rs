@@ -444,7 +444,7 @@ impl History {
             }
             learned.at = at;
             let after = Some(learned.clone());
-            change.learned.push((key, before, after));
+            change.learned.push(Replaced { key, before, after });
         }
         self.trim(&mut change);
         change
@@ -466,7 +466,11 @@ impl History {
         ids.insert(id.to_owned(), picks);
         let key = (extension.to_owned(), id.to_owned());
         Change {
-            picks: vec![(key, before, Some(picks))],
+            picks: vec![Replaced {
+                key,
+                before,
+                after: Some(picks),
+            }],
             learned: Vec::new(),
         }
     }
@@ -506,7 +510,7 @@ impl History {
                 let forget = forgotten((extension, id));
                 if forget {
                     let key = (extension.clone(), id.clone());
-                    change.picks.push((key, Some(*picks), None));
+                    change.picks.push(Replaced::gone(key, *picks));
                 }
                 !forget
             });
@@ -527,7 +531,11 @@ impl History {
             learned.contenders.retain(|(key, _)| !is_forgotten(key));
             let keep = learned.choice.is_some() || !learned.contenders.is_empty();
             let after = keep.then(|| learned.clone());
-            change.learned.push((query.clone(), Some(before), after));
+            change.learned.push(Replaced {
+                key: query.clone(),
+                before: Some(before),
+                after,
+            });
             keep
         });
         change
@@ -537,12 +545,17 @@ impl History {
     /// changed again since, which stays as it is now.
     pub fn undo(&mut self, change: Change) {
         self.version += 1;
-        for (key, before, after) in change.picks.into_iter().rev() {
+        for Replaced { key, before, after } in change.picks.into_iter().rev() {
             if self.picks(&key.0, &key.1).copied() == after {
                 self.set_picks(key, before);
             }
         }
-        for (query, before, after) in change.learned.into_iter().rev() {
+        for Replaced {
+            key: query,
+            before,
+            after,
+        } in change.learned.into_iter().rev()
+        {
             if self.learned.get(&query) == after.as_ref() {
                 match before {
                     Some(learned) => self.learned.insert(query, learned),
@@ -620,11 +633,11 @@ impl History {
             for (id, picks) in ids {
                 change
                     .picks
-                    .push(((extension.clone(), id), Some(picks), None));
+                    .push(Replaced::gone((extension.clone(), id), picks));
             }
         }
         for (query, learned) in self.learned.drain() {
-            change.learned.push((query, Some(learned), None));
+            change.learned.push(Replaced::gone(query, learned));
         }
         change
     }
@@ -648,7 +661,7 @@ impl History {
                     let keep = picks.count(at, half_life) >= floor;
                     if !keep {
                         let key = (extension.clone(), id.clone());
-                        change.picks.push((key, Some(*picks), None));
+                        change.picks.push(Replaced::gone(key, *picks));
                     }
                     keep
                 });
@@ -665,7 +678,7 @@ impl History {
                 if !keep {
                     change
                         .learned
-                        .push((query.clone(), Some(learned.clone()), None));
+                        .push(Replaced::gone(query.clone(), learned.clone()));
                 }
                 keep
             });
@@ -677,8 +690,29 @@ impl History {
 /// while: each entry it touched, as it was before and after.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Change {
-    picks: Vec<(ResultKey, Option<Picks>, Option<Picks>)>,
-    learned: Vec<(String, Option<Learned>, Option<Learned>)>,
+    picks: Vec<Replaced<ResultKey, Picks>>,
+    /// By query, as [`query_key`] gives it.
+    learned: Vec<Replaced<String, Learned>>,
+}
+
+/// What the History kept under one key before and after a change; `None`
+/// when it kept nothing.
+#[derive(Clone, Debug, PartialEq)]
+struct Replaced<K, V> {
+    key: K,
+    before: Option<V>,
+    after: Option<V>,
+}
+
+impl<K, V> Replaced<K, V> {
+    /// What a change removed.
+    fn gone(key: K, before: V) -> Self {
+        Replaced {
+            key,
+            before: Some(before),
+            after: None,
+        }
+    }
 }
 
 impl Change {
@@ -771,9 +805,12 @@ impl Store for Disk {
     }
 
     fn forget_usage(&mut self, extension: Option<&str>) {
-        self.usage_log
-            .get_or_insert_with(|| usage::Writer::new(self.usage.clone()))
-            .forget(extension.map(str::to_owned));
+        let extension = extension.map(str::to_owned);
+        match &self.usage_log {
+            Some(writer) => writer.forget(extension),
+            // No thread is kept for a log that is off.
+            None => usage::forget(self.usage.clone(), extension),
+        }
     }
 }
 

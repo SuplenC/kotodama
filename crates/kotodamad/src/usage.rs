@@ -28,7 +28,7 @@
 //! Results from them. Undoing either puts back the History, never the log.
 
 use std::fs::{self, File, OpenOptions};
-use std::io::{self, Write};
+use std::io::{self, BufRead, BufReader, BufWriter, Write};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -137,24 +137,31 @@ struct Picked {
 /// Rewrites the log at `path` without the picks of `extension`'s Results,
 /// replacing it whole so a crash leaves the old one.
 fn drop_picks(path: &Path, extension: &str) -> io::Result<()> {
-    let text = fs::read_to_string(path)?;
-    let kept: String = text
-        .split_inclusive('\n')
-        .filter(|line| {
-            serde_json::from_str::<Picked>(line).map_or(true, |picked| {
-                picked.extension.as_deref() != Some(extension)
-            })
-        })
-        .collect();
-    if kept.len() == text.len() {
-        return Ok(());
-    }
+    let lines = BufReader::new(File::open(path)?).split(b'\n');
     let mut partial = path.as_os_str().to_owned();
     partial.push(".partial");
     let partial = PathBuf::from(partial);
     let _ = fs::remove_file(&partial);
-    open(&partial)?.write_all(kept.as_bytes())?;
-    fs::rename(&partial, path)
+    let mut kept = BufWriter::new(open(&partial)?);
+    let mut dropped = false;
+    for line in lines {
+        let line = line?;
+        let picked = serde_json::from_slice::<Picked>(&line)
+            .is_ok_and(|picked| picked.extension.as_deref() == Some(extension));
+        if picked {
+            dropped = true;
+        } else {
+            kept.write_all(&line)?;
+            kept.write_all(b"\n")?;
+        }
+    }
+    kept.flush()?;
+    drop(kept);
+    if dropped {
+        fs::rename(&partial, path)
+    } else {
+        fs::remove_file(&partial)
+    }
 }
 
 /// The older log, which the current one replaces when it's full.
@@ -179,6 +186,16 @@ fn open(path: &Path) -> io::Result<File> {
 /// How many entries may wait for a slow disk; past this, new ones are dropped
 /// rather than held in memory.
 const PENDING: usize = 1024;
+
+/// Forgets the log at `path`, current and rotated, on a thread of its own, as
+/// [`Writer::forget`] does, for when no Writer is running.
+pub fn forget(path: PathBuf, extension: Option<String>) {
+    spawn("usage".into(), move || {
+        if let Err(err) = Log::new(path, MAX_BYTES).forget(extension.as_deref()) {
+            log::error!("couldn't forget the usage log: {err}");
+        }
+    });
+}
 
 /// What the Writer's thread is asked to do.
 enum Op {
