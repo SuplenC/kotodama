@@ -1,6 +1,12 @@
 //! The Daemon as the benches drive it: the corpus Indexed off the keystroke
 //! path, as the real Daemon has it, and a Front end connected. `query.rs` and
 //! `instructions.rs` share it, so both measure the same keystroke.
+//!
+//! Time stands still in a Setup: every event happens at the moment it was
+//! made, on a wall clock that reads [`START`] in UTC. So a run counts the
+//! same instructions as the last: the History ranks the same, the time zone
+//! is never read, and no timer (planning the hot Items) falls due inside a
+//! measured query.
 
 use std::path::PathBuf;
 use std::sync::mpsc::{self, Receiver};
@@ -9,7 +15,7 @@ use std::time::Instant;
 use kotodama_protocol::{
     FromExtension, FromFrontEnd, Item, Manifest, Table, ToFrontEnd, View, ViewContent, WireFormat,
 };
-use kotodamad::clock::{DAY_SECS, When};
+use kotodamad::clock::{Clock, DAY_SECS, When};
 use kotodamad::daemon::{Daemon, Desktop, Event, ExtensionId, FrontEndId, Launcher, Output};
 use kotodamad::discovery::Found;
 use kotodamad::history::{History, Store};
@@ -36,6 +42,10 @@ impl Store for Nothing {
     fn forget_usage(&mut self, _: Option<&str>) {}
 }
 
+/// The wall clock when a Setup is made, in seconds since the Unix epoch:
+/// 2026-10-20 at 8:30 UTC.
+pub const START: u64 = 1_792_485_000;
+
 /// The Extensions every Setup runs: `apps` holds the corpus, `clipboard`
 /// whatever a bench sends it.
 pub const APPS: ExtensionId = ExtensionId(0);
@@ -52,6 +62,8 @@ pub struct Setup {
     /// Batches sent and not indexed yet.
     pub pending: usize,
     buf: Vec<u8>,
+    /// When every event happens.
+    pub now: Instant,
     /// Where the Items' payloads are kept, as in `$XDG_CACHE_HOME`.
     _payloads: tempfile::TempDir,
 }
@@ -62,14 +74,10 @@ impl Setup {
     }
 
     /// With 2000 Items picked, the most the History keeps, at every time of
-    /// day over a month.
+    /// day over the month before [`START`].
     pub fn picked() -> Self {
         let mut history = History::default();
-        let start = std::time::SystemTime::now()
-            .duration_since(std::time::SystemTime::UNIX_EPOCH)
-            .unwrap()
-            .as_secs()
-            - 30 * DAY_SECS;
+        let start = START - 30 * DAY_SECS;
         for n in 0..2000u64 {
             let at = start + n * 30 * DAY_SECS / 2000;
             let when = When {
@@ -97,6 +105,7 @@ impl Setup {
             Nothing,
             now,
         );
+        daemon.set_clock(Clock::starting_at(START));
         for extension in [APPS, CLIPBOARD] {
             let (sender, _) = mpsc::sync_channel(64);
             daemon.handle(
@@ -118,6 +127,7 @@ impl Setup {
             indexed,
             pending: 0,
             buf: Vec::new(),
+            now,
             _payloads: payloads,
         };
         setup.send(APPS, items);
@@ -153,7 +163,7 @@ impl Setup {
                 generation: 1,
                 message: FromExtension::AddItems { items },
             },
-            Instant::now(),
+            self.now,
         );
         self.pending += 1;
     }
@@ -165,7 +175,7 @@ impl Setup {
             if matches!(event, Event::Indexed(_)) {
                 self.pending -= 1;
             }
-            self.daemon.handle(event, Instant::now());
+            self.daemon.handle(event, self.now);
         }
         self.results.try_iter().for_each(drop);
     }
@@ -177,7 +187,7 @@ impl Setup {
                 front_end: MENU,
                 message: FromFrontEnd::Query { text: text.into() },
             },
-            Instant::now(),
+            self.now,
         );
         let results = self
             .results
@@ -211,7 +221,7 @@ impl Setup {
                     },
                 }),
             },
-            Instant::now(),
+            self.now,
         );
         self.results.try_iter().for_each(drop);
     }
@@ -228,7 +238,7 @@ impl Setup {
                     text: text.into(),
                 },
             },
-            Instant::now(),
+            self.now,
         );
         let reply = self.results.try_recv().unwrap();
         self.buf.clear();
@@ -246,7 +256,7 @@ impl Setup {
                 front_end: COMMAND,
                 message: FromFrontEnd::Toggle,
             },
-            Instant::now(),
+            self.now,
         );
         self.results.try_iter().for_each(drop);
     }
