@@ -39,6 +39,12 @@
         }
       );
 
+      # `pkgs.kotodama`, built with the nixpkgs it is applied to: with the
+      # nixpkgs a Quickshell comes from, the QML module uses that Quickshell's Qt.
+      overlays.default = final: _prev: {
+        kotodama = final.callPackage ./nix/package.nix { };
+      };
+
       homeModules.default = import ./nix/home-manager.nix self;
       # The name most home-manager configurations still use.
       homeManagerModules = self.homeModules;
@@ -141,6 +147,8 @@
       checks = forAllSystems (pkgs: {
         devShell = self.devShells.${pkgs.stdenv.hostPlatform.system}.default;
         package = self.packages.${pkgs.stdenv.hostPlatform.system}.default;
+        # The same derivation as `package` on this nixpkgs: checks the overlay evaluates.
+        overlay = (pkgs.extend self.overlays.default).kotodama;
         qml-module = import ./nix/tests/qml-module.nix {
           inherit pkgs;
           kotodama = self.packages.${pkgs.stdenv.hostPlatform.system}.default;
