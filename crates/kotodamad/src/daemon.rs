@@ -36,6 +36,7 @@ use crate::keywords::{self, Alias, Keywords};
 use crate::kind_order::{KindOrder, KindPlaces};
 use crate::narrowing::Narrowing;
 use crate::open_view::{Opening, ViewName};
+use crate::pick::{self, PICK, Pick};
 use crate::rank::{self, Haystack, Matched, Text, Tier, Tiers};
 use crate::reserved;
 use crate::segment::Edit;
@@ -850,6 +851,12 @@ pub struct Daemon<L, D, S> {
     invocations: HashMap<u64, (FrontEndId, ExtensionId)>,
     /// By the id of the form's View.
     argument_forms: HashMap<String, ArgumentForm>,
+    /// The Proposals waiting for the user to pick their Item, by the Front
+    /// end that shows the list; at most one each.
+    picks: HashMap<FrontEndId, Pick>,
+    /// The picks' lists, by the Extension whose Items they hold, for the
+    /// Daemon to filter as the user types.
+    pick_lists: Views,
     next_id: u64,
     config: Table,
     /// Running Extensions' Contributed actions by Item kind, in Extension order.
@@ -935,6 +942,8 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             live_queries: HashMap::new(),
             invocations: HashMap::new(),
             argument_forms: HashMap::new(),
+            picks: HashMap::new(),
+            pick_lists: Views::default(),
             next_id: 1,
             config,
             contributed: HashMap::new(),
@@ -1369,6 +1378,16 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
                 extension: name.clone(),
                 view: view.clone(),
             });
+        }
+        // Its Items can't be picked any more.
+        let picking: Vec<FrontEndId> = self
+            .picks
+            .iter()
+            .filter(|(_, pick)| pick.target == id)
+            .map(|(&front_end, _)| front_end)
+            .collect();
+        for front_end in picking {
+            self.cancel_pick(front_end);
         }
         for session in self.sessions.values_mut() {
             let live = &mut session.live[id.0];
@@ -1810,8 +1829,9 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
     }
 
     /// Runs an Action from the Action catalog that `proposer` proposed and the
-    /// user confirmed, on the one Indexed item of its kind that
-    /// offers it, as if the user had picked that Item's Action.
+    /// user confirmed, on the one Indexed item of its kind that offers it, as
+    /// if the user had picked that Item's Action. When several offer it, the
+    /// user picks one first.
     fn run_catalog_action(
         &mut self,
         front_end: FrontEndId,
@@ -1832,22 +1852,18 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             .extension_named(&action.extension)
             .filter(|&target| target != proposer && self.extensions[target.0].sender().is_some())
             .ok_or_else(|| format!("{} isn't running", action.extension))?;
-        // Two are enough to know it isn't one.
-        let mut offering: Vec<String> = self
+        let mut offering: Vec<Slot> = self
             .index
             .offering(target, kind.as_str(), &action.id)
-            .take(2)
-            .filter_map(|slot| self.index.id(slot).map(str::to_owned))
             .collect();
         let id = match offering.len() {
-            1 => offering.swap_remove(0),
-            2 => {
-                return Err(format!(
-                    "several {kind} Items offer `{}`; pick one in the search",
-                    action.id
-                ));
-            }
-            _ => {
+            1 => self
+                .index
+                .id(offering.swap_remove(0))
+                .map(str::to_owned)
+                .ok_or_else(|| format!("no {kind} Item offers `{}`", action.id))?,
+            2.. => return self.offer_pick(front_end, target, &offering, action, arguments),
+            0 => {
                 let contributed = self.extensions[target.0]
                     .found
                     .manifest
@@ -1875,6 +1891,133 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             Missing::AskInForm,
             now,
         )
+    }
+
+    /// Asks `front_end` which of the Items in `offering` the Action runs on,
+    /// in a list View of the Daemon's own, in place of any it asked before.
+    fn offer_pick(
+        &mut self,
+        front_end: FrontEndId,
+        target: ExtensionId,
+        offering: &[Slot],
+        action: ActionRef,
+        arguments: BTreeMap<String, String>,
+    ) -> Result<(), String> {
+        let items: Vec<Item> = offering
+            .iter()
+            .filter_map(|&slot| self.index.item(slot))
+            .map(Arc::unwrap_or_clone)
+            .collect();
+        if items.is_empty() {
+            return Err("those Items are gone".to_owned());
+        }
+        let title = items
+            .iter()
+            .flat_map(|item| &item.actions)
+            .find(|offered| offered.id == action.id)
+            .map_or_else(|| action.id.clone(), |offered| offered.title.clone());
+        self.cancel_pick(front_end);
+        let Some(session) = self.sessions.get(&front_end) else {
+            return Ok(());
+        };
+        let id = format!("pick-{}", self.next_id);
+        self.next_id += 1;
+        let view = pick::view(id.clone(), &title, items);
+        session.send(ToFrontEnd::PushView {
+            extension: OWN.to_owned(),
+            view: view.clone(),
+            contributed: BTreeMap::new(),
+        });
+        self.pick_lists.push(target, view);
+        self.picks.insert(
+            front_end,
+            Pick {
+                view: id,
+                target,
+                action,
+                arguments,
+            },
+        );
+        Ok(())
+    }
+
+    /// The user picked `result` in the list of `front_end`'s pick: the list
+    /// goes, and the proposed Action runs on it.
+    fn run_pick(
+        &mut self,
+        front_end: FrontEndId,
+        result: &ResultRef,
+        now: Instant,
+    ) -> Result<(), String> {
+        let gone = || "that Result is gone".to_owned();
+        let listed = self.picks.get(&front_end).is_some_and(|pick| {
+            self.pick_lists
+                .get(pick.target, &pick.view)
+                .is_some_and(|open| open.items().iter().any(|item| item.id == result.id))
+        });
+        if !listed {
+            return Err(gone());
+        }
+        let pick = self.cancel_pick(front_end).ok_or_else(gone)?;
+        let result = ResultRef {
+            extension: pick.action.extension.clone(),
+            id: result.id.clone(),
+        };
+        self.run_action(
+            front_end,
+            &result,
+            &pick.action,
+            pick.arguments,
+            Missing::AskInForm,
+            now,
+        )
+    }
+
+    /// Drops `front_end`'s pick, if it has one, and takes its list off the
+    /// menu, unless the menu took it off already.
+    fn cancel_pick(&mut self, front_end: FrontEndId) -> Option<Pick> {
+        let pick = self.picks.remove(&front_end)?;
+        self.pick_lists.pop(pick.target, &pick.view);
+        if let Some(session) = self.sessions.get(&front_end) {
+            session.send(ToFrontEnd::PopView {
+                extension: OWN.to_owned(),
+                view: pick.view.clone(),
+            });
+        }
+        Some(pick)
+    }
+
+    /// The user left the list of `front_end`'s pick `view`, with Esc.
+    fn pick_popped(&mut self, front_end: FrontEndId, view: &str) {
+        if self
+            .picks
+            .get(&front_end)
+            .is_some_and(|pick| pick.view == view)
+            && let Some(pick) = self.picks.remove(&front_end)
+        {
+            self.pick_lists.pop(pick.target, &pick.view);
+        }
+    }
+
+    /// The user typed `text` into the list of `front_end`'s pick `view`.
+    fn filter_pick(&mut self, front_end: FrontEndId, view: &str, text: String) {
+        let Some(pick) = self.picks.get(&front_end).filter(|pick| pick.view == view) else {
+            return;
+        };
+        if text.is_empty() {
+            return;
+        }
+        let matches =
+            self.pick_lists
+                .filter(pick.target, view, &text, &mut self.matcher, &mut self.tiers);
+        if let Some(session) = self.sessions.get(&front_end) {
+            session.send(ToFrontEnd::FilteredView {
+                extension: OWN.to_owned(),
+                view: view.to_owned(),
+                text,
+                matches,
+            });
+        }
     }
 
     /// Nothing goes into a window, so there is no waiting for the menus to
@@ -2001,12 +2144,21 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             }
         }
         self.argument_forms.retain(|_, form| form.front_end != id);
+        if let Some(pick) = self.picks.remove(&id) {
+            self.pick_lists.pop(pick.target, &pick.view);
+        }
         self.closed(Some(id));
     }
 
     fn front_end_message(&mut self, id: FrontEndId, message: FromFrontEnd, now: Instant) {
         match message {
-            FromFrontEnd::Query { text } => self.query(id, text, now),
+            FromFrontEnd::Query { text } => {
+                // A query typed in the search answers no pick.
+                if !self.picks.is_empty() {
+                    self.cancel_pick(id);
+                }
+                self.query(id, text, now);
+            }
             FromFrontEnd::Viewport { top, rows } => {
                 if let Some(session) = self.sessions.get_mut(&id) {
                     // Rows scrolled past are protected as much as those on screen.
@@ -2025,7 +2177,9 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
                 arguments,
             } => {
                 let daemons = action.extension == OWN;
-                let run = if self.unseen(id, &result, shown) {
+                let run = if daemons && action.id == PICK && result.extension == OWN {
+                    self.run_pick(id, &result, now)
+                } else if self.unseen(id, &result, shown) {
                     Err("that Result wasn't on screen yet".to_owned())
                 } else if daemons && action.id == FORGET {
                     self.forget_result(id, &result, now)
@@ -2052,12 +2206,18 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             FromFrontEnd::ViewPopped { extension, view } => {
                 if extension == OWN {
                     self.take_argument_form(id, &view);
+                    self.pick_popped(id, &view);
                 } else if let Some(ext) = self.extension_named(&extension) {
                     self.forget_filters(ext, &view);
                     self.views.pop(ext, &view);
                     self.extensions[ext.0].send(ToExtension::ViewPopped { view });
                 }
             }
+            FromFrontEnd::FilterView {
+                extension,
+                view,
+                text,
+            } if extension == OWN => self.filter_pick(id, &view, text),
             FromFrontEnd::FilterView {
                 extension,
                 view,

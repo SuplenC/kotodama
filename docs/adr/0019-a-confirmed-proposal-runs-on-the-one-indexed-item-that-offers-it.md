@@ -1,6 +1,6 @@
 # 19. A confirmed Proposal runs on the one Indexed item that offers it
 
-Status: accepted (2026-10-20)
+Status: accepted (2026-10-20), amended by ADR 0022 (several Items offering it: the user picks one in a list View)
 
 The AI Extension (#15) reads the Action catalog and proposes catalog Actions for a request in plain words, such as "set up a go project". Once the user confirms a Proposal, that Action has to run. It belongs to another Extension, though, and runs on an Item, and the catalog holds no Items by design: nothing about the user's Items ever reaches the model.
 

@@ -20,6 +20,7 @@ mod notify;
 mod open_view;
 pub mod paths;
 mod payload;
+mod pick;
 pub mod rank;
 mod reserved;
 mod segment;

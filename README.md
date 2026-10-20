@@ -366,7 +366,7 @@ programs.kotodama.extensions.ai = {
 };
 ```
 
-What goes to the model is the query and the Action catalog (each Action's title, Item kind, Arguments and Extension), never Items, the clipboard, file paths or anything else the menu shows. Its Manifest sets `action_catalog = true`, the only way it learns which Actions exist, as for any Extension. A query that changes, or a View left, kills the request in flight. Requests go through `curl`, so the Extension carries no TLS stack; it idles at 2.5 MiB resident. A proposal runs on the one Indexed item of its kind that offers the Action; when several do, or the Action is a Contributed action that needs an Item, the menu says to pick one in the search. Its `manifest.toml` runs `./kotodama-ai`, so a package installs the binary next to it in `$XDG_DATA_DIRS/kotodama/extensions/ai/`.
+What goes to the model is the query and the Action catalog (each Action's title, Item kind, Arguments and Extension), never Items, the clipboard, file paths or anything else the menu shows. Its Manifest sets `action_catalog = true`, the only way it learns which Actions exist, as for any Extension. A query that changes, or a View left, kills the request in flight. Requests go through `curl`, so the Extension carries no TLS stack; it idles at 2.5 MiB resident. A proposal runs on the one Indexed item of its kind that offers the Action. When several do, the menu lists them to pick from, and the Action runs on the one picked, with the proposal's Arguments; Esc runs nothing. When none does, as for a Contributed action that needs an Item, the menu says to pick one in the search. Its `manifest.toml` runs `./kotodama-ai`, so a package installs the binary next to it in `$XDG_DATA_DIRS/kotodama/extensions/ai/`.
 
 ### Folder sources
 

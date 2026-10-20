@@ -999,16 +999,229 @@ fn only_an_extension_that_reads_the_catalog_may_run_from_it() {
     );
 }
 
-#[test]
-fn a_catalog_action_several_items_offer_is_not_guessed() {
+/// Two Suites offering `new-go-project`, and a proposer that confirms
+/// `outcome` for it.
+fn two_suites(outcome: Outcome) -> (Harness, FrontEnd, Ext) {
     let mut h = Harness::new(vec![pinner(), plain("suites")]);
     let pinner = h.up(0);
     let suites = h.up(1);
-    let mut other = suite();
-    other.id = "go-2".into();
-    h.add(&suites, vec![suite(), other]);
+    let mut work = suite();
+    work.id = "go-work".into();
+    work.title = "Work Suite".into();
+    h.add(&suites, vec![suite(), work]);
     let ui = h.front_end();
-    suites.drain();
+    confirm(&mut h, &ui, &pinner, "pinner", outcome);
+    (h, ui, suites)
+}
+
+type Listed = Vec<(String, String, Vec<String>)>;
+
+/// The id of the pick list the Daemon pushed, and its Items' ids, titles and
+/// Actions.
+fn pick_list(messages: &[ToFrontEnd]) -> Option<(String, Listed)> {
+    messages.iter().find_map(|message| match message {
+        ToFrontEnd::PushView {
+            extension,
+            view:
+                View {
+                    id,
+                    content: ViewContent::List { items, .. },
+                    ..
+                },
+            ..
+        } if extension == "kotodama" => Some((
+            id.clone(),
+            items
+                .iter()
+                .map(|item| {
+                    let actions = item
+                        .actions
+                        .iter()
+                        .map(|action| action.title.clone())
+                        .collect();
+                    (item.id.clone(), item.title.clone(), actions)
+                })
+                .collect(),
+        )),
+        _ => None,
+    })
+}
+
+fn popped(messages: &[ToFrontEnd], view: &str) -> bool {
+    messages.iter().any(|message| {
+        matches!(message, ToFrontEnd::PopView { extension, view: popped }
+            if extension == "kotodama" && popped == view)
+    })
+}
+
+/// The Actions `suites` was asked to run: by id, on which Item, with which
+/// Arguments.
+fn sent_runs(suites: &Ext) -> Vec<(String, String, BTreeMap<String, String>)> {
+    suites
+        .drain()
+        .into_iter()
+        .filter_map(|message| match message {
+            ToExtension::RunAction {
+                action,
+                item,
+                arguments,
+                ..
+            } => Some((action, item.id, arguments)),
+            _ => None,
+        })
+        .collect()
+}
+
+fn failed(messages: &[ToFrontEnd]) -> bool {
+    messages
+        .iter()
+        .any(|m| matches!(m, ToFrontEnd::ActionFailed { .. }))
+}
+
+#[test]
+fn a_catalog_action_several_items_offer_lists_them_to_pick_from() {
+    let (_h, ui, suites) = two_suites(new_go_project(&[("name", "demo")]));
+
+    let messages = ui.drain();
+    let (_, items) = pick_list(&messages).expect("a pick list");
+
+    assert_eq!(
+        items,
+        [
+            (
+                "go".to_owned(),
+                "Go Suite".to_owned(),
+                vec!["New Go project".to_owned()]
+            ),
+            (
+                "go-work".to_owned(),
+                "Work Suite".to_owned(),
+                vec!["New Go project".to_owned()]
+            ),
+        ]
+    );
+    assert!(!failed(&messages));
+    assert_eq!(sent_runs(&suites), []);
+}
+
+#[test]
+fn picking_an_item_runs_the_proposed_action_on_it_with_the_proposals_arguments() {
+    let (mut h, ui, suites) = two_suites(new_go_project(&[("name", "demo")]));
+    let (view, _) = pick_list(&ui.drain()).expect("a pick list");
+
+    run(&mut h, &ui, "kotodama", "go-work", "kotodama", "pick");
+
+    assert_eq!(
+        sent_runs(&suites),
+        [(
+            "new-go-project".to_owned(),
+            "go-work".to_owned(),
+            BTreeMap::from([("name".to_owned(), "demo".to_owned())])
+        )]
+    );
+    assert!(popped(&ui.drain(), &view));
+}
+
+#[test]
+fn a_picked_item_asks_for_the_arguments_the_proposal_left_out() {
+    let (mut h, ui, suites) = two_suites(new_go_project(&[]));
+    pick_list(&ui.drain()).expect("a pick list");
+
+    run(&mut h, &ui, "kotodama", "go", "kotodama", "pick");
+
+    assert_eq!(sent_runs(&suites), []);
+    assert!(ui.drain().iter().any(|message| matches!(
+        message,
+        ToFrontEnd::PushView {
+            view: View {
+                content: ViewContent::Form { .. },
+                ..
+            },
+            ..
+        }
+    )));
+}
+
+#[test]
+fn esc_on_the_pick_list_runs_nothing() {
+    let (mut h, ui, suites) = two_suites(new_go_project(&[("name", "demo")]));
+    let (view, _) = pick_list(&ui.drain()).expect("a pick list");
+
+    h.front_end_sends(
+        &ui,
+        FromFrontEnd::ViewPopped {
+            extension: "kotodama".into(),
+            view,
+        },
+    );
+    run(&mut h, &ui, "kotodama", "go", "kotodama", "pick");
+
+    assert_eq!(sent_runs(&suites), []);
+    assert!(failed(&ui.drain()));
+}
+
+#[test]
+fn a_new_query_cancels_the_pick_and_runs_nothing() {
+    let (mut h, ui, suites) = two_suites(new_go_project(&[("name", "demo")]));
+    let (view, _) = pick_list(&ui.drain()).expect("a pick list");
+
+    h.front_end_sends(&ui, FromFrontEnd::Query { text: "go".into() });
+    let messages = ui.drain();
+    run(&mut h, &ui, "kotodama", "go", "kotodama", "pick");
+
+    assert!(popped(&messages, &view));
+    assert_eq!(sent_runs(&suites), []);
+    assert!(failed(&ui.drain()));
+}
+
+#[test]
+fn typing_in_the_pick_list_filters_its_items() {
+    let (mut h, ui, _suites) = two_suites(new_go_project(&[("name", "demo")]));
+    let (view, _) = pick_list(&ui.drain()).expect("a pick list");
+
+    h.front_end_sends(
+        &ui,
+        FromFrontEnd::FilterView {
+            extension: "kotodama".into(),
+            view: view.clone(),
+            text: "work".into(),
+        },
+    );
+
+    let matched: Vec<u32> = ui
+        .drain()
+        .into_iter()
+        .filter_map(|message| match message {
+            ToFrontEnd::FilteredView {
+                extension,
+                view: filtered,
+                matches,
+                ..
+            } if extension == "kotodama" && filtered == view => Some(matches),
+            _ => None,
+        })
+        .flatten()
+        .map(|found| found.item)
+        .collect();
+    assert_eq!(matched, [1]);
+}
+
+#[test]
+fn the_pick_list_goes_when_the_extension_whose_items_it_lists_stops() {
+    let (mut h, ui, suites) = two_suites(new_go_project(&[("name", "demo")]));
+    let (view, _) = pick_list(&ui.drain()).expect("a pick list");
+
+    h.down(&suites);
+
+    assert!(popped(&ui.drain(), &view));
+}
+
+#[test]
+fn a_catalog_action_no_item_offers_is_refused() {
+    let mut h = Harness::new(vec![pinner(), plain("suites")]);
+    let pinner = h.up(0);
+    let suites = h.up(1);
+    let ui = h.front_end();
 
     confirm(
         &mut h,
@@ -1017,12 +1230,11 @@ fn a_catalog_action_several_items_offer_is_not_guessed() {
         "pinner",
         new_go_project(&[("name", "demo")]),
     );
-    assert_eq!(runs(&suites), []);
-    assert!(
-        ui.drain()
-            .iter()
-            .any(|m| matches!(m, ToFrontEnd::ActionFailed { .. }))
-    );
+
+    let messages = ui.drain();
+    assert!(failed(&messages));
+    assert_eq!(pick_list(&messages), None);
+    assert_eq!(sent_runs(&suites), []);
 }
 
 fn statuses(ui: &FrontEnd) -> Vec<Vec<String>> {
