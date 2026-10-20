@@ -16,7 +16,7 @@
 //! the test.
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::fmt::Write as _;
+use std::fmt::{Debug, Write as _};
 use std::path::{Path, PathBuf};
 
 use kotodama_protocol::*;
@@ -140,9 +140,25 @@ fn layout() -> String {
     out
 }
 
-fn record<T: Serialize>(out: &mut String, label: &str, sample: &T) {
+/// Records a sample's encodings, after checking each decodes back to it: some
+/// types decode through a different struct than they encode with, and the
+/// pinned bytes are only worth pinning if this build also reads them.
+fn record<T: Serialize + DeserializeOwned + PartialEq + Debug>(
+    out: &mut String,
+    label: &str,
+    sample: &T,
+) {
     let postcard = WireFormat::Postcard.encode(sample).unwrap();
     let json = String::from_utf8(WireFormat::Json.encode(sample).unwrap()).unwrap();
+    for (format, bytes) in [
+        (WireFormat::Postcard, postcard.as_slice()),
+        (WireFormat::Json, json.as_bytes()),
+    ] {
+        let back: T = format
+            .decode(bytes)
+            .unwrap_or_else(|err| panic!("{label} doesn't decode from {format:?}: {err:?}"));
+        assert_eq!(&back, sample, "{label} decodes differently from {format:?}");
+    }
     write!(out, "{label} postcard").unwrap();
     for byte in postcard {
         write!(out, " {byte:02x}").unwrap();
@@ -152,7 +168,11 @@ fn record<T: Serialize>(out: &mut String, label: &str, sample: &T) {
 
 /// Records each sample under its variant's name, and fails if a variant of
 /// `T` has no sample.
-fn record_enum<T: Serialize + DeserializeOwned>(out: &mut String, name: &str, samples: &[T]) {
+fn record_enum<T: Serialize + DeserializeOwned + PartialEq + Debug>(
+    out: &mut String,
+    name: &str,
+    samples: &[T],
+) {
     let mut covered = BTreeSet::new();
     for sample in samples {
         let variant = match serde_json::to_value(sample).unwrap() {
@@ -282,24 +302,16 @@ fn item(kind: ItemKind) -> Item {
 
 fn items() -> Vec<Item> {
     vec![
-        item(ItemKind::App {
-            desktop_id: "firefox.desktop".into(),
-        }),
-        item(ItemKind::File {
-            path: PathBuf::from("/a/file"),
-        }),
+        item(app()),
+        item(file()),
         item(ItemKind::Folder {
             path: PathBuf::from("/a/folder"),
         }),
-        item(ItemKind::Project {
-            path: PathBuf::from("/a/project"),
-        }),
+        item(project()),
         item(ItemKind::Window {
             address: "0x1".into(),
         }),
-        item(ItemKind::Url {
-            url: "https://example.org".into(),
-        }),
+        item(url()),
         item(ItemKind::Namespaced(
             NamespacedKind::new("kubaos.suite").unwrap(),
         )),
@@ -307,10 +319,34 @@ fn items() -> Vec<Item> {
 }
 
 fn item_ref() -> ItemRef {
-    item(ItemKind::Project {
+    ItemRef {
+        id: "id".into(),
+        kind: project(),
+    }
+}
+
+fn app() -> ItemKind {
+    ItemKind::App {
+        desktop_id: "firefox.desktop".into(),
+    }
+}
+
+fn file() -> ItemKind {
+    ItemKind::File {
+        path: PathBuf::from("/a/file"),
+    }
+}
+
+fn project() -> ItemKind {
+    ItemKind::Project {
         path: PathBuf::from("/a/project"),
-    })
-    .to_ref()
+    }
+}
+
+fn url() -> ItemKind {
+    ItemKind::Url {
+        url: "https://example.org".into(),
+    }
 }
 
 fn fraction() -> Fraction {
@@ -374,7 +410,7 @@ fn to_extension() -> Vec<ToExtension> {
 fn from_extension() -> Vec<FromExtension> {
     vec![
         FromExtension::AddItems {
-            items: vec![items().remove(0)],
+            items: vec![item(app())],
         },
         FromExtension::RemoveItems {
             ids: vec!["a".into(), "b".into()],
@@ -382,7 +418,7 @@ fn from_extension() -> Vec<FromExtension> {
         FromExtension::LiveResults {
             live_query: 3,
             results: vec![LiveResult {
-                item: items().remove(5),
+                item: item(url()),
                 score: fraction(),
                 answer: true,
             }],
@@ -440,7 +476,7 @@ fn to_front_end() -> Vec<ToFrontEnd> {
         ToFrontEnd::Results {
             results: vec![ShownResult {
                 extension: "apps".into(),
-                item: items().remove(0),
+                item: item(app()),
                 contributed: vec![OfferedAction {
                     extension: "shell".into(),
                     action: action(),
@@ -507,7 +543,7 @@ fn clipboards() -> Vec<Clipboard> {
 fn view_contents() -> Vec<ViewContent> {
     vec![
         ViewContent::List {
-            items: vec![items().remove(1)],
+            items: vec![item(file())],
         },
         ViewContent::Form {
             fields: vec![FormField {

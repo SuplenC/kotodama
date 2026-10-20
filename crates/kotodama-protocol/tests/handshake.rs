@@ -79,7 +79,7 @@ fn sides_on_different_protocol_versions_fail_the_handshake() {
 
 #[test]
 fn a_peer_built_for_version_1_is_turned_away_at_the_handshake_not_at_a_later_decode() {
-    // Version 1 predates the Item identity and the copy Outcome, so a postcard
+    // Version 1 predates the Identity of Items and the copy Outcome, so a postcard
     // peer on it would misread every Item it was sent.
     let mut peer_hello = Vec::new();
     frame::write(
