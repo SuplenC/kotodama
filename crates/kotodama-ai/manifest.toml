@@ -1,0 +1,17 @@
+# The AI Bundled extension. A package installs this directory as
+# `$XDG_DATA_DIRS/kotodama/extensions/ai/`, with the `kotodama-ai` binary next
+# to this file (or `command` rewritten to its absolute path).
+name = "ai"
+description = "Proposes Actions other Extensions offer for what you ask after `?`; you confirm each one"
+command = ["./kotodama-ai"]
+# The catalog is all it knows of what can be done: it never sees Items.
+action_catalog = true
+
+# `?` asks the model, once the query is still (the Extension's own
+# `debounce_ms`). A fallback query gets only the "Ask AI" Result, which asks
+# nothing until picked. 0 here, so that Result shows with the keystroke; the
+# Extension does no slow work on it.
+[live_query]
+prefixes = ["?"]
+fallback = true
+debounce_ms = 0

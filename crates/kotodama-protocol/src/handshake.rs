@@ -12,7 +12,7 @@ use crate::{Error, WireFormat};
 /// It goes up by one with every change an older peer can't read in some Wire
 /// format; see `docs/adr/0012-the-protocol-version-goes-up-with-every-layout-change.md`.
 /// The `layout` test fails until it does.
-pub const PROTOCOL_VERSION: u32 = 3;
+pub const PROTOCOL_VERSION: u32 = 4;
 
 /// What one side sends to open a connection. Both sides send theirs straight
 /// away, without waiting for the other's, and each then picks the same Wire format

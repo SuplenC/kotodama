@@ -13,6 +13,7 @@ are in [docs/adr/](docs/adr/).
 - [`crates/kotodama/`](crates/kotodama/CODEMAP.md): the `kotodama` CLI (`toggle`, `open`) that a compositor keybind runs.
 - [`crates/kotodama-qml/`](crates/kotodama-qml/CODEMAP.md): the Quickshell Front end, a Rust cdylib QML module (`Kotodama`) plus `qml/KotodamaMenu.qml`.
 - [`crates/kotodama-extension/`](crates/kotodama-extension/CODEMAP.md): the runtime Rust Extensions are built on (handshake, reader thread, `SentItems`, config, launch, XDG dirs, directory watcher, waiting on `$XDG_RUNTIME_DIR`, and with feature `wayland` finding the compositor and data-control; the dev-only `testing` harness the Bundled extensions' tests share). The Daemon uses its watcher and its Wayland module.
+- [`crates/kotodama-ai/`](crates/kotodama-ai/CODEMAP.md): Bundled extension, Proposals: catalog Actions a model picks for a request in plain words, run once the user confirms.
 - [`crates/kotodama-apps/`](crates/kotodama-apps/CODEMAP.md): Bundled extension, desktop apps from `.desktop` files.
 - [`crates/kotodama-calculator/`](crates/kotodama-calculator/CODEMAP.md): Bundled extension, math, units, currency, dates.
 - [`crates/kotodama-clipboard/`](crates/kotodama-clipboard/CODEMAP.md): Bundled extension, clipboard history.

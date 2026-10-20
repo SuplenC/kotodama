@@ -8,7 +8,7 @@ Kotodama is a command menu for Wayland desktops. You type, and it finds and does
 - **A Quickshell QML module** written in Rust (cxx-qt) gives QML a native result model. QML only draws the results.
 - **Extensions** are separate processes in any language. They speak a protocol whose wire format is negotiated (JSON, MessagePack or postcard), so a crashing Extension never takes down the menu.
 
-Status: early. The protocol, the Daemon, the Quickshell Front end and the apps, clipboard history, calculator, emoji, folders, Hyprland and web search Bundled extensions work; Views, the Action panel and the other Bundled extensions are next. See `docs/adr/0001-architecture.md` and the issues.
+Status: early. The protocol, the Daemon, the Quickshell Front end and the apps, clipboard history, calculator, emoji, folders, Hyprland, web search and AI Bundled extensions work; Views, the Action panel and the other Bundled extensions are next. See `docs/adr/0001-architecture.md` and the issues.
 
 ## Installing
 
@@ -274,6 +274,30 @@ engines = [
 ```
 
 It is a Live query Extension whose `manifest.toml` sets `fallback = true` under `[live_query]`, with a debounce of 0 so it may answer with an address. Its triggers send it what may be an address on any keystroke; anything else it is sent only when the rows aren't full, so a keystroke whose real matches fill the rows costs nothing. It does no network calls. Its `manifest.toml` runs `./kotodama-web-search`, so a package installs the binary next to it in `$XDG_DATA_DIRS/kotodama/extensions/web-search/`.
+
+### AI
+
+`kotodama-ai` (`crates/kotodama-ai`, Extension name `ai`) turns a request in plain words into Actions that other Extensions already offer. Type `?` and the request, `?set up a go project`, and once the query has been still for `debounce_ms` the model's proposals show as Results: "Install Go Suite", "New Go project (name: demo)". Each is a Proposal; Enter confirms it, and only then does the Daemon run the Action, as if you had picked it yourself, asking for any Argument the model left out. Nothing runs before you confirm, and the model never runs anything. A query that real matches leave rows empty for also gets an "Ask AI" row at the bottom, which asks nothing until picked; picking it opens a View that lists the proposals.
+
+It is off until configured. With neither `api_key_command` nor `url` set it adds no rows, asks for nothing and makes no network calls.
+
+```toml
+[extensions.ai]
+# Prints the API key. Its output is kept in memory only: never logged, never
+# written to disk, and handed to curl on stdin, never on its command line.
+api_key_command = ["pass", "show", "anthropic"]
+# The Messages API endpoint. A local server that speaks the same API, such
+# as Ollama (`http://localhost:11434/v1/messages`), works too, with no key.
+url = "https://api.anthropic.com/v1/messages"
+# The default is the fastest Claude model, as you wait on it with the menu open.
+model = "claude-haiku-5-5"
+# `output_config.effort`; "" leaves it out, for a server that doesn't take it.
+effort = "low"
+# How long a `?` query must be still before it is sent.
+debounce_ms = 600
+```
+
+What goes to the model is the query and the Action catalog (each Action's title, Item kind, Arguments and Extension), never Items, the clipboard, file paths or anything else the menu shows. Its Manifest sets `action_catalog = true`, the only way it learns which Actions exist, as for any Extension. A query that changes, or a View left, kills the request in flight. Requests go through `curl`, so the Extension carries no TLS stack; it idles at 2.5 MiB resident. A proposal runs on the one Indexed item of its kind that offers the Action; when several do, or the Action is a Contributed action that needs an Item, the menu says to pick one in the search. Its `manifest.toml` runs `./kotodama-ai`, so a package installs the binary next to it in `$XDG_DATA_DIRS/kotodama/extensions/ai/`.
 
 ### Folder sources
 

@@ -165,7 +165,7 @@ craneLib.buildPackage (
       replaceRunpath $module/libKotodama.so ${qt}/lib ${qtRunpath}
 
       # Each Bundled extension's manifest runs its binary, beside it.
-      for name in apps calculator clipboard emoji folders hyprland web-search; do
+      for name in ai apps calculator clipboard emoji folders hyprland web-search; do
         dir=$extensions/share/kotodama/extensions/$name
         mkdir -p $dir
         cp crates/kotodama-$name/manifest.toml $dir/
