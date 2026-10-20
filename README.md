@@ -288,7 +288,7 @@ Hyprland can't run here: it needs a DRM device. Its live tests will run in the N
 
 ### CI
 
-GitHub Actions runs `check`, `test` and `e2e` on x86_64 and arm64, plus the NixOS VM job on x86_64. The bench job (x86_64 only) runs the benchmarks of the base commit and of the change on the same runner, one after the other, and fails when one is more than 50% slower or the Daemon's resident memory is more than 10% higher. Shared runners differ too much for absolute timings, or a baseline saved by another run, to mean anything, so CI only compares the two runs it made itself.
+GitHub Actions runs `check` and `test`, and `e2e` as a separate job, on x86_64 and arm64. Each restores a cargo cache keyed on `Cargo.lock` and `flake.lock`, which only runs on `main` save. On pull requests, `e2e` skips the `latency` test (set `E2E_SKIP` to a space-separated list of tests to leave out a full run), and the NixOS VM job (x86_64) doesn't run: both need a full build that no cache can save, so they run after every merge to `main` instead. The bench job (x86_64 only) runs the benchmarks of the base commit and of the change on the same runner, one after the other, and fails when one is more than 50% slower or the Daemon's resident memory is more than 10% higher. Shared runners differ too much for absolute timings, or a baseline saved by another run, to mean anything, so CI only compares the two runs it made itself.
 
 On pushes to `main`, CI publishes:
 

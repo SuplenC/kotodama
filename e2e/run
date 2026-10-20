@@ -13,8 +13,12 @@ if [ "${1:-}" = --update ]; then
 fi
 tests=("$@")
 if [ "${#tests[@]}" -eq 0 ]; then
+    # E2E_SKIP names tests to leave out of a full run, separated by spaces.
     for test in "$root"/e2e/*/test.sh; do
-        tests+=("$(basename "$(dirname "$test")")")
+        name=$(basename "$(dirname "$test")")
+        if [[ " ${E2E_SKIP:-} " != *" $name "* ]]; then
+            tests+=("$name")
+        fi
     done
 fi
 
