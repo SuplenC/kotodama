@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Runs every benchmark of the checkout in DIR, in that checkout's dev shell, and
-# writes its bencher-format result lines to OUT, which stays empty when the
-# checkout has no benchmarks yet. The words of CRITERION_ARGS, if set, go to
+# Runs every criterion benchmark of the checkout in DIR, in that checkout's dev
+# shell, and writes its bencher-format result lines to OUT, which stays empty
+# when the checkout has no benchmarks yet. The words of CRITERION_ARGS, if set, go to
 # every benchmark binary after `--output-format bencher`: CI shortens
 # criterion's warm-up and measurement times with them on pull requests.
 # Usage: [CRITERION_ARGS=...] bench-run DIR OUT
@@ -17,7 +17,14 @@ cd "$dir"
 # sources' mtimes. Without this, the checkout built second would reuse the
 # first's crates wherever its own files were written before that build.
 git ls-files -z | xargs -0 touch -h
-if nix develop --command scripts/has-benches; then
-    nix develop --command just bench --bench '*' -- --output-format bencher "${extra[@]}" | tee "$out.log"
+# Every criterion benchmark: the gungraun ones, all named `instructions`, take
+# none of criterion's arguments and run in scripts/bench-instructions instead.
+benches=()
+while read -r name; do
+    benches+=(--bench "$name")
+done < <(nix develop --command cargo metadata --no-deps --format-version 1 |
+    jq -r '[.packages[].targets[] | select(.kind == ["bench"] and .name != "instructions") | .name] | unique[]')
+if [ ${#benches[@]} -gt 0 ]; then
+    nix develop --command just bench "${benches[@]}" -- --output-format bencher "${extra[@]}" | tee "$out.log"
     grep 'bench:' "$out.log" >"$out" || true
 fi

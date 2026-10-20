@@ -19,9 +19,12 @@ defaults:
 jobs:
   # On pull requests, decides which jobs the change needs. It lists the paths
   # that can be ignored, so a path nobody listed runs everything. Pushes to main
-  # skip this and run every job. `bench` also ignores the crates no benchmark
-  # builds on (scripts/bench-crates lists the ones that matter) and the files
-  # only the other jobs, the dev image or releases read.
+  # skip this and run every job. `bench` (and `instructions`) also ignores the
+  # crates no benchmark builds on (scripts/bench-crates lists the ones that
+  # matter) and the files only the other jobs, the dev image or releases read.
+  # `latency`, the e2e test, runs for the crates the Daemon, the `kotodama`
+  # command and the QML module build on, and the e2e harness; `nix`, the Nix
+  # package and its VM tests, for what the package or the flake read.
   changes:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
@@ -29,6 +32,8 @@ jobs:
       rust: ${{ steps.diff.outputs.rust }}
       e2e: ${{ steps.diff.outputs.e2e }}
       bench: ${{ steps.diff.outputs.bench }}
+      latency: ${{ steps.diff.outputs.latency }}
+      nix: ${{ steps.diff.outputs.nix }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -39,27 +44,33 @@ jobs:
         run: |
           benched=" $(scripts/bench-crates | tr '\n' ' ')"
           echo "crates the benchmarks build on:$benched"
-          rust=false e2e=false bench=false
+          measured=" $(scripts/path-deps kotodamad kotodama kotodama-qml | tr '\n' ' ')"
+          echo "crates the latency test builds on:$measured"
+          rust=false e2e=false bench=false latency=false nix=false
           while read -r path; do
             case $path in
               *.md | docs/* | LICENSE) ;;
+              e2e/latency/* | e2e/run | e2e/lib.sh | e2e/sway.conf) e2e=true latency=true ;;
               e2e/* | examples/*) e2e=true ;;
               crates/*)
-                rust=true e2e=true
+                rust=true e2e=true nix=true
                 crate=${path#crates/}
                 case $benched in *" ${crate%%/*} "*) bench=true ;; esac
+                case $measured in *" ${crate%%/*} "*) latency=true ;; esac
                 ;;
-              docker/* | nix/home-manager.nix | nix/tests/* | .config/nextest.toml | \
-                scripts/dev-image | scripts/qml-module | scripts/tests/* | \
+              scripts/qml-module) rust=true e2e=true latency=true ;;
+              nix/home-manager.nix | nix/tests/*) rust=true e2e=true nix=true ;;
+              docker/* | .config/nextest.toml | scripts/dev-image | scripts/tests/* | \
                 .github/workflows/release-please.yml | release-please-config.json | \
                 .release-please-manifest.json | .gitignore)
                 rust=true e2e=true
                 ;;
-              *) rust=true e2e=true bench=true ;;
+              *) rust=true e2e=true bench=true latency=true nix=true ;;
             esac
           done < <(git diff --name-only "$BASE"...HEAD)
-          echo "rust=$rust e2e=$e2e bench=$bench"
-          printf 'rust=%s\ne2e=%s\nbench=%s\n' "$rust" "$e2e" "$bench" >> "$GITHUB_OUTPUT"
+          echo "rust=$rust e2e=$e2e bench=$bench latency=$latency nix=$nix"
+          printf 'rust=%s\ne2e=%s\nbench=%s\nlatency=%s\nnix=%s\n' \
+            "$rust" "$e2e" "$bench" "$latency" "$nix" >> "$GITHUB_OUTPUT"
 
   # check and test, and e2e, run as separate jobs so they overlap. Each restores
   # a cargo cache (the registry and target/) keyed on the lockfiles; only runs
@@ -135,11 +146,12 @@ jobs:
             target
           key: cargo-e2e-${{ matrix.runner }}-${{ hashFiles('Cargo.lock', 'flake.lock') }}
           restore-keys: cargo-e2e-${{ matrix.runner }}-
-      # The latency test needs a release build of the workspace, which no cache
-      # can skip (the PR changes the crates), so it runs only on main.
+      # The latency test builds the workspace in release. Main's cache holds the
+      # dependencies' release build, so only the workspace's crates rebuild.
+      # On a PR it runs when `changes` found something it builds on.
       - run: nix develop --command just e2e
         env:
-          E2E_SKIP: ${{ github.event_name == 'pull_request' && 'latency' || '' }}
+          E2E_SKIP: ${{ github.event_name == 'pull_request' && needs.changes.outputs.latency != 'true' && 'latency' || '' }}
       - if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.cargo-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@v6
         with:
@@ -278,12 +290,13 @@ jobs:
           key: ${{ steps.cargo-cache.outputs.cache-primary-key }}
 
   # Builds the package, loads its QML module in Quickshell, and runs it in a
-  # NixOS VM: socket activation and the home-manager module now, the live
-  # Hyprland tests (#13) later, since Hyprland needs a DRM device.
-  # Only on main for now: the Nix build compiles the whole package from source
-  # on every PR (about 8 minutes), with no cargo cache.
+  # NixOS VM (socket activation and the home-manager module), and runs the
+  # Hyprland Extension live in another, since Hyprland needs a DRM device. The
+  # package's dependencies are a derivation of their own (nix/package.nix),
+  # which main pushes to Cachix, so a PR builds only the workspace's crates.
   nixos-vm:
-    if: github.event_name == 'push'
+    needs: changes
+    if: ${{ !cancelled() && (github.event_name == 'push' || needs.changes.outputs.nix == 'true') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -291,6 +304,51 @@ jobs:
         with:
           cachix-auth-token: ${{ secrets.CACHIX_AUTH_TOKEN }}
       - run: nix build -L .#checks.x86_64-linux.nixos-vm .#checks.x86_64-linux.hyprland-vm .#checks.x86_64-linux.qml-module
+
+  # Counts the instructions the Daemon runs per keystroke
+  # (scripts/bench-instructions), for the base commit and this one, and fails
+  # when a benchmark runs 5% more. Callgrind's counts are the same from run to
+  # run on one runner, so unlike `bench`'s timings, small changes show.
+  instructions:
+    needs: changes
+    if: ${{ !cancelled() && (github.event_name == 'push' || needs.changes.outputs.bench == 'true') }}
+    runs-on: ubuntu-latest
+    env:
+      BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup-nix
+        with:
+          cachix-auth-token: ${{ secrets.CACHIX_AUTH_TOKEN }}
+      - name: Check out the base commit
+        id: base
+        run: |
+          # Both checkouts build into one target directory, so dependencies
+          # build once, and keep their counts in one place.
+          echo "CARGO_TARGET_DIR=$RUNNER_TEMP/target" >> "$GITHUB_ENV"
+          echo "GUNGRAUN_HOME=$RUNNER_TEMP/gungraun" >> "$GITHUB_ENV"
+          if [ -z "$BASE" ] || [ "$BASE" = 0000000000000000000000000000000000000000 ]; then
+            echo "::warning::No base commit to compare with; instruction counts were not compared."
+            exit 0
+          fi
+          git fetch --no-tags --depth=1 origin "$BASE"
+          git worktree add "$RUNNER_TEMP/base" "$BASE"
+          echo "dir=$RUNNER_TEMP/base" >> "$GITHUB_OUTPUT"
+      # `bench`'s cache: the same profile and dependencies. Only `bench` saves it.
+      - uses: actions/cache/restore@v6
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            ${{ runner.temp }}/target
+          key: cargo-bench-${{ hashFiles('Cargo.lock', 'flake.lock') }}
+          restore-keys: cargo-bench-
+      - name: Count the base commit's instructions
+        if: steps.base.outputs.dir
+        run: scripts/bench-instructions "${{ steps.base.outputs.dir }}" save
+      - name: Count this commit's instructions
+        run: scripts/bench-instructions . compare
 
   # The image only copies files onto nixos/nix, so both platforms build without emulation.
   image:
@@ -324,7 +382,7 @@ jobs:
   # The one required check: fails if a job it needs failed or was cancelled, and
   # passes when each succeeded or was skipped as not needed.
   ci:
-    needs: [changes, test, e2e, bench]
+    needs: [changes, test, e2e, bench, instructions, nixos-vm]
     if: always()
     runs-on: ubuntu-latest
     steps:
