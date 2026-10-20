@@ -14,3 +14,4 @@ The shared protocol. Maintained by hand: fix stale lines when you find them, and
 - `wire.rs`: `WireFormat` (postcard, JSON, MessagePack) `encode`/`decode`.
 - `channel.rs`: `Channel::handshake`, `send`, `recv`, `split`; `ChannelReader::has_buffered` (what came with the last message).
 - `launch.rs:launch_command`: detached program start, `KOTODAMA_LAUNCH_PREFIX`.
+- `../benches/batch.rs`: encoding and decoding 10k Indexed items in each Wire format.

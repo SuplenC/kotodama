@@ -33,3 +33,4 @@ The Daemon. Maintained by hand: fix stale lines when you find them, and update t
 - `notify.rs:send`: desktop notifications over D-Bus.
 - `paths.rs:Paths::from_env`: socket, config, state, cache and Extension dirs from XDG.
 - `usage.rs`: opt-in Usage log (`Writer`, `forget`).
+- `../benches/`: `query.rs` (criterion: keystrokes, empty query, batches, cold cache, long titles), `instructions.rs` (gungraun: instructions per keystroke, compared against the base commit in CI), `daemon.rs` (the real Daemon: socket p99 and resident memory with 10k Items), `memory.rs` (heap per Indexed item); `setup/` is the Daemon `query.rs` and `instructions.rs` both drive, `corpus/` the Items.

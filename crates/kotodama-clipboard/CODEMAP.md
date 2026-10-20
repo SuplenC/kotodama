@@ -6,3 +6,4 @@ A Bundled extension. Maintained by hand: fix stale lines when you find them, and
 - `copied.rs` (MIME choice, `Copied`)
 - `history.rs` (`History` on disk, `Limits`)
 - `items.rs` (Items, list and detail Views)
+- `../benches/search.rs`: searching a 1000-entry clipboard history in the Daemon (p99 under 2 ms), plus the Extension's resident memory.
