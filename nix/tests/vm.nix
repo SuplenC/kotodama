@@ -2,14 +2,41 @@
 # user whose systemd user manager runs from boot. It checks that the socket
 # starts the Daemon, that home-manager's settings reach it, that it reaches
 # the session bus and finds apps wherever NixOS installs them, that the
-# Folder source lists projects and scripts, and that the programs it starts
-# outlive it.
+# Folder source lists projects and scripts, that the programs it starts
+# outlive it, and that apps and Extensions a switch installs show up without a
+# restart.
 {
   pkgs,
   self,
   home-manager,
 }:
 
+let
+  # An Extension that reports a finished job as soon as it starts, so the
+  # Daemon sends a desktop notification titled `title` over the session bus.
+  jobManifest = name: title: ''
+    name = "${name}"
+    command = ["${pkgs.writeShellScript name ''
+      export LC_ALL=C
+      send() { printf '%d\n%s' "''${#1}" "$1"; }
+      read_frame() { IFS= read -r len && IFS= read -r -N "$len" frame; }
+      send '{"version":3,"formats":["json"]}'
+      read_frame # the Daemon's hello
+      read_frame # the config
+      send '{"job_progress":{"id":"${name}","title":"${title}","state":"succeeded"}}'
+      while read_frame; do :; done
+    ''}"]
+  '';
+
+  # A package holding a job Extension, as one from nixpkgs would.
+  jobExtension =
+    name: title:
+    pkgs.writeTextDir "share/kotodama/extensions/${name}/manifest.toml" (jobManifest name title);
+
+  app =
+    name: desktopName: exec:
+    pkgs.makeDesktopItem { inherit name desktopName exec; };
+in
 pkgs.testers.runNixOSTest {
   name = "kotodama-vm";
 
@@ -27,12 +54,23 @@ pkgs.testers.runNixOSTest {
       pkgs.dbus # dbus-monitor
       # An app in the system profile, which the user manager's XDG_DATA_DIRS
       # holds on NixOS.
-      (pkgs.makeDesktopItem {
-        name = "dozer";
-        desktopName = "Dozer";
-        exec = "sleep 1003";
-      })
+      (app "dozer" "Dozer" "sleep 1003")
     ];
+    # Extensions in the system profile, which is on XDG_DATA_DIRS too.
+    environment.pathsToLink = [ "/share/kotodama" ];
+
+    # What a switch to it installs: an app and an Extension in the system
+    # profile, and the same in the home-manager profile, ~/.nix-profile.
+    specialisation.switched.configuration = {
+      environment.systemPackages = [
+        (app "loader" "Loader" "sleep 1004")
+        (jobExtension "vm-system-job" "System job")
+      ];
+      home-manager.users.alice.home.packages = [
+        (app "hauler" "Hauler" "sleep 1005")
+        (jobExtension "vm-home-job" "Home job")
+      ];
+    };
 
     home-manager.useGlobalPkgs = true;
     home-manager.users.alice = {
@@ -78,21 +116,7 @@ pkgs.testers.runNixOSTest {
         Name=Sleeper
         Exec=sleep 1002
       '';
-      # An Extension that reports a finished job as soon as it starts, so the
-      # Daemon sends a desktop notification over the session bus.
-      xdg.configFile."kotodama/extensions/vm-job/manifest.toml".text = ''
-        name = "vm-job"
-        command = ["${pkgs.writeShellScript "vm-job" ''
-          export LC_ALL=C
-          send() { printf '%d\n%s' "''${#1}" "$1"; }
-          read_frame() { IFS= read -r len && IFS= read -r -N "$len" frame; }
-          send '{"version":3,"formats":["json"]}'
-          read_frame # the Daemon's hello
-          read_frame # the config
-          send '{"job_progress":{"id":"vm","title":"VM job","state":"succeeded"}}'
-          while read_frame; do :; done
-        ''}"]
-      '';
+      xdg.configFile."kotodama/extensions/vm-job/manifest.toml".text = jobManifest "vm-job" "VM job";
     };
   };
 
@@ -182,5 +206,25 @@ pkgs.testers.runNixOSTest {
         user("kotodama toggle")
         machine.wait_for_unit("kotodamad.service", "alice")
         user(f"{front_end} nap")
+
+    with subtest("apps and Extensions a system switch and a home-manager switch install show up without a restart"):
+        machine.wait_until_succeeds(
+            as_alice(f"{front_end} dozer") + " | grep -P '^apps\tdozer\tDozer$'"
+        )
+        daemon = user("systemctl --user show -P MainPID kotodamad.service").strip()
+        apps = machine.succeed(pgrep("kotodama-apps")).strip()
+        # Replaces the /run/current-system link, and restarts
+        # home-manager-alice.service, which replaces ~/.nix-profile's.
+        machine.succeed("/run/booted-system/specialisation/switched/bin/switch-to-configuration test")
+        machine.wait_until_succeeds(
+            as_alice(f"{front_end} loader") + " | grep -P '^apps\tloader\tLoader$'"
+        )
+        machine.wait_until_succeeds(
+            as_alice(f"{front_end} hauler") + " | grep -P '^apps\thauler\tHauler$'"
+        )
+        machine.wait_until_succeeds("grep -q 'string \"System job\"' /tmp/notifications")
+        machine.wait_until_succeeds("grep -q 'string \"Home job\"' /tmp/notifications")
+        assert user("systemctl --user show -P MainPID kotodamad.service").strip() == daemon, "the Daemon restarted"
+        assert machine.succeed(pgrep("kotodama-apps")).strip() == apps, "the apps Extension restarted"
   '';
 }

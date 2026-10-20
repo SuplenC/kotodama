@@ -132,8 +132,12 @@ fn extension_dir(root: &TempDir, name: &str) -> PathBuf {
 
 /// Installs the recording test Extension as `name`, indexing `items`.
 fn install(root: &TempDir, name: &str, manifest_extra: &str, items: &[Item]) {
-    let dir = extension_dir(root, name);
-    fs::create_dir_all(&dir).unwrap();
+    install_in(&extension_dir(root, name), name, manifest_extra, items);
+}
+
+/// Installs the recording test Extension as `name` in `dir`.
+fn install_in(dir: &Path, name: &str, manifest_extra: &str, items: &[Item]) {
+    fs::create_dir_all(dir).unwrap();
     fs::copy(fixture(), dir.join("extension.sh")).unwrap();
     fs::write(
         dir.join("manifest.toml"),
@@ -417,6 +421,35 @@ fn an_extension_installed_or_removed_while_the_daemon_runs_is_picked_up() {
 
     fs::remove_dir_all(daemon.extension_dir("bookmarks")).unwrap();
     ui.wait_for_titles("kotodama", &[]);
+}
+
+#[test]
+fn an_extension_a_profile_switch_brings_is_picked_up() {
+    let root = Daemon::home();
+    // The data directory is a profile: a link to a generation, which a NixOS
+    // or home-manager switch replaces with a link to the next. The first has
+    // no Extensions at all.
+    fs::remove_dir(root.path().join("share")).unwrap();
+    fs::create_dir(root.path().join("gen-1")).unwrap();
+    install_in(
+        &root.path().join("gen-2/kotodama/extensions/bookmarks"),
+        "bookmarks",
+        "",
+        &[item("kotodama", "Kotodama")],
+    );
+    std::os::unix::fs::symlink("gen-1", root.path().join("share")).unwrap();
+    let daemon = Daemon::start(root);
+    let mut ui = daemon.connect();
+    assert_eq!(ui.titles("kotodama"), Vec::<String>::new());
+
+    // As `ln -sfn` and Nix do it: a new link renamed over the old one.
+    let (new, share) = (
+        daemon.root.path().join("share.new"),
+        daemon.root.path().join("share"),
+    );
+    std::os::unix::fs::symlink("gen-2", &new).unwrap();
+    fs::rename(&new, &share).unwrap();
+    ui.wait_for_titles("kotodama", &["Kotodama"]);
 }
 
 #[test]

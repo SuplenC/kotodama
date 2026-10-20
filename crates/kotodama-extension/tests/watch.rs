@@ -181,3 +181,105 @@ fn without_a_thread_of_its_own_each_change_is_passed_on_as_it_happens() {
     fs::write(dir.join("script"), "x").unwrap();
     assert!(noticed(&touches));
 }
+
+/// Points the symlink `link` at `target` as `ln -sfn` and Nix do: a new link
+/// renamed over the old one.
+fn relink(target: &Path, link: &Path) {
+    let new = link.with_extension("new");
+    std::os::unix::fs::symlink(target, &new).unwrap();
+    fs::rename(&new, link).unwrap();
+}
+
+fn is_desktop_file(path: &Path) -> bool {
+    path.extension().is_some_and(|ext| ext == "desktop")
+}
+
+#[test]
+fn a_profile_link_switched_to_a_new_generation_is_watched_there() {
+    let root = TempDir::new().unwrap();
+    let (one, two) = (root.path().join("gen-1"), root.path().join("gen-2"));
+    fs::create_dir_all(one.join("share/applications")).unwrap();
+    fs::create_dir_all(two.join("share/applications")).unwrap();
+    // nix-profile -> profiles/profile -> gen-1, as Nix lays a profile out.
+    let profiles = root.path().join("profiles");
+    fs::create_dir(&profiles).unwrap();
+    relink(&one, &profiles.join("profile"));
+    let profile = root.path().join("nix-profile");
+    relink(&profiles.join("profile"), &profile);
+    let (_watcher, changes) = watch(
+        vec![profile.join("share/applications")],
+        RecursiveMode::Recursive,
+        is_desktop_file,
+    );
+
+    // A switch replaces the link furthest in, noticed once.
+    fs::write(two.join("share/applications/new.desktop"), "x").unwrap();
+    relink(&two, &profiles.join("profile"));
+    assert!(noticed(&changes));
+    assert!(quiet(&changes));
+
+    // The old generation is no longer watched, the new one is.
+    fs::write(one.join("share/applications/old.desktop"), "x").unwrap();
+    assert!(quiet(&changes));
+    fs::write(two.join("share/applications/later.desktop"), "x").unwrap();
+    assert!(noticed(&changes));
+}
+
+#[test]
+fn a_directory_a_new_generation_brings_is_noticed_and_then_watched() {
+    let root = TempDir::new().unwrap();
+    let (one, two) = (root.path().join("gen-1"), root.path().join("gen-2"));
+    fs::create_dir_all(&one).unwrap();
+    fs::create_dir_all(two.join("share/kotodama/extensions")).unwrap();
+    let system = root.path().join("current-system");
+    relink(&one, &system);
+    let dir = system.join("share/kotodama/extensions");
+    let inside = dir.clone();
+    let (_watcher, changes) = watch(vec![dir], RecursiveMode::NonRecursive, move |path| {
+        path.starts_with(&inside)
+    });
+
+    relink(&two, &system);
+    assert!(noticed(&changes));
+    fs::create_dir(two.join("share/kotodama/extensions/new")).unwrap();
+    assert!(noticed(&changes));
+}
+
+#[test]
+fn a_profile_made_by_the_first_switch_is_noticed_and_then_watched() {
+    let root = TempDir::new().unwrap();
+    let generation = root.path().join("gen-1");
+    fs::create_dir_all(generation.join("share/applications")).unwrap();
+    // No profile yet, nor the directory its link goes in.
+    let profile = root.path().join("per-user/alice");
+    let (_watcher, changes) = watch(
+        vec![profile.join("share/applications")],
+        RecursiveMode::Recursive,
+        is_desktop_file,
+    );
+
+    fs::create_dir(root.path().join("per-user")).unwrap();
+    relink(&generation, &profile);
+    assert!(noticed(&changes));
+    fs::write(generation.join("share/applications/app.desktop"), "x").unwrap();
+    assert!(noticed(&changes));
+}
+
+#[test]
+fn only_a_watched_link_replaced_counts_in_its_directory() {
+    let root = TempDir::new().unwrap();
+    let generation = root.path().join("gen-1");
+    fs::create_dir_all(generation.join("share")).unwrap();
+    let system = root.path().join("current-system");
+    relink(&generation, &system);
+    let (_watcher, changes) = watch(
+        vec![system.join("share")],
+        RecursiveMode::NonRecursive,
+        |_| false,
+    );
+    fs::write(root.path().join("unrelated"), "x").unwrap();
+    relink(&generation, &root.path().join("booted-system"));
+    assert!(quiet(&changes));
+    relink(&generation, &system);
+    assert!(noticed(&changes));
+}
