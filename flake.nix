@@ -141,6 +141,10 @@
       checks = forAllSystems (pkgs: {
         devShell = self.devShells.${pkgs.stdenv.hostPlatform.system}.default;
         package = self.packages.${pkgs.stdenv.hostPlatform.system}.default;
+        qml-module = import ./nix/tests/qml-module.nix {
+          inherit pkgs;
+          kotodama = self.packages.${pkgs.stdenv.hostPlatform.system}.default;
+        };
         # Socket activation, the home-manager module, and later the live Hyprland
         # tests (#13): Hyprland needs a DRM device, so they run in a NixOS VM, the
         # way Hyprland tests itself. CI runs it on x86_64, which has KVM.
