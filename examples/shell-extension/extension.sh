@@ -124,7 +124,7 @@ done_with() {
 # The handshake is always JSON. Both sides send a hello; this script offers JSON
 # only, so JSON is what the connection uses from here on. Both must speak the
 # same protocol version, which goes up whenever a message changes.
-version=5
+version=6
 send "{\"version\":$version,\"formats\":[\"json\"]}"
 read_frame
 if ! jq -e --argjson version "$version" '.version == $version' <<<"$frame" >/dev/null; then

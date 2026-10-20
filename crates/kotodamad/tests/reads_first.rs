@@ -9,6 +9,7 @@ use std::time::{Duration, Instant};
 
 use common::*;
 use kotodama_protocol::*;
+use kotodamad::daemon::RERANK_FOR;
 use kotodamad::daemon::{Event, HOT_CAPACITY};
 
 /// How long a change may take to show: about one frame of a slow typist.
@@ -89,10 +90,11 @@ fn a_keystroke_while_items_are_indexed_searches_the_last_version_whole() {
 
     h.add(&apps, vec![app("Fire Alarm"), app("Fireworks")]);
     assert_eq!(titles(&h.query(&ui, "fire")), ["Firefox"]);
+    h.advance(RERANK_FOR);
     next_version(&mut h, &indexed);
     let late = ui.results().expect("the new version is shown");
     let mut late = titles(&late);
-    // The row on screen stays put (ADR 0003).
+    // The row on screen stays put.
     assert_eq!(late.remove(0), "Firefox");
     late.sort_unstable();
     assert_eq!(late, ["Fire Alarm", "Fireworks"]);

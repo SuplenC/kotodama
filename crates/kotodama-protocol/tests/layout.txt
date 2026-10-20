@@ -1,4 +1,4 @@
-protocol version 5
+protocol version 6
 ToExtension::config postcard 00 02 07 65 6e 61 62 6c 65 64 00 01 05 6c 69 6d 69 74 01 0e
 ToExtension::config json {"config":{"enabled":true,"limit":7}}
 ToExtension::live_query postcard 01 03 03 31 2b 31 01 01 3d
@@ -39,24 +39,26 @@ FromFrontEnd::query postcard 00 03 66 69 72
 FromFrontEnd::query json {"query":{"text":"fir"}}
 FromFrontEnd::viewport postcard 01 02 09
 FromFrontEnd::viewport json {"viewport":{"top":2,"rows":9}}
-FromFrontEnd::run_action postcard 02 04 61 70 70 73 07 66 69 72 65 66 6f 78 05 73 68 65 6c 6c 04 6f 70 65 6e 01 07 76 65 72 73 69 6f 6e 04 31 2e 32 33
-FromFrontEnd::run_action json {"run_action":{"result":{"extension":"apps","id":"firefox"},"action":{"extension":"shell","id":"open"},"arguments":{"version":"1.23"}}}
-FromFrontEnd::submit_form postcard 03 05 73 68 65 6c 6c 04 76 69 65 77 02 07 65 6e 61 62 6c 65 64 00 01 05 6c 69 6d 69 74 01 0e
+FromFrontEnd::selection_moved postcard 02
+FromFrontEnd::selection_moved json "selection_moved"
+FromFrontEnd::run_action postcard 03 04 61 70 70 73 07 66 69 72 65 66 6f 78 07 05 73 68 65 6c 6c 04 6f 70 65 6e 01 07 76 65 72 73 69 6f 6e 04 31 2e 32 33
+FromFrontEnd::run_action json {"run_action":{"result":{"extension":"apps","id":"firefox"},"shown":7,"action":{"extension":"shell","id":"open"},"arguments":{"version":"1.23"}}}
+FromFrontEnd::submit_form postcard 04 05 73 68 65 6c 6c 04 76 69 65 77 02 07 65 6e 61 62 6c 65 64 00 01 05 6c 69 6d 69 74 01 0e
 FromFrontEnd::submit_form json {"submit_form":{"extension":"shell","view":"view","values":{"enabled":true,"limit":7}}}
-FromFrontEnd::view_popped postcard 04 05 73 68 65 6c 6c 04 76 69 65 77
+FromFrontEnd::view_popped postcard 05 05 73 68 65 6c 6c 04 76 69 65 77
 FromFrontEnd::view_popped json {"view_popped":{"extension":"shell","view":"view"}}
-FromFrontEnd::filter_view postcard 05 05 73 68 65 6c 6c 04 76 69 65 77 03 66 69 72
+FromFrontEnd::filter_view postcard 06 05 73 68 65 6c 6c 04 76 69 65 77 03 66 69 72
 FromFrontEnd::filter_view json {"filter_view":{"extension":"shell","view":"view","text":"fir"}}
-FromFrontEnd::closed postcard 06
+FromFrontEnd::closed postcard 07
 FromFrontEnd::closed json "closed"
-FromFrontEnd::open postcard 07 03 66 69 72 01 04 76 69 65 77
+FromFrontEnd::open postcard 08 03 66 69 72 01 04 76 69 65 77
 FromFrontEnd::open json {"open":{"query":"fir","view":"view"}}
-FromFrontEnd::toggle postcard 08
+FromFrontEnd::toggle postcard 09
 FromFrontEnd::toggle json "toggle"
-FromFrontEnd::undo postcard 09 07
+FromFrontEnd::undo postcard 0a 07
 FromFrontEnd::undo json {"undo":{"change":7}}
-ToFrontEnd::results postcard 00 01 04 61 70 70 73 02 69 64 03 61 70 70 01 0f 66 69 72 65 66 6f 78 2e 64 65 73 6b 74 6f 70 00 00 00 01 13 61 70 70 3a 66 69 72 65 66 6f 78 2e 64 65 73 6b 74 6f 70 05 54 69 74 6c 65 01 08 53 75 62 74 69 74 6c 65 01 04 69 63 6f 6e 01 02 67 6f 01 07 62 72 6f 77 73 65 72 01 04 6f 70 65 6e 04 4f 70 65 6e 01 06 63 74 72 6c 2b 6f 01 07 76 65 72 73 69 6f 6e 01 04 31 2e 32 33 01 01 01 05 73 68 65 6c 6c 04 6f 70 65 6e 04 4f 70 65 6e 01 06 63 74 72 6c 2b 6f 01 07 76 65 72 73 69 6f 6e 01 04 31 2e 32 33 01 02 00 02
-ToFrontEnd::results json {"results":{"results":[{"extension":"apps","item":{"id":"id","kind":"app","desktop_id":"firefox.desktop","path":null,"address":null,"url":null,"identity":"app:firefox.desktop","title":"Title","subtitle":"Subtitle","icon":"icon","keyword":"go","keywords":["browser"],"actions":[{"id":"open","title":"Open","shortcut":"ctrl+o","arguments":[{"name":"version","placeholder":"1.23","optional":true}]}],"hidden":true},"contributed":[{"extension":"shell","action":{"id":"open","title":"Open","shortcut":"ctrl+o","arguments":[{"name":"version","placeholder":"1.23","optional":true}]}}],"highlights":[0,2]}]}}
+ToFrontEnd::results postcard 00 07 01 04 61 70 70 73 02 69 64 03 61 70 70 01 0f 66 69 72 65 66 6f 78 2e 64 65 73 6b 74 6f 70 00 00 00 01 13 61 70 70 3a 66 69 72 65 66 6f 78 2e 64 65 73 6b 74 6f 70 05 54 69 74 6c 65 01 08 53 75 62 74 69 74 6c 65 01 04 69 63 6f 6e 01 02 67 6f 01 07 62 72 6f 77 73 65 72 01 04 6f 70 65 6e 04 4f 70 65 6e 01 06 63 74 72 6c 2b 6f 01 07 76 65 72 73 69 6f 6e 01 04 31 2e 32 33 01 01 01 05 73 68 65 6c 6c 04 6f 70 65 6e 04 4f 70 65 6e 01 06 63 74 72 6c 2b 6f 01 07 76 65 72 73 69 6f 6e 01 04 31 2e 32 33 01 02 00 02
+ToFrontEnd::results json {"results":{"version":7,"results":[{"extension":"apps","item":{"id":"id","kind":"app","desktop_id":"firefox.desktop","path":null,"address":null,"url":null,"identity":"app:firefox.desktop","title":"Title","subtitle":"Subtitle","icon":"icon","keyword":"go","keywords":["browser"],"actions":[{"id":"open","title":"Open","shortcut":"ctrl+o","arguments":[{"name":"version","placeholder":"1.23","optional":true}]}],"hidden":true},"contributed":[{"extension":"shell","action":{"id":"open","title":"Open","shortcut":"ctrl+o","arguments":[{"name":"version","placeholder":"1.23","optional":true}]}}],"highlights":[0,2]}]}}
 ToFrontEnd::status postcard 01 01 05 73 68 65 6c 6c
 ToFrontEnd::status json {"status":{"down":["shell"]}}
 ToFrontEnd::close postcard 02

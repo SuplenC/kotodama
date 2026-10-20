@@ -309,6 +309,7 @@ fn reopened(h: &mut Harness) -> FrontEnd {
         id,
         rx,
         closed: Default::default(),
+        shown: Default::default(),
     }
 }
 
@@ -438,6 +439,7 @@ fn arguments_the_front_end_gives_win_over_the_typed_ones() {
                 extension: "tools".into(),
                 id: "go".into(),
             },
+            shown: ui.shown.get(),
             action: ActionRef {
                 extension: "tools".into(),
                 id: "open".into(),
@@ -467,6 +469,7 @@ fn an_empty_argument_from_the_front_end_is_taken_from_the_query() {
                 extension: "tools".into(),
                 id: "go".into(),
             },
+            shown: ui.shown.get(),
             action: ActionRef {
                 extension: "tools".into(),
                 id: "open".into(),

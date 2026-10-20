@@ -19,6 +19,18 @@ ShellRoot {
             function onConnectedChanged() {
                 console.log("connected: " + menu.search.connected);
             }
+            // The title in the top row, whenever the rows change.
+            function onRowsInserted() {
+                menu.logTop();
+            }
+            function onDataChanged() {
+                menu.logTop();
+            }
+        }
+
+        function logTop() {
+            // 0x100 is the title role.
+            console.log("top: " + menu.search.data(menu.search.index(0, 0), 0x100));
         }
     }
 }

@@ -160,6 +160,16 @@ pub mod qobject {
         #[qinvokable]
         fn viewport(self: Pin<&mut KotodamaSearch>, top: i32, rows: i32);
 
+        /// The window is about to draw a frame of the model as it is now.
+        #[qinvokable]
+        #[cxx_name = "frameStarted"]
+        fn frame_started(self: Pin<&mut KotodamaSearch>);
+
+        /// The frame `frameStarted` began reached the screen: its Results are
+        /// the ones the user sees, and so the ones a run confirms.
+        #[qinvokable]
+        fn painted(self: Pin<&mut KotodamaSearch>);
+
         /// Answers `closeRequested` once the window is gone.
         #[qinvokable]
         fn closed(self: Pin<&mut KotodamaSearch>);
@@ -290,6 +300,19 @@ pub struct SearchRust {
     listed: Option<(String, String)>,
     /// The row the list has selected, by what it shows.
     selected: Option<ResultRef>,
+    /// Whether the user moved the selection off the top row of the Results
+    /// since the query last changed, and the Daemon knows.
+    selection_moved: bool,
+    /// The version of the Results in the model, or last in it while a list
+    /// View's Items are shown instead.
+    version: u32,
+    /// The version of the Results kept in `results`.
+    kept_version: u32,
+    /// The version of the Results in the frame being drawn.
+    drawing: u32,
+    /// The version of the Results in the last frame on screen, which a run
+    /// confirms to the Daemon.
+    on_screen: u32,
     views: Views,
     view: variant::Map,
     depth: i32,
@@ -316,6 +339,11 @@ impl Default for SearchRust {
             results: None,
             listed: None,
             selected: None,
+            selection_moved: false,
+            version: 0,
+            kept_version: 0,
+            drawing: 0,
+            on_screen: 0,
             views: Views::default(),
             view: variant::Map::default(),
             depth: 0,
@@ -367,6 +395,7 @@ impl KotodamaSearch {
     fn send_query(mut self: Pin<&mut Self>, text: String) {
         let now = Instant::now();
         let mut this = self.as_mut().rust_mut();
+        this.selection_moved = false;
         if this.send(&FromFrontEnd::Query { text }) {
             this.asked.get_or_insert(now);
         }
@@ -393,6 +422,7 @@ impl KotodamaSearch {
         };
         let message = FromFrontEnd::RunAction {
             result: row.result.clone(),
+            shown: self.on_screen,
             action,
             arguments: Default::default(),
         };
@@ -463,7 +493,21 @@ impl KotodamaSearch {
 
     fn select(mut self: Pin<&mut Self>, row: i32) {
         let selected = self.row(row).map(|row| row.result.clone());
-        self.as_mut().rust_mut().selected = selected;
+        let mut this = self.as_mut().rust_mut();
+        this.selected = selected;
+        if row > 0 && this.listed.is_none() && !this.selection_moved {
+            this.selection_moved = this.send(&FromFrontEnd::SelectionMoved);
+        }
+    }
+
+    fn frame_started(mut self: Pin<&mut Self>) {
+        let version = self.version;
+        self.as_mut().rust_mut().drawing = version;
+    }
+
+    fn painted(mut self: Pin<&mut Self>) {
+        let drawn = self.drawing;
+        self.as_mut().rust_mut().on_screen = drawn;
     }
 
     fn viewport(mut self: Pin<&mut Self>, top: i32, rows: i32) {
@@ -568,6 +612,12 @@ impl KotodamaSearch {
                 let mut this = self.as_mut().rust_mut();
                 this.writer = Some(writer);
                 this.asked = None;
+                // A Daemon that restarted counts its Results from the start.
+                this.version = 0;
+                this.kept_version = 0;
+                this.drawing = 0;
+                this.on_screen = 0;
+                this.selection_moved = false;
                 self.as_mut().set_connected(true);
                 // A Daemon that restarted has no idea what is typed. Even
                 // nothing typed has Results: those of the Empty query.
@@ -575,10 +625,13 @@ impl KotodamaSearch {
                 self.as_mut().send_query(text);
                 Shown::Same
             }
-            Update::Rows(rows) => {
+            Update::Rows(version, rows) => {
                 if self.results.is_some() {
-                    self.as_mut().rust_mut().results = Some(rows);
+                    let mut this = self.as_mut().rust_mut();
+                    this.results = Some(rows);
+                    this.kept_version = version;
                 } else {
+                    self.as_mut().rust_mut().version = version;
                     self.as_mut().replace(rows);
                 }
                 if let Some(asked) = self.as_mut().rust_mut().asked.take() {
@@ -734,13 +787,17 @@ impl KotodamaSearch {
         let Some(top) = top else {
             self.as_mut().rust_mut().listed = None;
             if let Some(results) = self.as_mut().rust_mut().results.take() {
+                let kept = self.kept_version;
+                self.as_mut().rust_mut().version = kept;
                 self.as_mut().replace(results);
             }
             return;
         };
         if self.results.is_none() {
             let results = self.rows.iter().cloned().collect();
-            self.as_mut().rust_mut().results = Some(results);
+            let mut this = self.as_mut().rust_mut();
+            this.results = Some(results);
+            this.kept_version = this.version;
         }
         let same = self.listed.as_ref() == Some(&top);
         self.as_mut().rust_mut().listed = Some(top);

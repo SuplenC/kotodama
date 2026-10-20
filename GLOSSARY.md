@@ -56,6 +56,10 @@ _Avoid_: Private item, internal item
 A query the Daemon forwards to an Extension as the user types, for sources that can't be indexed ahead of time, such as a calculator or web search.
 _Avoid_: Dynamic search, remote query
 
+**Late Result**:
+A Result that comes after the list for its query was first sent, such as a Live query's. Until the user moves the selection or 150 ms after the keystroke it reranks the rows on screen; after that it goes below them. Enter runs one only once a frame has shown it.
+_Avoid_: Delayed result, async result
+
 **Action**:
 Something the user can do to a Result; every Result has one primary Action and may have more, listed in the Action panel.
 _Avoid_: Command, handler, verb
