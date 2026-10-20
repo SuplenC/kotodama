@@ -123,16 +123,10 @@ impl Character {
     /// The Item it is offered as: titled with the character and its name, with
     /// an Action for each skin tone it has after typing and copying.
     pub fn item(&self) -> Item {
-        let action = |id: &str, title: String| Action {
-            id: id.into(),
-            title,
-            shortcut: None,
-            arguments: vec![],
-        };
-        let mut actions = vec![action(TYPE, "Type".into()), action(COPY, "Copy".into())];
+        let mut actions = vec![Action::new(TYPE, "Type"), Action::new(COPY, "Copy")];
         for tone in Tone::ALL {
             if let Some(toned) = self.toned(tone) {
-                actions.push(action(&tone.action(), format!("Type {toned}")));
+                actions.push(Action::new(tone.action(), format!("Type {toned}")));
             }
         }
         let mut name = self.name.chars();

@@ -9,6 +9,8 @@ repository.workspace = true
 [features]
 # The directory watcher, which brings in `notify`. Off unless asked for.
 watch = ["dep:notify"]
+# The shared test harness. For dev-dependencies only.
+testing = []
 
 [dependencies]
 kotodama-protocol = { path = "../kotodama-protocol" }

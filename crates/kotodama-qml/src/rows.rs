@@ -205,19 +205,10 @@ mod tests {
         }
     }
 
-    fn action(id: &str, title: &str) -> kotodama_protocol::Action {
-        kotodama_protocol::Action {
-            id: id.into(),
-            title: title.into(),
-            shortcut: None,
-            arguments: Vec::new(),
-        }
-    }
-
     fn offered(extension: &str, id: &str, title: &str) -> OfferedAction {
         OfferedAction {
             extension: extension.into(),
-            action: action(id, title),
+            action: kotodama_protocol::Action::new(id, title),
         }
     }
 
@@ -237,7 +228,10 @@ mod tests {
                 keywords: Vec::new(),
                 hidden: false,
                 identity: None,
-                actions: vec![action("open", "Open"), action("term", "Open in terminal")],
+                actions: vec![
+                    kotodama_protocol::Action::new("open", "Open"),
+                    kotodama_protocol::Action::new("term", "Open in terminal"),
+                ],
             },
             contributed: vec![
                 offered("pinner", "pin", "Pin a version here"),

@@ -1,86 +1,41 @@
 //! Drives the emoji Extension the way the Daemon does, over its stdio.
 
 use std::collections::BTreeMap;
-use std::process::{Child, ChildStdin, Command, Stdio};
-use std::sync::mpsc::{self, Receiver};
-use std::thread;
+use std::process::Command;
 use std::time::Duration;
 
+use kotodama_extension::testing::Spawned;
 use kotodama_protocol::*;
 
 const WAIT: Duration = Duration::from_secs(10);
 
-struct Emoji {
-    child: Child,
-    writer: ChannelWriter<ChildStdin>,
-    received: Receiver<FromExtension>,
-}
+struct Emoji(Spawned);
 
 impl Emoji {
     /// Starts the Extension and sends it `config`, as the Daemon does.
     fn start(config: Table) -> Self {
-        let mut child = Command::new(env!("CARGO_BIN_EXE_kotodama-emoji"))
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .spawn()
-            .unwrap();
-        let (stdout, stdin) = (child.stdout.take().unwrap(), child.stdin.take().unwrap());
-        let channel = Channel::handshake(stdout, stdin, &Hello::new(&WireFormat::ALL)).unwrap();
-        let (mut reader, writer) = channel.split();
-        let (sender, received) = mpsc::channel();
-        thread::spawn(move || {
-            while let Ok(Some(message)) = reader.recv::<FromExtension>() {
-                if sender.send(message).is_err() {
-                    break;
-                }
-            }
-        });
-        let mut emoji = Emoji {
-            child,
-            writer,
-            received,
-        };
-        emoji.writer.send(&ToExtension::Config(config)).unwrap();
-        emoji
+        let mut extension = Spawned::start(
+            &mut Command::new(env!("CARGO_BIN_EXE_kotodama-emoji")),
+            WAIT,
+        );
+        extension.send(ToExtension::Config(config));
+        Emoji(extension)
     }
 
     /// The Items the Extension indexes, which it sends once, all at once.
     fn items(&self) -> Vec<Item> {
-        match self.received.recv_timeout(WAIT) {
-            Ok(FromExtension::AddItems { items }) => items,
-            other => panic!("expected add_items, got {other:?}"),
-        }
+        self.0.added()
     }
 
     fn run(&mut self, id: &str, action: &str) -> Outcome {
-        self.writer
-            .send(&ToExtension::RunAction {
-                invocation: 3,
-                action: action.into(),
-                item: ItemRef {
-                    id: id.into(),
-                    kind: ItemKind::Namespaced(NamespacedKind::new("emoji.character").unwrap()),
-                },
-                arguments: BTreeMap::new(),
-            })
-            .unwrap();
-        loop {
-            match self.received.recv_timeout(WAIT) {
-                Ok(FromExtension::ActionDone {
-                    invocation: 3,
-                    outcome,
-                }) => return outcome,
-                Ok(FromExtension::AddItems { .. }) => {}
-                other => panic!("expected action_done, got {other:?}"),
-            }
-        }
-    }
-}
-
-impl Drop for Emoji {
-    fn drop(&mut self) {
-        let _ = self.child.kill();
-        let _ = self.child.wait();
+        let item = ItemRef {
+            id: id.into(),
+            kind: ItemKind::Namespaced(NamespacedKind::new("emoji.character").unwrap()),
+        };
+        self.0.start_run(3, action, item, BTreeMap::new());
+        self.0.outcome(3, |message| {
+            matches!(message, FromExtension::AddItems { .. })
+        })
     }
 }
 

@@ -74,6 +74,8 @@ pub mod config;
 pub mod dirs;
 mod items;
 pub mod launch;
+#[cfg(feature = "testing")]
+pub mod testing;
 #[cfg(feature = "watch")]
 pub mod watch;
 

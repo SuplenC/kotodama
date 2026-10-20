@@ -9,9 +9,8 @@ use std::os::unix::net::UnixStream;
 use std::thread;
 use std::time::{Duration, Instant};
 
-use kotodama_protocol::{
-    ActionRef, Channel, FromFrontEnd, Hello, ResultRef, ShownResult, ToFrontEnd, WireFormat,
-};
+use kotodama_extension::testing;
+use kotodama_protocol::{ActionRef, Channel, FromFrontEnd, ResultRef, ShownResult, ToFrontEnd};
 use kotodamad::paths::Paths;
 use tempfile::TempDir;
 
@@ -26,16 +25,17 @@ impl Menu {
     pub fn start(config: &str) -> Self {
         let dir = tempfile::tempdir().unwrap();
         let path = |sub: &str| dir.path().join(sub);
-        let ext = path("extensions/emoji");
-        fs::create_dir_all(&ext).unwrap();
         fs::create_dir_all(path("config")).unwrap();
         fs::write(path("config/config.toml"), config).unwrap();
         // The Bundled extension's own Manifest, run from where cargo built it.
-        let manifest = include_str!("../../manifest.toml").replace(
-            "\"./kotodama-emoji\"",
-            &format!("{:?}", env!("CARGO_BIN_EXE_kotodama-emoji")),
+        testing::install(
+            &path("extensions"),
+            "emoji",
+            &testing::bundled(
+                include_str!("../../manifest.toml"),
+                env!("CARGO_BIN_EXE_kotodama-emoji"),
+            ),
         );
-        fs::write(ext.join("manifest.toml"), manifest).unwrap();
 
         let paths = Paths {
             socket: path("kotodama.sock"),
@@ -47,22 +47,7 @@ impl Menu {
         let socket = paths.socket.clone();
         thread::spawn(move || kotodamad::run(&paths));
 
-        let stream = (0..500)
-            .find_map(|_| {
-                UnixStream::connect(&socket)
-                    .map_err(|_| thread::sleep(Duration::from_millis(10)))
-                    .ok()
-            })
-            .expect("the Daemon never opened its socket");
-        stream
-            .set_read_timeout(Some(Duration::from_secs(1)))
-            .unwrap();
-        let ui = Channel::handshake(
-            stream.try_clone().unwrap(),
-            stream,
-            &Hello::new(&WireFormat::ALL),
-        )
-        .unwrap();
+        let ui = testing::connect(&socket, Duration::from_secs(1));
         let mut menu = Menu { _dir: dir, ui };
         // The Results change once the Items are indexed; from then on each
         // query has one answer.

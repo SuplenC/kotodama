@@ -5,60 +5,49 @@
 
 use std::collections::BTreeMap;
 use std::fs;
+use std::ops::{Deref, DerefMut};
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
-use std::process::{Child, ChildStdin, Command, Stdio};
-use std::sync::mpsc::{self, Receiver};
+use std::process::Command;
 use std::thread;
 use std::time::{Duration, Instant};
 
+use kotodama_extension::testing::Spawned;
 use kotodama_protocol::*;
 use tempfile::TempDir;
 
 /// Long enough for a change on disk to be noticed and settle.
 const WAIT: Duration = Duration::from_secs(5);
 
+/// The Extension is declared first, so it is killed before its home goes.
 struct Folders {
+    extension: Spawned,
     home: TempDir,
-    child: Child,
-    writer: ChannelWriter<ChildStdin>,
-    received: Receiver<FromExtension>,
 }
 
-impl Drop for Folders {
-    fn drop(&mut self) {
-        let _ = self.child.kill();
-        let _ = self.child.wait();
+impl Deref for Folders {
+    type Target = Spawned;
+    fn deref(&self) -> &Spawned {
+        &self.extension
+    }
+}
+
+impl DerefMut for Folders {
+    fn deref_mut(&mut self) -> &mut Spawned {
+        &mut self.extension
     }
 }
 
 impl Folders {
     /// Starts the Extension with `home` as its home folder.
     fn start(home: TempDir) -> Self {
-        let mut child = Command::new(env!("CARGO_BIN_EXE_kotodama-folders"))
-            .env("HOME", home.path())
-            .env_remove("KOTODAMA_LAUNCH_PREFIX")
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .spawn()
-            .unwrap();
-        let (stdout, stdin) = (child.stdout.take().unwrap(), child.stdin.take().unwrap());
-        let channel = Channel::handshake(stdout, stdin, &Hello::new(&WireFormat::ALL)).unwrap();
-        let (mut reader, writer) = channel.split();
-        let (sender, received) = mpsc::channel();
-        thread::spawn(move || {
-            while let Ok(Some(message)) = reader.recv::<FromExtension>() {
-                if sender.send(message).is_err() {
-                    break;
-                }
-            }
-        });
-        Folders {
-            home,
-            child,
-            writer,
-            received,
-        }
+        let extension = Spawned::start(
+            Command::new(env!("CARGO_BIN_EXE_kotodama-folders"))
+                .env("HOME", home.path())
+                .env_remove("KOTODAMA_LAUNCH_PREFIX"),
+            WAIT,
+        );
+        Folders { extension, home }
     }
 
     /// Starts the Extension and sends it `config`.
@@ -71,69 +60,32 @@ impl Folders {
     /// Sends `config`, TOML for the `[extensions.folders]` table.
     fn configure(&mut self, config: &str) {
         let table: toml::Table = toml::from_str(config).unwrap();
-        self.writer
-            .send(&ToExtension::Config(table_from(table)))
-            .unwrap();
+        self.send(ToExtension::Config(table_from(table)));
     }
 
     fn path(&self) -> &Path {
         self.home.path()
     }
 
-    fn recv(&self) -> FromExtension {
-        self.received
-            .recv_timeout(WAIT)
-            .expect("the Extension sent nothing")
-    }
-
     /// The Items of the next message, which must be `add_items`, by title.
     fn added(&self) -> BTreeMap<String, Item> {
-        match self.recv() {
-            FromExtension::AddItems { items } => items
-                .into_iter()
-                .map(|item| (item.title.clone(), item))
-                .collect(),
-            other => panic!("expected add_items, got {other:?}"),
-        }
-    }
-
-    /// The ids of the next message, which must be `remove_items`.
-    fn removed(&self) -> Vec<String> {
-        match self.recv() {
-            FromExtension::RemoveItems { ids } => ids,
-            other => panic!("expected remove_items, got {other:?}"),
-        }
-    }
-
-    fn quiet(&self) {
-        if let Ok(message) = self.received.recv_timeout(Duration::from_millis(600)) {
-            panic!("expected nothing, got {message:?}");
-        }
+        self.extension
+            .added()
+            .into_iter()
+            .map(|item| (item.title.clone(), item))
+            .collect()
     }
 
     /// Runs `action` on `item` with `arguments`, and returns the outcome.
     fn run_with(&mut self, item: &Item, action: &str, arguments: &[(&str, &str)]) -> Outcome {
-        self.writer
-            .send(&ToExtension::RunAction {
-                invocation: 7,
-                action: action.into(),
-                item: item.to_ref(),
-                arguments: arguments
-                    .iter()
-                    .map(|(name, value)| ((*name).into(), (*value).into()))
-                    .collect(),
-            })
-            .unwrap();
-        loop {
-            match self.recv() {
-                FromExtension::ActionDone {
-                    invocation: 7,
-                    outcome,
-                } => return outcome,
-                FromExtension::JobProgress(_) => {}
-                other => panic!("expected action_done, got {other:?}"),
-            }
-        }
+        let arguments = arguments
+            .iter()
+            .map(|(name, value)| ((*name).into(), (*value).into()))
+            .collect();
+        self.start_run(7, action, item.to_ref(), arguments);
+        self.outcome(7, |message| {
+            matches!(message, FromExtension::JobProgress(_))
+        })
     }
 
     fn run(&mut self, item: &Item, action: &str) -> Outcome {
@@ -487,15 +439,12 @@ fn a_background_script_is_a_job_that_ends_with_its_last_line() {
     let items = folders.added();
     assert_eq!(items["Sync"].actions[0].title, "Run in Background");
 
-    folders
-        .writer
-        .send(&ToExtension::RunAction {
-            invocation: 1,
-            action: "run".into(),
-            item: items["Sync"].to_ref(),
-            arguments: BTreeMap::new(),
-        })
-        .unwrap();
+    folders.send(ToExtension::RunAction {
+        invocation: 1,
+        action: "run".into(),
+        item: items["Sync"].to_ref(),
+        arguments: BTreeMap::new(),
+    });
     let started = folders.job();
     assert_eq!(
         (started.title.as_str(), started.state),

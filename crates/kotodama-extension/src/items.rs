@@ -108,12 +108,7 @@ mod tests {
             keyword: None,
             keywords: Vec::new(),
             hidden: false,
-            actions: vec![Action {
-                id: "open".into(),
-                title: "Open".into(),
-                shortcut: None,
-                arguments: Vec::new(),
-            }],
+            actions: vec![Action::new("open", "Open")],
         }
     }
 
