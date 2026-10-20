@@ -417,6 +417,12 @@ PanelWindow {
                     required property string markup
                     required property string subtitle
                     required property string icon
+                    // The Alias the query named this Result by, drawn as a
+                    // badge; empty for none.
+                    required property string alias
+                    // Why the Result can't run, shown in place of its
+                    // subtitle; the row is greyed out. Empty when it can run.
+                    required property string unavailable
 
                     width: ListView.view.width
                     height: menu.rowHeight
@@ -435,14 +441,37 @@ PanelWindow {
                         anchors.verticalCenter: parent.verticalCenter
                         implicitSize: menu.rowHeight - 16
                         visible: row.icon !== ""
+                        opacity: row.unavailable === "" ? 1 : 0.4
                         source: row.icon.startsWith("/") ? "file://" + row.icon : Quickshell.iconPath(row.icon, true)
+                    }
+
+                    Rectangle {
+                        id: badge
+                        anchors.right: parent.right
+                        anchors.rightMargin: 16
+                        anchors.verticalCenter: parent.verticalCenter
+                        visible: row.alias !== ""
+                        width: visible ? badgeText.implicitWidth + 12 : 0
+                        height: badgeText.implicitHeight + 4
+                        radius: height / 2
+                        color: "transparent"
+                        border.color: menu.border
+
+                        Text {
+                            id: badgeText
+                            anchors.centerIn: parent
+                            text: row.alias
+                            color: menu.dimmed
+                            font.family: menu.fontFamily
+                            font.pixelSize: menu.fontSize - 4
+                        }
                     }
 
                     Column {
                         anchors.left: parent.left
                         anchors.leftMargin: 16 + menu.rowHeight - 16 + 12
-                        anchors.right: parent.right
-                        anchors.rightMargin: 16
+                        anchors.right: badge.left
+                        anchors.rightMargin: badge.visible ? 8 : 0
                         anchors.verticalCenter: parent.verticalCenter
 
                         Text {
@@ -450,15 +479,16 @@ PanelWindow {
                             text: row.markup
                             textFormat: Text.StyledText
                             elide: Text.ElideRight
-                            color: menu.foreground
+                            color: row.unavailable === "" ? menu.foreground : menu.dimmed
+                            opacity: row.unavailable === "" ? 1 : 0.6
                             font.family: menu.fontFamily
                             font.pixelSize: menu.fontSize
                         }
 
                         Text {
                             width: parent.width
-                            visible: row.subtitle !== ""
-                            text: row.subtitle
+                            visible: text !== ""
+                            text: row.unavailable === "" ? row.subtitle : row.unavailable
                             elide: Text.ElideRight
                             color: menu.dimmed
                             font.family: menu.fontFamily

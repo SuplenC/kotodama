@@ -510,6 +510,8 @@ fn to_front_end() -> Vec<ToFrontEnd> {
                     action: action(),
                 }],
                 highlights: vec![0, 2],
+                alias: Some("ff".into()),
+                unavailable: Some("apps isn't running".into()),
             }],
         },
         ToFrontEnd::Status {

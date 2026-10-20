@@ -23,6 +23,10 @@ pub struct Row {
     pub icon: String,
     /// Positions, in characters, of the title's matched characters, in order.
     pub highlights: Vec<u32>,
+    /// The Alias the query named the Result by, shown as a badge.
+    pub alias: Option<Box<str>>,
+    /// Why the Result can't run, shown greyed out in place of the subtitle.
+    pub unavailable: Option<Box<str>>,
 }
 
 /// One entry of the Action panel.
@@ -54,6 +58,8 @@ impl From<ShownResult> for Row {
             subtitle: item.subtitle.unwrap_or_default(),
             icon: item.icon.unwrap_or_default(),
             highlights,
+            alias: shown.alias.map(String::into_boxed_str),
+            unavailable: shown.unavailable.map(String::into_boxed_str),
         }
     }
 }
@@ -78,6 +84,8 @@ impl Row {
             subtitle: item.subtitle.clone().unwrap_or_default(),
             icon: item.icon.clone().unwrap_or_default(),
             highlights,
+            alias: None,
+            unavailable: None,
         }
     }
 
@@ -131,8 +139,12 @@ impl Row {
         own.chain(contributed)
     }
 
-    /// What runs the `n`th entry of the Action panel.
+    /// What runs the `n`th entry of the Action panel. Nothing runs on an
+    /// unavailable row.
     pub fn action(&self, n: usize) -> Option<ActionRef> {
+        if self.unavailable.is_some() {
+            return None;
+        }
         match self.own.get(n) {
             Some(own) => Some(ActionRef {
                 extension: self.result.extension.clone(),
@@ -508,6 +520,8 @@ mod tests {
             subtitle: String::new(),
             icon: String::new(),
             highlights: highlights.to_vec(),
+            alias: None,
+            unavailable: None,
         }
     }
 
@@ -545,6 +559,8 @@ mod tests {
                 offered("git", "log", "Show log"),
             ],
             highlights: Vec::new(),
+            alias: None,
+            unavailable: None,
         };
         let row = Row::from(shown);
         let panel: Vec<_> = row
@@ -571,6 +587,37 @@ mod tests {
             ]
         );
         assert_eq!(row.action(5), None);
+    }
+
+    #[test]
+    fn an_unavailable_row_keeps_its_alias_badge_and_runs_nothing() {
+        let shown = ShownResult {
+            extension: "apps".into(),
+            item: Item {
+                id: "firefox".into(),
+                kind: ItemKind::App {
+                    desktop_id: "firefox.desktop".into(),
+                },
+                title: "Firefox".into(),
+                subtitle: None,
+                icon: None,
+                keyword: None,
+                keywords: Vec::new(),
+                hidden: false,
+                identity: None,
+                actions: vec![Action::new("open", "Open")],
+            },
+            contributed: Vec::new(),
+            highlights: Vec::new(),
+            alias: Some("ff".into()),
+            unavailable: Some("apps isn't running".into()),
+        };
+
+        let row = Row::from(shown);
+
+        assert_eq!(row.alias.as_deref(), Some("ff"));
+        assert_eq!(row.unavailable.as_deref(), Some("apps isn't running"));
+        assert_eq!(row.action(0), None);
     }
 
     #[test]
