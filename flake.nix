@@ -87,6 +87,9 @@
               rustfmt
               rust-analyzer
               cargo-nextest
+              # The instruction-counting benchmarks: gungraun runs them under Valgrind.
+              valgrind
+              (callPackage ./nix/gungraun-runner.nix { })
 
               # Qt 6 and what cxx-qt needs to build against it
               qt
