@@ -150,6 +150,7 @@ impl Character {
             keyword: None,
             keywords: self.keywords().map(str::to_owned).collect(),
             actions,
+            hidden: false,
         }
     }
 }

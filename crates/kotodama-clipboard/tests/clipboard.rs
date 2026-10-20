@@ -340,7 +340,7 @@ fn the_history_item_lists_every_entry_newest_first() {
     extension.start_run("history", "clipboard.history", "open");
     let view = extension.pushed();
     assert_eq!(extension.outcome(), Outcome::KeepOpen);
-    let ViewContent::List { items } = view.content else {
+    let ViewContent::List { items, .. } = view.content else {
         panic!("expected a list View, got {view:?}");
     };
     assert_eq!(titles(&items), ["newer", "older"]);
@@ -350,7 +350,7 @@ fn the_history_item_lists_every_entry_newest_first() {
     assert_eq!(extension.removed(), [newer]);
     match extension.recv() {
         FromExtension::UpdateView(View {
-            content: ViewContent::List { items },
+            content: ViewContent::List { items, .. },
             ..
         }) => assert_eq!(titles(&items), ["older"]),
         other => panic!("expected update_view, got {other:?}"),

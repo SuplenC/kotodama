@@ -94,6 +94,7 @@ impl Answer {
                 icon: Some("accessories-calculator".into()),
                 keyword: None,
                 keywords: vec![],
+                hidden: false,
                 actions: vec![
                     action(COPY, "Copy Answer"),
                     action(COPY_EXPRESSION, "Copy Expression and Answer"),

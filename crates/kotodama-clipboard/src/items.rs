@@ -84,6 +84,7 @@ pub fn history_item() -> Item {
         icon: Some("edit-paste".to_owned()),
         keyword: None,
         keywords: vec!["paste".to_owned(), "copied".to_owned()],
+        hidden: false,
         actions: vec![
             action(OPEN, "Show Clipboard History"),
             action(CLEAR, "Clear Clipboard History"),
@@ -119,6 +120,7 @@ pub fn clip_item(history: &History, entry: &Entry) -> Item {
         icon: Some(icon),
         keyword: None,
         keywords: Vec::new(),
+        hidden: false,
         actions: vec![
             action(PASTE, "Paste"),
             action(COPY, "Copy to Clipboard"),
@@ -138,6 +140,8 @@ pub fn list_view(history: &History) -> View {
                 .entries()
                 .map(|entry| clip_item(history, entry))
                 .collect(),
+            // Typing filters it in the Daemon, newest first within a Tier.
+            filters_itself: false,
         },
     }
 }

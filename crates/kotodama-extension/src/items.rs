@@ -62,9 +62,13 @@ fn fingerprint(item: &Item) -> u64 {
         icon,
         keyword,
         keywords,
+        hidden,
         actions,
     } = item;
-    (id, kind, identity, title, subtitle, icon, keyword, keywords).hash(&mut hasher);
+    (
+        id, kind, identity, title, subtitle, icon, keyword, keywords, hidden,
+    )
+        .hash(&mut hasher);
     for Action {
         id,
         title,
@@ -103,6 +107,7 @@ mod tests {
             icon: None,
             keyword: None,
             keywords: Vec::new(),
+            hidden: false,
             actions: vec![Action {
                 id: "open".into(),
                 title: "Open".into(),

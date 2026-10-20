@@ -21,6 +21,7 @@ fn batch() -> FromExtension {
             keyword: None,
             identity: None,
             keywords: vec!["example".into(), "utility".into(), format!("app{n}")],
+            hidden: false,
             actions: vec![
                 Action {
                     id: "open".into(),

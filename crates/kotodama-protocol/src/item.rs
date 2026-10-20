@@ -35,6 +35,11 @@ pub struct Item {
     /// The Item's own Actions. The first is the primary one, which Enter runs, so
     /// there is always at least one.
     pub actions: Vec<Action>,
+    /// Kept out of the search: only `kotodama open --view` reaches it, as the
+    /// entry point to a View of an Extension that would rather not list one,
+    /// such as one with only Live queries (ADR 0015). Ignored outside
+    /// `add_items`.
+    pub hidden: bool,
 }
 
 /// An Item's id and kind, without anything shown on screen. This is how the
@@ -313,6 +318,7 @@ struct ItemWire<'a> {
     keyword: Option<&'a str>,
     keywords: &'a [String],
     actions: &'a [Action],
+    hidden: bool,
 }
 
 #[derive(Deserialize)]
@@ -339,6 +345,8 @@ struct ItemOwned {
     #[serde(default)]
     keywords: Vec<String>,
     actions: Vec<Action>,
+    #[serde(default)]
+    hidden: bool,
 }
 
 impl Serialize for Item {
@@ -358,6 +366,7 @@ impl Serialize for Item {
             keyword: self.keyword.as_deref(),
             keywords: &self.keywords,
             actions: &self.actions,
+            hidden: self.hidden,
         }
         .serialize(serializer)
     }
@@ -395,6 +404,7 @@ impl TryFrom<ItemOwned> for Item {
             keyword: wire.keyword,
             keywords: wire.keywords,
             actions: wire.actions,
+            hidden: wire.hidden,
         })
     }
 }

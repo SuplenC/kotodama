@@ -1,4 +1,4 @@
-protocol version 2
+protocol version 3
 ToExtension::config postcard 00 02 07 65 6e 61 62 6c 65 64 00 01 05 6c 69 6d 69 74 01 0e
 ToExtension::config json {"config":{"enabled":true,"limit":7}}
 ToExtension::live_query postcard 01 03 03 31 2b 31 01 01 3d
@@ -11,14 +11,16 @@ ToExtension::submit_form postcard 04 04 76 69 65 77 02 07 65 6e 61 62 6c 65 64 0
 ToExtension::submit_form json {"submit_form":{"view":"view","values":{"enabled":true,"limit":7}}}
 ToExtension::view_popped postcard 05 04 76 69 65 77
 ToExtension::view_popped json {"view_popped":{"view":"view"}}
-ToExtension::action_catalog postcard 06 01 05 73 68 65 6c 6c 07 70 72 6f 6a 65 63 74 04 6f 70 65 6e 04 4f 70 65 6e 01 06 63 74 72 6c 2b 6f 01 07 76 65 72 73 69 6f 6e 01 04 31 2e 32 33 01
+ToExtension::filter_view postcard 06 04 76 69 65 77 03 66 69 72
+ToExtension::filter_view json {"filter_view":{"view":"view","text":"fir"}}
+ToExtension::action_catalog postcard 07 01 05 73 68 65 6c 6c 07 70 72 6f 6a 65 63 74 04 6f 70 65 6e 04 4f 70 65 6e 01 06 63 74 72 6c 2b 6f 01 07 76 65 72 73 69 6f 6e 01 04 31 2e 32 33 01
 ToExtension::action_catalog json {"action_catalog":{"entries":[{"extension":"shell","kind":"project","action":{"id":"open","title":"Open","shortcut":"ctrl+o","arguments":[{"name":"version","placeholder":"1.23","optional":true}]}}]}}
-FromExtension::add_items postcard 00 01 02 69 64 03 61 70 70 01 0f 66 69 72 65 66 6f 78 2e 64 65 73 6b 74 6f 70 00 00 00 01 13 61 70 70 3a 66 69 72 65 66 6f 78 2e 64 65 73 6b 74 6f 70 05 54 69 74 6c 65 01 08 53 75 62 74 69 74 6c 65 01 04 69 63 6f 6e 01 02 67 6f 01 07 62 72 6f 77 73 65 72 01 04 6f 70 65 6e 04 4f 70 65 6e 01 06 63 74 72 6c 2b 6f 01 07 76 65 72 73 69 6f 6e 01 04 31 2e 32 33 01
-FromExtension::add_items json {"add_items":{"items":[{"id":"id","kind":"app","desktop_id":"firefox.desktop","path":null,"address":null,"url":null,"identity":"app:firefox.desktop","title":"Title","subtitle":"Subtitle","icon":"icon","keyword":"go","keywords":["browser"],"actions":[{"id":"open","title":"Open","shortcut":"ctrl+o","arguments":[{"name":"version","placeholder":"1.23","optional":true}]}]}]}}
+FromExtension::add_items postcard 00 01 02 69 64 03 61 70 70 01 0f 66 69 72 65 66 6f 78 2e 64 65 73 6b 74 6f 70 00 00 00 01 13 61 70 70 3a 66 69 72 65 66 6f 78 2e 64 65 73 6b 74 6f 70 05 54 69 74 6c 65 01 08 53 75 62 74 69 74 6c 65 01 04 69 63 6f 6e 01 02 67 6f 01 07 62 72 6f 77 73 65 72 01 04 6f 70 65 6e 04 4f 70 65 6e 01 06 63 74 72 6c 2b 6f 01 07 76 65 72 73 69 6f 6e 01 04 31 2e 32 33 01 01
+FromExtension::add_items json {"add_items":{"items":[{"id":"id","kind":"app","desktop_id":"firefox.desktop","path":null,"address":null,"url":null,"identity":"app:firefox.desktop","title":"Title","subtitle":"Subtitle","icon":"icon","keyword":"go","keywords":["browser"],"actions":[{"id":"open","title":"Open","shortcut":"ctrl+o","arguments":[{"name":"version","placeholder":"1.23","optional":true}]}],"hidden":true}]}}
 FromExtension::remove_items postcard 01 02 01 61 01 62
 FromExtension::remove_items json {"remove_items":{"ids":["a","b"]}}
-FromExtension::live_results postcard 02 03 01 02 69 64 03 75 72 6c 00 00 00 01 13 68 74 74 70 73 3a 2f 2f 65 78 61 6d 70 6c 65 2e 6f 72 67 01 13 61 70 70 3a 66 69 72 65 66 6f 78 2e 64 65 73 6b 74 6f 70 05 54 69 74 6c 65 01 08 53 75 62 74 69 74 6c 65 01 04 69 63 6f 6e 01 02 67 6f 01 07 62 72 6f 77 73 65 72 01 04 6f 70 65 6e 04 4f 70 65 6e 01 06 63 74 72 6c 2b 6f 01 07 76 65 72 73 69 6f 6e 01 04 31 2e 32 33 01 00 00 40 3f 01 01
-FromExtension::live_results json {"live_results":{"live_query":3,"results":[{"item":{"id":"id","kind":"url","desktop_id":null,"path":null,"address":null,"url":"https://example.org","identity":"app:firefox.desktop","title":"Title","subtitle":"Subtitle","icon":"icon","keyword":"go","keywords":["browser"],"actions":[{"id":"open","title":"Open","shortcut":"ctrl+o","arguments":[{"name":"version","placeholder":"1.23","optional":true}]}]},"score":0.75,"answer":true}],"done":true}}
+FromExtension::live_results postcard 02 03 01 02 69 64 03 75 72 6c 00 00 00 01 13 68 74 74 70 73 3a 2f 2f 65 78 61 6d 70 6c 65 2e 6f 72 67 01 13 61 70 70 3a 66 69 72 65 66 6f 78 2e 64 65 73 6b 74 6f 70 05 54 69 74 6c 65 01 08 53 75 62 74 69 74 6c 65 01 04 69 63 6f 6e 01 02 67 6f 01 07 62 72 6f 77 73 65 72 01 04 6f 70 65 6e 04 4f 70 65 6e 01 06 63 74 72 6c 2b 6f 01 07 76 65 72 73 69 6f 6e 01 04 31 2e 32 33 01 01 00 00 40 3f 01 01
+FromExtension::live_results json {"live_results":{"live_query":3,"results":[{"item":{"id":"id","kind":"url","desktop_id":null,"path":null,"address":null,"url":"https://example.org","identity":"app:firefox.desktop","title":"Title","subtitle":"Subtitle","icon":"icon","keyword":"go","keywords":["browser"],"actions":[{"id":"open","title":"Open","shortcut":"ctrl+o","arguments":[{"name":"version","placeholder":"1.23","optional":true}]}],"hidden":true},"score":0.75,"answer":true}],"done":true}}
 FromExtension::action_done postcard 03 05 01
 FromExtension::action_done json {"action_done":{"invocation":5,"outcome":"keep_open"}}
 FromExtension::push_view postcard 04 04 76 69 65 77 06 41 20 56 69 65 77 03 03 6a 6f 62
@@ -27,9 +29,11 @@ FromExtension::update_view postcard 05 04 76 69 65 77 06 41 20 56 69 65 77 03 03
 FromExtension::update_view json {"update_view":{"id":"view","title":"A View","content":{"progress":{"job":"job"}}}}
 FromExtension::pop_view postcard 06 04 76 69 65 77
 FromExtension::pop_view json {"pop_view":{"view":"view"}}
-FromExtension::job_progress postcard 07 03 6a 6f 62 0a 49 6e 73 74 61 6c 6c 69 6e 67 02 01 00 00 40 3f 01 0c 6f 75 74 20 6f 66 20 73 70 61 63 65
+FromExtension::replace_view postcard 07 04 66 6f 72 6d 04 76 69 65 77 06 41 20 56 69 65 77 03 03 6a 6f 62
+FromExtension::replace_view json {"replace_view":{"view":"form","with":{"id":"view","title":"A View","content":{"progress":{"job":"job"}}}}}
+FromExtension::job_progress postcard 08 03 6a 6f 62 0a 49 6e 73 74 61 6c 6c 69 6e 67 02 01 00 00 40 3f 01 0c 6f 75 74 20 6f 66 20 73 70 61 63 65
 FromExtension::job_progress json {"job_progress":{"id":"job","title":"Installing","state":"failed","progress":0.75,"message":"out of space"}}
-FromExtension::request_action_catalog postcard 08
+FromExtension::request_action_catalog postcard 09
 FromExtension::request_action_catalog json "request_action_catalog"
 FromFrontEnd::query postcard 00 03 66 69 72
 FromFrontEnd::query json {"query":{"text":"fir"}}
@@ -41,31 +45,37 @@ FromFrontEnd::submit_form postcard 03 05 73 68 65 6c 6c 04 76 69 65 77 02 07 65 
 FromFrontEnd::submit_form json {"submit_form":{"extension":"shell","view":"view","values":{"enabled":true,"limit":7}}}
 FromFrontEnd::view_popped postcard 04 05 73 68 65 6c 6c 04 76 69 65 77
 FromFrontEnd::view_popped json {"view_popped":{"extension":"shell","view":"view"}}
-FromFrontEnd::closed postcard 05
+FromFrontEnd::filter_view postcard 05 05 73 68 65 6c 6c 04 76 69 65 77 03 66 69 72
+FromFrontEnd::filter_view json {"filter_view":{"extension":"shell","view":"view","text":"fir"}}
+FromFrontEnd::closed postcard 06
 FromFrontEnd::closed json "closed"
-FromFrontEnd::open postcard 06 03 66 69 72 01 04 76 69 65 77
+FromFrontEnd::open postcard 07 03 66 69 72 01 04 76 69 65 77
 FromFrontEnd::open json {"open":{"query":"fir","view":"view"}}
-FromFrontEnd::toggle postcard 07
+FromFrontEnd::toggle postcard 08
 FromFrontEnd::toggle json "toggle"
-ToFrontEnd::results postcard 00 01 04 61 70 70 73 02 69 64 03 61 70 70 01 0f 66 69 72 65 66 6f 78 2e 64 65 73 6b 74 6f 70 00 00 00 01 13 61 70 70 3a 66 69 72 65 66 6f 78 2e 64 65 73 6b 74 6f 70 05 54 69 74 6c 65 01 08 53 75 62 74 69 74 6c 65 01 04 69 63 6f 6e 01 02 67 6f 01 07 62 72 6f 77 73 65 72 01 04 6f 70 65 6e 04 4f 70 65 6e 01 06 63 74 72 6c 2b 6f 01 07 76 65 72 73 69 6f 6e 01 04 31 2e 32 33 01 01 05 73 68 65 6c 6c 04 6f 70 65 6e 04 4f 70 65 6e 01 06 63 74 72 6c 2b 6f 01 07 76 65 72 73 69 6f 6e 01 04 31 2e 32 33 01 02 00 02
-ToFrontEnd::results json {"results":{"results":[{"extension":"apps","item":{"id":"id","kind":"app","desktop_id":"firefox.desktop","path":null,"address":null,"url":null,"identity":"app:firefox.desktop","title":"Title","subtitle":"Subtitle","icon":"icon","keyword":"go","keywords":["browser"],"actions":[{"id":"open","title":"Open","shortcut":"ctrl+o","arguments":[{"name":"version","placeholder":"1.23","optional":true}]}]},"contributed":[{"extension":"shell","action":{"id":"open","title":"Open","shortcut":"ctrl+o","arguments":[{"name":"version","placeholder":"1.23","optional":true}]}}],"highlights":[0,2]}]}}
+ToFrontEnd::results postcard 00 01 04 61 70 70 73 02 69 64 03 61 70 70 01 0f 66 69 72 65 66 6f 78 2e 64 65 73 6b 74 6f 70 00 00 00 01 13 61 70 70 3a 66 69 72 65 66 6f 78 2e 64 65 73 6b 74 6f 70 05 54 69 74 6c 65 01 08 53 75 62 74 69 74 6c 65 01 04 69 63 6f 6e 01 02 67 6f 01 07 62 72 6f 77 73 65 72 01 04 6f 70 65 6e 04 4f 70 65 6e 01 06 63 74 72 6c 2b 6f 01 07 76 65 72 73 69 6f 6e 01 04 31 2e 32 33 01 01 01 05 73 68 65 6c 6c 04 6f 70 65 6e 04 4f 70 65 6e 01 06 63 74 72 6c 2b 6f 01 07 76 65 72 73 69 6f 6e 01 04 31 2e 32 33 01 02 00 02
+ToFrontEnd::results json {"results":{"results":[{"extension":"apps","item":{"id":"id","kind":"app","desktop_id":"firefox.desktop","path":null,"address":null,"url":null,"identity":"app:firefox.desktop","title":"Title","subtitle":"Subtitle","icon":"icon","keyword":"go","keywords":["browser"],"actions":[{"id":"open","title":"Open","shortcut":"ctrl+o","arguments":[{"name":"version","placeholder":"1.23","optional":true}]}],"hidden":true},"contributed":[{"extension":"shell","action":{"id":"open","title":"Open","shortcut":"ctrl+o","arguments":[{"name":"version","placeholder":"1.23","optional":true}]}}],"highlights":[0,2]}]}}
 ToFrontEnd::status postcard 01 01 05 73 68 65 6c 6c
 ToFrontEnd::status json {"status":{"down":["shell"]}}
 ToFrontEnd::close postcard 02
 ToFrontEnd::close json "close"
 ToFrontEnd::action_failed postcard 03 02 6e 6f
 ToFrontEnd::action_failed json {"action_failed":{"message":"no"}}
-ToFrontEnd::push_view postcard 04 05 73 68 65 6c 6c 04 76 69 65 77 06 41 20 56 69 65 77 03 03 6a 6f 62
-ToFrontEnd::push_view json {"push_view":{"extension":"shell","view":{"id":"view","title":"A View","content":{"progress":{"job":"job"}}}}}
-ToFrontEnd::update_view postcard 05 05 73 68 65 6c 6c 04 76 69 65 77 06 41 20 56 69 65 77 03 03 6a 6f 62
-ToFrontEnd::update_view json {"update_view":{"extension":"shell","view":{"id":"view","title":"A View","content":{"progress":{"job":"job"}}}}}
+ToFrontEnd::push_view postcard 04 05 73 68 65 6c 6c 04 76 69 65 77 06 41 20 56 69 65 77 03 03 6a 6f 62 01 04 66 69 6c 65 01 06 70 69 6e 6e 65 72 04 6f 70 65 6e 04 4f 70 65 6e 01 06 63 74 72 6c 2b 6f 01 07 76 65 72 73 69 6f 6e 01 04 31 2e 32 33 01
+ToFrontEnd::push_view json {"push_view":{"extension":"shell","view":{"id":"view","title":"A View","content":{"progress":{"job":"job"}}},"contributed":{"file":[{"extension":"pinner","action":{"id":"open","title":"Open","shortcut":"ctrl+o","arguments":[{"name":"version","placeholder":"1.23","optional":true}]}}]}}}
+ToFrontEnd::update_view postcard 05 05 73 68 65 6c 6c 04 76 69 65 77 06 41 20 56 69 65 77 03 03 6a 6f 62 01 04 66 69 6c 65 01 06 70 69 6e 6e 65 72 04 6f 70 65 6e 04 4f 70 65 6e 01 06 63 74 72 6c 2b 6f 01 07 76 65 72 73 69 6f 6e 01 04 31 2e 32 33 01
+ToFrontEnd::update_view json {"update_view":{"extension":"shell","view":{"id":"view","title":"A View","content":{"progress":{"job":"job"}}},"contributed":{"file":[{"extension":"pinner","action":{"id":"open","title":"Open","shortcut":"ctrl+o","arguments":[{"name":"version","placeholder":"1.23","optional":true}]}}]}}}
+ToFrontEnd::replace_view postcard 07 05 73 68 65 6c 6c 04 66 6f 72 6d 04 76 69 65 77 06 41 20 56 69 65 77 03 03 6a 6f 62 01 04 66 69 6c 65 01 06 70 69 6e 6e 65 72 04 6f 70 65 6e 04 4f 70 65 6e 01 06 63 74 72 6c 2b 6f 01 07 76 65 72 73 69 6f 6e 01 04 31 2e 32 33 01
+ToFrontEnd::replace_view json {"replace_view":{"extension":"shell","view":"form","with":{"id":"view","title":"A View","content":{"progress":{"job":"job"}}},"contributed":{"file":[{"extension":"pinner","action":{"id":"open","title":"Open","shortcut":"ctrl+o","arguments":[{"name":"version","placeholder":"1.23","optional":true}]}}]}}}
+ToFrontEnd::filtered_view postcard 08 05 73 68 65 6c 6c 04 76 69 65 77 03 66 69 72 01 03 02 00 02
+ToFrontEnd::filtered_view json {"filtered_view":{"extension":"shell","view":"view","text":"fir","matches":[{"item":3,"highlights":[0,2]}]}}
 ToFrontEnd::pop_view postcard 06 05 73 68 65 6c 6c 04 76 69 65 77
 ToFrontEnd::pop_view json {"pop_view":{"extension":"shell","view":"view"}}
-ToFrontEnd::job_progress postcard 07 05 73 68 65 6c 6c 03 6a 6f 62 0a 49 6e 73 74 61 6c 6c 69 6e 67 02 01 00 00 40 3f 01 0c 6f 75 74 20 6f 66 20 73 70 61 63 65
+ToFrontEnd::job_progress postcard 09 05 73 68 65 6c 6c 03 6a 6f 62 0a 49 6e 73 74 61 6c 6c 69 6e 67 02 01 00 00 40 3f 01 0c 6f 75 74 20 6f 66 20 73 70 61 63 65
 ToFrontEnd::job_progress json {"job_progress":{"extension":"shell","job":{"id":"job","title":"Installing","state":"failed","progress":0.75,"message":"out of space"}}}
-ToFrontEnd::open postcard 08 03 66 69 72 01 04 76 69 65 77
+ToFrontEnd::open postcard 0a 03 66 69 72 01 04 76 69 65 77
 ToFrontEnd::open json {"open":{"query":"fir","view":"view"}}
-ToFrontEnd::toggle postcard 09
+ToFrontEnd::toggle postcard 0b
 ToFrontEnd::toggle json "toggle"
 Outcome::close postcard 00
 Outcome::close json "close"
@@ -83,8 +93,8 @@ Clipboard::text postcard 00 04 74 65 78 74
 Clipboard::text json {"text":"text"}
 Clipboard::image postcard 01 09 69 6d 61 67 65 2f 70 6e 67 02 89 50
 Clipboard::image json {"image":{"mime":"image/png","data":"iVA="}}
-ViewContent::list postcard 00 01 02 69 64 04 66 69 6c 65 00 01 07 2f 61 2f 66 69 6c 65 00 00 01 13 61 70 70 3a 66 69 72 65 66 6f 78 2e 64 65 73 6b 74 6f 70 05 54 69 74 6c 65 01 08 53 75 62 74 69 74 6c 65 01 04 69 63 6f 6e 01 02 67 6f 01 07 62 72 6f 77 73 65 72 01 04 6f 70 65 6e 04 4f 70 65 6e 01 06 63 74 72 6c 2b 6f 01 07 76 65 72 73 69 6f 6e 01 04 31 2e 32 33 01
-ViewContent::list json {"list":{"items":[{"id":"id","kind":"file","desktop_id":null,"path":"/a/file","address":null,"url":null,"identity":"app:firefox.desktop","title":"Title","subtitle":"Subtitle","icon":"icon","keyword":"go","keywords":["browser"],"actions":[{"id":"open","title":"Open","shortcut":"ctrl+o","arguments":[{"name":"version","placeholder":"1.23","optional":true}]}]}]}}
+ViewContent::list postcard 00 01 02 69 64 04 66 69 6c 65 00 01 07 2f 61 2f 66 69 6c 65 00 00 01 13 61 70 70 3a 66 69 72 65 66 6f 78 2e 64 65 73 6b 74 6f 70 05 54 69 74 6c 65 01 08 53 75 62 74 69 74 6c 65 01 04 69 63 6f 6e 01 02 67 6f 01 07 62 72 6f 77 73 65 72 01 04 6f 70 65 6e 04 4f 70 65 6e 01 06 63 74 72 6c 2b 6f 01 07 76 65 72 73 69 6f 6e 01 04 31 2e 32 33 01 01 01
+ViewContent::list json {"list":{"items":[{"id":"id","kind":"file","desktop_id":null,"path":"/a/file","address":null,"url":null,"identity":"app:firefox.desktop","title":"Title","subtitle":"Subtitle","icon":"icon","keyword":"go","keywords":["browser"],"actions":[{"id":"open","title":"Open","shortcut":"ctrl+o","arguments":[{"name":"version","placeholder":"1.23","optional":true}]}],"hidden":true}],"filters_itself":true}}
 ViewContent::form postcard 01 01 04 6e 61 6d 65 04 4e 61 6d 65 01 01 02 47 6f
 ViewContent::form json {"form":{"fields":[{"id":"name","label":"Name","input":{"checkbox":{"default":true}}}],"submit":"Go"}}
 ViewContent::detail postcard 02 04 23 20 48 69 01 04 53 69 7a 65 04 33 20 4d 42
@@ -115,17 +125,17 @@ Value::Array postcard 04 02 01 02 03 03 74 77 6f
 Value::Array json [1,"two"]
 Value::Table postcard 05 02 07 65 6e 61 62 6c 65 64 00 01 05 6c 69 6d 69 74 01 0e
 Value::Table json {"enabled":true,"limit":7}
-Item::App postcard 02 69 64 03 61 70 70 01 0f 66 69 72 65 66 6f 78 2e 64 65 73 6b 74 6f 70 00 00 00 01 13 61 70 70 3a 66 69 72 65 66 6f 78 2e 64 65 73 6b 74 6f 70 05 54 69 74 6c 65 01 08 53 75 62 74 69 74 6c 65 01 04 69 63 6f 6e 01 02 67 6f 01 07 62 72 6f 77 73 65 72 01 04 6f 70 65 6e 04 4f 70 65 6e 01 06 63 74 72 6c 2b 6f 01 07 76 65 72 73 69 6f 6e 01 04 31 2e 32 33 01
-Item::App json {"id":"id","kind":"app","desktop_id":"firefox.desktop","path":null,"address":null,"url":null,"identity":"app:firefox.desktop","title":"Title","subtitle":"Subtitle","icon":"icon","keyword":"go","keywords":["browser"],"actions":[{"id":"open","title":"Open","shortcut":"ctrl+o","arguments":[{"name":"version","placeholder":"1.23","optional":true}]}]}
-Item::File postcard 02 69 64 04 66 69 6c 65 00 01 07 2f 61 2f 66 69 6c 65 00 00 01 13 61 70 70 3a 66 69 72 65 66 6f 78 2e 64 65 73 6b 74 6f 70 05 54 69 74 6c 65 01 08 53 75 62 74 69 74 6c 65 01 04 69 63 6f 6e 01 02 67 6f 01 07 62 72 6f 77 73 65 72 01 04 6f 70 65 6e 04 4f 70 65 6e 01 06 63 74 72 6c 2b 6f 01 07 76 65 72 73 69 6f 6e 01 04 31 2e 32 33 01
-Item::File json {"id":"id","kind":"file","desktop_id":null,"path":"/a/file","address":null,"url":null,"identity":"app:firefox.desktop","title":"Title","subtitle":"Subtitle","icon":"icon","keyword":"go","keywords":["browser"],"actions":[{"id":"open","title":"Open","shortcut":"ctrl+o","arguments":[{"name":"version","placeholder":"1.23","optional":true}]}]}
-Item::Folder postcard 02 69 64 06 66 6f 6c 64 65 72 00 01 09 2f 61 2f 66 6f 6c 64 65 72 00 00 01 13 61 70 70 3a 66 69 72 65 66 6f 78 2e 64 65 73 6b 74 6f 70 05 54 69 74 6c 65 01 08 53 75 62 74 69 74 6c 65 01 04 69 63 6f 6e 01 02 67 6f 01 07 62 72 6f 77 73 65 72 01 04 6f 70 65 6e 04 4f 70 65 6e 01 06 63 74 72 6c 2b 6f 01 07 76 65 72 73 69 6f 6e 01 04 31 2e 32 33 01
-Item::Folder json {"id":"id","kind":"folder","desktop_id":null,"path":"/a/folder","address":null,"url":null,"identity":"app:firefox.desktop","title":"Title","subtitle":"Subtitle","icon":"icon","keyword":"go","keywords":["browser"],"actions":[{"id":"open","title":"Open","shortcut":"ctrl+o","arguments":[{"name":"version","placeholder":"1.23","optional":true}]}]}
-Item::Project postcard 02 69 64 07 70 72 6f 6a 65 63 74 00 01 0a 2f 61 2f 70 72 6f 6a 65 63 74 00 00 01 13 61 70 70 3a 66 69 72 65 66 6f 78 2e 64 65 73 6b 74 6f 70 05 54 69 74 6c 65 01 08 53 75 62 74 69 74 6c 65 01 04 69 63 6f 6e 01 02 67 6f 01 07 62 72 6f 77 73 65 72 01 04 6f 70 65 6e 04 4f 70 65 6e 01 06 63 74 72 6c 2b 6f 01 07 76 65 72 73 69 6f 6e 01 04 31 2e 32 33 01
-Item::Project json {"id":"id","kind":"project","desktop_id":null,"path":"/a/project","address":null,"url":null,"identity":"app:firefox.desktop","title":"Title","subtitle":"Subtitle","icon":"icon","keyword":"go","keywords":["browser"],"actions":[{"id":"open","title":"Open","shortcut":"ctrl+o","arguments":[{"name":"version","placeholder":"1.23","optional":true}]}]}
-Item::Window postcard 02 69 64 06 77 69 6e 64 6f 77 00 00 01 03 30 78 31 00 01 13 61 70 70 3a 66 69 72 65 66 6f 78 2e 64 65 73 6b 74 6f 70 05 54 69 74 6c 65 01 08 53 75 62 74 69 74 6c 65 01 04 69 63 6f 6e 01 02 67 6f 01 07 62 72 6f 77 73 65 72 01 04 6f 70 65 6e 04 4f 70 65 6e 01 06 63 74 72 6c 2b 6f 01 07 76 65 72 73 69 6f 6e 01 04 31 2e 32 33 01
-Item::Window json {"id":"id","kind":"window","desktop_id":null,"path":null,"address":"0x1","url":null,"identity":"app:firefox.desktop","title":"Title","subtitle":"Subtitle","icon":"icon","keyword":"go","keywords":["browser"],"actions":[{"id":"open","title":"Open","shortcut":"ctrl+o","arguments":[{"name":"version","placeholder":"1.23","optional":true}]}]}
-Item::Url postcard 02 69 64 03 75 72 6c 00 00 00 01 13 68 74 74 70 73 3a 2f 2f 65 78 61 6d 70 6c 65 2e 6f 72 67 01 13 61 70 70 3a 66 69 72 65 66 6f 78 2e 64 65 73 6b 74 6f 70 05 54 69 74 6c 65 01 08 53 75 62 74 69 74 6c 65 01 04 69 63 6f 6e 01 02 67 6f 01 07 62 72 6f 77 73 65 72 01 04 6f 70 65 6e 04 4f 70 65 6e 01 06 63 74 72 6c 2b 6f 01 07 76 65 72 73 69 6f 6e 01 04 31 2e 32 33 01
-Item::Url json {"id":"id","kind":"url","desktop_id":null,"path":null,"address":null,"url":"https://example.org","identity":"app:firefox.desktop","title":"Title","subtitle":"Subtitle","icon":"icon","keyword":"go","keywords":["browser"],"actions":[{"id":"open","title":"Open","shortcut":"ctrl+o","arguments":[{"name":"version","placeholder":"1.23","optional":true}]}]}
-Item::Namespaced postcard 02 69 64 0c 6b 75 62 61 6f 73 2e 73 75 69 74 65 00 00 00 00 01 13 61 70 70 3a 66 69 72 65 66 6f 78 2e 64 65 73 6b 74 6f 70 05 54 69 74 6c 65 01 08 53 75 62 74 69 74 6c 65 01 04 69 63 6f 6e 01 02 67 6f 01 07 62 72 6f 77 73 65 72 01 04 6f 70 65 6e 04 4f 70 65 6e 01 06 63 74 72 6c 2b 6f 01 07 76 65 72 73 69 6f 6e 01 04 31 2e 32 33 01
-Item::Namespaced json {"id":"id","kind":"kubaos.suite","desktop_id":null,"path":null,"address":null,"url":null,"identity":"app:firefox.desktop","title":"Title","subtitle":"Subtitle","icon":"icon","keyword":"go","keywords":["browser"],"actions":[{"id":"open","title":"Open","shortcut":"ctrl+o","arguments":[{"name":"version","placeholder":"1.23","optional":true}]}]}
+Item::App postcard 02 69 64 03 61 70 70 01 0f 66 69 72 65 66 6f 78 2e 64 65 73 6b 74 6f 70 00 00 00 01 13 61 70 70 3a 66 69 72 65 66 6f 78 2e 64 65 73 6b 74 6f 70 05 54 69 74 6c 65 01 08 53 75 62 74 69 74 6c 65 01 04 69 63 6f 6e 01 02 67 6f 01 07 62 72 6f 77 73 65 72 01 04 6f 70 65 6e 04 4f 70 65 6e 01 06 63 74 72 6c 2b 6f 01 07 76 65 72 73 69 6f 6e 01 04 31 2e 32 33 01 01
+Item::App json {"id":"id","kind":"app","desktop_id":"firefox.desktop","path":null,"address":null,"url":null,"identity":"app:firefox.desktop","title":"Title","subtitle":"Subtitle","icon":"icon","keyword":"go","keywords":["browser"],"actions":[{"id":"open","title":"Open","shortcut":"ctrl+o","arguments":[{"name":"version","placeholder":"1.23","optional":true}]}],"hidden":true}
+Item::File postcard 02 69 64 04 66 69 6c 65 00 01 07 2f 61 2f 66 69 6c 65 00 00 01 13 61 70 70 3a 66 69 72 65 66 6f 78 2e 64 65 73 6b 74 6f 70 05 54 69 74 6c 65 01 08 53 75 62 74 69 74 6c 65 01 04 69 63 6f 6e 01 02 67 6f 01 07 62 72 6f 77 73 65 72 01 04 6f 70 65 6e 04 4f 70 65 6e 01 06 63 74 72 6c 2b 6f 01 07 76 65 72 73 69 6f 6e 01 04 31 2e 32 33 01 01
+Item::File json {"id":"id","kind":"file","desktop_id":null,"path":"/a/file","address":null,"url":null,"identity":"app:firefox.desktop","title":"Title","subtitle":"Subtitle","icon":"icon","keyword":"go","keywords":["browser"],"actions":[{"id":"open","title":"Open","shortcut":"ctrl+o","arguments":[{"name":"version","placeholder":"1.23","optional":true}]}],"hidden":true}
+Item::Folder postcard 02 69 64 06 66 6f 6c 64 65 72 00 01 09 2f 61 2f 66 6f 6c 64 65 72 00 00 01 13 61 70 70 3a 66 69 72 65 66 6f 78 2e 64 65 73 6b 74 6f 70 05 54 69 74 6c 65 01 08 53 75 62 74 69 74 6c 65 01 04 69 63 6f 6e 01 02 67 6f 01 07 62 72 6f 77 73 65 72 01 04 6f 70 65 6e 04 4f 70 65 6e 01 06 63 74 72 6c 2b 6f 01 07 76 65 72 73 69 6f 6e 01 04 31 2e 32 33 01 01
+Item::Folder json {"id":"id","kind":"folder","desktop_id":null,"path":"/a/folder","address":null,"url":null,"identity":"app:firefox.desktop","title":"Title","subtitle":"Subtitle","icon":"icon","keyword":"go","keywords":["browser"],"actions":[{"id":"open","title":"Open","shortcut":"ctrl+o","arguments":[{"name":"version","placeholder":"1.23","optional":true}]}],"hidden":true}
+Item::Project postcard 02 69 64 07 70 72 6f 6a 65 63 74 00 01 0a 2f 61 2f 70 72 6f 6a 65 63 74 00 00 01 13 61 70 70 3a 66 69 72 65 66 6f 78 2e 64 65 73 6b 74 6f 70 05 54 69 74 6c 65 01 08 53 75 62 74 69 74 6c 65 01 04 69 63 6f 6e 01 02 67 6f 01 07 62 72 6f 77 73 65 72 01 04 6f 70 65 6e 04 4f 70 65 6e 01 06 63 74 72 6c 2b 6f 01 07 76 65 72 73 69 6f 6e 01 04 31 2e 32 33 01 01
+Item::Project json {"id":"id","kind":"project","desktop_id":null,"path":"/a/project","address":null,"url":null,"identity":"app:firefox.desktop","title":"Title","subtitle":"Subtitle","icon":"icon","keyword":"go","keywords":["browser"],"actions":[{"id":"open","title":"Open","shortcut":"ctrl+o","arguments":[{"name":"version","placeholder":"1.23","optional":true}]}],"hidden":true}
+Item::Window postcard 02 69 64 06 77 69 6e 64 6f 77 00 00 01 03 30 78 31 00 01 13 61 70 70 3a 66 69 72 65 66 6f 78 2e 64 65 73 6b 74 6f 70 05 54 69 74 6c 65 01 08 53 75 62 74 69 74 6c 65 01 04 69 63 6f 6e 01 02 67 6f 01 07 62 72 6f 77 73 65 72 01 04 6f 70 65 6e 04 4f 70 65 6e 01 06 63 74 72 6c 2b 6f 01 07 76 65 72 73 69 6f 6e 01 04 31 2e 32 33 01 01
+Item::Window json {"id":"id","kind":"window","desktop_id":null,"path":null,"address":"0x1","url":null,"identity":"app:firefox.desktop","title":"Title","subtitle":"Subtitle","icon":"icon","keyword":"go","keywords":["browser"],"actions":[{"id":"open","title":"Open","shortcut":"ctrl+o","arguments":[{"name":"version","placeholder":"1.23","optional":true}]}],"hidden":true}
+Item::Url postcard 02 69 64 03 75 72 6c 00 00 00 01 13 68 74 74 70 73 3a 2f 2f 65 78 61 6d 70 6c 65 2e 6f 72 67 01 13 61 70 70 3a 66 69 72 65 66 6f 78 2e 64 65 73 6b 74 6f 70 05 54 69 74 6c 65 01 08 53 75 62 74 69 74 6c 65 01 04 69 63 6f 6e 01 02 67 6f 01 07 62 72 6f 77 73 65 72 01 04 6f 70 65 6e 04 4f 70 65 6e 01 06 63 74 72 6c 2b 6f 01 07 76 65 72 73 69 6f 6e 01 04 31 2e 32 33 01 01
+Item::Url json {"id":"id","kind":"url","desktop_id":null,"path":null,"address":null,"url":"https://example.org","identity":"app:firefox.desktop","title":"Title","subtitle":"Subtitle","icon":"icon","keyword":"go","keywords":["browser"],"actions":[{"id":"open","title":"Open","shortcut":"ctrl+o","arguments":[{"name":"version","placeholder":"1.23","optional":true}]}],"hidden":true}
+Item::Namespaced postcard 02 69 64 0c 6b 75 62 61 6f 73 2e 73 75 69 74 65 00 00 00 00 01 13 61 70 70 3a 66 69 72 65 66 6f 78 2e 64 65 73 6b 74 6f 70 05 54 69 74 6c 65 01 08 53 75 62 74 69 74 6c 65 01 04 69 63 6f 6e 01 02 67 6f 01 07 62 72 6f 77 73 65 72 01 04 6f 70 65 6e 04 4f 70 65 6e 01 06 63 74 72 6c 2b 6f 01 07 76 65 72 73 69 6f 6e 01 04 31 2e 32 33 01 01
+Item::Namespaced json {"id":"id","kind":"kubaos.suite","desktop_id":null,"path":null,"address":null,"url":null,"identity":"app:firefox.desktop","title":"Title","subtitle":"Subtitle","icon":"icon","keyword":"go","keywords":["browser"],"actions":[{"id":"open","title":"Open","shortcut":"ctrl+o","arguments":[{"name":"version","placeholder":"1.23","optional":true}]}],"hidden":true}

@@ -39,6 +39,15 @@ pub enum FromFrontEnd {
     /// which keeps its Views open, since an Extension may take this as
     /// "cancel".
     ViewPopped { extension: String, view: String },
+    /// The user typed `text` into an open list View to filter it; empty
+    /// clears the filter. The Daemon answers with
+    /// [`ToFrontEnd::FilteredView`], or, for a View whose Extension filters it
+    /// itself, passes the text on and the Extension updates the View.
+    FilterView {
+        extension: String,
+        view: String,
+        text: String,
+    },
     /// Answers [`ToFrontEnd::Close`]: the window is gone and focus is back on the
     /// window the user came from, so the Daemon may type or paste into it.
     Closed,
@@ -76,18 +85,41 @@ pub enum ToFrontEnd {
     ActionFailed {
         message: String,
     },
+    /// `contributed` holds, for a list View, the Contributed actions on its
+    /// Items by Item kind name, grouped as [`ShownResult::contributed`] has
+    /// them; an Item's own Action keeps a shortcut one of them also binds.
+    /// Empty for other Views.
     PushView {
         extension: String,
         view: View,
+        contributed: BTreeMap<String, Vec<OfferedAction>>,
     },
-    /// Replaces the open View with the same id.
+    /// Replaces the open View with the same id. A list View being filtered
+    /// is followed by its [`ToFrontEnd::FilteredView`] for the new Items.
     UpdateView {
         extension: String,
         view: View,
+        contributed: BTreeMap<String, Vec<OfferedAction>>,
     },
     PopView {
         extension: String,
         view: String,
+    },
+    /// Pops the open View `view` and pushes `with`, in one step, so the
+    /// search never shows in between.
+    ReplaceView {
+        extension: String,
+        view: String,
+        with: View,
+        contributed: BTreeMap<String, Vec<OfferedAction>>,
+    },
+    /// The Items of a list View that match the filter `text`, best first.
+    /// Never sent for an empty filter, which shows every Item in order.
+    FilteredView {
+        extension: String,
+        view: String,
+        text: String,
+        matches: Vec<ListMatch>,
     },
     JobProgress {
         extension: String,
@@ -118,6 +150,15 @@ pub struct ShownResult {
     pub contributed: Vec<OfferedAction>,
     /// The positions, in characters, of the title's characters that matched the
     /// query.
+    pub highlights: Vec<u32>,
+}
+
+/// One Item of a filtered list View.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ListMatch {
+    /// The Item's position in the View's `items`.
+    pub item: u32,
+    /// The positions, in characters, of the title's characters that matched.
     pub highlights: Vec<u32>,
 }
 

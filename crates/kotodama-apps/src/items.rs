@@ -118,6 +118,7 @@ impl Settings {
             icon: app.icon.clone(),
             keyword: None,
             keywords,
+            hidden: false,
             actions,
         }
     }

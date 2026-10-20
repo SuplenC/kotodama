@@ -297,6 +297,7 @@ fn item(kind: ItemKind) -> Item {
         keyword: Some("go".into()),
         keywords: vec!["browser".into()],
         actions: vec![action()],
+        hidden: true,
     }
 }
 
@@ -365,6 +366,16 @@ fn view() -> View {
     }
 }
 
+fn contributed() -> BTreeMap<String, Vec<OfferedAction>> {
+    BTreeMap::from([(
+        "file".into(),
+        vec![OfferedAction {
+            extension: "pinner".into(),
+            action: action(),
+        }],
+    )])
+}
+
 fn job() -> Job {
     Job {
         id: "job".into(),
@@ -396,6 +407,10 @@ fn to_extension() -> Vec<ToExtension> {
         },
         ToExtension::ViewPopped {
             view: "view".into(),
+        },
+        ToExtension::FilterView {
+            view: "view".into(),
+            text: "fir".into(),
         },
         ToExtension::ActionCatalog {
             entries: vec![CatalogEntry {
@@ -433,6 +448,10 @@ fn from_extension() -> Vec<FromExtension> {
         FromExtension::PopView {
             view: "view".into(),
         },
+        FromExtension::ReplaceView {
+            view: "form".into(),
+            with: view(),
+        },
         FromExtension::JobProgress(job()),
         FromExtension::RequestActionCatalog,
     ]
@@ -461,6 +480,11 @@ fn from_front_end() -> Vec<FromFrontEnd> {
         FromFrontEnd::ViewPopped {
             extension: "shell".into(),
             view: "view".into(),
+        },
+        FromFrontEnd::FilterView {
+            extension: "shell".into(),
+            view: "view".into(),
+            text: "fir".into(),
         },
         FromFrontEnd::Closed,
         FromFrontEnd::Open {
@@ -494,10 +518,27 @@ fn to_front_end() -> Vec<ToFrontEnd> {
         ToFrontEnd::PushView {
             extension: "shell".into(),
             view: view(),
+            contributed: contributed(),
         },
         ToFrontEnd::UpdateView {
             extension: "shell".into(),
             view: view(),
+            contributed: contributed(),
+        },
+        ToFrontEnd::ReplaceView {
+            extension: "shell".into(),
+            view: "form".into(),
+            with: view(),
+            contributed: contributed(),
+        },
+        ToFrontEnd::FilteredView {
+            extension: "shell".into(),
+            view: "view".into(),
+            text: "fir".into(),
+            matches: vec![ListMatch {
+                item: 3,
+                highlights: vec![0, 2],
+            }],
         },
         ToFrontEnd::PopView {
             extension: "shell".into(),
@@ -544,6 +585,7 @@ fn view_contents() -> Vec<ViewContent> {
     vec![
         ViewContent::List {
             items: vec![item(file())],
+            filters_itself: true,
         },
         ViewContent::Form {
             fields: vec![FormField {

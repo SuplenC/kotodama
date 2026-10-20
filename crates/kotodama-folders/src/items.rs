@@ -45,6 +45,7 @@ pub fn project(project: &Project, home: Option<&Path>) -> Item {
         icon: Some("folder".to_owned()),
         keyword: None,
         keywords: Vec::new(),
+        hidden: false,
         actions: vec![
             action(OPEN, "Open", Vec::new()),
             action(SHELL, "Open Terminal Here", Vec::new()),
@@ -83,6 +84,7 @@ pub fn script(script: &Script, home: Option<&Path>) -> Item {
         subtitle: Some(shown(&script.path, home)),
         icon: Some("utilities-terminal".to_owned()),
         keyword: None,
+        hidden: false,
         // Found by its file's name when its header renames it.
         keywords: if script.header.name.is_some() {
             vec![script.stem.clone()]

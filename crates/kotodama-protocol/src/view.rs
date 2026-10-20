@@ -18,8 +18,18 @@ pub struct View {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ViewContent {
-    /// Items to pick from; their Actions run like a search Result's.
-    List { items: Vec<Item> },
+    /// Items to pick from; their Actions run like a search Result's, and
+    /// Contributed actions are offered on them by Item kind (ADR 0002). Typing
+    /// filters them: the Daemon matches them as it does the search, without
+    /// asking the Extension, unless `filters_itself` is set.
+    List {
+        items: Vec<Item>,
+        /// The Extension filters the list itself: the Daemon sends it what is
+        /// typed as [`ToExtension::FilterView`](crate::ToExtension::FilterView),
+        /// and it answers with an `update_view` holding the Items to show.
+        #[serde(default)]
+        filters_itself: bool,
+    },
     /// Fields to fill in. Submitting sends the values back to the Extension.
     Form {
         fields: Vec<FormField>,

@@ -57,6 +57,7 @@
 //!                     icon: None,
 //!                     keyword: None,
 //!                     keywords: Vec::new(),
+//!                     hidden: false,
 //!                     actions: Vec::new(),
 //!                 };
 //!                 sent.publish(&mut writer, [item])?;

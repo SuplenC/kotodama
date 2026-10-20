@@ -44,6 +44,7 @@ fn items() -> Vec<Item> {
             keyword: None,
             identity: Some("app:firefox.desktop".into()),
             keywords: vec!["browser".into(), "web".into()],
+            hidden: false,
             actions: vec![
                 action("open"),
                 Action {
@@ -61,6 +62,7 @@ fn items() -> Vec<Item> {
             keyword: Some("go".into()),
             identity: None,
             keywords: vec![],
+            hidden: false,
             actions: vec![Action {
                 arguments: vec![
                     Argument {
@@ -88,6 +90,7 @@ fn items() -> Vec<Item> {
             keyword: None,
             identity: None,
             keywords: vec![],
+            hidden: false,
             actions: vec![action("open")],
         },
     ]
@@ -143,6 +146,10 @@ fn to_extension_messages() -> Vec<ToExtension> {
             values: table(),
         },
         ToExtension::ViewPopped { view: "new".into() },
+        ToExtension::FilterView {
+            view: "history".into(),
+            text: "rust".into(),
+        },
         ToExtension::ActionCatalog {
             entries: vec![CatalogEntry {
                 extension: "kubaos".into(),
@@ -217,7 +224,14 @@ fn from_extension_messages() -> Vec<FromExtension> {
                 message: "no network".into(),
             },
         },
-        FromExtension::PushView(view(ViewContent::List { items: items() })),
+        FromExtension::PushView(view(ViewContent::List {
+            items: items(),
+            filters_itself: false,
+        })),
+        FromExtension::PushView(view(ViewContent::List {
+            items: vec![],
+            filters_itself: true,
+        })),
         FromExtension::PushView(view(ViewContent::Form {
             fields: vec![
                 FormField {
@@ -274,6 +288,10 @@ fn from_extension_messages() -> Vec<FromExtension> {
             job: "install".into(),
         })),
         FromExtension::PopView { view: "v".into() },
+        FromExtension::ReplaceView {
+            view: "v".into(),
+            with: view(ViewContent::Progress { job: "j".into() }),
+        },
         FromExtension::JobProgress(Job {
             id: "install".into(),
             title: "Installing Go 1.23".into(),
@@ -310,10 +328,11 @@ fn to_extension_variant(message: &ToExtension) -> usize {
         ToExtension::RunAction { .. } => 3,
         ToExtension::SubmitForm { .. } => 4,
         ToExtension::ViewPopped { .. } => 5,
-        ToExtension::ActionCatalog { .. } => 6,
+        ToExtension::FilterView { .. } => 6,
+        ToExtension::ActionCatalog { .. } => 7,
     }
 }
-const TO_EXTENSION_VARIANTS: usize = 7;
+const TO_EXTENSION_VARIANTS: usize = 8;
 
 fn from_extension_variant(message: &FromExtension) -> usize {
     match message {
@@ -324,11 +343,12 @@ fn from_extension_variant(message: &FromExtension) -> usize {
         FromExtension::PushView(_) => 4,
         FromExtension::UpdateView(_) => 5,
         FromExtension::PopView { .. } => 6,
-        FromExtension::JobProgress(_) => 7,
-        FromExtension::RequestActionCatalog => 8,
+        FromExtension::ReplaceView { .. } => 7,
+        FromExtension::JobProgress(_) => 8,
+        FromExtension::RequestActionCatalog => 9,
     }
 }
-const FROM_EXTENSION_VARIANTS: usize = 9;
+const FROM_EXTENSION_VARIANTS: usize = 10;
 
 fn to_front_end_messages() -> Vec<ToFrontEnd> {
     vec![
@@ -357,14 +377,45 @@ fn to_front_end_messages() -> Vec<ToFrontEnd> {
                 markdown: "# Hi".into(),
                 metadata: vec![],
             }),
+            contributed: BTreeMap::new(),
+        },
+        ToFrontEnd::PushView {
+            extension: "projects".into(),
+            view: view(ViewContent::List {
+                items: items(),
+                filters_itself: false,
+            }),
+            contributed: BTreeMap::from([(
+                "project".into(),
+                vec![OfferedAction {
+                    extension: "kubaos".into(),
+                    action: action("pin-version"),
+                }],
+            )]),
         },
         ToFrontEnd::UpdateView {
             extension: "kubaos".into(),
             view: view(ViewContent::Progress { job: "j".into() }),
+            contributed: BTreeMap::new(),
         },
         ToFrontEnd::PopView {
             extension: "kubaos".into(),
             view: "v".into(),
+        },
+        ToFrontEnd::ReplaceView {
+            extension: "kubaos".into(),
+            view: "v".into(),
+            with: view(ViewContent::Progress { job: "j".into() }),
+            contributed: BTreeMap::new(),
+        },
+        ToFrontEnd::FilteredView {
+            extension: "projects".into(),
+            view: "v".into(),
+            text: "kot".into(),
+            matches: vec![ListMatch {
+                item: 2,
+                highlights: vec![0, 1, 2],
+            }],
         },
         ToFrontEnd::JobProgress {
             extension: "kubaos".into(),
@@ -412,6 +463,11 @@ fn from_front_end_messages() -> Vec<FromFrontEnd> {
             extension: "kubaos".into(),
             view: "new".into(),
         },
+        FromFrontEnd::FilterView {
+            extension: "clipboard".into(),
+            view: "history".into(),
+            text: "żółw".into(),
+        },
         FromFrontEnd::Closed,
         FromFrontEnd::Open {
             query: "fir".into(),
@@ -430,12 +486,14 @@ fn to_front_end_variant(message: &ToFrontEnd) -> usize {
         ToFrontEnd::PushView { .. } => 4,
         ToFrontEnd::UpdateView { .. } => 5,
         ToFrontEnd::PopView { .. } => 6,
-        ToFrontEnd::JobProgress { .. } => 7,
-        ToFrontEnd::Open { .. } => 8,
-        ToFrontEnd::Toggle => 9,
+        ToFrontEnd::ReplaceView { .. } => 7,
+        ToFrontEnd::FilteredView { .. } => 8,
+        ToFrontEnd::JobProgress { .. } => 9,
+        ToFrontEnd::Open { .. } => 10,
+        ToFrontEnd::Toggle => 11,
     }
 }
-const TO_FRONT_END_VARIANTS: usize = 10;
+const TO_FRONT_END_VARIANTS: usize = 12;
 
 fn from_front_end_variant(message: &FromFrontEnd) -> usize {
     match message {
@@ -444,12 +502,13 @@ fn from_front_end_variant(message: &FromFrontEnd) -> usize {
         FromFrontEnd::RunAction { .. } => 2,
         FromFrontEnd::SubmitForm { .. } => 3,
         FromFrontEnd::ViewPopped { .. } => 4,
-        FromFrontEnd::Closed => 5,
-        FromFrontEnd::Open { .. } => 6,
-        FromFrontEnd::Toggle => 7,
+        FromFrontEnd::FilterView { .. } => 5,
+        FromFrontEnd::Closed => 6,
+        FromFrontEnd::Open { .. } => 7,
+        FromFrontEnd::Toggle => 8,
     }
 }
-const FROM_FRONT_END_VARIANTS: usize = 8;
+const FROM_FRONT_END_VARIANTS: usize = 9;
 
 #[test]
 fn every_message_to_a_front_end_survives_every_wire_format() {

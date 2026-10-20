@@ -1,7 +1,7 @@
 //! One end of a connection: framing, the handshake and the agreed Wire format
 //! together.
 
-use std::io::{BufReader, BufWriter, Read, Write};
+use std::io::{BufRead, BufReader, BufWriter, Read, Write};
 
 use serde::Serialize;
 use serde::de::DeserializeOwned;
@@ -110,6 +110,23 @@ impl<R: Read> ChannelReader<R> {
             self.buf = Vec::new();
         }
         message
+    }
+
+    /// Waits for the next message to start arriving, as long as a read
+    /// waits, such as for the socket's read timeout, and takes nothing. True
+    /// once some of it is buffered, or the peer has hung up, so
+    /// [`recv`](Self::recv) has something to say at once.
+    pub fn wait_for_more(&mut self) -> bool {
+        self.reader.fill_buf().is_ok()
+    }
+}
+
+impl<R> ChannelReader<R> {
+    /// Whether some of the next frame has been read already: the peer sent
+    /// it along with the last one. [`recv`](Self::recv) may still wait for
+    /// the rest of it, but not for the peer to decide to send it.
+    pub fn has_buffered(&self) -> bool {
+        !self.reader.buffer().is_empty()
     }
 }
 
