@@ -715,6 +715,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "kotodama-emoji"
+version = "0.1.0"
+dependencies = [
+ "kotodama-extension",
+ "kotodama-protocol",
+ "kotodamad",
+ "tempfile",
+]
+
+[[package]]
 name = "kotodama-extension"
 version = "0.1.0"
 dependencies = [

@@ -1,0 +1,6 @@
+# The emoji Bundled extension. A package installs this directory as
+# `$XDG_DATA_DIRS/kotodama/extensions/emoji/`, with the `kotodama-emoji` binary
+# next to this file (or `command` rewritten to its absolute path).
+name = "emoji"
+description = "Emoji, with their skin tones, and symbols such as arrows, math and ⌘ ⌥ ⇧, typed or copied"
+command = ["./kotodama-emoji"]

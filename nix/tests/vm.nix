@@ -136,7 +136,7 @@ pkgs.testers.runNixOSTest {
     with subtest("the Daemon reaches the user's session bus for notifications"):
         machine.wait_until_succeeds("grep -q 'string \"VM job\"' /tmp/notifications")
 
-    with subtest("the Bundled extensions are found: the user's apps and the system's, and the calculator"):
+    with subtest("the Bundled extensions are found: the user's apps and the system's, the calculator and emoji"):
         machine.wait_until_succeeds(
             as_alice(f"{front_end} sleeper") + " | grep -P '^apps\tsleeper\tSleeper$'"
         )
@@ -148,6 +148,9 @@ pkgs.testers.runNixOSTest {
         )
         machine.wait_until_succeeds(
             as_alice(f"{front_end} --wait 6\\*7") + " | grep -P '^calculator\t6\\*7\t42$'"
+        )
+        machine.wait_until_succeeds(
+            as_alice(f"{front_end} thumbs") + " | grep -P '^emoji\t👍\t👍 Thumbs up$'"
         )
 
     with subtest("the Folder source lists the configured projects and scripts"):

@@ -1,0 +1,204 @@
+//! The emoji Bundled extension's characters and Actions. `main.rs` speaks
+//! the protocol around them.
+//!
+//! The characters come from `data/emoji.tsv`, which `data/update.sh` draws
+//! from Unicode's emoji data and CLDR. The file is built into the binary and
+//! read in place: a [`Character`] borrows its text from it, so nothing is
+//! copied until Items are made of them.
+
+use kotodama_protocol::{Action, Clipboard, Item, ItemKind, NamespacedKind, Outcome};
+
+/// One character per line: the character, its name, its keywords separated by
+/// `|`, and its five skin-toned forms separated by spaces, or nothing.
+const DATA: &str = include_str!("../data/emoji.tsv");
+
+/// The Item kind of every emoji and symbol.
+pub const KIND: &str = "emoji.character";
+/// The primary Action: types the character.
+pub const TYPE: &str = "type";
+/// Copies the character.
+pub const COPY: &str = "copy";
+/// What a skin tone's Action id starts with, before the tone's name.
+const TONE_ACTION: &str = "type-";
+
+/// A skin tone, from light to dark.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Tone {
+    Light,
+    MediumLight,
+    Medium,
+    MediumDark,
+    Dark,
+}
+
+impl Tone {
+    pub const ALL: [Tone; 5] = [
+        Tone::Light,
+        Tone::MediumLight,
+        Tone::Medium,
+        Tone::MediumDark,
+        Tone::Dark,
+    ];
+
+    /// The tone's name, as the `skin_tone` setting spells it.
+    pub fn name(self) -> &'static str {
+        match self {
+            Tone::Light => "light",
+            Tone::MediumLight => "medium-light",
+            Tone::Medium => "medium",
+            Tone::MediumDark => "medium-dark",
+            Tone::Dark => "dark",
+        }
+    }
+
+    pub fn from_name(name: &str) -> Option<Tone> {
+        Tone::ALL.into_iter().find(|tone| tone.name() == name)
+    }
+
+    /// The id of the Action that types an emoji in this tone: `type-` and
+    /// the tone's name.
+    fn action(self) -> String {
+        format!("{TONE_ACTION}{}", self.name())
+    }
+
+    fn from_action(action: &str) -> Option<Tone> {
+        Tone::from_name(action.strip_prefix(TONE_ACTION)?)
+    }
+}
+
+/// One emoji or symbol.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Character {
+    /// The character itself, which is also its Item's id: `👍`.
+    pub text: &'static str,
+    /// Its CLDR name: `thumbs up`.
+    pub name: &'static str,
+    keywords: &'static str,
+    tones: &'static str,
+}
+
+impl Character {
+    /// Every emoji, then every symbol.
+    pub fn all() -> impl Iterator<Item = Character> {
+        DATA.lines()
+            .filter(|line| !line.starts_with('#'))
+            .map(Character::parse)
+    }
+
+    /// The character whose text is `text`.
+    pub fn find(text: &str) -> Option<Character> {
+        Character::all().find(|character| character.text == text)
+    }
+
+    fn parse(line: &'static str) -> Character {
+        let mut fields = line.split('\t');
+        let mut field = || fields.next().unwrap_or_default();
+        Character {
+            text: field(),
+            name: field(),
+            keywords: field(),
+            tones: field(),
+        }
+    }
+
+    /// Its CLDR keywords, besides the words of its name.
+    pub fn keywords(&self) -> impl Iterator<Item = &'static str> {
+        self.keywords.split('|').filter(|word| !word.is_empty())
+    }
+
+    /// The character in `tone`, if it has skin tones.
+    pub fn toned(&self, tone: Tone) -> Option<&'static str> {
+        self.tones
+            .split(' ')
+            .nth(tone as usize)
+            .filter(|toned| !toned.is_empty())
+    }
+
+    /// What `tone` makes of it: the toned form, or the character itself if
+    /// it has no skin tones.
+    fn text_in(&self, tone: Option<Tone>) -> &'static str {
+        tone.and_then(|tone| self.toned(tone)).unwrap_or(self.text)
+    }
+
+    /// The Item it is offered as: titled with the character and its name, with
+    /// an Action for each skin tone it has after typing and copying.
+    pub fn item(&self) -> Item {
+        let action = |id: &str, title: String| Action {
+            id: id.into(),
+            title,
+            shortcut: None,
+            arguments: vec![],
+        };
+        let mut actions = vec![action(TYPE, "Type".into()), action(COPY, "Copy".into())];
+        for tone in Tone::ALL {
+            if let Some(toned) = self.toned(tone) {
+                actions.push(action(&tone.action(), format!("Type {toned}")));
+            }
+        }
+        let mut name = self.name.chars();
+        let title = match name.next() {
+            Some(first) => format!("{} {}{}", self.text, first.to_uppercase(), name.as_str()),
+            None => self.text.to_owned(),
+        };
+        Item {
+            id: self.text.to_owned(),
+            kind: ItemKind::Namespaced(NamespacedKind::new(KIND).expect("a valid kind")),
+            identity: None,
+            title,
+            subtitle: None,
+            icon: None,
+            keyword: None,
+            keywords: self.keywords().map(str::to_owned).collect(),
+            actions,
+        }
+    }
+}
+
+/// Every character's Item.
+pub fn items() -> Vec<Item> {
+    Character::all().map(|character| character.item()).collect()
+}
+
+/// The Outcome of the Action `action` on the Item `id`. `tone` is the configured
+/// skin tone, which typing and copying use.
+pub fn outcome(id: &str, action: &str, tone: Option<Tone>) -> Outcome {
+    let Some(character) = Character::find(id) else {
+        return failed(format!("there is no emoji or symbol “{id}”"));
+    };
+    match action {
+        TYPE => Outcome::Type {
+            text: character.text_in(tone).to_owned(),
+        },
+        COPY => Outcome::Copy(Clipboard::Text(character.text_in(tone).to_owned())),
+        _ => match Tone::from_action(action) {
+            Some(tone) => match character.toned(tone) {
+                Some(toned) => Outcome::Type {
+                    text: toned.to_owned(),
+                },
+                None => failed(format!("{id} has no skin tones")),
+            },
+            None => failed(format!("the emoji Extension has no Action `{action}`")),
+        },
+    }
+}
+
+fn failed(message: String) -> Outcome {
+    Outcome::Failed { message }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn every_line_is_a_character_with_a_name() {
+        let mut seen = std::collections::HashSet::new();
+        for character in Character::all() {
+            assert!(!character.text.is_empty(), "{character:?}");
+            assert!(!character.name.is_empty(), "{character:?}");
+            assert!(seen.insert(character.text), "twice: {character:?}");
+            let tones = character.tones.split(' ').filter(|t| !t.is_empty());
+            assert!(matches!(tones.count(), 0 | 5), "{character:?}");
+        }
+    }
+}
