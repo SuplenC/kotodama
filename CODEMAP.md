@@ -41,7 +41,7 @@ are in [docs/adr/](docs/adr/).
 
 - Unit tests: `#[cfg(test)]` modules in each `src/*.rs`.
 - Integration: `crates/*/tests/*.rs`. Daemon: `kotodamad/tests/` (`common/` helpers, `fixtures/recorder`, `ranking.rs`, `interaction.rs`, `open_view.rs`, `config.rs`, `forget.rs`). Protocol: `layout.rs`, `conformance.rs`, `shell_extension.rs`.
-- e2e: `e2e/*/test.sh` under headless sway. `latency` is skipped on PRs. `emoji` types an emoji in a configured skin tone, and a symbol, into a test client. `open-view` checks `kotodama open --view` shows the View in the first frame (its `shell.qml` logs the top View as the window maps).
+- e2e: `e2e/*/test.sh` under headless sway, which `e2e/run` gives a virtual keyboard for the whole run (without one, windows bind no keyboard and lose keys). `e2e/type-and-paste/client.qml` is the window typed into; it logs `ready` once it has the keys. `latency` is skipped on PRs. `emoji` types an emoji in a configured skin tone, and a symbol, into a test client. `open-view` checks `kotodama open --view` shows the View in the first frame (its `shell.qml` logs the top View as the window maps).
 - Benches: `kotodamad/benches/{query,daemon}.rs` (+ `corpus/`), `kotodama-protocol/benches/batch.rs`, `kotodama-calculator/benches/answer.rs`, `kotodama-clipboard/benches/search.rs`, `kotodama-emoji/benches/search.rs`.
 - Nix: `nix/tests/vm.nix` (NixOS VM, `front-end.py`), `nix/tests/qml-module.nix`; `flake.nix` `checks`.
 - Script tests: `scripts/tests/*.sh`.
