@@ -52,6 +52,7 @@ are in [docs/adr/](docs/adr/).
 - `just shell`, `just image`.
 
 CI (`.github/workflows/ci.yml`):
+- On PRs, `changes` gates the jobs below by path (docs-only runs none); `ci` is the single required check.
 - On PRs and main: `test` (check + test, x86 and arm), `e2e` (both arches, no `latency` on PRs), `bench` (base vs this commit; fails on +50% time, +10% Daemon memory).
 - Push only: `nixos-vm` (VM and QML module checks). Main only: `image` (dev image), cargo cache saves.
 - `release-please.yml`: release PRs from Conventional Commits.
