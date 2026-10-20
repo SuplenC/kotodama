@@ -146,8 +146,9 @@ fn bench(c: &mut Criterion) {
         })
     });
     // Two words pasted into a cleared box: the empty query forgets the last
-    // search, so this one searches every Item.
-    group.bench_function("two_words", |b| {
+    // search, so this one searches every Item. (Named `two_words` while the
+    // Daemon still narrowed it from the last iteration's.)
+    group.bench_function("two_words_pasted", |b| {
         b.iter(|| {
             setup.query("");
             black_box(setup.query("fire tool"))
