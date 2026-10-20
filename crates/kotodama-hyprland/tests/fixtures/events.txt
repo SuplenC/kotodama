@@ -1,0 +1,20 @@
+activewindow>>foot,~/src/kotodama
+activewindowv2>>55d0c6b3e1c0
+openwindow>>55d0c6c2a4e0,3,org.gnome.Nautilus,Home
+activewindow>>org.gnome.Nautilus,Home
+activewindowv2>>55d0c6c2a4e0
+windowtitle>>55d0c6c2a4e0
+windowtitlev2>>55d0c6c2a4e0,Downloads, 3 items
+movewindow>>55d0c6c2a4e0,4
+movewindowv2>>55d0c6c2a4e0,4,4
+workspace>>2
+workspacev2>>2,2
+focusedmon>>DP-1,2
+openlayer>>notifications
+closelayer>>notifications
+activewindow>>firefox,Hyprland Wiki — Mozilla Firefox
+activewindowv2>>55d0c6a1b2c0
+closewindow>>55d0c6a1b2c0
+activewindow>>,
+activewindowv2>>
+configreloaded>>

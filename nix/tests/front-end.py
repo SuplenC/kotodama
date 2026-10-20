@@ -3,6 +3,9 @@
     front-end.py QUERY          prints the Results, one `extension<TAB>id<TAB>title` per line
     front-end.py --run QUERY    also runs the top Result's primary Action
     front-end.py --wait QUERY   waits for Results that aren't empty, as a Live query's
+    front-end.py --listen       prints `ready`, then, for each View pushed, `view<TAB>extension<TAB>id`
+                                and its Items, one `title<TAB>subtitle` per line, and `open<TAB>view`
+                                for each request to open, as `kotodama open` sends
 """
 
 import json
@@ -23,6 +26,25 @@ def recv(reader):
     return json.loads(reader.read(int(header)))
 
 
+def listen(sock, reader):
+    print("ready", flush=True)
+    while True:
+        message = recv(reader)
+        if message == "close":
+            send(sock, "closed")
+        if not isinstance(message, dict):
+            continue
+        if "push_view" in message:
+            pushed = message["push_view"]
+            view = pushed["view"]
+            print("view\t%s\t%s" % (pushed["extension"], view["id"]))
+            for item in view["content"].get("list", {}).get("items", []):
+                print("%s\t%s" % (item["title"], item.get("subtitle") or ""))
+            sys.stdout.flush()
+        elif "open" in message:
+            print("open\t%s" % (message["open"].get("view") or ""), flush=True)
+
+
 def main():
     args = sys.argv[1:]
     run = args[:1] == ["--run"]
@@ -36,6 +58,10 @@ def main():
     # The handshake: this Front end speaks JSON only.
     send(sock, {"version": 3, "formats": ["json"]})
     recv(reader)
+    if args == ["--listen"]:
+        # Runs until the test ends it; it never searches.
+        sock.settimeout(None)
+        listen(sock, reader)
 
     send(sock, {"query": {"text": query}})
     while True:

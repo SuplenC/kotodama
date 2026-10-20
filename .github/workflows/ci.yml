@@ -290,7 +290,7 @@ jobs:
       - uses: ./.github/actions/setup-nix
         with:
           cachix-auth-token: ${{ secrets.CACHIX_AUTH_TOKEN }}
-      - run: nix build -L .#checks.x86_64-linux.nixos-vm .#checks.x86_64-linux.qml-module
+      - run: nix build -L .#checks.x86_64-linux.nixos-vm .#checks.x86_64-linux.hyprland-vm .#checks.x86_64-linux.qml-module
 
   # The image only copies files onto nixos/nix, so both platforms build without emulation.
   image:

@@ -8,7 +8,7 @@ Kotodama is a command menu for Wayland desktops. You type, and it finds and does
 - **A Quickshell QML module** written in Rust (cxx-qt) gives QML a native result model. QML only draws the results.
 - **Extensions** are separate processes in any language. They speak a protocol whose wire format is negotiated (JSON, MessagePack or postcard), so a crashing Extension never takes down the menu.
 
-Status: early. The protocol, the Daemon, the Quickshell Front end and the apps, clipboard history, calculator, emoji and web search Bundled extensions work; Views, the Action panel and the other Bundled extensions are next. See `docs/adr/0001-architecture.md` and the issues.
+Status: early. The protocol, the Daemon, the Quickshell Front end and the apps, clipboard history, calculator, emoji, folders, Hyprland and web search Bundled extensions work; Views, the Action panel and the other Bundled extensions are next. See `docs/adr/0001-architecture.md` and the issues.
 
 ## Installing
 
@@ -303,6 +303,22 @@ copy_path = ["wl-copy", "{path}"]
 ```
 
 Its `manifest.toml` runs `./kotodama-folders`, so a package installs the binary next to it in `$XDG_DATA_DIRS/kotodama/extensions/folders/`.
+
+### Hyprland
+
+`kotodama-hyprland` (`crates/kotodama-hyprland`, Extension name `hyprland`) talks to Hyprland over its two sockets in `$XDG_RUNTIME_DIR/hypr/$HYPRLAND_INSTANCE_SIGNATURE/`, never through `hyprctl`.
+
+**Windows**: every open window is an Item of the shared kind `window` with its address, titled by its title, with its class and workspace beside. It reads the windows once at start, then follows Hyprland's event socket, so a window opened, closed, moved or retitled is sent again, alone, and focus changes send nothing. Its primary Action, "Focus Window", focuses it; "Close Window", "Move to Workspace" (which asks for the workspace) and "Toggle Floating" follow.
+
+**Shortcuts**: Hyprland's binds come from Hyprland itself, so every bind is there, whether the config or `hyprctl keyword bind` added it; no config file is parsed. Every bind with a description (`bindd`) is an Item of kind `hyprland.shortcut`, titled by the description, with its keys beside, so searching "screenshot" shows `SUPER + SHIFT + S` next to it; its Action runs the bind. The "Keyboard Shortcuts" Item opens a View of every bind, titled by its keys and grouped by modifier: binds without one first, then by how many modifiers and their names, a submap's binds last. Picking one runs it, except a mouse bind, which only the mouse runs. The binds are read again each time the View opens, and on a config reload, so a bind added at runtime is there the next time. To open the menu straight on it:
+
+```
+bind = SUPER, F1, exec, kotodama open --view hyprland/shortcuts
+```
+
+Outside Hyprland (no `HYPRLAND_INSTANCE_SIGNATURE`) the Extension sends nothing and waits, using no CPU. The Daemon, a systemd user service, finds Hyprland through the user manager's environment, so Hyprland's config should import it: `exec-once = systemctl --user import-environment HYPRLAND_INSTANCE_SIGNATURE WAYLAND_DISPLAY`. If Hyprland exits, its windows and binds are taken away.
+
+Its `manifest.toml` runs `./kotodama-hyprland`, so a package installs the binary next to it in `$XDG_DATA_DIRS/kotodama/extensions/hyprland/`.
 
 ## The Quickshell Front end
 
