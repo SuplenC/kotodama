@@ -16,6 +16,10 @@
 //! Every type decodes from all three Wire formats, so none uses serde features
 //! postcard can't decode: no internally tagged or untagged enums, no flattening,
 //! and no skipped fields.
+//!
+//! Any change to how a message encodes, in any Wire format, needs a new
+//! [`PROTOCOL_VERSION`] (ADR 0011), so the handshake turns away a peer that
+//! would misread it. `tests/layout.rs` fails until the version goes up.
 
 mod channel;
 pub mod frame;

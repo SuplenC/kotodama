@@ -106,10 +106,12 @@ done_with() {
 }
 
 # The handshake is always JSON. Both sides send a hello; this script offers JSON
-# only, so JSON is what the connection uses from here on.
-send '{"version":1,"formats":["json"]}'
+# only, so JSON is what the connection uses from here on. Both must speak the
+# same protocol version, which goes up whenever a message changes.
+version=2
+send "{\"version\":$version,\"formats\":[\"json\"]}"
 read_frame
-if ! jq -e '.version == 1' <<<"$frame" >/dev/null; then
+if ! jq -e --argjson version "$version" '.version == $version' <<<"$frame" >/dev/null; then
     echo "shell-example: unsupported protocol version: $frame" >&2
     exit 1
 fi
