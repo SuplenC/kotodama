@@ -47,7 +47,9 @@ pub enum FromFrontEnd {
     Open {
         /// The search text to open with; empty clears it.
         query: String,
-        /// A View to open on, by id.
+        /// A View to open on, as `<extension>/<item id>`: the Daemon runs that
+        /// Item's primary Action, and passes the request on only once the
+        /// View it pushes is there, or after a second without it (ADR 0013).
         view: Option<String>,
     },
     /// Asks every other Front end to open if it is closed and close if it is
@@ -92,6 +94,8 @@ pub enum ToFrontEnd {
         job: Job,
     },
     /// Open the menu, as another Front end asked with [`FromFrontEnd::Open`].
+    /// When `view` is given, the View it names is already on top, unless it
+    /// failed to open, in which case an [`ToFrontEnd::ActionFailed`] follows.
     Open {
         query: String,
         view: Option<String>,

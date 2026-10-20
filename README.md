@@ -288,9 +288,10 @@ A compositor keybind opens it through the `kotodama` command, which asks the Dae
 ```
 # Hyprland
 bind = SUPER, Space, exec, kotodama toggle
+bind = SUPER, V, exec, kotodama open --view clipboard/history
 ```
 
-`kotodama open [--view <id>] [--query <text>]` opens it with text already typed. To try it, build the module and point Quickshell at it:
+`kotodama open [--view <extension>/<item>] [--query <text>]` opens it with text already typed. `--view` opens it on a View: it names an Item by its Extension and id, and the Daemon runs that Item's primary Action, such as "Show Clipboard History" on the clipboard's `history` Item, and opens the menu once the View it pushes is there, so the menu never shows the search first. Esc pops the View to the search. If the name matches no Item, or the Action fails, the menu opens on the search and says why. If the View hasn't arrived within a second (an Extension that is slow to start, say), the menu opens on the search, and the View still goes on top when it arrives. To try it, build the module and point Quickshell at it:
 
 ```sh
 QML_IMPORT_PATH=$(scripts/qml-module --release) quickshell --path shell.qml
