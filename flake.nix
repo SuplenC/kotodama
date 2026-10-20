@@ -147,6 +147,8 @@
       checks = forAllSystems (pkgs: {
         devShell = self.devShells.${pkgs.stdenv.hostPlatform.system}.default;
         package = self.packages.${pkgs.stdenv.hostPlatform.system}.default;
+        # The same derivation as `package` on this nixpkgs: checks the overlay evaluates.
+        overlay = (pkgs.extend self.overlays.default).kotodama;
         qml-module = import ./nix/tests/qml-module.nix {
           inherit pkgs;
           kotodama = self.packages.${pkgs.stdenv.hostPlatform.system}.default;

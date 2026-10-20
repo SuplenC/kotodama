@@ -27,15 +27,15 @@ let
   # it needs, so curlMinimal, without HTTP/3, brotli, zstd or libpsl. Only the
   # `curl` binary is copied: curl's bin output also holds wcurl, a shell script
   # that would bring in bash.
-  fetcher = runCommand "kotodama-curl-${curlMinimal.version}" { } ''
+  curlOnly = runCommand "kotodama-curl-${curlMinimal.version}" { } ''
     install -D -m 555 ${lib.getExe curlMinimal} $out/bin/curl
   '';
 
   # A Rust binary needs libgcc_s and nothing else from GCC, but the linker
   # leaves a runpath to GCC's `lib` output, which also holds libstdc++ (10 MiB).
   # GCC's `libgcc` output holds libgcc_s alone.
-  gccLib = "${lib.getLib stdenv.cc.cc}/lib";
-  libgcc = "${stdenv.cc.cc.libgcc}/lib";
+  gccLibDir = "${lib.getLib stdenv.cc.cc}/lib";
+  libgccOnlyDir = "${stdenv.cc.cc.libgcc}/lib";
 
   # What the command, the Daemon and the Bundled extensions must never need at
   # run time: the build-time Qt, libstdc++, a shell, or the full curl.
@@ -77,11 +77,12 @@ rustPlatform.buildRustPackage {
   ];
   env = {
     QMAKE = "${qt}/bin/qmake";
-    KOTODAMA_CURL = "${fetcher}/bin/curl";
+    KOTODAMA_CURL = "${curlOnly}/bin/curl";
   };
   # Quickshell loads the QML module as a plugin: there is no Qt app to wrap.
   dontWrapQtApps = true;
-  # outputChecks, which checks each output on its own, needs structured attributes.
+  # outputChecks, which checks each output on its own, needs structured
+  # attributes, so the build's variables come from `env` above.
   __structuredAttrs = true;
   outputChecks = {
     out.disallowedRequisites = notAtRunTime;
@@ -95,6 +96,15 @@ rustPlatform.buildRustPackage {
   doCheck = false;
 
   postInstall = ''
+    # replaceRunpath FILE FROM TO: replace the directory FROM in FILE's runpath with TO.
+    replaceRunpath() {
+      local rpath
+      rpath=":$(patchelf --print-rpath "$1"):"
+      rpath=''${rpath//":$2:"/":$3:"}
+      rpath=''${rpath#:}
+      patchelf --set-rpath "''${rpath%:}" "$1"
+    }
+
     # The QML module, laid out as a QML import path expects (as scripts/qml-module does).
     module=$qml/lib/qt-6/qml/Kotodama
     mkdir -p $module
@@ -106,8 +116,7 @@ rustPlatform.buildRustPackage {
     # runpath names it, and the environment holds every Qt module's dev output
     # (#52). Point the runpath at the Qt libraries themselves: a Quickshell from
     # the same nixpkgs already has those store paths.
-    rpath=$(patchelf --print-rpath $module/libKotodama.so)
-    patchelf --set-rpath "''${rpath//"${qt}/lib"/"${qtRunpath}"}" $module/libKotodama.so
+    replaceRunpath $module/libKotodama.so ${qt}/lib ${qtRunpath}
 
     # Each Bundled extension's manifest runs its binary, beside it.
     for name in apps calculator clipboard emoji folders hyprland web-search; do
@@ -117,10 +126,15 @@ rustPlatform.buildRustPackage {
       mv $out/bin/kotodama-$name $dir/
     done
 
+    for bin in $out/bin/* $extensions/share/kotodama/extensions/*/kotodama-*; do
+      replaceRunpath "$bin" ${gccLibDir} ${libgccOnlyDir}
+    done
+
     # The Daemon finds the Bundled extensions on XDG_DATA_DIRS. They go first,
-    # before the caller's directories or, when it has none, the default ones,
-    # which an Extension such as apps reads too. The wrapper is compiled, so it
-    # needs no shell.
+    # before the caller's directories or, when the variable is unset, the
+    # default ones, which an Extension such as apps reads too. The wrapper is
+    # compiled, so it needs no shell. Unlike the shell's `:-`, it keeps an
+    # empty XDG_DATA_DIRS as it is.
     wrapProgram $out/bin/kotodamad \
       --set-default XDG_DATA_DIRS /usr/local/share:/usr/share \
       --prefix XDG_DATA_DIRS : $extensions/share
@@ -129,14 +143,6 @@ rustPlatform.buildRustPackage {
     cp crates/kotodamad/systemd/kotodamad.socket $out/lib/systemd/user/
     substitute crates/kotodamad/systemd/kotodamad.service $out/lib/systemd/user/kotodamad.service \
       --replace-fail @bindir@ $out/bin
-  '';
-
-  # After fixupPhase has shrunk each runpath to the directories it uses.
-  postFixup = ''
-    for bin in $out/bin/kotodama $out/bin/.kotodamad-wrapped $extensions/share/kotodama/extensions/*/kotodama-*; do
-      rpath=$(patchelf --print-rpath "$bin")
-      patchelf --set-rpath "''${rpath//"${gccLib}"/"${libgcc}"}" "$bin"
-    done
   '';
 
   meta = {

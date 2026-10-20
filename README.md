@@ -46,7 +46,7 @@ The QML module links against Qt, so it shares Qt with a Quickshell built from th
 - If your Quickshell comes from your own `nixpkgs` input, have Kotodama follow it: `inputs.kotodama.inputs.nixpkgs.follows = "nixpkgs";`.
 - Otherwise, apply `inputs.kotodama.overlays.default` to the nixpkgs your Quickshell is built from (for Quickshell's flake, `inputs.quickshell.inputs.nixpkgs`) and use `pkgs.kotodama`. With home-manager, set `programs.kotodama.package = pkgs.kotodama;`.
 
-That nixpkgs must be recent enough to build Kotodama; nixos-25.11 is.
+That nixpkgs must be recent enough to build Kotodama; nixos-25.11 is. Its Quickshell version doesn't matter, since the overlay builds only Kotodama.
 
 The Daemon starts the first time something connects to its socket, whether a `kotodama toggle` or the Quickshell Front end, and stays running after that. While it is stopped, systemd holds new connections and starts it again. It runs with the environment of the systemd user manager, not the compositor's:
 
