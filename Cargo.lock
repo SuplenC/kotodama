@@ -800,6 +800,7 @@ version = "0.1.0"
 dependencies = [
  "criterion",
  "kotodama-calculator",
+ "kotodama-emoji",
  "kotodama-extension",
  "kotodama-protocol",
  "kotodama-web-search",
