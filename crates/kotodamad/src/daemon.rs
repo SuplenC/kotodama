@@ -3589,16 +3589,22 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
 
     /// Where the Result `alias` names comes from in this session:
     /// [`Source::Unavailable`] when its Item is gone or its Extension is down,
-    /// and `None` for a hidden Item, which only `kotodama open --view` reaches.
+    /// and `None` for a hidden Item, which only `kotodama open --view` reaches,
+    /// or for one a running Live query Extension may still answer with.
     fn alias_source(&self, session: &Session, alias: &Alias) -> Option<Source> {
         if let Some(source) = self.source_of(session, &alias.extension, &alias.item) {
             return Some(source);
         }
+        let Some(ext) = self.extension_named(&alias.extension) else {
+            return Some(Source::Unavailable);
+        };
+        let running = &self.extensions[ext.0];
+        let answers_live = running.sender().is_some() && running.debounce().is_some();
         let hidden = self
-            .extension_named(&alias.extension)
-            .and_then(|ext| self.hidden.get(&ext))
+            .hidden
+            .get(&ext)
             .is_some_and(|hidden| hidden.contains_key(&alias.item));
-        (!hidden).then_some(Source::Unavailable)
+        (!answers_live && !hidden).then_some(Source::Unavailable)
     }
 
     /// Where the Result named by an Extension's name and an Item id comes from

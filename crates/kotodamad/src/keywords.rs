@@ -80,18 +80,17 @@ impl Quicklink {
     /// opener, or [`url::opener`] without one.
     pub fn command(&self, query: &str) -> Vec<String> {
         match &self.target {
-            Target::Url {
-                template,
-                opener: Some(opener),
-            } => {
-                let mut command = opener.clone();
-                command.push(url::fill(template, query));
-                command
+            Target::Url { template, opener } => {
+                let url = url::fill(template, query);
+                match opener {
+                    Some(opener) => {
+                        let mut command = opener.clone();
+                        command.push(url);
+                        command
+                    }
+                    None => url::opener(&url),
+                }
             }
-            Target::Url {
-                template,
-                opener: None,
-            } => url::opener(&url::fill(template, query)),
             Target::Command(args) => args
                 .iter()
                 .map(|arg| arg.replace(PLACEHOLDER, query))
@@ -164,7 +163,7 @@ pub fn from_config(config: &Table) -> Keywords {
         }
     }
     for (keyword, value) in tables(config, "quicklinks") {
-        match quicklink(keyword, value, default_opener.as_ref()) {
+        match quicklink(keyword, value, default_opener.as_deref()) {
             Ok(quicklink) => keywords.quicklinks.push(quicklink),
             Err(err) => log::error!("quicklink `{keyword}`: {err}"),
         }
@@ -209,7 +208,7 @@ fn default_opener(config: &Table) -> Result<Option<Vec<String>>, String> {
 fn quicklink(
     keyword: &str,
     value: &Value,
-    default_opener: Option<&Vec<String>>,
+    default_opener: Option<&[String]>,
 ) -> Result<Quicklink, String> {
     if keyword.is_empty() || keyword.contains(char::is_whitespace) {
         return Err("a keyword is one word".into());
@@ -222,7 +221,7 @@ fn quicklink(
     let target = match (string("url")?, command(table, "command")?) {
         (Some(template), None) => Target::Url {
             template,
-            opener: opener.or_else(|| default_opener.cloned()),
+            opener: opener.or_else(|| default_opener.map(<[String]>::to_vec)),
         },
         (None, Some(_)) if opener.is_some() => {
             return Err("has both `command` and `opener`".into());

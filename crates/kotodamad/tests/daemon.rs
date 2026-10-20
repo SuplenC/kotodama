@@ -1726,6 +1726,26 @@ fn an_alias_for_an_action_makes_it_primary() {
 }
 
 #[test]
+fn an_alias_for_a_live_result_not_yet_answered_shows_no_row() {
+    let mut h = Harness::with_config(
+        vec![manifest(
+            "name = \"web\"\ncommand = [\"x\"]\n[live_query]\ntriggers = ['.']\ndebounce_ms = 100",
+        )],
+        config("[aliases]\nddg = { extension = \"web\", item = \"duckduckgo\" }"),
+    );
+    h.up(0);
+    let ui = h.front_end();
+
+    let rows = h.query(&ui, "ddg");
+
+    assert_eq!(
+        titles(&rows),
+        Vec::<&str>::new(),
+        "its Extension may still answer"
+    );
+}
+
+#[test]
 fn a_result_reached_through_an_alias_carries_a_badge_naming_it() {
     let mut h = Harness::with_config(
         vec![plain("apps")],
