@@ -1,178 +1,27 @@
 //! From a query arriving to its Results encoded for the Front end, with 10k
 //! Indexed items: everything the Daemon does per keystroke except the socket
-//! write. Then the same for a list View of 10k Items the Daemon filters.
+//! write. Also: titles 200 characters long, a keystroke right behind a 1,000
+//! Item batch, the first keystroke after the menu opens on a cold CPU cache,
+//! and rows whose Items were read from the payload file. Then the same for a
+//! list View of 10k Items the Daemon filters.
 
 use std::hint::black_box;
-use std::path::PathBuf;
-use std::sync::mpsc::{self, Receiver};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use criterion::{Criterion, criterion_group, criterion_main};
-use kotodama_protocol::{
-    FromExtension, FromFrontEnd, Manifest, Table, ToFrontEnd, View, ViewContent, WireFormat,
-};
-use kotodamad::clock::{DAY_SECS, When};
-use kotodamad::daemon::{Daemon, Desktop, Event, ExtensionId, FrontEndId, Launcher, Output};
-use kotodamad::discovery::Found;
-use kotodamad::history::{History, Store};
-use kotodamad::usage::Entry;
+use kotodamad::history::History;
 
 mod corpus;
+mod setup;
 
-struct Nothing;
+use setup::{APPS, CLIPBOARD, Setup};
 
-impl Launcher for Nothing {
-    fn start(&mut self, _: ExtensionId, _: u64, _: &Found) {}
-    fn stop(&mut self, _: ExtensionId, _: u64) {}
-}
-
-impl Desktop for Nothing {
-    fn output(&mut self, _: Output) {}
-    fn launch(&mut self, _: Vec<String>) {}
-    fn notify(&mut self, _: String, _: String) {}
-}
-
-impl Store for Nothing {
-    fn save(&mut self, _: &History) {}
-    fn log(&mut self, _: Entry) {}
-    fn forget_usage(&mut self, _: Option<&str>) {}
-}
-
-struct Setup {
-    daemon: Daemon<Nothing, Nothing, Nothing>,
-    results: Receiver<ToFrontEnd>,
-    buf: Vec<u8>,
-}
-
-impl Setup {
-    fn new() -> Self {
-        Self::with_history(History::default())
-    }
-
-    /// With 2000 Items picked, the most the History keeps, at every time of
-    /// day over a month.
-    fn picked() -> Self {
-        let mut history = History::default();
-        let start = std::time::SystemTime::now()
-            .duration_since(std::time::SystemTime::UNIX_EPOCH)
-            .unwrap()
-            .as_secs()
-            - 30 * DAY_SECS;
-        for n in 0..2000u64 {
-            let at = start + n * 30 * DAY_SECS / 2000;
-            let when = When {
-                at,
-                time_of_day: (at % DAY_SECS) as u32,
-            };
-            history.touch("apps", &format!("item-{}", n * 5), when);
-        }
-        Self::with_history(history)
-    }
-
-    fn with_history(history: History) -> Self {
-        let manifest = Manifest::from_toml("name = \"apps\"\ncommand = [\"x\"]").unwrap();
-        let found = Found::new(manifest, PathBuf::from("/")).unwrap();
-        let now = Instant::now();
-        let mut daemon = Daemon::new(
-            vec![found],
-            Table::new(),
-            history,
-            Nothing,
-            Nothing,
-            Nothing,
-            now,
-        );
-        let (sender, _extension) = mpsc::sync_channel(64);
-        daemon.handle(
-            Event::ExtensionUp {
-                extension: ExtensionId(0),
-                generation: 1,
-                sender,
-            },
-            now,
-        );
-        daemon.handle(
-            Event::FromExtension {
-                extension: ExtensionId(0),
-                generation: 1,
-                message: FromExtension::AddItems {
-                    items: corpus::items(),
-                },
-            },
-            now,
-        );
-        let (sender, results) = mpsc::sync_channel(64);
-        daemon.handle(
-            Event::FrontEndUp {
-                front_end: FrontEndId(0),
-                sender,
-                disconnect: Box::new(|| {}),
-            },
-            now,
-        );
-        results.try_iter().for_each(drop);
-        Setup {
-            daemon,
-            results,
-            buf: Vec::new(),
-        }
-    }
-
-    /// Sends one query and encodes its Results as the socket writer would.
-    fn query(&mut self, text: &str) -> usize {
-        self.daemon.handle(
-            Event::FromFrontEnd {
-                front_end: FrontEndId(0),
-                message: FromFrontEnd::Query { text: text.into() },
-            },
-            Instant::now(),
-        );
-        self.encode_reply()
-    }
-
-    /// Pushes the corpus as a list View, as `apps/all`.
-    fn push_list(&mut self) {
-        self.daemon.handle(
-            Event::FromExtension {
-                extension: ExtensionId(0),
-                generation: 1,
-                message: FromExtension::PushView(View {
-                    id: "all".into(),
-                    title: "All".into(),
-                    content: ViewContent::List {
-                        items: corpus::items(),
-                        filters_itself: false,
-                    },
-                }),
-            },
-            Instant::now(),
-        );
-        self.results.try_iter().for_each(drop);
-    }
-
-    /// Types `text` into the list View and encodes the Daemon's matches.
-    fn filter(&mut self, text: &str) -> usize {
-        self.daemon.handle(
-            Event::FromFrontEnd {
-                front_end: FrontEndId(0),
-                message: FromFrontEnd::FilterView {
-                    extension: "apps".into(),
-                    view: "all".into(),
-                    text: text.into(),
-                },
-            },
-            Instant::now(),
-        );
-        self.encode_reply()
-    }
-
-    fn encode_reply(&mut self) -> usize {
-        let reply = self.results.try_recv().unwrap();
-        self.buf.clear();
-        WireFormat::Postcard
-            .encode_into(&reply, &mut self.buf)
-            .unwrap();
-        self.buf.len()
+/// Typing on: each keystroke narrows the last one's matches.
+fn next_keystroke(setup: &mut Setup, word: &str) -> impl FnMut() -> usize {
+    let mut len = 0;
+    move || {
+        len = len % word.len() + 1;
+        setup.query(&word[..len])
     }
 }
 
@@ -196,19 +45,144 @@ fn bench(c: &mut Criterion) {
             black_box(setup.query("fire tool"))
         })
     });
-    // Typing on: each keystroke narrows the last one's matches.
     group.bench_function("next_keystroke", |b| {
-        let word = "firefoxterminal";
-        let mut len = 1;
-        b.iter(|| {
-            len = len % word.len() + 1;
-            black_box(setup.query(&word[..len]))
-        })
+        let mut keystroke = next_keystroke(&mut setup, "firefoxterminal");
+        b.iter(|| black_box(keystroke()))
     });
+    // A keystroke right behind a batch of 1,000 Items, as when the apps are
+    // scanned again or the clipboard sends its history: from the batch
+    // arriving to the keystroke's Results.
+    group.bench_function("keystroke_behind_1k_batch", |b| {
+        let batches = [1, 2].map(|seed| corpus::long_titles(1000, 60, seed));
+        let mut n = 0;
+        b.iter_custom(|iters| {
+            let mut total = Duration::ZERO;
+            for _ in 0..iters {
+                setup.settle();
+                n += 1;
+                let batch = batches[n % 2].clone();
+                let start = Instant::now();
+                setup.send(CLIPBOARD, batch);
+                black_box(setup.query(if n.is_multiple_of(2) { "f" } else { "t" }));
+                total += start.elapsed();
+            }
+            total
+        });
+        setup.settle();
+    });
+    group.finish();
+
+    // How long a batch takes to show: from an Extension sending it to its
+    // new version being ready on the indexing thread. A batch of new clips,
+    // and the apps scanned again.
+    let mut group = c.benchmark_group("staleness");
+    let clips = corpus::long_titles(1000, 60, 1);
+    let apps = corpus::items();
+    for (name, extension, batch) in [
+        ("1k_clips", CLIPBOARD, &clips),
+        ("10k_apps_rescanned", APPS, &apps),
+    ] {
+        group.bench_function(name, |b| {
+            b.iter_custom(|iters| {
+                let mut total = Duration::ZERO;
+                for _ in 0..iters {
+                    let batch = batch.clone();
+                    let start = Instant::now();
+                    setup.send(extension, batch);
+                    let indexed = setup.indexed.recv().unwrap();
+                    total += start.elapsed();
+                    setup.daemon.handle(indexed, Instant::now());
+                    setup.pending -= 1;
+                }
+                total
+            })
+        });
+    }
+    group.finish();
+
+    let mut group = c.benchmark_group("query_10k_items");
     // Opening the menu: the Results most used at this time of day.
     let mut setup = Setup::picked();
     group.bench_function("empty_query_2k_picked", |b| {
         b.iter(|| black_box(setup.query("")))
+    });
+    group.finish();
+
+    // The first keystroke after the menu opens, with the CPU cache taken by
+    // other programs since the last time: only the keystroke is timed. Each
+    // iteration also writes 32 MiB, so it runs fewer.
+    let mut group = c.benchmark_group("open_10k_items");
+    group.sample_size(10);
+    group.measurement_time(Duration::from_secs(2));
+    // Opening warms the cache with what a keystroke reads; `_unwarmed` takes
+    // it again between the toggle and the keystroke, as if the Daemon didn't.
+    for (name, warmed) in [
+        ("first_keystroke_cold_cache", true),
+        ("first_keystroke_cold_cache_unwarmed", false),
+    ] {
+        group.bench_function(name, |b| {
+            let mut evict = vec![0u8; 32 << 20];
+            let mut n = 0u8;
+            b.iter_custom(|iters| {
+                let mut total = Duration::ZERO;
+                for _ in 0..iters {
+                    setup.query("");
+                    n = n.wrapping_add(1);
+                    let mut evict = || {
+                        for page in evict.chunks_mut(64) {
+                            page[0] = n;
+                        }
+                        black_box(&evict);
+                    };
+                    evict();
+                    setup.toggle();
+                    if !warmed {
+                        evict();
+                    }
+                    let start = Instant::now();
+                    black_box(setup.query(if n.is_multiple_of(2) { "f" } else { "t" }));
+                    total += start.elapsed();
+                }
+                total
+            })
+        });
+    }
+    group.finish();
+
+    // A query whose rows' Items were read for the last Results, and one
+    // whose rows' Items are each read from the payload file: an app's own
+    // keyword, a different app each time, out of the most kept resident.
+    let mut group = c.benchmark_group("query_10k_items");
+    group.bench_function("rows_resident", |b| {
+        b.iter(|| {
+            setup.query("");
+            black_box(setup.query("app4321"))
+        })
+    });
+    group.bench_function("rows_from_payload_file", |b| {
+        let mut n = 0;
+        b.iter(|| {
+            n = (n + 7919) % corpus::ITEMS;
+            setup.query("");
+            black_box(setup.query(&format!("app{n}")))
+        })
+    });
+    group.finish();
+
+    // Clipboard entries searched by their whole text: the time per keystroke
+    // should not grow with the titles' length.
+    let mut setup = Setup::with(History::default(), corpus::long_titles(1000, 200, 7));
+    let mut group = c.benchmark_group("query_1k_long_titles");
+    group.bench_function("first_keystroke", |b| {
+        let mut alternate = false;
+        b.iter(|| {
+            alternate = !alternate;
+            black_box(setup.query(if alternate { "f" } else { "t" }))
+        })
+    });
+    group.bench_function("next_keystroke", |b| {
+        let mut keystroke = next_keystroke(&mut setup, "firefoxterminal");
+        b.iter(|| black_box(keystroke()))
     });
     group.finish();
 }

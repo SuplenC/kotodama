@@ -9,7 +9,7 @@
 //! (`Żółw` is `zolw`), so neither case nor accents in the query matter.
 
 use kotodama_protocol::Item;
-use nucleo_matcher::pattern::Pattern;
+use nucleo_matcher::pattern::{AtomKind, Pattern};
 use std::ops::{BitOr, BitOrAssign};
 
 use nucleo_matcher::{Matcher, Utf32Str, Utf32String, chars};
@@ -75,6 +75,9 @@ pub struct Query {
     last_is_whole: bool,
     /// The letters of each word.
     letters: Vec<Letters>,
+    /// As [`Query::typo_initials`] gives them: asked of every row looked at
+    /// for a near miss.
+    typo_initials: Letters,
 }
 
 /// One character, lowercase and without accents. Letters nucleo doesn't fold,
@@ -113,6 +116,11 @@ impl Query {
             query.letters.push(Letters::in_text(word.iter().copied()));
             query.words.push(word);
         }
+        query.typo_initials = query
+            .words
+            .iter()
+            .filter(|word| typos(word.len()) > 0)
+            .fold(Letters::NONE, |set, word| set | Letters::of(word[0]));
         query
     }
 
@@ -129,25 +137,36 @@ impl Query {
     /// [`Haystack::initials`] gives them: a near miss has a word starting
     /// with one of them.
     pub fn typo_initials(&self) -> Letters {
-        self.words
+        self.typo_initials
+    }
+
+    /// Whether an Item whose title and keywords have `letters`, and words
+    /// starting with `initials`, as [`Texts`] has them, may be a near miss:
+    /// each letter they lack takes a typo, and a word that could have one
+    /// must start a word of theirs, as one with a typo does. Never, for a
+    /// query that tolerates no typo.
+    #[inline]
+    pub fn may_nearly_match(&self, letters: Letters, initials: Letters) -> bool {
+        let enough = self
+            .words
             .iter()
-            .filter(|word| typos(word.len()) > 0)
-            .fold(Letters::NONE, |set, word| set | Letters::of(word[0]))
+            .zip(&self.letters)
+            .all(|(word, &wanted)| letters.lacks(wanted) <= typos(word.len()));
+        enough && initials.meets(self.typo_initials())
     }
 
     /// Whether whatever nearly matches `longer`, a query that adds to this
     /// one, matches or nearly matches this one. So it does when each word
     /// that `longer` lengthens allows as many typos, for a word's start is no
     /// nearer a longer word. Not when this query asked for a whole word,
-    /// which `longer` may not.
+    /// which `longer` may not, nor when a word of one letter, which only
+    /// matches at a word's start, grows to one that matches anywhere.
     pub fn narrows_near_misses_of(&self, longer: &Query) -> bool {
         !self.last_is_whole
             && longer.words.len() >= self.words.len()
-            && self
-                .words
-                .iter()
-                .zip(&longer.words)
-                .all(|(word, longer)| typos(word.len()) == typos(longer.len()))
+            && self.words.iter().zip(&longer.words).all(|(word, longer)| {
+                typos(word.len()) == typos(longer.len()) && (word.len() > 1 || longer.len() == 1)
+            })
     }
 
     /// Whether the query is long enough for subtitles to be searched.
@@ -203,10 +222,12 @@ impl Filter {
     }
 
     /// Whether an Item with `letters` in its texts, as
-    /// [`Haystack::every_letter`] gives them, may match.
+    /// [`Haystack::every_letter`] gives them, and `initials` starting the
+    /// words of its title and keywords, as [`Haystack::initials`] gives them,
+    /// may match.
     #[inline]
-    pub fn may_match(&self, letters: Letters) -> bool {
-        letters.contains(self.letters)
+    pub fn may_match(&self, letters: Letters, initials: Letters) -> bool {
+        letters.contains(self.letters) && self.letter.is_none_or(|letter| initials.meets(letter))
     }
 }
 
@@ -222,26 +243,118 @@ pub fn fold_text(text: &str) -> String {
 
 /// What separates an Item's keywords in [`Haystack`]: none has it, and it
 /// starts a word like a space does.
-const SEPARATOR: char = '\u{1f}';
+pub const SEPARATOR: char = '\u{1f}';
 
-/// What an Item is searched by, folded as [`fold`] does and converted once on
-/// the way in. A folded text has as many characters as the original, so match
-/// positions are the same in both.
-pub struct Haystack {
-    pub title: Utf32String,
+/// One folded text as it is searched, wherever it is kept: its characters,
+/// as nucleo holds them, and where its words start.
+#[derive(Clone, Copy, Debug)]
+pub struct Text<'a> {
+    pub chars: Utf32Str<'a>,
+    /// Where each word starts, as [`word_starts`] finds them, in order.
+    pub starts: &'a [u32],
+}
+
+impl Text<'_> {
+    pub const EMPTY: Text<'static> = Text {
+        chars: Utf32Str::Ascii(&[]),
+        starts: &[],
+    };
+
+    pub fn is_empty(&self) -> bool {
+        self.chars.is_empty()
+    }
+}
+
+/// What an Item is searched by, wherever it is kept: an owned [`Haystack`]
+/// or a row of the Index. Everything a keystroke needs, worked out once when
+/// the Item arrives.
+#[derive(Clone, Copy, Debug)]
+pub struct Texts<'a> {
+    pub title: Text<'a>,
     /// The keyword and keywords, joined by [`SEPARATOR`]; empty if there are
     /// none.
-    words: Utf32String,
-    /// Empty if there is none.
-    subtitle: Utf32String,
+    pub words: Text<'a>,
+    /// Empty if there is none. Searched so seldom that where its words start
+    /// isn't kept.
+    pub subtitle: Utf32Str<'a>,
     /// The letters words of the title and keywords start with, so a
     /// one-letter query passes over most Items without searching them.
-    initials: Letters,
+    pub initials: Letters,
     /// The same for the subtitle.
-    subtitle_initials: Letters,
+    pub subtitle_initials: Letters,
     /// Every letter of the title and keywords, so looking for near misses
     /// passes over most Items without searching them.
+    pub letters: Letters,
+}
+
+/// An Item's texts folded as [`fold`] does, with all that [`Texts`] holds:
+/// what the Index copies into its arena, and [`Haystack`] keeps on its own.
+pub struct Folded {
+    pub title: Utf32String,
+    pub words: Utf32String,
+    pub subtitle: Utf32String,
+    pub title_starts: Vec<u32>,
+    pub words_starts: Vec<u32>,
+    pub initials: Letters,
+    pub subtitle_initials: Letters,
+    pub letters: Letters,
+    /// Every letter of the title, keywords and subtitle.
+    pub every_letter: Letters,
+}
+
+impl Folded {
+    pub fn new(item: &Item) -> Self {
+        let mut words = String::new();
+        for word in item.keyword.iter().chain(&item.keywords) {
+            if !words.is_empty() {
+                words.push(SEPARATOR);
+            }
+            words.push_str(word);
+        }
+        let title = fold_text(&item.title);
+        let words = fold_text(&words);
+        let subtitle = fold_text(item.subtitle.as_deref().unwrap_or(""));
+        let subtitle_initials = initials(&subtitle, None);
+        let initials = initials(&title, Some(&item.title)) | initials(&words, None);
+        let letters = Letters::in_text(title.chars().chain(words.chars()));
+        let (title, words, subtitle) = (
+            Utf32String::from(title),
+            Utf32String::from(words),
+            Utf32String::from(subtitle),
+        );
+        let every_letter = letters | Letters::in_text(subtitle.slice(..).chars());
+        let mut title_starts = Vec::new();
+        word_starts(title.slice(..), Some(&item.title), &mut title_starts);
+        let mut words_starts = Vec::new();
+        word_starts(words.slice(..), None, &mut words_starts);
+        Folded {
+            title,
+            words,
+            subtitle,
+            title_starts,
+            words_starts,
+            initials,
+            subtitle_initials,
+            letters,
+            every_letter,
+        }
+    }
+}
+
+/// What an Item is searched by, on its own rather than in the Index: the
+/// Daemon's own Items and Live query results.
+pub struct Haystack {
+    pub title: Utf32String,
+    words: Utf32String,
+    subtitle: Utf32String,
+    /// Where the title's words start, then the keywords'.
+    starts: Vec<u32>,
+    /// How many of `starts` are the title's.
+    title_starts: usize,
+    initials: Letters,
+    subtitle_initials: Letters,
     letters: Letters,
+    every_letter: Letters,
 }
 
 /// A set of folded characters, as bits of one word: one for each ASCII letter
@@ -256,6 +369,10 @@ const _: () = assert!(size_of::<Letters>() == size_of::<u64>());
 
 impl Letters {
     pub const NONE: Letters = Letters(0);
+
+    pub fn bits(self) -> u64 {
+        self.0
+    }
     /// The one every character but an ASCII letter or digit stands for.
     const OTHER: Letters = Letters(1 << 63);
 
@@ -315,7 +432,7 @@ impl BitOrAssign for Letters {
 }
 
 /// The letters words of `folded` start with, with words starting as
-/// [`one_letter`] has them, and [`Letters::OTHER`].
+/// [`word_starts`] has them, and [`Letters::OTHER`].
 fn initials(folded: &str, original: Option<&str>) -> Letters {
     let mut set = Letters::OTHER;
     let mut cases = original
@@ -337,6 +454,29 @@ fn initials(folded: &str, original: Option<&str>) -> Letters {
     set
 }
 
+/// Appends to `starts` where each word of a folded text starts: at a letter
+/// or digit after anything else, and, when `original` gives the case, at a
+/// capital after a small letter, as in `WebStorm`. The case counts only where
+/// `original` has a byte for each character, so it is ASCII.
+pub fn word_starts(folded: Utf32Str, original: Option<&str>, starts: &mut Vec<u32>) {
+    let mut cases = original
+        .filter(|original| original.len() == folded.len())
+        .map(str::chars);
+    let (mut prev, mut prev_lower) = (None, false);
+    for (at, c) in folded.chars().enumerate() {
+        let lower = cases
+            .as_mut()
+            .and_then(Iterator::next)
+            .map(|o| (o.is_lowercase(), o.is_uppercase()));
+        let camel = prev_lower && lower.is_some_and(|(_, upper)| upper);
+        if c.is_alphanumeric() && (camel || prev.is_none_or(|p: char| !p.is_alphanumeric())) {
+            starts.push(at as u32);
+        }
+        prev = Some(c);
+        prev_lower = lower.is_some_and(|(lower, _)| lower);
+    }
+}
+
 /// `text` as a [`Haystack`] holds it.
 pub fn folded(text: &str) -> Utf32String {
     Utf32String::from(fold_text(text))
@@ -344,26 +484,151 @@ pub fn folded(text: &str) -> Utf32String {
 
 impl Haystack {
     pub fn new(item: &Item) -> Self {
-        let mut words = String::new();
-        for word in item.keyword.iter().chain(&item.keywords) {
-            if !words.is_empty() {
-                words.push(SEPARATOR);
-            }
-            words.push_str(word);
-        }
-        let title = fold_text(&item.title);
-        let words = fold_text(&words);
-        let subtitle = fold_text(item.subtitle.as_deref().unwrap_or(""));
+        let Folded {
+            title,
+            words,
+            subtitle,
+            mut title_starts,
+            words_starts,
+            initials,
+            subtitle_initials,
+            letters,
+            every_letter,
+        } = Folded::new(item);
+        let len = title_starts.len();
+        title_starts.extend(words_starts);
         Haystack {
-            initials: initials(&title, Some(&item.title)) | initials(&words, None),
-            subtitle_initials: initials(&subtitle, None),
-            letters: Letters::in_text(title.chars().chain(words.chars())),
-            title: Utf32String::from(title),
-            words: Utf32String::from(words),
-            subtitle: Utf32String::from(subtitle),
+            title,
+            words,
+            subtitle,
+            starts: title_starts,
+            title_starts: len,
+            initials,
+            subtitle_initials,
+            letters,
+            every_letter,
         }
     }
 
+    pub fn texts(&self) -> Texts<'_> {
+        let (title, words) = self.starts.split_at(self.title_starts);
+        Texts {
+            title: Text {
+                chars: self.title.slice(..),
+                starts: title,
+            },
+            words: Text {
+                chars: self.words.slice(..),
+                starts: words,
+            },
+            subtitle: self.subtitle.slice(..),
+            initials: self.initials,
+            subtitle_initials: self.subtitle_initials,
+            letters: self.letters,
+        }
+    }
+
+    /// As [`Texts::score`].
+    pub fn score(
+        &self,
+        pattern: &Pattern,
+        matcher: &mut Matcher,
+        filter: Filter,
+    ) -> Option<(u32, Matched)> {
+        self.texts().score(pattern, matcher, filter)
+    }
+
+    /// The letters words of the title and keywords start with.
+    pub fn initials(&self) -> Letters {
+        self.initials
+    }
+
+    /// Every letter of the title, keywords and subtitle.
+    pub fn every_letter(&self) -> Letters {
+        self.every_letter
+    }
+}
+
+/// Past this many characters, a text is scored by nucleo's greedy match, in
+/// time that grows with the text, rather than its optimal match, in time that
+/// grows with the text times the query: long clipboard entries would
+/// otherwise make every keystroke slower (ADR 0017). Both match the same
+/// texts; only the score, a late tie-break, may differ.
+pub const OPTIMAL_CHARS: usize = 64;
+
+/// `pattern`'s score in `haystack`, as [`Pattern::score`] gives it up to
+/// [`OPTIMAL_CHARS`].
+#[inline]
+fn score(pattern: &Pattern, haystack: Utf32Str<'_>, matcher: &mut Matcher) -> Option<u32> {
+    if haystack.len() <= OPTIMAL_CHARS {
+        return pattern.score(haystack, matcher);
+    }
+    let mut score = 0;
+    for atom in &pattern.atoms {
+        score += u32::from(if atom.kind == AtomKind::Fuzzy && !atom.negative {
+            // As nucleo sets them for a query parsed as the Daemon parses
+            // it: folded like the haystacks.
+            matcher.config.ignore_case = true;
+            matcher.config.normalize = false;
+            matcher.fuzzy_match_greedy(haystack, atom.needle_text())?
+        } else {
+            atom.score(haystack, matcher)?
+        });
+    }
+    Some(score)
+}
+
+/// What [`Texts::score`] reads of an Item's texts before nucleo turns most
+/// Items down: the Index scores a row from these alone, and reads the rest
+/// of its texts only for a match.
+#[derive(Clone, Copy)]
+pub struct Searched<'a> {
+    /// The folded title.
+    pub title: Utf32Str<'a>,
+    /// The keyword and keywords, as [`Texts::words`] has them.
+    pub words: Utf32Str<'a>,
+    /// The letters the subtitle's words start with, so the subtitle is read
+    /// only if it may match.
+    pub subtitle_initials: Letters,
+}
+
+impl<'a> Searched<'a> {
+    /// As [`Texts::score`], once `filter`'s letter, if it has one, is known
+    /// to start a word of the title or keywords. `subtitle` is read only if
+    /// the subtitle is searched.
+    #[inline]
+    pub fn score(
+        self,
+        subtitle: impl FnOnce() -> Utf32Str<'a>,
+        pattern: &Pattern,
+        matcher: &mut Matcher,
+        filter: Filter,
+    ) -> Option<(u32, Matched)> {
+        let title = score(pattern, self.title, matcher);
+        let words = if self.words.is_empty() {
+            None
+        } else {
+            score(pattern, self.words, matcher)
+        };
+        let matched = Matched {
+            title: title.is_some(),
+            words: words.is_some(),
+            subtitle: false,
+        };
+        match title.max(words) {
+            Some(score) => Some((score, matched)),
+            None if filter
+                .subtitles
+                .is_some_and(|initials| self.subtitle_initials.contains(initials)) =>
+            {
+                score(pattern, subtitle(), matcher).map(|score| (score, Matched::SUBTITLE))
+            }
+            None => None,
+        }
+    }
+}
+
+impl Texts<'_> {
     /// nucleo's score, the best of the title's and the keywords', and which of
     /// them matched. Failing both, the subtitle's, if `filter` lets subtitles
     /// be searched and the subtitle has words starting with every word of the
@@ -379,52 +644,12 @@ impl Haystack {
         {
             return None;
         }
-        let title = pattern.score(self.title.slice(..), matcher);
-        let words = if self.words.is_empty() {
-            None
-        } else {
-            pattern.score(self.words.slice(..), matcher)
+        let searched = Searched {
+            title: self.title.chars,
+            words: self.words.chars,
+            subtitle_initials: self.subtitle_initials,
         };
-        let matched = Matched {
-            title: title.is_some(),
-            words: words.is_some(),
-            subtitle: false,
-        };
-        match title.max(words) {
-            Some(score) => Some((score, matched)),
-            None if filter
-                .subtitles
-                .is_some_and(|initials| self.subtitle_initials.contains(initials)) =>
-            {
-                pattern
-                    .score(self.subtitle.slice(..), matcher)
-                    .map(|score| (score, Matched::SUBTITLE))
-            }
-            None => None,
-        }
-    }
-
-    /// Whether the title and keywords have enough of each word's letters for
-    /// the Item to be a near miss: each letter they lack takes a typo, and a
-    /// word that could have one must start a word of theirs, as one with a
-    /// typo does.
-    fn may_nearly_match(&self, query: &Query) -> bool {
-        let letters = query
-            .words
-            .iter()
-            .zip(&query.letters)
-            .all(|(word, &letters)| self.letters.lacks(letters) <= typos(word.len()));
-        letters && self.initials.meets(query.typo_initials())
-    }
-
-    /// The letters words of the title and keywords start with.
-    pub fn initials(&self) -> Letters {
-        self.initials
-    }
-
-    /// Every letter of the title, keywords and subtitle.
-    pub fn every_letter(&self) -> Letters {
-        self.letters | Letters::in_text(self.subtitle.slice(..).chars())
+        searched.score(|| self.subtitle, pattern, matcher, filter)
     }
 }
 
@@ -450,172 +675,185 @@ impl Matched {
     };
 }
 
+/// Runs `$body` with `$chars` bound to the characters of a [`Utf32Str`], as
+/// bytes or as `char`s, so the body is compiled for each without a branch
+/// per character.
+macro_rules! with_chars {
+    ($text:expr, |$chars:ident| $body:expr) => {
+        match $text {
+            Utf32Str::Ascii($chars) => $body,
+            Utf32Str::Unicode($chars) => $body,
+        }
+    };
+}
+
+/// A character of a folded text, as a byte of an ASCII one or a `char`.
+trait Char: Copy {
+    fn char(self) -> char;
+}
+
+impl Char for u8 {
+    #[inline]
+    fn char(self) -> char {
+        char::from(self)
+    }
+}
+
+impl Char for char {
+    #[inline]
+    fn char(self) -> char {
+        self
+    }
+}
+
+/// Whether `chars` from `at` on start with `word`.
+#[inline]
+fn starts_with<C: Char>(chars: &[C], at: usize, word: &[char]) -> bool {
+    chars.len() >= at + word.len() && chars[at..].iter().zip(word).all(|(&c, &w)| c.char() == w)
+}
+
 /// Works out tiers, reusing its buffers from one text to the next.
 #[derive(Default)]
 pub struct Tiers {
     chars: Vec<char>,
-    /// Where each word of `chars` starts.
-    starts: Vec<usize>,
+    /// Where each word of the subtitle starts, while it is searched.
+    starts: Vec<u32>,
     /// The table [`within`] works in.
     distances: Vec<usize>,
 }
 
 impl Tiers {
+    /// How well an Item matches, as [`Tiers::texts`] works it out. `item`
+    /// is the Item `haystack` was made from.
+    pub fn item(
+        &mut self,
+        haystack: &Haystack,
+        _item: &Item,
+        query: &Query,
+        matched: Matched,
+    ) -> Option<Tier> {
+        self.texts(haystack.texts(), query, matched)
+    }
+
     /// How well an Item matches: the best of its title and its keywords, or
     /// failing those, its subtitle. A subtitle counts only for a query of at
     /// least [`SUBTITLE_LETTERS`] letters, only at word starts, and then only
     /// as [`Tier::Inside`]. Only the texts in `matched` are looked at. `None`
     /// if nothing matches well enough.
-    pub fn item(
-        &mut self,
-        haystack: &Haystack,
-        item: &Item,
-        query: &Query,
-        matched: Matched,
-    ) -> Option<Tier> {
+    pub fn texts(&mut self, texts: Texts, query: &Query, matched: Matched) -> Option<Tier> {
         let mut best = None;
         if matched.title {
-            best = self.text(haystack.title.slice(..), Some(&item.title), query);
+            best = self.text(texts.title, query);
         }
-        if matched.words && best < Some(Tier::Exact) && !haystack.words.is_empty() {
-            best = best.max(self.text(haystack.words.slice(..), None, query));
+        if matched.words && best < Some(Tier::Exact) && !texts.words.is_empty() {
+            best = best.max(self.text(texts.words, query));
         }
         if best.is_none()
             && matched.subtitle
             && query.searches_subtitles()
-            && !haystack.subtitle.is_empty()
-            && self.text(haystack.subtitle.slice(..), None, query) >= Some(Tier::WordStart)
+            && !texts.subtitle.is_empty()
         {
-            best = Some(Tier::Inside);
+            let mut starts = std::mem::take(&mut self.starts);
+            starts.clear();
+            word_starts(texts.subtitle, None, &mut starts);
+            let subtitle = Text {
+                chars: texts.subtitle,
+                starts: &starts,
+            };
+            if self.text(subtitle, query) >= Some(Tier::WordStart) {
+                best = Some(Tier::Inside);
+            }
+            self.starts = starts;
         }
         best
+    }
+
+    /// Whether an Item that doesn't match is a near miss, as
+    /// [`Tiers::near_miss_texts`] works it out. `item` is the Item `haystack`
+    /// was made from.
+    pub fn near_miss(&mut self, haystack: &Haystack, _item: &Item, query: &Query) -> bool {
+        self.near_miss_texts(haystack.texts(), query)
     }
 
     /// Whether an Item that doesn't match is a near miss: each word of the
     /// query matches its title or keywords, or a word of them starts with
     /// the query's word but for as many typos as that may have. Subtitles
     /// aren't looked at.
-    pub fn near_miss(&mut self, haystack: &Haystack, item: &Item, query: &Query) -> bool {
-        if !query.tolerates_typos() || !haystack.may_nearly_match(query) {
+    pub fn near_miss_texts(&mut self, texts: Texts, query: &Query) -> bool {
+        if !query.may_nearly_match(texts.letters, texts.initials) {
             return false;
         }
-        self.nearly(haystack.title.slice(..), Some(&item.title), query)
-            || (!haystack.words.is_empty() && self.nearly(haystack.words.slice(..), None, query))
+        self.nearly(texts.title, query)
+            || (!texts.words.is_empty() && self.nearly(texts.words, query))
     }
 
     /// Whether each word of the query matches one folded text, or a word of
     /// it starts with the query's word but for as many typos as that may
-    /// have. `original` gives the case, as for [`Tiers::text`].
-    fn nearly(&mut self, folded: Utf32Str, original: Option<&str>, query: &Query) -> bool {
+    /// have.
+    fn nearly(&mut self, text: Text, query: &Query) -> bool {
         // Asked only of what doesn't match, so a one-word query's word
-        // doesn't, and only the words starting with its first letter count.
+        // doesn't.
         if let [word] = query.words.as_slice() {
-            return self.typo_in(folded, original, word, query.last_is_whole);
+            return self.typo(text, word, query.last_is_whole);
         }
-        self.load(folded, original);
         let last = query.words.len() - 1;
         query.words.iter().enumerate().all(|(n, word)| {
             let whole = n == last && query.last_is_whole;
-            self.word(word, whole).is_some() || self.typo(word, whole)
+            word_tier(text, word, whole).is_some() || self.typo(text, word, whole)
         })
-    }
-
-    /// [`Tiers::typo`] of a folded text. An ASCII text is read without
-    /// [`Tiers::load`]: only the words starting with `word`'s first letter are
-    /// copied out.
-    fn typo_in(
-        &mut self,
-        folded: Utf32Str,
-        original: Option<&str>,
-        word: &[char],
-        whole: bool,
-    ) -> bool {
-        let Utf32Str::Ascii(bytes) = folded else {
-            self.load(folded, original);
-            return self.typo(word, whole);
-        };
-        let typos = typos(word.len());
-        // Most texts: look only where the first letter is.
-        let Ok(first) = u8::try_from(word[0]) else {
-            return false;
-        };
-        if typos == 0 {
-            return false;
-        }
-        // As `load` reads them: the original's case counts only where it has
-        // as many bytes as the folded text has characters, so it is ASCII.
-        let cases = original
-            .filter(|original| original.len() == folded.len())
-            .map(str::as_bytes);
-        for at in (0..bytes.len()).filter(|&at| bytes[at] == first) {
-            let starts = at == 0
-                || !bytes[at - 1].is_ascii_alphanumeric()
-                || cases.is_some_and(|cases| {
-                    cases[at].is_ascii_uppercase() && cases[at - 1].is_ascii_lowercase()
-                });
-            if !starts {
-                continue;
-            }
-            self.chars.clear();
-            self.chars.extend(
-                bytes[at..]
-                    .iter()
-                    .take_while(|b| b.is_ascii_alphanumeric())
-                    .take(word.len() + typos + 1)
-                    .map(|&b| char::from(b)),
-            );
-            if within(word, &self.chars, typos, whole, &mut self.distances).is_some() {
-                return true;
-            }
-        }
-        false
     }
 
     /// Whether a word of the text, or with `whole` false the start of one, is
     /// `word` but for as many typos as it may have. The first letter is never
     /// one: people rarely mistype it, and holding to it keeps short queries
     /// from nearly matching most words.
-    fn typo(&mut self, word: &[char], whole: bool) -> bool {
+    fn typo(&mut self, text: Text, word: &[char], whole: bool) -> bool {
         let typos = typos(word.len());
-        typos > 0 && self.nearest(word, whole, typos).is_some()
+        typos > 0 && self.nearest(text, word, whole, typos).is_some()
     }
 
-    /// Where the first word of the loaded text that starts with `word`, but
-    /// for at most `typos` typos, starts, and how many of its letters `word`
-    /// stands for.
-    fn nearest(&mut self, word: &[char], whole: bool, typos: usize) -> Option<(usize, usize)> {
-        let Tiers {
-            chars,
-            starts,
-            distances,
-        } = self;
-        starts
-            .iter()
-            .filter(|&&at| chars[at] == word[0])
-            .find_map(|&at| {
-                let len = chars[at..]
-                    .iter()
-                    .position(|c| !c.is_alphanumeric())
-                    .unwrap_or(chars.len() - at);
-                within(word, &chars[at..at + len], typos, whole, distances).map(|len| (at, len))
-            })
-    }
-
-    /// Adds to `highlights` where in a folded title, its case in `original`,
-    /// each word of the query starts a word of it, but for as many typos as
-    /// the word may have: why a near miss is one.
-    pub fn near_miss_highlights(
+    /// Where the first word of the text that starts with `word`, but for at
+    /// most `typos` typos, starts, and how many of its letters `word` stands
+    /// for. Only the words starting with `word`'s first letter are copied
+    /// out, and of each only as much as could be near it.
+    fn nearest(
         &mut self,
-        folded: Utf32Str,
-        original: &str,
-        query: &Query,
-        highlights: &mut Vec<u32>,
-    ) {
-        self.load(folded, Some(original));
+        text: Text,
+        word: &[char],
+        whole: bool,
+        typos: usize,
+    ) -> Option<(usize, usize)> {
+        let Tiers {
+            chars, distances, ..
+        } = self;
+        let most = word.len() + typos + 1;
+        with_chars!(text.chars, |all| {
+            text.starts.iter().find_map(|&at| {
+                let at = at as usize;
+                if all[at].char() != word[0] {
+                    return None;
+                }
+                chars.clear();
+                chars.extend(
+                    all[at..]
+                        .iter()
+                        .map(|c| c.char())
+                        .take_while(|c| c.is_alphanumeric())
+                        .take(most),
+                );
+                within(word, chars, typos, whole, distances).map(|len| (at, len))
+            })
+        })
+    }
+
+    /// Adds to `highlights` where in a folded title each word of the query
+    /// starts a word of it, but for as many typos as the word may have: why a
+    /// near miss is one.
+    pub fn near_miss_highlights(&mut self, title: Text, query: &Query, highlights: &mut Vec<u32>) {
         let last = query.words.len().saturating_sub(1);
         for (n, word) in query.words.iter().enumerate() {
             let whole = n == last && query.last_is_whole;
-            if let Some((at, len)) = self.nearest(word, whole, typos(word.len())) {
+            if let Some((at, len)) = self.nearest(title, word, whole, typos(word.len())) {
                 highlights.extend((at..at + len).map(|at| at as u32));
             }
         }
@@ -626,10 +864,8 @@ impl Tiers {
     /// How well one folded text matches: the worst of the query's words, or
     /// `Exact` if the whole text, or one of its parts between
     /// [`SEPARATOR`]s, is the query. A one-letter word only matches at the
-    /// start of a word. Words start after a character that isn't a letter or
-    /// digit, and, when `original` gives the case, at a capital after a small
-    /// letter, as in `WebStorm`.
-    fn text(&mut self, folded: Utf32Str, original: Option<&str>, query: &Query) -> Option<Tier> {
+    /// start of a word.
+    fn text(&mut self, text: Text, query: &Query) -> Option<Tier> {
         if query.is_empty() {
             return None;
         }
@@ -637,82 +873,74 @@ impl Tiers {
             && let [letter] = word.as_slice()
             && !query.last_is_whole
         {
-            return one_letter(*letter, folded, original);
+            return one_letter(*letter, text);
         }
-        self.load(folded, original);
-        if self
-            .chars
-            .split(|&c| c == SEPARATOR)
-            .any(|part| part == query.whole)
-        {
+        if is_exact(text.chars, &query.whole) {
             return Some(Tier::Exact);
         }
         let last = query.words.len() - 1;
         let mut worst = Tier::Initials;
         for (n, word) in query.words.iter().enumerate() {
-            worst = worst.min(self.word(word, n == last && query.last_is_whole)?);
+            worst = worst.min(word_tier(text, word, n == last && query.last_is_whole)?);
         }
         Some(worst)
     }
+}
 
-    /// Fills `chars` with a folded text and `starts` with where its words
-    /// start.
-    fn load(&mut self, folded: Utf32Str, original: Option<&str>) {
-        self.chars.clear();
-        self.starts.clear();
-        // The original's case, where it has the same characters.
-        let mut cases = original
-            .filter(|original| original.len() == folded.len())
-            .map(str::chars);
-        let (mut prev, mut prev_lower) = (None, false);
-        for (at, c) in folded.chars().enumerate() {
-            let lower = cases
-                .as_mut()
-                .and_then(Iterator::next)
-                .map(|o| (o.is_lowercase(), o.is_uppercase()));
-            let camel = prev_lower && lower.is_some_and(|(_, upper)| upper);
-            if c.is_alphanumeric() && (camel || prev.is_none_or(|p: char| !p.is_alphanumeric())) {
-                self.starts.push(at);
-            }
-            prev = Some(c);
-            prev_lower = lower.is_some_and(|(lower, _)| lower);
-            self.chars.push(c);
+/// Whether a folded text, or one of its parts between [`SEPARATOR`]s, is
+/// `whole`.
+fn is_exact(chars: Utf32Str, whole: &[char]) -> bool {
+    with_chars!(chars, |chars| {
+        chars
+            .split(|c| c.char() == SEPARATOR)
+            .any(|part| part.len() == whole.len() && starts_with(part, 0, whole))
+    })
+}
+
+/// How well one word of a query matches a folded text.
+fn word_tier(text: Text, word: &[char], whole: bool) -> Option<Tier> {
+    debug_assert!(!word.is_empty());
+    with_chars!(text.chars, |chars| {
+        word_in(chars, text.starts, word, whole)
+    })
+}
+
+fn word_in<C: Char>(chars: &[C], starts: &[u32], word: &[char], whole: bool) -> Option<Tier> {
+    if word.len() >= 2 && !whole {
+        let initials = starts.windows(word.len()).any(|starts| {
+            starts
+                .iter()
+                .zip(word)
+                .all(|(&at, &c)| chars[at as usize].char() == c)
+        });
+        if initials {
+            return Some(Tier::Initials);
         }
     }
-
-    fn word(&self, word: &[char], whole: bool) -> Option<Tier> {
-        debug_assert!(!word.is_empty());
-        let chars = &self.chars[..];
-        if word.len() >= 2 && !whole {
-            let initials = self
-                .starts
-                .windows(word.len())
-                .any(|starts| starts.iter().zip(word).all(|(&at, &c)| chars[at] == c));
-            if initials {
-                return Some(Tier::Initials);
+    let mut prefix = false;
+    for &at in starts {
+        let at = at as usize;
+        if starts_with(chars, at, word) {
+            let end = at + word.len();
+            if !whole || chars.get(end).is_none_or(|c| !c.char().is_alphanumeric()) {
+                return Some(Tier::WordStart);
             }
+            prefix = true;
         }
-        let mut prefix = false;
-        for &at in &self.starts {
-            if chars[at..].starts_with(word) {
-                let end = at + word.len();
-                if !whole || chars.get(end).is_none_or(|c| !c.is_alphanumeric()) {
-                    return Some(Tier::WordStart);
-                }
-                prefix = true;
-            }
-        }
-        if word.len() == 1 {
-            return None;
-        }
-        if prefix || chars.windows(word.len()).any(|window| window == word) {
-            return Some(Tier::Inside);
-        }
-        let mut rest = chars.iter();
-        word.iter()
-            .all(|c| rest.any(|t| t == c))
-            .then_some(Tier::Scattered)
     }
+    if word.len() == 1 {
+        return None;
+    }
+    if prefix
+        || (0..(chars.len() + 1).saturating_sub(word.len()))
+            .any(|at| chars[at].char() == word[0] && starts_with(chars, at, word))
+    {
+        return Some(Tier::Inside);
+    }
+    let mut rest = chars.iter();
+    word.iter()
+        .all(|&c| rest.any(|t| t.char() == c))
+        .then_some(Tier::Scattered)
 }
 
 /// How many letters of `text` are `word` but for at most `typos` letters
@@ -773,29 +1001,26 @@ fn within(
     (cost <= typos).then_some(len.0)
 }
 
-/// [`Tiers::text`] for a one-letter query, without its buffers: the text is
-/// that letter, or a word starts with it.
-fn one_letter(letter: char, folded: Utf32Str, original: Option<&str>) -> Option<Tier> {
-    if folded.len() == 1 {
-        return (folded.get(0) == letter).then_some(Tier::Exact);
+/// [`Tiers::text`] for a one-letter query: the text is that letter, or a
+/// word starts with it.
+fn one_letter(letter: char, text: Text) -> Option<Tier> {
+    if text.chars.len() == 1 {
+        return (text.chars.get(0) == letter).then_some(Tier::Exact);
     }
-    let mut cases = original
-        .filter(|original| original.len() == folded.len())
-        .map(str::chars);
-    let (mut prev, mut prev_lower) = (None, false);
-    for c in folded.chars() {
-        let lower = cases
-            .as_mut()
-            .and_then(Iterator::next)
-            .map(|o| (o.is_lowercase(), o.is_uppercase()));
-        let camel = prev_lower && lower.is_some_and(|(_, upper)| upper);
-        if c == letter && (camel || prev.is_none_or(|p: char| !p.is_alphanumeric())) {
-            return Some(Tier::WordStart);
+    let starts = with_chars!(text.chars, |chars| {
+        if letter.is_alphanumeric() {
+            text.starts
+                .iter()
+                .any(|&at| chars[at as usize].char() == letter)
+        } else {
+            // Words start only at letters and digits; anything else counts
+            // after anything but one.
+            (0..chars.len()).any(|at| {
+                chars[at].char() == letter && (at == 0 || !chars[at - 1].char().is_alphanumeric())
+            })
         }
-        prev = Some(c);
-        prev_lower = lower.is_some_and(|(lower, _)| lower);
-    }
-    None
+    });
+    starts.then_some(Tier::WordStart)
 }
 
 #[cfg(test)]
@@ -803,7 +1028,14 @@ mod tests {
     use super::*;
 
     fn tier(text: &str, query: &str) -> Option<Tier> {
-        Tiers::default().text(folded(text).slice(..), Some(text), &Query::new(query))
+        let chars = folded(text);
+        let mut starts = Vec::new();
+        word_starts(chars.slice(..), Some(text), &mut starts);
+        let text = Text {
+            chars: chars.slice(..),
+            starts: &starts,
+        };
+        Tiers::default().text(text, &Query::new(query))
     }
 
     #[test]

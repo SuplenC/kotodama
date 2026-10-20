@@ -91,6 +91,7 @@ fn start(root: &Path) -> Client {
         extension_dirs: vec![extensions],
         history: root.join("state/history.json"),
         usage_log: root.join("state/usage.jsonl"),
+        cache: root.join("cache"),
     };
     let socket = paths.socket.clone();
     thread::spawn(move || kotodamad::run(&paths));

@@ -44,6 +44,10 @@ _Avoid_: Match, hit, row
 An Item the Extension sends ahead of time and keeps up to date, so the Daemon searches it without asking the Extension while the user types.
 _Avoid_: Static item, cached item
 
+**Hot item**:
+An Indexed item the History predicts the user will want around now, kept whole in memory; every other Indexed item is cold, with only what a search reads in memory and the rest read back when a Result shows it.
+_Avoid_: Cached item, preloaded item
+
 **Hidden item**:
 An Item an Extension sends ahead of time that the search never shows; only `kotodama open --view` reaches it, to run its primary Action, which usually pushes a View.
 _Avoid_: Private item, internal item

@@ -891,6 +891,7 @@ dependencies = [
  "criterion",
  "gungraun",
  "kotodama-calculator",
+ "kotodama-emoji",
  "kotodama-extension",
  "kotodama-protocol",
  "kotodama-web-search",
