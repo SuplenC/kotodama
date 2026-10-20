@@ -203,7 +203,14 @@ fn below_the_visible_rows_live_results_compete_with_indexed_items_on_score() {
     let mut h = Harness::new(vec![plain("apps"), web()]);
     let apps = h.up(0);
     let web = h.up(1);
-    h.add(&apps, vec![app("g rust"), app("g xrxuxsxt")]);
+    // Of the live results' kind, so that only the score tells them apart.
+    h.add(
+        &apps,
+        vec![
+            live("g rust", 0.0, false).item,
+            live("g xrxuxsxt", 0.0, false).item,
+        ],
+    );
     let ui = h.front_end();
     h.front_end_sends(&ui, FromFrontEnd::Viewport { top: 0, rows: 1 });
 

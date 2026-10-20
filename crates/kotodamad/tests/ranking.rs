@@ -197,6 +197,130 @@ fn letters_together_beat_letters_scattered() {
     assert_eq!(rows(&mut w, "code"), ["Code", "Encode Tool", "Color Dev"]);
 }
 
+// The kind of Result.
+
+fn file(title: &str) -> Item {
+    item(
+        title,
+        title,
+        ItemKind::File {
+            path: format!("/home/me/{title}").into(),
+        },
+    )
+}
+
+fn bookmark(title: &str) -> Item {
+    let id = title.to_lowercase().replace(' ', "-");
+    item(
+        &id,
+        title,
+        ItemKind::Url {
+            url: format!("https://{id}.example"),
+        },
+    )
+}
+
+fn named_project(title: &str) -> Item {
+    let mut item = project(title);
+    item.title = title.into();
+    item
+}
+
+/// M9: though the shorter title would win a tie.
+#[test]
+fn on_an_equal_match_apps_come_before_projects_bookmarks_and_files() {
+    let mut w = World::with(
+        vec![
+            file("notes.txt"),
+            bookmark("Notes Online"),
+            named_project("notebook-tools"),
+            app("Notebook Organizer"),
+        ],
+        "",
+    );
+    assert_eq!(
+        rows(&mut w, "note"),
+        [
+            "Notebook Organizer",
+            "notebook-tools",
+            "Notes Online",
+            "notes.txt"
+        ]
+    );
+}
+
+/// M9: the kind order applies within a Tier.
+#[test]
+fn the_kind_of_result_never_beats_a_better_match() {
+    let mut w = World::with(vec![app("Notebook"), file("note")], "");
+    assert_eq!(rows(&mut w, "note"), ["note", "Notebook"]);
+}
+
+/// M10
+#[test]
+fn a_well_used_file_beats_a_never_used_app() {
+    let mut w = World::with(vec![app("Notebook"), file("notes.txt")], "");
+    w.daily(3, "notes.txt", "notes.txt");
+    assert_eq!(rows(&mut w, "note"), ["notes.txt", "Notebook"]);
+}
+
+/// M9: the order is a setting, and `*` places the kinds it doesn't name.
+#[test]
+fn the_kind_order_is_a_setting() {
+    let items = || {
+        vec![
+            app("Notebook Organizer"),
+            file("notes.txt"),
+            item(
+                "n",
+                "Notes Clip",
+                ItemKind::Namespaced(NamespacedKind::new("apps.clip").unwrap()),
+            ),
+        ]
+    };
+    let mut w = World::with(items(), "");
+    assert_eq!(
+        rows(&mut w, "note"),
+        ["Notebook Organizer", "Notes Clip", "notes.txt"],
+        "by default, other kinds come between bookmarks and files"
+    );
+    let mut w = World::with(items(), "[ranking]\nkinds = [\"file\", \"*\", \"app\"]");
+    assert_eq!(
+        rows(&mut w, "note"),
+        ["notes.txt", "Notes Clip", "Notebook Organizer"]
+    );
+    w.reconfigure("[ranking]\nkinds = [\"apps.clip\", \"app\"]");
+    assert_eq!(
+        rows(&mut w, "note"),
+        ["Notes Clip", "Notebook Organizer", "notes.txt"],
+        "without `*`, the kinds not named come last; and the order reloads with the config"
+    );
+}
+
+/// M9: a kind that isn't one is left out, and a list that isn't one keeps the
+/// default.
+#[test]
+fn a_kind_order_that_does_not_parse_keeps_what_does() {
+    let items = || vec![app("Notebook Organizer"), file("notes.txt")];
+    let mut w = World::with(items(), "[ranking]\nkinds = [\"bogus\", 3, \"file\"]");
+    assert_eq!(rows(&mut w, "note"), ["notes.txt", "Notebook Organizer"]);
+    let mut w = World::with(items(), "[ranking]\nkinds = \"file\"");
+    assert_eq!(rows(&mut w, "note"), ["Notebook Organizer", "notes.txt"]);
+}
+
+/// D1: of the Results of one thing, the one picked through most still leads.
+#[test]
+fn the_kind_order_does_not_decide_between_results_of_one_thing() {
+    let mut firefox = app("Firefox");
+    firefox.identity = Some("app:firefox.desktop".into());
+    let mut desktop_file = file("firefox.desktop");
+    desktop_file.identity = Some("app:firefox.desktop".into());
+    let mut w = World::with(vec![firefox, desktop_file], "");
+    assert_eq!(rows(&mut w, "fire"), ["Firefox", "firefox.desktop"]);
+    w.pick("fire", "firefox.desktop");
+    assert_eq!(rows(&mut w, "fire"), ["firefox.desktop", "Firefox"]);
+}
+
 // Case, accents and typos.
 
 /// T1

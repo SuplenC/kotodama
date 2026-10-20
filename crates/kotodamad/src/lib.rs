@@ -12,6 +12,7 @@ pub mod history;
 mod host;
 mod index;
 pub mod keywords;
+pub mod kind_order;
 mod link;
 mod notify;
 pub mod paths;
