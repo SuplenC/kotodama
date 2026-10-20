@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+# Prints the crates whose changes can move a benchmark, one directory name under
+# crates/ per line: every crate with a benches/ directory, and every workspace
+# crate those depend on through a `path` dependency (dev-dependencies too, since
+# benches use them). CI's `changes` job runs `bench` when one of them changed.
+# Usage: bench-crates
+set -euo pipefail
+
+cd "$(dirname "$0")/.."
+found=" "
+queue=()
+for dir in crates/*/benches; do
+    [ -d "$dir" ] || continue
+    crate=${dir#crates/}
+    queue+=("${crate%/benches}")
+done
+while [ ${#queue[@]} -gt 0 ]; do
+    crate=${queue[0]}
+    queue=("${queue[@]:1}")
+    case $found in *" $crate "*) continue ;; esac
+    found+="$crate "
+    while read -r dep; do
+        queue+=("$dep")
+    done < <(sed -nE 's|.*path *= *"\.\./([^"/]+)".*|\1|p' "crates/$crate/Cargo.toml")
+done
+tr ' ' '\n' <<<"$found" | grep . | sort

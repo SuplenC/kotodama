@@ -19,13 +19,16 @@ defaults:
 jobs:
   # On pull requests, decides which jobs the change needs. It lists the paths
   # that can be ignored, so a path nobody listed runs everything. Pushes to main
-  # skip this and run every job.
+  # skip this and run every job. `bench` also ignores the crates no benchmark
+  # builds on (scripts/bench-crates lists the ones that matter) and the files
+  # only the other jobs, the dev image or releases read.
   changes:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     outputs:
       rust: ${{ steps.diff.outputs.rust }}
       e2e: ${{ steps.diff.outputs.e2e }}
+      bench: ${{ steps.diff.outputs.bench }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -34,17 +37,29 @@ jobs:
         env:
           BASE: ${{ github.event.pull_request.base.sha }}
         run: |
-          rust=false e2e=false
+          benched=" $(scripts/bench-crates | tr '\n' ' ')"
+          echo "crates the benchmarks build on:$benched"
+          rust=false e2e=false bench=false
           while read -r path; do
             case $path in
               *.md | docs/* | LICENSE) ;;
               e2e/* | examples/*) e2e=true ;;
-              *) rust=true e2e=true ;;
+              crates/*)
+                rust=true e2e=true
+                crate=${path#crates/}
+                case $benched in *" ${crate%%/*} "*) bench=true ;; esac
+                ;;
+              docker/* | nix/home-manager.nix | nix/tests/* | .config/nextest.toml | \
+                scripts/dev-image | scripts/qml-module | scripts/tests/* | \
+                .github/workflows/release-please.yml | release-please-config.json | \
+                .release-please-manifest.json | .gitignore)
+                rust=true e2e=true
+                ;;
+              *) rust=true e2e=true bench=true ;;
             esac
           done < <(git diff --name-only "$BASE"...HEAD)
-          echo "rust=$rust e2e=$e2e"
-          echo "rust=$rust" >> "$GITHUB_OUTPUT"
-          echo "e2e=$e2e" >> "$GITHUB_OUTPUT"
+          echo "rust=$rust e2e=$e2e bench=$bench"
+          printf 'rust=%s\ne2e=%s\nbench=%s\n' "$rust" "$e2e" "$bench" >> "$GITHUB_OUTPUT"
 
   # check and test, and e2e, run as separate jobs so they overlap. Each restores
   # a cargo cache (the registry and target/) keyed on the lockfiles; only runs
@@ -141,23 +156,43 @@ jobs:
           path: e2e/out
           if-no-files-found: ignore
 
-  # Runs the base commit's benchmarks and this commit's on the same runner, one after
-  # the other, and compares them. Shared runners differ too much from one another for
-  # a baseline saved by another run to mean anything. Only the relative change is
-  # checked: 50% for timings, 10% for the Daemon's resident memory.
+  # Compares this commit's benchmarks with the base commit's, and fails when a
+  # timing is more than 50% higher, or the Daemon's resident memory 10%.
+  #
+  # On main, both commits run on the same runner, one after the other, with
+  # criterion's default times, and this commit's results are saved in the cache
+  # as bench-results-<sha>.
+  #
+  # On a PR, the base commit's saved results stand in for running it when they
+  # exist, so only this commit builds and runs, with shorter criterion times.
+  # Shared runners differ in speed by up to 2x, so a timing over the limit against
+  # another runner's results is confirmed by running the base commit here and
+  # comparing again. Resident memory doesn't depend on the runner. Without saved
+  # results (an old base, or evicted), both commits run here, as on main.
   bench:
     needs: changes
-    if: ${{ !cancelled() && (github.event_name == 'push' || needs.changes.outputs.rust == 'true') }}
+    if: ${{ !cancelled() && (github.event_name == 'push' || needs.changes.outputs.bench == 'true') }}
     runs-on: ubuntu-latest
     env:
       BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+      # Criterion's defaults are a 3 s warm-up and 5 s of measurement per benchmark.
+      CRITERION_ARGS: ${{ github.event_name == 'pull_request' && '--warm-up-time 1 --measurement-time 2 --noplot' || '' }}
     steps:
       - uses: actions/checkout@v7
       - uses: ./.github/actions/setup-nix
         with:
           cachix-auth-token: ${{ secrets.CACHIX_AUTH_TOKEN }}
+      - name: Restore the base commit's saved results
+        id: saved
+        if: github.event_name == 'pull_request'
+        uses: actions/cache/restore@v6
+        with:
+          path: bench-saved.txt
+          key: bench-results-${{ github.event.pull_request.base.sha }}
       - name: Check out the base commit
         id: base
+        env:
+          SAVED: ${{ steps.saved.outputs.cache-hit == 'true' }}
         run: |
           # Both checkouts build into one target directory, so dependencies build once.
           echo "CARGO_TARGET_DIR=$RUNNER_TEMP/target" >> "$GITHUB_ENV"
@@ -165,6 +200,14 @@ jobs:
             echo "::warning::No base commit to compare with; benchmarks were not compared."
             exit 0
           fi
+          if [ "$SAVED" = true ]; then
+            echo "bench: using the saved results of the base commit $BASE; only this commit runs."
+            echo "bench: they were measured on:$(sed -n 's/^# cpu://p' bench-saved.txt)"
+            cp bench-saved.txt bench-base.txt
+          else
+            echo "bench: no saved results for the base commit $BASE; both commits run on this runner."
+          fi
+          # Checked out either way: a timing over the limit against saved results reruns it here.
           git fetch --no-tags --depth=1 origin "$BASE"
           git worktree add "$RUNNER_TEMP/base" "$BASE"
           echo "dir=$RUNNER_TEMP/base" >> "$GITHUB_OUTPUT"
@@ -182,15 +225,48 @@ jobs:
           key: cargo-bench-${{ hashFiles('Cargo.lock', 'flake.lock') }}
           restore-keys: cargo-bench-
       - name: Run the base commit's benchmarks
-        if: steps.base.outputs.dir
+        if: steps.base.outputs.dir && steps.saved.outputs.cache-hit != 'true'
         run: scripts/bench-run "${{ steps.base.outputs.dir }}" bench-base.txt
       - name: Run this commit's benchmarks
-        run: scripts/bench-run . bench-current.txt
-      - name: Compare
-        if: steps.base.outputs.dir
+        id: current
         run: |
-          scripts/bench-compare bench-base.txt bench-current.txt 50
+          echo "bench: this runner:$(grep -m1 '^model name' /proc/cpuinfo | cut -d: -f2-)"
+          scripts/bench-run . bench-current.txt
+      - name: Compare
+        id: compare
+        if: steps.base.outputs.dir
+        env:
+          SAVED: ${{ steps.saved.outputs.cache-hit == 'true' }}
+        run: |
           scripts/bench-compare bench-base.txt bench-current.txt 10 bytes
+          if scripts/bench-compare bench-base.txt bench-current.txt 50; then
+            exit 0
+          fi
+          if [ "$SAVED" != true ]; then
+            exit 1
+          fi
+          echo "bench: a timing is over the limit against another runner's results; running the base commit here to confirm."
+          echo "confirm=true" >> "$GITHUB_OUTPUT"
+      - name: Confirm against the base commit on this runner
+        if: steps.compare.outputs.confirm
+        run: |
+          scripts/bench-run "${{ steps.base.outputs.dir }}" bench-base-here.txt
+          scripts/bench-compare bench-base-here.txt bench-current.txt 50
+      # Saved even when the comparison failed: they are still this commit's
+      # results, which the PRs based on it compare against.
+      - name: Save this commit's results
+        id: results
+        if: ${{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.current.outcome == 'success' }}
+        run: |
+          if [ -s bench-current.txt ]; then
+            { echo "# cpu:$(grep -m1 '^model name' /proc/cpuinfo | cut -d: -f2-)"; cat bench-current.txt; } >bench-saved.txt
+            echo "save=true" >> "$GITHUB_OUTPUT"
+          fi
+      - if: ${{ !cancelled() && steps.results.outputs.save }}
+        uses: actions/cache/save@v6
+        with:
+          path: bench-saved.txt
+          key: bench-results-${{ github.sha }}
       - if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.cargo-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@v6
         with:

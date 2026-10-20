@@ -1,12 +1,15 @@
 #!/usr/bin/env bash
 # Runs every benchmark of the checkout in DIR, in that checkout's dev shell, and
 # writes its bencher-format result lines to OUT, which stays empty when the
-# checkout has no benchmarks yet.
-# Usage: bench-run DIR OUT
+# checkout has no benchmarks yet. The words of CRITERION_ARGS, if set, go to
+# every benchmark binary after `--output-format bencher`: CI shortens
+# criterion's warm-up and measurement times with them on pull requests.
+# Usage: [CRITERION_ARGS=...] bench-run DIR OUT
 set -euo pipefail
 
 dir=$1
 out=$(realpath -m "$2")
+read -ra extra <<<"${CRITERION_ARGS:-}"
 : >"$out"
 cd "$dir"
 # CI builds two checkouts into one target directory, and Cargo gives a
@@ -15,6 +18,6 @@ cd "$dir"
 # first's crates wherever its own files were written before that build.
 git ls-files -z | xargs -0 touch -h
 if nix develop --command scripts/has-benches; then
-    nix develop --command just bench --bench '*' -- --output-format bencher | tee "$out.log"
+    nix develop --command just bench --bench '*' -- --output-format bencher "${extra[@]}" | tee "$out.log"
     grep 'bench:' "$out.log" >"$out" || true
 fi
