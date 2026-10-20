@@ -716,6 +716,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "kotodama-folders"
+version = "0.1.0"
+dependencies = [
+ "kotodama-protocol",
+ "kotodamad",
+ "libc",
+ "notify",
+ "shlex",
+ "tempfile",
+ "toml",
+]
+
+[[package]]
 name = "kotodama-protocol"
 version = "0.1.0"
 dependencies = [
