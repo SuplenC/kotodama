@@ -9,7 +9,7 @@
 //! (`Żółw` is `zolw`), so neither case nor accents in the query matter.
 
 use kotodama_protocol::Item;
-use nucleo_matcher::pattern::Pattern;
+use nucleo_matcher::pattern::{AtomKind, Pattern};
 use std::ops::{BitOr, BitOrAssign};
 
 use nucleo_matcher::{Matcher, Utf32Str, Utf32String, chars};
@@ -527,6 +527,34 @@ impl Haystack {
     }
 }
 
+/// Past this many characters, a text is scored by nucleo's greedy match, in
+/// time that grows with the text, rather than its optimal match, in time that
+/// grows with the text times the query: long clipboard entries would
+/// otherwise make every keystroke slower (ADR 0016). Both match the same
+/// texts; only the score, a late tie-break, may differ.
+pub const OPTIMAL_CHARS: usize = 64;
+
+/// `pattern`'s score in `haystack`, as [`Pattern::score`] gives it up to
+/// [`OPTIMAL_CHARS`].
+fn score(pattern: &Pattern, haystack: Utf32Str<'_>, matcher: &mut Matcher) -> Option<u32> {
+    if haystack.len() <= OPTIMAL_CHARS {
+        return pattern.score(haystack, matcher);
+    }
+    let mut score = 0;
+    for atom in &pattern.atoms {
+        score += u32::from(if atom.kind == AtomKind::Fuzzy && !atom.negative {
+            // As nucleo sets them for a query parsed as the Daemon parses
+            // it: folded like the haystacks.
+            matcher.config.ignore_case = true;
+            matcher.config.normalize = false;
+            matcher.fuzzy_match_greedy(haystack, atom.needle_text())?
+        } else {
+            atom.score(haystack, matcher)?
+        });
+    }
+    Some(score)
+}
+
 impl Texts<'_> {
     /// nucleo's score, the best of the title's and the keywords', and which of
     /// them matched. Failing both, the subtitle's, if `filter` lets subtitles
@@ -543,11 +571,11 @@ impl Texts<'_> {
         {
             return None;
         }
-        let title = pattern.score(self.title.chars, matcher);
+        let title = score(pattern, self.title.chars, matcher);
         let words = if self.words.is_empty() {
             None
         } else {
-            pattern.score(self.words.chars, matcher)
+            score(pattern, self.words.chars, matcher)
         };
         let matched = Matched {
             title: title.is_some(),
@@ -560,9 +588,7 @@ impl Texts<'_> {
                 .subtitles
                 .is_some_and(|initials| self.subtitle_initials.contains(initials)) =>
             {
-                pattern
-                    .score(self.subtitle, matcher)
-                    .map(|score| (score, Matched::SUBTITLE))
+                score(pattern, self.subtitle, matcher).map(|score| (score, Matched::SUBTITLE))
             }
             None => None,
         }

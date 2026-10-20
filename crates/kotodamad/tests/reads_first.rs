@@ -245,9 +245,11 @@ fn words(random: &mut Random, most: usize) -> String {
 
 fn random_item(random: &mut Random) -> Item {
     let id = format!("item-{}", random.below(30));
+    // Some titles longer than nucleo scores optimally.
+    let most = [3, 3, 3, 16][random.below(4)];
     let mut item = item(
         &id,
-        &words(random, 3),
+        &words(random, most),
         ItemKind::Url {
             url: format!("https://example.org/{id}"),
         },
