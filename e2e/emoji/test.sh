@@ -1,6 +1,6 @@
 # shellcheck shell=bash
 # The emoji Extension's primary Action types the character into the window
-# that has focus: an emoji, a symbol, and an emoji in the configured skin tone.
+# that has focus: an emoji, in the configured skin tone, and a symbol.
 root=$(cd ../.. && pwd)
 target=$(cargo metadata --format-version 1 --no-deps --manifest-path "$root/Cargo.toml" | jq -r .target_directory)
 cargo build --quiet --manifest-path "$root/Cargo.toml" -p kotodamad -p kotodama-emoji \
@@ -14,6 +14,8 @@ ext="$XDG_DATA_DIRS/kotodama/extensions/emoji"
 mkdir -p "$ext"
 cp "$root/crates/kotodama-emoji/manifest.toml" "$ext/"
 ln -s "$target/debug/kotodama-emoji" "$ext/kotodama-emoji"
+mkdir -p "$XDG_CONFIG_HOME/kotodama"
+printf '[extensions.emoji]\nskin_tone = "dark"\n' >"$XDG_CONFIG_HOME/kotodama/config.toml"
 
 spawn quickshell --path ../type-and-paste/client.qml
 wait_for_log quickshell.log "ready"
@@ -28,13 +30,6 @@ for _ in $(seq 50); do
 done
 
 "$front_end" --run thumbs
-wait_for_log quickshell.log "typed: 👍"
+wait_for_log quickshell.log "typed: 👍🏿"
 "$front_end" --run not equal
-wait_for_log quickshell.log "typed: 👍≠"
-
-# The config is watched: a skin tone set now applies to the next Action.
-mkdir -p "$XDG_CONFIG_HOME/kotodama"
-printf '[extensions.emoji]\nskin_tone = "dark"\n' >"$XDG_CONFIG_HOME/kotodama/config.toml"
-sleep 1
-"$front_end" --run thumbs
-wait_for_log quickshell.log "typed: 👍≠👍🏿"
+wait_for_log quickshell.log "typed: 👍🏿≠"

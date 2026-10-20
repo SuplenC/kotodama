@@ -41,7 +41,7 @@ fn run() -> Result<(), kotodama_protocol::Error> {
                 ..
             }) => writer.send(&FromExtension::ActionDone {
                 invocation,
-                outcome: kotodama_emoji::run(&item.id, &action, tone),
+                outcome: kotodama_emoji::outcome(&item.id, &action, tone),
             })?,
             Event::Message(_) | Event::Own(()) => {}
             Event::Hangup => break,

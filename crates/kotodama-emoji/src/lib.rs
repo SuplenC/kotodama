@@ -18,6 +18,8 @@ pub const KIND: &str = "emoji.character";
 pub const TYPE: &str = "type";
 /// Copies the character.
 pub const COPY: &str = "copy";
+/// What a skin tone's Action id starts with, before the tone's name.
+const TONE_ACTION: &str = "type-";
 
 /// A skin tone, from light to dark.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -53,19 +55,14 @@ impl Tone {
         Tone::ALL.into_iter().find(|tone| tone.name() == name)
     }
 
-    /// The id of the Action that types an emoji in this tone.
-    fn action(self) -> &'static str {
-        match self {
-            Tone::Light => "type-light",
-            Tone::MediumLight => "type-medium-light",
-            Tone::Medium => "type-medium",
-            Tone::MediumDark => "type-medium-dark",
-            Tone::Dark => "type-dark",
-        }
+    /// The id of the Action that types an emoji in this tone: `type-` and
+    /// the tone's name.
+    fn action(self) -> String {
+        format!("{TONE_ACTION}{}", self.name())
     }
 
     fn from_action(action: &str) -> Option<Tone> {
-        Tone::ALL.into_iter().find(|tone| tone.action() == action)
+        Tone::from_name(action.strip_prefix(TONE_ACTION)?)
     }
 }
 
@@ -119,7 +116,7 @@ impl Character {
 
     /// What `tone` makes of it: the toned form, or the character itself if
     /// it has no skin tones.
-    fn in_tone(&self, tone: Option<Tone>) -> &'static str {
+    fn text_in(&self, tone: Option<Tone>) -> &'static str {
         tone.and_then(|tone| self.toned(tone)).unwrap_or(self.text)
     }
 
@@ -135,7 +132,7 @@ impl Character {
         let mut actions = vec![action(TYPE, "Type".into()), action(COPY, "Copy".into())];
         for tone in Tone::ALL {
             if let Some(toned) = self.toned(tone) {
-                actions.push(action(tone.action(), format!("Type {toned}")));
+                actions.push(action(&tone.action(), format!("Type {toned}")));
             }
         }
         let mut name = self.name.chars();
@@ -162,17 +159,17 @@ pub fn items() -> Vec<Item> {
     Character::all().map(|character| character.item()).collect()
 }
 
-/// What the Action `action` on the Item `id` does. `tone` is the configured
+/// The Outcome of the Action `action` on the Item `id`. `tone` is the configured
 /// skin tone, which typing and copying use.
-pub fn run(id: &str, action: &str, tone: Option<Tone>) -> Outcome {
+pub fn outcome(id: &str, action: &str, tone: Option<Tone>) -> Outcome {
     let Some(character) = Character::find(id) else {
         return failed(format!("there is no emoji or symbol “{id}”"));
     };
     match action {
         TYPE => Outcome::Type {
-            text: character.in_tone(tone).to_owned(),
+            text: character.text_in(tone).to_owned(),
         },
-        COPY => Outcome::Copy(Clipboard::Text(character.in_tone(tone).to_owned())),
+        COPY => Outcome::Copy(Clipboard::Text(character.text_in(tone).to_owned())),
         _ => match Tone::from_action(action) {
             Some(tone) => match character.toned(tone) {
                 Some(toned) => Outcome::Type {

@@ -226,7 +226,7 @@ rates_url = "https://api.frankfurter.app/latest"
 
 ### Emoji and symbols
 
-`kotodama-emoji` (`crates/kotodama-emoji`, Extension name `emoji`) makes every emoji and the common symbols Items of kind `emoji.character`: arrows, math, punctuation and keyboard keys (⌘ ⌥ ⌃ ⇧ ⎋ ⏎ ⌫). Each is titled with the character and its CLDR name ("👍 Thumbs up") and found by the name and its CLDR keywords, so `thumbs` and `like` find 👍, `arrow right` finds →, and `command` finds ⌘. Its primary Action, "Type", has the Daemon type the character into the window the menu was opened from; "Copy" puts it on the clipboard. An emoji with skin tones is one Item, with an Action to type each tone ("Type 👍🏽") after those two.
+`kotodama-emoji` (`crates/kotodama-emoji`, Extension name `emoji`) makes every emoji and the common symbols Items of kind `emoji.character`: arrows, math, punctuation, shapes and keyboard keys (⌘ ⌥ ⌃ ⇧ ⎋ ⏎ ⌫), every non-ASCII symbol CLDR names. Each is titled with the character and its CLDR name ("👍 Thumbs up") and found by the name and its CLDR keywords, so `thumbs` and `like` find 👍, `arrow right` finds →, and `command` finds ⌘. Its primary Action, "Type", has the Daemon type the character into the window the menu was opened from; "Copy" puts it on the clipboard. An emoji with skin tones is one Item, with an Action to type each tone ("Type 👍🏽") after those two.
 
 ```toml
 [extensions.emoji]
