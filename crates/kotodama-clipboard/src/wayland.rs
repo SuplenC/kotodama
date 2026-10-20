@@ -43,7 +43,7 @@ mod linux {
     use std::io::{Read, Write};
     use std::os::fd::{AsFd, OwnedFd};
     use std::sync::Arc;
-    use std::sync::mpsc::{self, Receiver, Sender};
+    use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
     use std::thread;
     use std::time::Duration;
 
@@ -79,9 +79,12 @@ mod linux {
     const READ_TIMEOUT: Duration = Duration::from_secs(5);
     const STACK: usize = 256 * 1024;
 
+    /// What to put on the clipboard, and where to say it is there.
+    type Request = (Vec<String>, Vec<u8>, Sender<()>);
+
     /// The watched clipboard. Dropping it stops the watching.
     pub struct Clipboard {
-        requests: Sender<(Vec<String>, Vec<u8>)>,
+        requests: Sender<Request>,
         wake: OwnedFd,
     }
 
@@ -148,15 +151,24 @@ mod linux {
             Ok(Clipboard { requests, wake })
         }
 
-        /// Puts `data` on the clipboard, offered as each of `mimes`. The
-        /// clipboard keeps it until something else is copied.
+        /// Puts `data` on the clipboard, offered as each of `mimes`, and
+        /// returns once the compositor has it there, so what is copied next
+        /// comes after it. The clipboard keeps it until something else is
+        /// copied. A compositor that doesn't answer within `READ_TIMEOUT` is
+        /// taken as hung.
         pub fn set(&self, mimes: Vec<String>, data: Vec<u8>) -> Result<(), String> {
-            if self.requests.send((mimes, data)).is_ok()
-                && rustix::io::write(&self.wake, &[1]).is_ok()
+            let (done, copied) = mpsc::channel();
+            if self.requests.send((mimes, data, done)).is_err()
+                || rustix::io::write(&self.wake, &[1]).is_err()
             {
-                Ok(())
-            } else {
-                Err("lost the connection to the compositor".into())
+                return Err("lost the connection to the compositor".into());
+            }
+            match copied.recv_timeout(READ_TIMEOUT) {
+                Ok(()) => Ok(()),
+                Err(RecvTimeoutError::Timeout) => Err("the compositor did not answer".into()),
+                Err(RecvTimeoutError::Disconnected) => {
+                    Err("lost the connection to the compositor".into())
+                }
             }
         }
     }
@@ -166,7 +178,7 @@ mod linux {
     fn run(
         mut queue: EventQueue<State>,
         mut state: State,
-        inbox: &Receiver<(Vec<String>, Vec<u8>)>,
+        inbox: &Receiver<Request>,
         wake: &OwnedFd,
     ) {
         let qh = queue.handle();
@@ -203,8 +215,20 @@ mod linux {
                 if matches!(rustix::io::read(wake, &mut buf), Ok(0) | Err(_)) {
                     return;
                 }
-                for (mimes, data) in inbox.try_iter() {
+                let mut waiting = Vec::new();
+                for (mimes, data, done) in inbox.try_iter() {
                     state.set_selection(mimes, data, &qh);
+                    waiting.push(done);
+                }
+                // A round trip: the compositor has handled the requests sent.
+                if !waiting.is_empty() {
+                    if queue.roundtrip(&mut state).is_err() {
+                        kotodama_extension::log!("lost the Wayland connection");
+                        return;
+                    }
+                    for done in waiting {
+                        let _ = done.send(());
+                    }
                 }
             }
         }

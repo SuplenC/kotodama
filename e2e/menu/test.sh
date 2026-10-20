@@ -39,18 +39,24 @@ open() {
     "$kotodama" open "$@"
     wait_for_log quickshell.log "focused: true" "$mark"
 }
+# close: closes the open menu and waits until it lets go of the keys.
+close() {
+    local mark
+    mark=$(log_lines quickshell.log)
+    "$kotodama" toggle
+    wait_for_log quickshell.log "focused: false" "$mark"
+}
 
 # The Extension may still be sending its Items; Snippet is the last one.
 open --query snippet
-mark=$(log_lines quickshell.log)
-"$kotodama" toggle
-wait_for_log quickshell.log "focused: false" "$mark"
+close
 
 # wtype's first key is lost if it arrives before the compositor has taken
 # wtype's keymap, so it waits a moment first.
 open
 wtype -s 200 "fi"
 expect_screen reference.png
+close
 
 open --query snip
 wtype -s 200 -k Return

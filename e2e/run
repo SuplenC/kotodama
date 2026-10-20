@@ -54,6 +54,29 @@ if [ -z "$WAYLAND_DISPLAY" ] || [ -z "$SWAYSOCK" ]; then
     exit 1
 fi
 export WAYLAND_DISPLAY SWAYSOCK
+
+# Headless sway has no keyboard of its own, so the seat would gain one only
+# while some program's virtual keyboard exists, and windows bind theirs only
+# then: keys typed before that are lost. This virtual keyboard stays for the
+# whole run, as a desktop's keyboard does: wtype makes it, then sleeps for an
+# hour, longer than any run.
+wtype -s 3600000 &
+keyboard_pid=$!
+trap 'kill "$keyboard_pid" "$sway_pid" 2>/dev/null || true; wait "$sway_pid" 2>/dev/null || true; rm -rf "$XDG_RUNTIME_DIR"' EXIT
+has_keyboard() {
+    # 2 is WL_SEAT_CAPABILITY_KEYBOARD.
+    swaymsg -t get_seats | jq -e 'any(.[]; .capabilities % 4 >= 2)' >/dev/null
+}
+for _ in $(seq 100); do
+    if has_keyboard; then
+        break
+    fi
+    sleep 0.1
+done
+if ! has_keyboard; then
+    echo "the seat has no keyboard; is wtype there?" >&2
+    exit 1
+fi
 export QT_QPA_PLATFORM=wayland QT_QUICK_BACKEND=software
 
 failed=0

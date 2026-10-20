@@ -111,7 +111,9 @@ fn start(root: &Path) -> Client {
         &Hello::new(&WireFormat::ALL),
     )
     .unwrap();
-    Client { channel }
+    let mut client = Client { channel };
+    client.settle();
+    client
 }
 
 struct Client {
@@ -127,8 +129,12 @@ impl Client {
         self.channel.recv().unwrap().expect("the Daemon hung up")
     }
 
-    /// The Folder source's Results for `query`, once there are `count`.
-    fn projects(&mut self, query: &str, count: usize) -> Vec<ShownResult> {
+    /// Results for `query`, once they are `done`. The Daemon sends Late
+    /// Results whenever an Extension comes up or sends Items, and they keep
+    /// the Results on screen in the order they were (ADR 0003). So the
+    /// Results read after a Query can be Late Results sent before the Daemon
+    /// got the Query, and only what `done` checks can be relied on.
+    fn search(&mut self, query: &str, done: impl Fn(&[ShownResult]) -> bool) -> Vec<ShownResult> {
         let start = Instant::now();
         loop {
             self.send(FromFrontEnd::Query { text: query.into() });
@@ -137,16 +143,37 @@ impl Client {
                     break results;
                 }
             };
-            let projects: Vec<ShownResult> = results
-                .into_iter()
-                .filter(|result| result.extension == "folders")
-                .collect();
-            if projects.len() == count {
-                return projects;
+            if done(&results) {
+                return results;
             }
-            assert!(start.elapsed() < TIMEOUT, "got {projects:?}");
+            assert!(start.elapsed() < TIMEOUT, "got {results:?}");
             thread::sleep(Duration::from_millis(50));
         }
+    }
+
+    /// Waits until the shell example is up and has sent its Items, so it
+    /// causes no Late Results after a test's Query. The Folder source's Items
+    /// are waited for by [`Client::projects`].
+    fn settle(&mut self) {
+        self.search("timer", |results| {
+            results
+                .iter()
+                .any(|result| result.extension == "shell-example" && result.item.id == "timer")
+        });
+    }
+
+    /// The Folder source's Results for `query`, once there are `count`. With
+    /// them, and the shell example settled, the Daemon has every Item it
+    /// will get, so the next Results it sends answer the next Query.
+    fn projects(&mut self, query: &str, count: usize) -> Vec<ShownResult> {
+        let folders = |results: &[ShownResult]| -> Vec<ShownResult> {
+            results
+                .iter()
+                .filter(|result| result.extension == "folders")
+                .cloned()
+                .collect()
+        };
+        folders(&self.search(query, |results| folders(results).len() == count))
     }
 
     /// Runs `action` of `extension` on the Folder source's Item `id`, and

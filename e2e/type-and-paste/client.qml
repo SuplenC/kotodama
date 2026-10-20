@@ -11,7 +11,11 @@ ShellRoot {
             anchors.fill: parent
             focus: true
             onTextChanged: console.log("typed: " + text)
-            Component.onCompleted: console.log("ready")
+            // Keys reach it from now on: its window is mapped and has focus.
+            onActiveFocusChanged: {
+                if (activeFocus)
+                    console.log("ready");
+            }
         }
     }
 }
