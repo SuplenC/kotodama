@@ -22,7 +22,10 @@ fn ahead(ranked_at: When) -> Ahead {
         versions: (1, 2, 3),
         ranked: vec![
             (ranked_at, vec![Source::Indexed(slot(1))]),
-            (history::next_part(ranked_at), vec![Source::Indexed(slot(2))]),
+            (
+                history::next_part(ranked_at),
+                vec![Source::Indexed(slot(2))],
+            ),
         ],
     }
 }

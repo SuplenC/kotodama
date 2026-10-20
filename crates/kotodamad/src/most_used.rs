@@ -137,7 +137,8 @@ impl Usage {
             }
         }
 
-        let mut stands_for: HashMap<Slot, usize, BuildHasherDefault<SlotHasher>> = HashMap::default();
+        let mut stands_for: HashMap<Slot, usize, BuildHasherDefault<SlotHasher>> =
+            HashMap::default();
         let mut keep = vec![true; most.len()];
         for n in 0..most.len() {
             let Some(group) = most[n].group else {

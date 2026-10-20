@@ -327,8 +327,16 @@ fn a_learned_choice_is_resident_once_planned_and_its_query_reads_nothing_off_its
     let alarm = ("apps".to_owned(), "fire-alarm".to_owned());
     assert_eq!(h.daemon.hot(), [alarm]);
     assert_eq!(titles(&shown), ["Fire Alarm"]);
-    assert_eq!(h.daemon.shelf_reads(), read, "read off its Shelf on the keystroke");
-    assert_eq!(cold.daemon.shelf_reads(), cold_read + 1, "read when nothing is hot");
+    assert_eq!(
+        h.daemon.shelf_reads(),
+        read,
+        "read off its Shelf on the keystroke"
+    );
+    assert_eq!(
+        cold.daemon.shelf_reads(),
+        cold_read + 1,
+        "read when nothing is hot"
+    );
 }
 
 /// Firefox picked at half past ten and Mail at half past one, on each of
@@ -363,7 +371,10 @@ impl AheadAndHere {
         let (mut ahead, ahead_apps, ahead_ui) = with_history(history.clone(), "", Some(events));
         let (mut here, here_apps, here_ui) = with_history(history, "", None);
         here.daemon.set_hot_capacity(0);
-        ahead.add(&ahead_apps, titles.iter().map(|&title| app(title)).collect());
+        ahead.add(
+            &ahead_apps,
+            titles.iter().map(|&title| app(title)).collect(),
+        );
         settle(&mut ahead, &indexed);
         here.add(&here_apps, titles.iter().map(|&title| app(title)).collect());
         let mut both = AheadAndHere {
@@ -394,7 +405,10 @@ impl AheadAndHere {
         let here = self.here.query(&self.here_ui, "");
         assert_eq!(titles(&ahead), titles(&here), "{context}");
         let ranked_on_keystroke = self.ahead.daemon.ranked_here() > ranked_here;
-        (titles(&ahead).into_iter().map(str::to_owned).collect(), ranked_on_keystroke)
+        (
+            titles(&ahead).into_iter().map(str::to_owned).collect(),
+            ranked_on_keystroke,
+        )
     }
 }
 
@@ -406,13 +420,25 @@ fn the_empty_querys_rows_for_the_next_part_of_the_day_are_ranked_before_the_menu
     both.advance(Duration::from_secs(3 * 60));
     let ranked_here = both.ahead.daemon.ranked_here();
 
-    for (h, ui) in [(&mut both.ahead, &both.ahead_ui), (&mut both.here, &both.here_ui)] {
+    for (h, ui) in [
+        (&mut both.ahead, &both.ahead_ui),
+        (&mut both.here, &both.here_ui),
+    ] {
         h.front_end_sends(ui, FromFrontEnd::Shown);
     }
-    let after_noon = both.ahead_ui.results().expect("ranked again for the afternoon");
-    let here = both.here_ui.results().expect("ranked again for the afternoon");
+    let after_noon = both
+        .ahead_ui
+        .results()
+        .expect("ranked again for the afternoon");
+    let here = both
+        .here_ui
+        .results()
+        .expect("ranked again for the afternoon");
 
-    assert_eq!(before_noon, (vec!["Firefox".to_owned(), "Mail".to_owned()], false));
+    assert_eq!(
+        before_noon,
+        (vec!["Firefox".to_owned(), "Mail".to_owned()], false)
+    );
     assert_eq!(titles(&after_noon), ["Mail", "Firefox"]);
     assert_eq!(titles(&after_noon), titles(&here));
     assert_eq!(both.ahead.daemon.ranked_here(), ranked_here, "ranked ahead");
@@ -423,7 +449,10 @@ fn rows_ranked_ahead_are_ranked_again_once_the_items_or_the_history_change() {
     let mut both = AheadAndHere::new(morning_and_afternoon(), &["Firefox", "Mail"]);
     let ranked = both.empty_query("as planned");
 
-    for (h, apps) in [(&mut both.ahead, &both.ahead_apps), (&mut both.here, &both.here_apps)] {
+    for (h, apps) in [
+        (&mut both.ahead, &both.ahead_apps),
+        (&mut both.here, &both.here_apps),
+    ] {
         h.add(apps, vec![app("Terminal")]);
     }
     next_version(&mut both.ahead, &both.indexed);
@@ -442,9 +471,17 @@ fn rows_ranked_ahead_are_ranked_again_once_the_items_or_the_history_change() {
     next_hot(&mut both.ahead, &both.indexed);
     let planned_again = both.empty_query("planned again");
 
-    let rows = |titles: &[&str]| titles.iter().map(|&title| title.to_owned()).collect::<Vec<_>>();
+    let rows = |titles: &[&str]| {
+        titles
+            .iter()
+            .map(|&title| title.to_owned())
+            .collect::<Vec<_>>()
+    };
     assert_eq!(ranked, (rows(&["Firefox", "Mail"]), false));
-    assert_eq!(terminal_added, (rows(&["Terminal", "Firefox", "Mail"]), true));
+    assert_eq!(
+        terminal_added,
+        (rows(&["Terminal", "Firefox", "Mail"]), true)
+    );
     assert_eq!(mail_picked, (rows(&["Mail", "Terminal", "Firefox"]), true));
     assert_eq!(planned_again, (mail_picked.0, false));
 }

@@ -87,8 +87,8 @@ impl Plan {
     }
 
     /// The hot Items, in slot order, up to the capacity. The Items the
-    /// Empty query shows go first, then Learned choices, strongest first, up
-    /// to one [`LEARNED_SHARE`] of the capacity, then the Items picked most
+    /// Empty query shows go first, then the strongest Learned choices, up to
+    /// a [`LEARNED_SHARE`]th of the capacity, then the Items picked most
     /// near this time of day, from a little before it to a little after,
     /// then Learned choices again while there is room.
     fn hot(&self, shown: impl Iterator<Item = Slot>, habits: &mut Vec<Habit>) -> Vec<Slot> {
@@ -511,7 +511,10 @@ mod tests {
         Plan {
             usage: Usage {
                 picked: Arc::new(Picked {
-                    slots: rows.iter().map(|&(row, _)| (slot(row), Counts::Both)).collect(),
+                    slots: rows
+                        .iter()
+                        .map(|&(row, _)| (slot(row), Counts::Both))
+                        .collect(),
                     groups: vec![None; rows.len()],
                     picks: Frecent::new(&picked, half_life),
                 }),
