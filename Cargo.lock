@@ -773,6 +773,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "kotodama-web-search"
+version = "0.1.0"
+dependencies = [
+ "kotodama-extension",
+ "kotodama-protocol",
+ "regex",
+ "tempfile",
+ "toml",
+]
+
+[[package]]
 name = "kotodamad"
 version = "0.1.0"
 dependencies = [
@@ -780,6 +791,7 @@ dependencies = [
  "kotodama-calculator",
  "kotodama-extension",
  "kotodama-protocol",
+ "kotodama-web-search",
  "libc",
  "log",
  "nucleo-matcher",

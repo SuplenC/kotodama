@@ -232,6 +232,16 @@ impl Extension {
         Some(Duration::from_millis(live.debounce_ms.into()))
     }
 
+    /// A fallback, such as web search: also asked what real matches leave
+    /// rows empty for, and its results, but for an answer, rank last.
+    fn fallback(&self) -> bool {
+        self.found
+            .manifest
+            .live_query
+            .as_ref()
+            .is_some_and(|live| live.fallback)
+    }
+
     /// The Live query to send for `query`: the query without its prefix, and
     /// the prefix, if a prefix or trigger routes it here.
     fn route(&self, query: &str) -> Option<(String, Option<String>)> {
@@ -276,6 +286,8 @@ enum Class {
 struct Candidate {
     source: Source,
     answer: bool,
+    /// A fallback Extension's result, which ranks below every real match.
+    fallback: bool,
     class: Class,
     /// How well it matches, as [`Tier::coarse`] gives it, after Frecency
     /// lifted it.
@@ -305,6 +317,7 @@ impl Candidate {
         Candidate {
             source,
             answer: false,
+            fallback: false,
             class: Class::Rest,
             tier: tier.coarse(),
             frecency: 0.0,
@@ -317,12 +330,13 @@ impl Candidate {
         }
     }
 
-    /// Answers first, then by class, how well it matches, Frecency, its Item
-    /// kind, and nucleo's score.
+    /// Answers first and fallbacks last, then by class, how well it
+    /// matches, Frecency, its Item kind, and nucleo's score.
     fn rank(&self, other: &Candidate) -> std::cmp::Ordering {
         other
             .answer
             .cmp(&self.answer)
+            .then(self.fallback.cmp(&other.fallback))
             .then(other.class.cmp(&self.class))
             .then(other.tier.cmp(&self.tier))
             .then(other.frecency.total_cmp(&self.frecency))
@@ -342,9 +356,24 @@ struct Live {
     sent: Option<u64>,
     /// When to send the query, once the debounce is over.
     due: Option<Instant>,
+    /// Whether the query is, or has been, asked of the Extension.
+    asked: bool,
     query: String,
     prefix: Option<String>,
     results: Vec<LiveResult>,
+}
+
+impl Live {
+    /// A Live query of `query`, routed by `prefix`, to send at `due`.
+    fn asking(query: String, prefix: Option<String>, due: Instant) -> Self {
+        Live {
+            query,
+            prefix,
+            due: Some(due),
+            asked: true,
+            ..Live::default()
+        }
+    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -937,12 +966,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
                     continue;
                 }
                 if let Some((query, prefix)) = ext.route(&session.query) {
-                    session.live[id.0] = Live {
-                        query,
-                        prefix,
-                        due: Some(now + debounce),
-                        ..Live::default()
-                    };
+                    session.live[id.0] = Live::asking(query, prefix, now + debounce);
                 }
             }
         }
@@ -1893,9 +1917,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             if let (Some(debounce), Some((query, prefix))) =
                 (ext.debounce(), ext.route(&session.query))
             {
-                live.query = query;
-                live.prefix = prefix;
-                live.due = Some(now + debounce);
+                *live = Live::asking(query, prefix, now + debounce);
             }
         }
         if let Some(query) = logged {
@@ -2283,6 +2305,13 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             .filter(|(named, _)| Some(*named) == source)
         {
             self.history.touch(OWN, &alias_id(alias), when);
+        } else if let Some(Source::Live(ext, _)) = source
+            && self.extensions[ext.0].fallback()
+        {
+            // Frecency orders the fallbacks among themselves, but a fallback
+            // is never a Learned choice, which would take over from the one
+            // among the real matches.
+            self.history.touch(&result.extension, &result.id, when);
         } else {
             let key = source
                 .and_then(|source| self.item(session, source))
@@ -2396,8 +2425,12 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             .filter(|(_, session)| session.update != Update::None)
             .map(|(&id, _)| id)
             .collect();
-        for id in ids {
-            self.refresh(id, now);
+        if !ids.is_empty() {
+            for id in ids {
+                self.refresh(id, now);
+            }
+            // A refresh asks fallbacks what real matches left rows empty for.
+            self.send_due_live_queries(now);
         }
 
         if self.catalog_dirty {
@@ -2554,10 +2587,12 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
         }
         // Up to here the candidates are in slot order.
         let indexed = candidates.len();
+        let mut fallbacks = Vec::new();
         for (ext, live) in session.live.iter().enumerate() {
             if live.results.is_empty() {
                 continue;
             }
+            let fallback = self.extensions[ext].fallback();
             // Matched against what the Extension was asked, without its
             // routing prefix. Its own idea of what matches stands, at worst as
             // letters scattered.
@@ -2579,7 +2614,12 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
                     len,
                 );
                 candidate.answer = result.answer;
-                candidates.push(candidate);
+                if fallback && !result.answer {
+                    candidate.fallback = true;
+                    fallbacks.push(candidate);
+                } else {
+                    candidates.push(candidate);
+                }
             }
         }
         for (n, own) in self.own.iter().enumerate() {
@@ -2604,6 +2644,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
         }
         let indexed = self.add_near_misses(&mut session, &mut candidates, indexed, narrow, fresh);
         let primary = self.learn(&mut session, &mut candidates, indexed, now);
+        self.add_fallbacks(&mut session, &mut candidates, fallbacks, now);
 
         let mut answers: Vec<Candidate> = Vec::new();
         candidates.retain(|candidate| {
@@ -2617,8 +2658,13 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
         let mut kept: Vec<Candidate> = Vec::new();
         if !fresh {
             let visible = session.shown.iter().take(session.rows);
+            // A fallback on screen moves down for a real match come late: it
+            // never ranks above one.
             for (source, _) in visible.filter(|(_, answer)| !answer) {
-                if let Some(at) = candidates.iter().position(|c| c.source == *source) {
+                if let Some(at) = candidates
+                    .iter()
+                    .position(|c| c.source == *source && !c.fallback)
+                {
                     kept.push(candidates.swap_remove(at));
                 }
             }
@@ -2650,6 +2696,41 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             .collect();
         session.send(ToFrontEnd::Results { results });
         self.sessions.insert(id, session);
+    }
+
+    /// Adds the fallback Extensions' results to `candidates`, after what
+    /// the Daemon learned is applied to the real matches there, if those
+    /// leave rows on screen empty, and asks the query of every fallback not
+    /// asked it yet. With the rows full, its results would sit below them
+    /// unseen. Frecency orders them among themselves, but takes no other part:
+    /// a fallback is never a Learned choice, nor lifted a Tier.
+    fn add_fallbacks(
+        &self,
+        session: &mut Session,
+        candidates: &mut Vec<Candidate>,
+        mut fallbacks: Vec<Candidate>,
+        now: Instant,
+    ) {
+        if candidates.len() >= session.rows {
+            return;
+        }
+        for (ext, live) in self.extensions.iter().zip(&mut session.live) {
+            if live.asked || !ext.fallback() || ext.sender().is_none() {
+                continue;
+            }
+            if let Some(debounce) = ext.debounce() {
+                *live = Live::asking(session.query.clone(), None, now + debounce);
+            }
+        }
+        if !self.history.is_empty() {
+            let when = self.when(now);
+            for fallback in &mut fallbacks {
+                if let Some((extension, item)) = self.item(session, fallback.source) {
+                    (fallback.frecency, fallback.direct) = self.frecency(extension, item, when);
+                }
+            }
+        }
+        candidates.append(&mut fallbacks);
     }
 
     /// Adds the near misses of the session's query, Indexed items and the

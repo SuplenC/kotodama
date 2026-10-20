@@ -8,7 +8,7 @@ Kotodama is a command menu for Wayland desktops. You type, and it finds and does
 - **A Quickshell QML module** written in Rust (cxx-qt) gives QML a native result model. QML only draws the results.
 - **Extensions** are separate processes in any language. They speak a protocol whose wire format is negotiated (JSON, MessagePack or postcard), so a crashing Extension never takes down the menu.
 
-Status: early. The protocol, the Daemon, the Quickshell Front end and the apps, clipboard history, calculator and emoji Bundled extensions work; Views, the Action panel and the other Bundled extensions are next. See `docs/adr/0001-architecture.md` and the issues.
+Status: early. The protocol, the Daemon, the Quickshell Front end and the apps, clipboard history, calculator, emoji and web search Bundled extensions work; Views, the Action panel and the other Bundled extensions are next. See `docs/adr/0001-architecture.md` and the issues.
 
 ## Installing
 
@@ -240,6 +240,32 @@ skin_tone = "medium"
 The characters are Indexed items, sent once at start, so the Daemon searches them with everything else and ranks them by Frecency, with no round trip on a keystroke. They are Unicode Emoji 17 and CLDR 48's English names and keywords (Unicode License v3, `data/LICENSE-UNICODE`), kept compact in `data/emoji.tsv` (`data/update.sh` regenerates it), built into the binary and read in place.
 
 Its `manifest.toml` runs `./kotodama-emoji`, so a package installs the binary next to it in `$XDG_DATA_DIRS/kotodama/extensions/emoji/`.
+
+### Web search
+
+`kotodama-web-search` (`crates/kotodama-web-search`, Extension name `web-search`) is the fallback for what nothing else matches. When the real matches leave rows on screen empty (fewer Results, Near misses included, than the menu shows), the bottom rows read "Search DuckDuckGo for …", "Search Google for …" and "Search Wikipedia for …", and Enter opens the search with `xdg-open`, as a Quicklink opens. That is the "no good match" threshold: a query whose real matches fill the rows offers no search, since it would sit below them unseen, and the Daemon doesn't even ask for one. The searches rank below every real match, Near misses included, however often they are picked, and a real match that arrives late goes above those on screen; among themselves, the engine picked most goes first, but picking one never makes it a Learned choice (ADR 0016). They are Items of the shared kind `url`.
+
+A query that looks like an address opens it from the top row, "Open example.com", whatever else matches, as the calculator's answer does. It counts as an address only if it is one word with:
+
+- an `http://` or `https://` scheme and a host, taken as typed;
+- a domain name such as `example.com` or `github.com/SuplenC/kotodama`, opened over `https://`, whose last label is a common generic top-level domain (`com`, `org`, `dev`, `app` and so on), a two-letter country code that isn't also a common file extension (`md`, `rs`, `py`, `sh`, `js` and so on are not), or not ASCII;
+- `localhost` with a port, such as `localhost:8080`, or an IPv4 address, such as `192.168.1.1:3000`, opened over `http://`.
+
+A port and a path may follow. `foo.bar baz`, `3.14`, `main.rs`, `Cargo.toml`, `localhost` and plain words are not addresses; any of them typed with `https://` is.
+
+```toml
+[extensions.web-search]
+# Searched in this order. A template takes the query where `{query}` is,
+# percent-encoded, as a Quicklink's does, so a Quicklink's URL works here as
+# it is. These are the defaults; an empty list leaves only addresses.
+engines = [
+    { name = "DuckDuckGo", url = "https://duckduckgo.com/?q={query}" },
+    { name = "Google", url = "https://www.google.com/search?q={query}" },
+    { name = "Wikipedia", url = "https://en.wikipedia.org/w/index.php?search={query}" },
+]
+```
+
+It is a Live query Extension whose `manifest.toml` sets `fallback = true` under `[live_query]`, with a debounce of 0 so it may answer with an address. Its triggers send it what may be an address on any keystroke; anything else it is sent only when the rows aren't full, so a keystroke whose real matches fill the rows costs nothing. It does no network calls. Its `manifest.toml` runs `./kotodama-web-search`, so a package installs the binary next to it in `$XDG_DATA_DIRS/kotodama/extensions/web-search/`.
 
 ### Folder sources
 

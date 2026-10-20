@@ -76,6 +76,7 @@ mod items;
 pub mod launch;
 #[cfg(feature = "testing")]
 pub mod testing;
+pub mod url;
 #[cfg(feature = "watch")]
 pub mod watch;
 

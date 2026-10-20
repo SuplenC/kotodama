@@ -1,0 +1,17 @@
+[package]
+name = "kotodama-web-search"
+version.workspace = true
+description = "The web search Bundled extension: searches the web for what nothing else matches, and opens what looks like an address"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+kotodama-extension = { path = "../kotodama-extension" }
+kotodama-protocol = { path = "../kotodama-protocol" }
+
+[dev-dependencies]
+kotodama-extension = { path = "../kotodama-extension", features = ["testing"] }
+regex = "1.13.1"
+tempfile = "3.27.0"
+toml = { version = "1.1.8", default-features = false, features = ["parse", "serde", "std"] }

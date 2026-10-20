@@ -1,0 +1,21 @@
+# The web search Bundled extension. A package installs this directory as
+# `$XDG_DATA_DIRS/kotodama/extensions/web-search/`, with the
+# `kotodama-web-search` binary next to this file (or `command` rewritten to its
+# absolute path).
+name = "web-search"
+description = "Searches the web for what nothing else matches, and opens what looks like an address"
+command = ["./kotodama-web-search"]
+
+# A fallback: the Daemon asks it only what real matches leave rows on screen
+# empty for, and ranks its searches below every real match. The triggers send
+# it, whatever else matches, the queries that may be an address, which it
+# answers in the top row: one word with a dot, `localhost:` or a scheme.
+[live_query]
+fallback = true
+triggers = [
+    '^\s*\S+\.\S+\s*$',
+    '(?i)^\s*localhost:\S+\s*$',
+    '(?i)^\s*https?://\S+\s*$',
+]
+# 0, so it may mark the address as the answer; it does no slow work.
+debounce_ms = 0

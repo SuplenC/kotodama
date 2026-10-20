@@ -96,6 +96,10 @@ _Avoid_: Match quality, bucket
 A Result that matches the query only with typos in it, at most one per 4 letters of each word; it ranks below every real match.
 _Avoid_: Fuzzy match, typo match
 
+**Fallback**:
+An Extension the Daemon asks only what real matches leave rows on screen empty for, such as web search, and whose Results rank below every real match.
+_Avoid_: Catch-all, default provider
+
 **Usage log**:
 An opt-in record, kept on the user's machine, of the queries typed and the Results picked, for tuning ranking from real use.
 _Avoid_: Telemetry, analytics, query log
