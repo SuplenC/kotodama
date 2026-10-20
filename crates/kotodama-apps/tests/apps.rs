@@ -4,7 +4,7 @@
 use std::collections::BTreeMap;
 use std::fs;
 use std::ops::{Deref, DerefMut};
-use std::os::unix::fs::PermissionsExt;
+use std::os::unix::fs::{PermissionsExt, symlink};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::thread;
@@ -357,6 +357,26 @@ fn apps_in_an_applications_directory_created_later_are_found() {
 
     install(apps.path(), "home", "late.desktop", &app("Late", "late"));
     assert_eq!(titles(&apps.added()), ["Late"]);
+}
+
+#[test]
+fn an_app_a_profile_switch_brings_is_added_without_a_restart() {
+    let dir = data_dirs();
+    // The system data directory is a profile: a link to a generation, which
+    // a NixOS or home-manager switch replaces with a link to the next.
+    fs::remove_dir_all(dir.path().join("system")).unwrap();
+    install(dir.path(), "gen-1", "old.desktop", &app("Old", "old"));
+    install(dir.path(), "gen-2", "old.desktop", &app("Old", "old"));
+    install(dir.path(), "gen-2", "new.desktop", &app("New", "new"));
+    symlink("gen-1", dir.path().join("system")).unwrap();
+    let apps = Apps::configured(dir, Table::new());
+    assert_eq!(titles(&apps.added()), ["Old"]);
+
+    // As `ln -sfn` and Nix do it: a new link renamed over the old one.
+    symlink("gen-2", apps.path().join("system.new")).unwrap();
+    fs::rename(apps.path().join("system.new"), apps.path().join("system")).unwrap();
+    assert_eq!(titles(&apps.added()), ["New"]);
+    apps.quiet();
 }
 
 #[test]
