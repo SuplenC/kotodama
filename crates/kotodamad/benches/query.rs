@@ -36,7 +36,7 @@ fn bench(c: &mut Criterion) {
             black_box(setup.query(if alternate { "f" } else { "t" }))
         })
     });
-    // Two words pasted into a cleared box: the empty query forgets the last
+    // Two words pasted into a cleared box: the Empty query forgets the last
     // search, so this one searches every Item. (Named `two_words` while the
     // Daemon still narrowed it from the last iteration's.)
     group.bench_function("two_words_pasted", |b| {

@@ -100,6 +100,20 @@ impl ItemKind {
         }
     }
 
+    /// A shared kind's index in [`SHARED_KINDS`], without comparing names;
+    /// `None` for a namespaced kind.
+    pub fn shared_index(&self) -> Option<usize> {
+        match self {
+            ItemKind::App { .. } => Some(0),
+            ItemKind::File { .. } => Some(1),
+            ItemKind::Folder { .. } => Some(2),
+            ItemKind::Project { .. } => Some(3),
+            ItemKind::Window { .. } => Some(4),
+            ItemKind::Url { .. } => Some(5),
+            ItemKind::Namespaced(_) => None,
+        }
+    }
+
     /// The Extension a namespaced kind belongs to; `None` for a shared kind.
     pub fn extension(&self) -> Option<&str> {
         match self {
@@ -487,3 +501,6 @@ impl TryFrom<ItemRefOwned> for ItemRef {
         })
     }
 }
+
+#[cfg(test)]
+mod tests;

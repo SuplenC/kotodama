@@ -100,7 +100,7 @@ impl Quicklink {
                     vec![Argument {
                         name: "query".into(),
                         placeholder: None,
-                        // The keyword alone opens it with an empty query.
+                        // The keyword alone opens it with an empty Argument.
                         optional: true,
                     }]
                 } else {

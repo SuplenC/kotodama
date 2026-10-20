@@ -37,7 +37,14 @@ impl KindOrder {
     /// The order of `kinds`, each a kind's name or [`OTHERS`]. A kind named
     /// twice keeps its first place.
     fn new(kinds: &[&str]) -> Self {
-        let kinds = &kinds[..kinds.len().min(usize::from(u8::MAX))];
+        let kept = kinds.len().min(usize::from(u8::MAX));
+        if kept < kinds.len() {
+            log::error!(
+                "ranking.kinds: names {} kinds, more than {kept}; the rest are left out",
+                kinds.len()
+            );
+        }
+        let kinds = &kinds[..kept];
         let others = kinds
             .iter()
             .position(|&kind| kind == OTHERS)
@@ -112,13 +119,13 @@ impl KindOrder {
 
     /// Where Results of `kind` rank on an equal match, lowest first.
     pub fn place(&self, kind: &ItemKind) -> u8 {
-        match kind {
-            ItemKind::Namespaced(kind) => self
+        match kind.shared_index() {
+            Some(n) => self.shared[n],
+            None => self
                 .namespaced
                 .iter()
-                .find(|(name, _)| name == kind.as_str())
+                .find(|(name, _)| name == kind.name())
                 .map_or(self.others, |&(_, place)| place),
-            shared => self.shared[shared_index(shared)],
         }
     }
 }
@@ -163,48 +170,10 @@ impl KindPlaces {
     }
 }
 
-/// A shared kind's index in [`SHARED_KINDS`], without comparing names.
-fn shared_index(kind: &ItemKind) -> usize {
-    match kind {
-        ItemKind::App { .. } => 0,
-        ItemKind::File { .. } => 1,
-        ItemKind::Folder { .. } => 2,
-        ItemKind::Project { .. } => 3,
-        ItemKind::Window { .. } => 4,
-        ItemKind::Url { .. } => 5,
-        ItemKind::Namespaced(_) => unreachable!("a namespaced kind isn't shared"),
-    }
-}
-
 fn kind_name(value: &Value) -> Result<&str, String> {
     match value {
         Value::String(kind) if kind == OTHERS => Ok(kind),
         Value::String(kind) => KindName::new(kind.as_str()).map(|_| kind.as_str()),
         _ => Err("should be the name of an Item kind, or `*`".to_owned()),
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn a_shared_kinds_index_is_its_place_among_the_shared_kinds() {
-        let kinds = [
-            ItemKind::App {
-                desktop_id: "x".into(),
-            },
-            ItemKind::File { path: "/x".into() },
-            ItemKind::Folder { path: "/x".into() },
-            ItemKind::Project { path: "/x".into() },
-            ItemKind::Window {
-                address: "x".into(),
-            },
-            ItemKind::Url { url: "x".into() },
-        ];
-        assert_eq!(kinds.len(), SHARED_KINDS.len());
-        for kind in &kinds {
-            assert_eq!(SHARED_KINDS[shared_index(kind)], kind.name());
-        }
     }
 }

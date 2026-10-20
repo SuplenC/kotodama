@@ -855,7 +855,7 @@ fn a_pick_counts_at_once() {
     assert_eq!(w.first("fi"), "Firefox");
 }
 
-// The empty query.
+// The Empty query.
 
 const HABITS: &[&str] = &[
     "Mail", "News", "Calendar", "Music", "Editor", "Games", "Files", "Terminal",
