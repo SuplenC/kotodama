@@ -214,7 +214,8 @@ pkgs.testers.runNixOSTest {
         daemon = user("systemctl --user show -P MainPID kotodamad.service").strip()
         apps = machine.succeed(pgrep("kotodama-apps")).strip()
         # Replaces the /run/current-system link, and restarts
-        # home-manager-alice.service, which replaces ~/.nix-profile's.
+        # home-manager-alice.service, which replaces the profile link behind
+        # ~/.nix-profile.
         machine.succeed("/run/booted-system/specialisation/switched/bin/switch-to-configuration test")
         machine.wait_until_succeeds(
             as_alice(f"{front_end} loader") + " | grep -P '^apps\tloader\tLoader$'"

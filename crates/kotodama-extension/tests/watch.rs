@@ -212,9 +212,11 @@ fn a_profile_link_switched_to_a_new_generation_is_watched_there() {
         is_desktop_file,
     );
 
-    // A switch replaces the link furthest in, noticed once.
+    // A switch replaces the link furthest in, and maybe others with it:
+    // noticed once.
     fs::write(two.join("share/applications/new.desktop"), "x").unwrap();
     relink(&two, &profiles.join("profile"));
+    relink(&profiles.join("profile"), &profile);
     assert!(noticed(&changes));
     assert!(quiet(&changes));
 

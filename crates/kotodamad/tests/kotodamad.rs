@@ -3,6 +3,7 @@
 //! bash 4+, which the dev environment provides.
 
 use std::fs;
+use std::os::unix::fs::symlink;
 use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command};
@@ -437,7 +438,7 @@ fn an_extension_a_profile_switch_brings_is_picked_up() {
         "",
         &[item("kotodama", "Kotodama")],
     );
-    std::os::unix::fs::symlink("gen-1", root.path().join("share")).unwrap();
+    symlink("gen-1", root.path().join("share")).unwrap();
     let daemon = Daemon::start(root);
     let mut ui = daemon.connect();
     assert_eq!(ui.titles("kotodama"), Vec::<String>::new());
@@ -447,7 +448,7 @@ fn an_extension_a_profile_switch_brings_is_picked_up() {
         daemon.root.path().join("share.new"),
         daemon.root.path().join("share"),
     );
-    std::os::unix::fs::symlink("gen-2", &new).unwrap();
+    symlink("gen-2", &new).unwrap();
     fs::rename(&new, &share).unwrap();
     ui.wait_for_titles("kotodama", &["Kotodama"]);
 }

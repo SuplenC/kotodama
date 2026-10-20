@@ -84,10 +84,7 @@ impl Watched {
     /// next [`Watcher::watch`] watches what is there now. Returns whether it
     /// forgot any.
     fn forget_gone(&mut self, event: &Event) -> bool {
-        if !matches!(
-            event.kind,
-            EventKind::Remove(_) | EventKind::Modify(notify::event::ModifyKind::Name(_))
-        ) {
+        if !removes_or_renames(&event.kind) {
             return false;
         }
         let mut forgot = false;
@@ -104,12 +101,7 @@ impl Watched {
     /// removes or renames, so the next [`Watcher::watch`] watches them where
     /// the links lead now. Returns whether it touched any link.
     fn forget_relinked(&mut self, event: &Event) -> bool {
-        if !matches!(
-            event.kind,
-            EventKind::Create(_)
-                | EventKind::Remove(_)
-                | EventKind::Modify(notify::event::ModifyKind::Name(_))
-        ) {
+        if !(matches!(event.kind, EventKind::Create(_)) || removes_or_renames(&event.kind)) {
             return false;
         }
         let mut relinked = false;
@@ -119,13 +111,21 @@ impl Watched {
             };
             relinked = true;
             for dir in behind {
-                if self.dirs.remove(dir).is_some() {
-                    self.gone.push(dir.clone());
-                }
+                // Gone even when not watched yet: a `watch` running may be
+                // watching it where the link led.
+                self.dirs.remove(dir);
+                self.gone.push(dir.clone());
             }
         }
         relinked
     }
+}
+
+fn removes_or_renames(kind: &EventKind) -> bool {
+    matches!(
+        kind,
+        EventKind::Remove(_) | EventKind::Modify(notify::event::ModifyKind::Name(_))
+    )
 }
 
 /// The symlinks on the way to `path` that can be replaced, each named as it
@@ -174,7 +174,8 @@ fn parts(path: &Path) -> Vec<PathBuf> {
 }
 
 /// Whether a symlink in `dir` can be replaced: not when nobody may write
-/// there, as in a Nix store path, which never changes.
+/// there, as in a Nix store path, nor on a read-only mount, as the Nix store
+/// is on NixOS. Neither changes, so watching them would only cost wakeups.
 fn replaceable(dir: &Path) -> bool {
     let dir = if dir.as_os_str().is_empty() {
         Path::new(".")
@@ -182,6 +183,30 @@ fn replaceable(dir: &Path) -> bool {
         dir
     };
     fs::metadata(dir).is_ok_and(|meta| meta.permissions().mode() & 0o222 != 0)
+        && !read_only_mount(dir)
+}
+
+#[cfg(target_os = "linux")]
+fn read_only_mount(dir: &Path) -> bool {
+    use std::ffi::CString;
+    use std::mem::MaybeUninit;
+    use std::os::unix::ffi::OsStrExt;
+
+    let Ok(path) = CString::new(dir.as_os_str().as_bytes()) else {
+        return false;
+    };
+    let mut stat = MaybeUninit::<libc::statvfs>::uninit();
+    // SAFETY: path is a NUL-terminated string that outlives the call, and
+    // statvfs fills `stat` whole when it returns 0.
+    unsafe {
+        libc::statvfs(path.as_ptr(), stat.as_mut_ptr()) == 0
+            && stat.assume_init().f_flag & libc::ST_RDONLY != 0
+    }
+}
+
+#[cfg(not(target_os = "linux"))]
+fn read_only_mount(_: &Path) -> bool {
+    false
 }
 
 fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -252,7 +277,7 @@ impl Watcher {
             let mut watched = lock(&handler_watched);
             let matters = watched.appeared(&event) || matters(&event, &watched);
             // A directory watched going, or a link to one replaced, is acted
-            // on too, to watch it again.
+            // on too, to watch it again. Both run: one event can do both.
             let gone = watched.forget_gone(&event) | watched.forget_relinked(&event);
             drop(watched);
             if matters || gone {
@@ -301,6 +326,9 @@ impl Watcher {
         for parent in routes.iter().flatten().filter_map(|link| link.parent()) {
             watch_beside(notify, &old, &mut dirs_now, parent);
         }
+        // Known before the directories are watched, so a link replaced while
+        // they are has them watched again.
+        lock(&self.0.watched).links = links_behind(&dirs, &routes, |dir| Some(dir.to_owned()));
         let mut missing = Vec::new();
         for dir in &dirs {
             if old.get(dir) == Some(&mode) || notify.watch(dir, mode).is_ok() {
@@ -315,16 +343,12 @@ impl Watcher {
                 watch_beside(notify, &old, &mut dirs_now, there);
             }
         }
-        // Each link with what is watched for each directory behind it.
-        let mut links: HashMap<PathBuf, Vec<PathBuf>> = HashMap::new();
-        for (dir, route) in dirs.iter().zip(routes) {
-            let Some(watched) = dir.ancestors().find(|there| dirs_now.contains_key(*there)) else {
-                continue;
-            };
-            for link in route {
-                links.entry(link).or_default().push(watched.to_owned());
-            }
-        }
+        // Now with what is watched for a missing directory too.
+        let links = links_behind(&dirs, &routes, |dir| {
+            dir.ancestors()
+                .find(|there| dirs_now.contains_key(*there))
+                .map(Path::to_owned)
+        });
         for gone in old.keys().filter(|dir| !dirs_now.contains_key(*dir)) {
             let _ = notify.unwatch(gone);
         }
@@ -341,6 +365,25 @@ impl Watcher {
         drop(watched);
         *lock(&self.0.wanted) = dirs;
     }
+}
+
+/// Each link on the `routes` to `dirs` with what is watched for the
+/// directories behind it, as `watched_for` says.
+fn links_behind(
+    dirs: &[PathBuf],
+    routes: &[Vec<PathBuf>],
+    watched_for: impl Fn(&Path) -> Option<PathBuf>,
+) -> HashMap<PathBuf, Vec<PathBuf>> {
+    let mut links: HashMap<PathBuf, Vec<PathBuf>> = HashMap::new();
+    for (dir, route) in dirs.iter().zip(routes) {
+        let Some(watched) = watched_for(dir) else {
+            continue;
+        };
+        for link in route {
+            links.entry(link.clone()).or_default().push(watched.clone());
+        }
+    }
+    links
 }
 
 /// Watches `dir` on its own, for what is made, removed or renamed in it,
