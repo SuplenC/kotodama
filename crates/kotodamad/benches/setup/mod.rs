@@ -3,14 +3,15 @@
 //! `instructions.rs` share it, so both measure the same keystroke.
 //!
 //! Time stands still in a Setup: every event happens at the moment it was
-//! made, on a wall clock that reads [`START`] in UTC. So a run counts the
-//! same instructions as the last: the History ranks the same, the time zone
-//! is never read, and no timer (planning the hot Items) falls due inside a
-//! measured query.
+//! made, on a wall clock that reads [`START`] in UTC, or a second later once
+//! [`Setup::plan`] waited for the hot Items to be planned. So a run counts
+//! the same instructions as the last: the History ranks the same, the time
+//! zone is never read, and no timer (planning the hot Items) falls due
+//! inside a measured query.
 
 use std::path::PathBuf;
 use std::sync::mpsc::{self, Receiver};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use kotodama_protocol::{
     FromExtension, FromFrontEnd, Item, Manifest, Table, ToFrontEnd, View, ViewContent, WireFormat,
@@ -74,7 +75,7 @@ impl Setup {
     }
 
     /// With 2000 Items picked, the most the History keeps, at every time of
-    /// day over the month before [`START`].
+    /// day over the month before [`START`], and the hot Items planned.
     pub fn picked() -> Self {
         let mut history = History::default();
         let start = START - 30 * DAY_SECS;
@@ -86,7 +87,29 @@ impl Setup {
             };
             history.touch("apps", &format!("item-{}", n * 5), when);
         }
-        Self::with(history, corpus::items())
+        let mut setup = Self::with(history, corpus::items());
+        setup.plan();
+        setup
+    }
+
+    /// Moves the clock on to when the hot Items are planned next, a second
+    /// after the last change, and hands the Daemon what the indexing thread
+    /// planned: the hot Items, and the Empty query ranked ahead.
+    pub fn plan(&mut self) {
+        self.now = self.daemon.next_wake().expect("the hot Items are planned");
+        self.daemon.tick(self.now);
+        loop {
+            let event = self
+                .indexed
+                .recv_timeout(Duration::from_secs(10))
+                .expect("the indexing thread plans the hot Items");
+            let planned = matches!(event, Event::Kept(_));
+            self.daemon.handle(event, self.now);
+            if planned {
+                break;
+            }
+        }
+        self.results.try_iter().for_each(drop);
     }
 
     pub fn with(history: History, items: Vec<Item>) -> Self {

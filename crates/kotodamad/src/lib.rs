@@ -15,6 +15,7 @@ mod indexer;
 pub mod keywords;
 pub mod kind_order;
 mod link;
+mod most_used;
 mod narrowing;
 mod notify;
 mod open_view;

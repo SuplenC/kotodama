@@ -146,6 +146,8 @@ pub struct Index {
     resident: RefCell<HashMap<Slot, Resident, BuildHasherDefault<SlotHasher>>>,
     /// Counts the Items read, so the latest read are kept.
     reads: Cell<u64>,
+    /// Counts the Items read back off their Shelves here.
+    shelf_reads: Cell<u64>,
     /// What an Item is read off its Shelf into, kept from one to the next.
     read_buf: RefCell<Vec<u8>>,
     /// The Items expected to be shown soon, in slot order, kept resident.
@@ -281,6 +283,7 @@ impl Index {
             return Some(Arc::clone(&kept.item));
         }
         let item = Arc::new(shelf.get_with(place, &mut self.read_buf.borrow_mut())?);
+        self.shelf_reads.set(self.shelf_reads.get() + 1);
         resident.insert(
             slot,
             Resident {
@@ -291,6 +294,11 @@ impl Index {
             },
         );
         Some(item)
+    }
+
+    /// How many Items were read back off their Shelves on this thread.
+    pub fn shelf_reads(&self) -> u64 {
+        self.shelf_reads.get()
     }
 
     /// Whether the Item in `slot` is resident, rather than on its Shelf.

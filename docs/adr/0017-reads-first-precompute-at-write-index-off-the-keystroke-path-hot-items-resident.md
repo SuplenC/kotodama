@@ -1,6 +1,6 @@
 # 17. Reads first: precompute at write, index off the keystroke path, keep only hot Items whole in memory
 
-Status: accepted (2026-10-20)
+Status: accepted (2026-10-20). Amended by ADR 0023.
 
 The Index is read thousands of times for every time an Extension writes to it, yet the Daemon did the work on the read side. Each keystroke folded each Item's texts again and found their words again. An Extension's batch was indexed on the event loop, so a keystroke behind it had to wait. Every Item stayed whole on the heap, though a search reads only its texts and a keystroke shows at most 50 Results. The Daemon now does that work when an Item is written, so that a read costs as little as possible.
 
@@ -34,7 +34,7 @@ A list View's filter (ADR 0015) uses the same matcher, but runs on the View's ow
 - Showing a cold row costs a `pread` and a decode, a few microseconds. A keystroke shows at most 50 rows, and the ones it showed last stay resident. Decoding takes about 4,000 instructions an Item, most of them allocations and UTF-8 checks. On the 10k apps corpus, against an Index that kept every Item whole on the heap: a first keystroke with none of its 50 rows resident runs about 3% more instructions, and two words pasted, with 20 cold rows, about 5% more. With their rows resident, the first keystroke runs about 8% fewer and two words about as many.
 - A Learned choice, an Alias's keyword, Identity grouping and the catalog of Actions by kind all read only what the Segment keeps in memory. For each kind and Action id, the catalog offers the Action of the first row whose Item has it.
 - A batch takes longer to index, because each Item is also encoded and written once.
-- The hot set comes only from the time-of-day habit. Learned choices aren't hot unless they were shown lately. The History has no weekday, so weekdays and weekends share one routine. The Empty query's rows are still ranked when the menu opens, not ahead of each window. Each of these is left for later.
+- The hot set comes only from the time-of-day habit. The History has no weekday, so weekdays and weekends share one routine. The Empty query's rows are still ranked when the menu opens, not ahead of each window. ADR 0023 makes Learned choices hot and ranks the Empty query ahead; the weekday is left for later.
 
 ## Considered options
 
