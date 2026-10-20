@@ -27,7 +27,7 @@ use crate::config::extension_table;
 use crate::discovery::Found;
 use crate::empty_query::EmptyQuery;
 use crate::history::{
-    Change, Habit, History, IDENTITIES, Picks, ResultKey, Settings, Store, query_key,
+    Change, Frecent, Habit, History, IDENTITIES, Picks, ResultKey, Settings, Store, query_key,
 };
 use crate::index::{Index, ItemRef, Slot};
 use crate::indexer::{Indexed, Indexer, Kept, Plan};
@@ -771,9 +771,14 @@ pub struct Daemon<L, D, S> {
     /// The changes to the History that can still be undone, oldest first.
     undos: Vec<Undoable>,
     /// The picked Indexed items, by slot, as of the index and History
-    /// versions in `frecent_versions`.
-    frecent: Vec<(Slot, Picks, Counts)>,
+    /// versions in `frecent_versions`, and their picks, in the same order.
+    frecent: Vec<(Slot, Counts)>,
+    frecent_picks: Frecent,
     frecent_versions: Option<(u64, u64)>,
+    /// What the picks of `frecent` count for at one time, in its order: kept
+    /// from one query to the next.
+    habits: Vec<Habit>,
+    frecencies: Vec<f64>,
     /// The slots the last search matched.
     scored: Vec<Slot>,
     tiers: Tiers,
@@ -833,7 +838,10 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             own: Vec::new(),
             undos: Vec::new(),
             frecent: Vec::new(),
+            frecent_picks: Frecent::default(),
             frecent_versions: None,
+            habits: Vec::new(),
+            frecencies: Vec::new(),
             scored: Vec::new(),
             tiers: Tiers::default(),
             highlights: Vec::new(),
@@ -910,7 +918,13 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
         let mut picked = Vec::new();
         if self.hot_capacity > 0 && !self.history.is_empty() {
             self.cache_frecent();
-            picked.extend(self.frecent.iter().map(|&(slot, picks, _)| (slot, picks)));
+            let picks = &self.frecent_picks;
+            picked.extend(
+                self.frecent
+                    .iter()
+                    .enumerate()
+                    .map(|(n, &(slot, _))| (slot, picks.picks(n))),
+            );
         }
         let plan = Plan {
             picked,
@@ -3109,11 +3123,13 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
         if !self.history.is_empty() {
             let settings = *self.history.settings();
             self.cache_frecent();
-            for &(slot, picks, counts) in &self.frecent {
+            let mut frecencies = std::mem::take(&mut self.frecencies);
+            self.frecent_picks
+                .frecency(when, settings.time_of_day, &mut frecencies);
+            for (&(slot, counts), &frecency) in self.frecent.iter().zip(&frecencies) {
                 if let Ok(n) =
                     candidates[..indexed].binary_search_by_key(&Source::Indexed(slot), |c| c.source)
                 {
-                    let frecency = picks.frecency(when, &settings);
                     if counts != Counts::Direct {
                         candidates[n].frecency = frecency;
                     }
@@ -3122,6 +3138,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
                     }
                 }
             }
+            self.frecencies = frecencies;
             for candidate in &mut candidates[indexed..] {
                 if let Some((extension, item)) = self.item(session, candidate.source) {
                     (candidate.frecency, candidate.direct) = self.frecency(extension, &item, when);
@@ -3270,14 +3287,15 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
         let mut most: Vec<MostUsed> = Vec::new();
         if self.empty_query.most_used > 0 && !self.history.is_empty() {
             self.cache_frecent();
+            self.frecent_picks.habits(when, &mut self.habits);
+            most.reserve(self.frecent.len());
             // In slot order, an Item's Identity's picks next to its own.
-            for &(slot, picks, counts) in &self.frecent {
+            for (&(slot, counts), &used) in self.frecent.iter().zip(&self.habits) {
                 let source = Source::Indexed(slot);
                 if most.last().is_none_or(|last| last.source != source) {
                     most.push(MostUsed::new(source));
                 }
                 let entry = most.last_mut().expect("just pushed");
-                let used = picks.habit(when, half_life);
                 if counts != Counts::Direct {
                     entry.used = used;
                 }
@@ -3363,14 +3381,14 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
     }
 
     /// Rebuilds the list of picked Indexed items if the index or the History
-    /// changed since it was built.
+    /// changed since it was built, or the half-life their picks decay at.
     fn cache_frecent(&mut self) {
         let versions = (self.index.version(), self.history.version());
-        if self.frecent_versions == Some(versions) {
+        let half_life = self.history.settings().half_life_secs;
+        if self.frecent_versions == Some(versions) && self.frecent_picks.half_life() == half_life {
             return;
         }
-        let mut frecent = std::mem::take(&mut self.frecent);
-        frecent.clear();
+        let mut frecent = Vec::with_capacity(self.frecent.len());
         for (extension, id, picks) in self.history.picked() {
             if extension == IDENTITIES {
                 let slots = self.index.identified(id);
@@ -3388,7 +3406,11 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             }
         }
         frecent.sort_unstable_by_key(|&(slot, ..)| slot);
-        self.frecent = frecent;
+        let picks: Vec<Picks> = frecent.iter().map(|&(_, picks, _)| picks).collect();
+        self.frecent_picks = Frecent::new(&picks, half_life);
+        self.frecent.clear();
+        self.frecent
+            .extend(frecent.iter().map(|&(slot, _, counts)| (slot, counts)));
         self.frecent_versions = Some(versions);
     }
 
