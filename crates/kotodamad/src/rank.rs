@@ -10,6 +10,8 @@
 
 use kotodama_protocol::Item;
 use nucleo_matcher::pattern::Pattern;
+use std::ops::{BitOr, BitOrAssign};
+
 use nucleo_matcher::{Matcher, Utf32Str, Utf32String, chars};
 
 /// How well a text matches, worst first.
@@ -71,8 +73,8 @@ pub struct Query {
     whole: Vec<char>,
     /// The query ends in whitespace, so its last word must be a whole word.
     last_is_whole: bool,
-    /// The letters of each word, as [`letters`] gives them.
-    letters: Vec<u64>,
+    /// The letters of each word.
+    letters: Vec<Letters>,
 }
 
 /// One character, lowercase and without accents. Letters nucleo doesn't fold,
@@ -108,7 +110,7 @@ impl Query {
                 query.whole.push(' ');
             }
             query.whole.extend(&word);
-            query.letters.push(letters(word.iter().copied()));
+            query.letters.push(Letters::in_text(word.iter().copied()));
             query.words.push(word);
         }
         query
@@ -120,17 +122,17 @@ impl Query {
 
     /// Whether any word is long enough to have a typo.
     pub fn tolerates_typos(&self) -> bool {
-        self.typo_initials() != 0
+        !self.typo_initials().is_empty()
     }
 
     /// The first letters of the words long enough to have a typo, as
     /// [`Haystack::initials`] gives them: a near miss has a word starting
     /// with one of them.
-    pub fn typo_initials(&self) -> u64 {
+    pub fn typo_initials(&self) -> Letters {
         self.words
             .iter()
             .filter(|word| typos(word.len()) > 0)
-            .fold(0, |set, word| set | initial(word[0]))
+            .fold(Letters::NONE, |set, word| set | Letters::of(word[0]))
     }
 
     /// Whether whatever nearly matches `longer`, a query that adds to this
@@ -157,16 +159,16 @@ impl Query {
     /// them.
     pub fn filter(&self) -> Filter {
         let letter = match self.words.as_slice() {
-            [word] if word.len() == 1 && !self.last_is_whole => Some(initial(word[0])),
+            [word] if word.len() == 1 && !self.last_is_whole => Some(Letters::of(word[0])),
             _ => None,
         };
         let subtitles = self.searches_subtitles().then(|| {
             self.words
                 .iter()
-                .map(|word| initial(word[0]))
-                .fold(0, |a, b| a | b)
+                .map(|word| Letters::of(word[0]))
+                .fold(Letters::NONE, BitOr::bitor)
         });
-        let letters = self.letters.iter().fold(0, |a, b| a | b);
+        let letters = self.letters.iter().copied().fold(Letters::NONE, BitOr::bitor);
         Filter {
             letter,
             subtitles,
@@ -175,20 +177,18 @@ impl Query {
     }
 }
 
-/// Word initials an Item's texts must have to be worth searching, as
-/// [`initial`] gives them.
+/// Letters an Item's texts must have to be worth searching.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Filter {
     /// A one-letter query's letter, which only matches at a word start, so the
     /// title or a keyword must have a word starting with it.
-    letter: Option<u64>,
+    letter: Option<Letters>,
     /// The first letters of the query's words, which a subtitle's words must
     /// start with for it to match, if it's long enough for subtitles to be
     /// searched.
-    subtitles: Option<u64>,
-    /// Every letter of the query, as [`letters`] gives them: an Item's texts
-    /// need them all to match.
-    letters: u64,
+    subtitles: Option<Letters>,
+    /// Every letter of the query: an Item's texts need them all to match.
+    letters: Letters,
 }
 
 impl Filter {
@@ -200,8 +200,9 @@ impl Filter {
 
     /// Whether an Item with `letters` in its texts, as
     /// [`Haystack::every_letter`] gives them, may match.
-    pub fn may_match(&self, letters: u64) -> bool {
-        letters & self.letters == self.letters
+    #[inline]
+    pub fn may_match(&self, letters: Letters) -> bool {
+        letters.contains(self.letters)
     }
 }
 
@@ -229,38 +230,90 @@ pub struct Haystack {
     words: Utf32String,
     /// Empty if there is none.
     subtitle: Utf32String,
-    /// The letters words of the title and keywords start with, as
-    /// [`initial`] gives them, so a one-letter query passes over most Items
-    /// without searching them.
-    initials: u64,
+    /// The letters words of the title and keywords start with, so a
+    /// one-letter query passes over most Items without searching them.
+    initials: Letters,
     /// The same for the subtitle.
-    subtitle_initials: u64,
-    /// Every letter of the title and keywords, as [`letters`] gives them, so
-    /// looking for near misses passes over most Items without searching them.
-    letters: u64,
+    subtitle_initials: Letters,
+    /// Every letter of the title and keywords, so looking for near misses
+    /// passes over most Items without searching them.
+    letters: Letters,
 }
 
-/// A character as a bit of a set of word initials: one of 36 for a folded
-/// ASCII letter or digit, and one shared by every other character.
-fn initial(c: char) -> u64 {
-    match c {
-        'a'..='z' => 1 << (c as u32 - 'a' as u32),
-        '0'..='9' => 1 << (26 + c as u32 - '0' as u32),
-        _ => 1 << 63,
+/// A set of folded characters, as bits of one word: one for each ASCII letter
+/// or digit, and one shared by every other character. The sets of an Item's
+/// texts always hold the shared one, so they never wrongly rule a text out.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[repr(transparent)]
+pub struct Letters(u64);
+
+// As small as the word it wraps, so the Index's arrays of them stay dense.
+const _: () = assert!(size_of::<Letters>() == size_of::<u64>());
+
+impl Letters {
+    pub const NONE: Letters = Letters(0);
+    /// The one every character but an ASCII letter or digit stands for.
+    const OTHER: Letters = Letters(1 << 63);
+
+    /// The set of one character.
+    #[inline]
+    pub fn of(c: char) -> Letters {
+        Letters(match c {
+            'a'..='z' => 1 << (c as u32 - 'a' as u32),
+            '0'..='9' => 1 << (26 + c as u32 - '0' as u32),
+            _ => Letters::OTHER.0,
+        })
+    }
+
+    /// Every character of a text, and [`Letters::OTHER`].
+    fn in_text(chars: impl Iterator<Item = char>) -> Letters {
+        chars.map(Letters::of).fold(Letters::OTHER, BitOr::bitor)
+    }
+
+    #[inline]
+    pub fn is_empty(self) -> bool {
+        self.0 == 0
+    }
+
+    /// Whether every one of `other` is in this set.
+    #[inline]
+    pub fn contains(self, other: Letters) -> bool {
+        self.0 & other.0 == other.0
+    }
+
+    /// Whether this set and `other` share one.
+    #[inline]
+    pub fn meets(self, other: Letters) -> bool {
+        self.0 & other.0 != 0
+    }
+
+    /// How many of `other` this set lacks.
+    #[inline]
+    pub fn lacks(self, other: Letters) -> usize {
+        (other.0 & !self.0).count_ones() as usize
     }
 }
 
-/// Every character of `chars`, as [`initial`] gives them. The bit every other
-/// character shares is always set, as in [`initials`].
-fn letters(chars: impl Iterator<Item = char>) -> u64 {
-    chars.map(initial).fold(1 << 63, |set, c| set | c)
+impl BitOr for Letters {
+    type Output = Letters;
+
+    #[inline]
+    fn bitor(self, other: Letters) -> Letters {
+        Letters(self.0 | other.0)
+    }
 }
 
-/// The letters words of `folded` start with, as [`initial`] gives them, with
-/// words starting as [`one_letter`] has them. The bit every other character
-/// shares is always set, so the set never wrongly rules a text out.
-fn initials(folded: &str, original: Option<&str>) -> u64 {
-    let mut set = 1 << 63;
+impl BitOrAssign for Letters {
+    #[inline]
+    fn bitor_assign(&mut self, other: Letters) {
+        self.0 |= other.0;
+    }
+}
+
+/// The letters words of `folded` start with, with words starting as
+/// [`one_letter`] has them, and [`Letters::OTHER`].
+fn initials(folded: &str, original: Option<&str>) -> Letters {
+    let mut set = Letters::OTHER;
     let mut cases = original
         .filter(|original| original.len() == folded.chars().count())
         .map(str::chars);
@@ -272,7 +325,7 @@ fn initials(folded: &str, original: Option<&str>) -> u64 {
             .map(|o| (o.is_lowercase(), o.is_uppercase()));
         let camel = prev_lower && lower.is_some_and(|(_, upper)| upper);
         if camel || prev.is_none_or(|p: char| !p.is_alphanumeric()) {
-            set |= initial(c);
+            set |= Letters::of(c);
         }
         prev = Some(c);
         prev_lower = lower.is_some_and(|(lower, _)| lower);
@@ -300,7 +353,7 @@ impl Haystack {
         Haystack {
             initials: initials(&title, Some(&item.title)) | initials(&words, None),
             subtitle_initials: initials(&subtitle, None),
-            letters: letters(title.chars().chain(words.chars())),
+            letters: Letters::in_text(title.chars().chain(words.chars())),
             title: Utf32String::from(title),
             words: Utf32String::from(words),
             subtitle: Utf32String::from(subtitle),
@@ -318,7 +371,7 @@ impl Haystack {
         filter: Filter,
     ) -> Option<(u32, Matched)> {
         if let Some(letter) = filter.letter
-            && self.initials & letter == 0
+            && !self.initials.meets(letter)
         {
             return None;
         }
@@ -337,7 +390,7 @@ impl Haystack {
             Some(score) => Some((score, matched)),
             None if filter
                 .subtitles
-                .is_some_and(|initials| self.subtitle_initials & initials == initials) =>
+                .is_some_and(|initials| self.subtitle_initials.contains(initials)) =>
             {
                 pattern
                     .score(self.subtitle.slice(..), matcher)
@@ -356,23 +409,18 @@ impl Haystack {
             .words
             .iter()
             .zip(&query.letters)
-            .all(|(word, &letters)| {
-                (letters & !self.letters).count_ones() as usize <= typos(word.len())
-            });
-        letters && self.initials & query.typo_initials() != 0
+            .all(|(word, &letters)| self.letters.lacks(letters) <= typos(word.len()));
+        letters && self.initials.meets(query.typo_initials())
     }
 
-    /// The letters words of the title and keywords start with: one of 36 bits
-    /// for each ASCII letter or digit, and one shared by every other
-    /// character, which is always set.
-    pub fn initials(&self) -> u64 {
+    /// The letters words of the title and keywords start with.
+    pub fn initials(&self) -> Letters {
         self.initials
     }
 
-    /// Every character of the title, keywords and subtitle, as [`initial`]
-    /// gives them; the bit every other character shares is always set.
-    pub fn every_letter(&self) -> u64 {
-        self.letters | letters(self.subtitle.slice(..).chars())
+    /// Every letter of the title, keywords and subtitle.
+    pub fn every_letter(&self) -> Letters {
+        self.letters | Letters::in_text(self.subtitle.slice(..).chars())
     }
 }
 
