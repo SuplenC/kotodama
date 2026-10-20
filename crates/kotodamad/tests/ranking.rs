@@ -1200,7 +1200,7 @@ fn a_bare_number_gives_no_answer_but_an_expression_or_conversion_takes_the_top_r
     let mut w = Calculating::new(&["42 Lab", "2048", "Kilometre Tracker"]);
     assert_eq!(w.rows("42"), ["42 Lab"]);
     assert_eq!(w.rows("42*2"), ["84"]);
-    assert_eq!(w.rows("42 km to mi"), ["26.0975900740 mi"]);
+    assert_eq!(w.rows("42 km to mi"), ["26.097590074 mi"]);
     assert_eq!(w.rows("2048"), ["2048"]);
     assert_eq!(w.rows("2048/2")[0], "1024");
 }

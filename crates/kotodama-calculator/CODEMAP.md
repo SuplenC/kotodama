@@ -3,7 +3,8 @@
 A Bundled extension. Maintained by hand: fix stale lines when you find them, and update this map in the PR that adds, moves or renames a module here. Paths are relative to `src/`. `manifest.toml` declares it; `src/main.rs` runs the protocol loop on `kotodama-extension` and reads `Settings`. See also the [root map](../../CODEMAP.md) and [GLOSSARY.md](../../GLOSSARY.md).
 
 - `lib.rs` (`Calculator::evaluate`)
-- `math.rs` (fend)
+- `math.rs` (fend; thousands separators checked before it, `round` trims approximate numbers after it)
+- `locale.rs` (`DecimalSeparator`, from the locale or the `decimal_separator` setting)
 - `dates.rs` (dates, time zones)
 - `rates.rs` (ECB rates fetch and cache, in `dirs::cache("calculator")`)
 - `../benches/answer.rs`: arithmetic answered through the real Daemon over its socket; the p99 must stay under 8 ms.

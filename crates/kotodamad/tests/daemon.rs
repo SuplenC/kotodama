@@ -519,6 +519,75 @@ fn an_answer_from_a_zero_debounce_extension_takes_the_top_row() {
     assert_eq!(titles(&ui.results().unwrap())[0], "= 2");
 }
 
+/// Types `query` and has the calculator answer it with `title`.
+fn answered(h: &mut Harness, ui: &FrontEnd, calc: &Ext, query: &str, title: &str) {
+    h.query(ui, query);
+    let (id, ..) = live_queries(calc).pop().expect("the query is sent");
+    h.send(
+        calc,
+        FromExtension::LiveResults {
+            live_query: id,
+            results: vec![live(title, 1.0, true)],
+            done: true,
+        },
+    );
+    let rows = ui.results().expect("the answer is sent");
+    assert_eq!(titles(&rows)[0], title);
+}
+
+/// The History as it is kept on disk.
+fn kept(h: &Harness) -> serde_json::Value {
+    serde_json::to_value(h.daemon.history()).expect("encode the History")
+}
+
+#[test]
+fn running_answers_leaves_the_history_as_it_was_but_logs_every_run() {
+    let mut h = Harness::with_config(
+        vec![plain("apps"), calculator()],
+        config("[history]\nusage_log = true"),
+    );
+    let apps = h.up(0);
+    let calc = h.up(1);
+    h.add(&apps, vec![app("2048 game")]);
+    let ui = h.front_end();
+    pick(&mut h, &ui, "2048", "apps", "2048-game");
+    let before = kept(&h);
+    let picked = h.daemon.history().picked().count();
+    h.saved.1.borrow_mut().clear();
+
+    for n in 0..100 {
+        let title = format!("= {}", n * (n + 2));
+        answered(&mut h, &ui, &calc, &format!("{n}*{}", n + 2), &title);
+        run(&mut h, &ui, "calc", &title, "calc", "open");
+    }
+
+    assert_eq!(h.daemon.history().picked().count(), picked);
+    assert_eq!(kept(&h), before);
+    let runs = logged(&h)
+        .iter()
+        .filter(|used| matches!(used, Used::Pick { extension, .. } if extension == "calc"))
+        .count();
+    assert_eq!(runs, 100, "every run is in the Usage log");
+}
+
+#[test]
+fn a_result_picked_below_an_answer_is_not_learned_as_picked_over_it() {
+    let mut h = Harness::new(vec![plain("apps"), calculator()]);
+    let apps = h.up(0);
+    let calc = h.up(1);
+    h.add(&apps, vec![app("2048 game")]);
+    let ui = h.front_end();
+
+    for _ in 0..3 {
+        answered(&mut h, &ui, &calc, "20", "= 20");
+        run(&mut h, &ui, "apps", "2048-game", "apps", "open");
+    }
+
+    let kept = kept(&h).to_string();
+    assert!(kept.contains("2048-game"), "the app is learned: {kept}");
+    assert!(!kept.contains("calc"), "the answer is not: {kept}");
+}
+
 #[test]
 fn an_answer_from_a_debounced_extension_is_ranked_like_any_late_result() {
     let mut h = Harness::new(vec![plain("apps"), web()]);

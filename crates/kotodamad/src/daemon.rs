@@ -496,6 +496,18 @@ impl Session {
         !self.selection_moved && now < self.typed + RERANK_FOR
     }
 
+    /// Whether `source` is a Live query's answer, which the History keeps
+    /// nothing of.
+    fn is_answer(&self, source: Source) -> bool {
+        let Source::Live(ext, n) = source else {
+            return false;
+        };
+        self.live[ext.0]
+            .results
+            .get(n as usize)
+            .is_some_and(|result| result.answer)
+    }
+
     /// Sends `results`, the rows of `shown`, as the next version. A late
     /// update notes each Result it adds or moves up a row as risen in that
     /// version.
@@ -2781,6 +2793,9 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
 
     /// Records that the user picked a Result in a Front end's session, by
     /// running `action`. A Result an Alias named counts for the Alias alone.
+    /// An answer goes in the Usage log only: neither Frecency nor Learned
+    /// choices count it, and a Result picked below one isn't learned as
+    /// picked over it.
     fn picked(
         &mut self,
         front_end: FrontEndId,
@@ -2816,6 +2831,11 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             .filter(|(named, _)| Some(*named) == source)
         {
             self.history.touch(OWN, &alias_id(alias), when);
+        } else if source.is_some_and(|source| session.is_answer(source)) {
+            // An answer is the query worked out, a new Result for every
+            // expression, and takes the top row whatever its Frecency: the
+            // History would only fill up with it.
+            return;
         } else if let Some(Source::Live(ext, _)) = source
             && self.extensions[ext.0].fallback()
         {
@@ -2834,6 +2854,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
                     session.shown[..at]
                         .iter()
                         .rev()
+                        .filter(|&&(_, answer)| !answer)
                         .filter_map(|&(shown, _)| self.history_key(session, shown))
                         .filter(|&above| above != key)
                         .map(|(extension, id)| (extension.to_owned(), id.to_owned()))

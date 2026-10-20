@@ -4,7 +4,7 @@
 use std::time::{Duration, Instant};
 
 use jiff::Zoned;
-use kotodama_calculator::{Calculator, Evaluation, Rates};
+use kotodama_calculator::{Calculator, DecimalSeparator, Evaluation, Rates};
 
 /// Tuesday 20 October 2026, 10:00 in Warsaw.
 fn now() -> Zoned {
@@ -17,6 +17,13 @@ fn answer(query: &str) -> Option<String> {
 
 fn answer_with(calculator: &mut Calculator, query: &str) -> Option<String> {
     result(calculator.evaluate(query, false, &now()))
+}
+
+/// What `query` comes to where decimals are written with a comma.
+fn with_comma(query: &str) -> Option<String> {
+    let mut calculator = Calculator::new(Rates::default());
+    calculator.set_decimal_separator(DecimalSeparator::Comma);
+    answer_with(&mut calculator, query)
 }
 
 /// What a query after the `=` prefix comes to.
@@ -162,4 +169,50 @@ fn times_convert_between_time_zones() {
         Some("03:00 EDT, Tuesday 20 October")
     );
     assert_eq!(answer("5pm PT in Atlantis"), None);
+}
+
+#[test]
+fn an_approximate_answer_has_no_zero_padding() {
+    assert_eq!(answer("42 km in mi").as_deref(), Some("26.097590074 mi"));
+    assert_eq!(answer("1000000/3").as_deref(), Some("333333.333333"));
+    assert_eq!(answer("2/3 m").as_deref(), Some("0.6666666667 m"));
+}
+
+#[test]
+fn a_thousands_separator_is_read_as_one() {
+    assert_eq!(answer("1,000 + 1").as_deref(), Some("1001"));
+    assert_eq!(answer("1,000 * 2").as_deref(), Some("2000"));
+    assert_eq!(answer("12,345.5 * 2").as_deref(), Some("24691"));
+    assert_eq!(routed("1,000").as_deref(), Some("1000"));
+}
+
+#[test]
+fn a_decimal_comma_where_a_dot_is_the_separator_gives_nothing_rather_than_a_misreading() {
+    assert_eq!(answer("3,5 * 2"), None);
+    assert_eq!(answer("1,5 + 1"), None);
+    assert_eq!(answer("1.000,5 + 1"), None);
+}
+
+#[test]
+fn with_a_decimal_comma_answers_read_and_write_one() {
+    assert_eq!(with_comma("3,5 * 2").as_deref(), Some("7"));
+    assert_eq!(with_comma("1,5 + 1").as_deref(), Some("2,5"));
+    assert_eq!(with_comma("1/3").as_deref(), Some("0,3333333333"));
+    assert_eq!(
+        with_comma("42 km in mi").as_deref(),
+        Some("26,097590074 mi")
+    );
+    assert_eq!(
+        with_comma("1,5 kg in lb").as_deref(),
+        Some("3,3069339328 lbs")
+    );
+    assert_eq!(with_comma("1.000 + 1").as_deref(), Some("1001"));
+    assert_eq!(with_comma("1.000.000,5 * 2").as_deref(), Some("2000001"));
+}
+
+#[test]
+fn with_a_decimal_comma_a_dot_between_digits_must_group_thousands() {
+    assert_eq!(with_comma("3.5 * 2"), None);
+    assert_eq!(with_comma("0.1 + 0.2"), None);
+    assert_eq!(with_comma("1,000.5 + 1"), None);
 }

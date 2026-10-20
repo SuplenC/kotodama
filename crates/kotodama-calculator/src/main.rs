@@ -9,6 +9,9 @@
 //! network = true
 //! # Where the rates come from: frankfurter's API, or anything answering like it.
 //! rates_url = "https://api.frankfurter.app/latest"
+//! # How decimals are written, "dot" (3.5) or "comma" (3,5); the other groups
+//! # thousands. Unset, the locale's (`LC_ALL`, `LC_NUMERIC` or `LANG`).
+//! decimal_separator = "comma"
 //! ```
 
 use std::process::ExitCode;
@@ -17,7 +20,9 @@ use std::thread;
 use std::time::{Duration, Instant, SystemTime};
 
 use jiff::Zoned;
-use kotodama_calculator::{Answer, COPY, COPY_EXPRESSION, Calculator, Evaluation, Rates, rates};
+use kotodama_calculator::{
+    Answer, COPY, COPY_EXPRESSION, Calculator, DecimalSeparator, Evaluation, Rates, rates,
+};
 use kotodama_extension::{Connection, Event, STACK_SIZE, Writer, config, dirs};
 use kotodama_protocol::{Clipboard, FromExtension, Outcome, Table, ToExtension};
 
@@ -45,9 +50,13 @@ fn run() -> Result<(), kotodama_protocol::Error> {
     } = kotodama_extension::connect()?;
 
     let rates = Rates::default();
+    let locale = DecimalSeparator::from_env();
+    let mut calculator = Calculator::new(rates.clone());
+    calculator.set_decimal_separator(locale);
     let mut extension = Extension {
         writer,
-        calculator: Calculator::new(rates.clone()),
+        calculator,
+        locale,
         rates,
         settings: Settings::default(),
         events,
@@ -68,6 +77,8 @@ fn run() -> Result<(), kotodama_protocol::Error> {
 struct Settings {
     network: bool,
     rates_url: String,
+    /// `None` for the locale's.
+    decimal_separator: Option<DecimalSeparator>,
 }
 
 impl Default for Settings {
@@ -75,6 +86,7 @@ impl Default for Settings {
         Settings {
             network: true,
             rates_url: rates::DEFAULT_URL.to_owned(),
+            decimal_separator: None,
         }
     }
 }
@@ -89,6 +101,14 @@ impl Settings {
         }
         if let Some(url) = config::string(table, "rates_url") {
             url.clone_into(&mut settings.rates_url);
+        }
+        if let Some(name) = config::string(table, "decimal_separator") {
+            settings.decimal_separator = DecimalSeparator::named(name);
+            if settings.decimal_separator.is_none() {
+                config::warn(format_args!(
+                    "`decimal_separator` should be \"dot\" or \"comma\", not \"{name}\""
+                ));
+            }
         }
         settings
     }
@@ -118,6 +138,8 @@ struct Waiting {
 struct Extension {
     writer: Writer,
     calculator: Calculator,
+    /// The locale's decimal separator, which the config may override.
+    locale: DecimalSeparator,
     rates: Rates,
     settings: Settings,
     events: Sender<Event<Fetched>>,
@@ -132,6 +154,10 @@ impl Extension {
         match message {
             ToExtension::Config(config) => {
                 self.settings = Settings::from_config(&config);
+                let separator = self.settings.decimal_separator.unwrap_or(self.locale);
+                self.calculator.set_decimal_separator(separator);
+                // Its value is written with the separator it was worked out with.
+                self.last = None;
                 Ok(())
             }
             ToExtension::LiveQuery { id, query, prefix } => {
