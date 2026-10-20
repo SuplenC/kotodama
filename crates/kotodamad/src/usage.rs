@@ -23,14 +23,18 @@
 //! When the file would grow past [`MAX_BYTES`], it is renamed to
 //! `usage.jsonl.1`, replacing the one before, and a new file is started, so
 //! the log never takes more than twice that. Turning the log off keeps what
-//! was written; delete the files to forget it.
+//! was written; delete the files to forget it. Clearing the History deletes
+//! both files, and clearing one Extension's history drops the picks of its
+//! Results from them. Undoing either puts back the History, never the log.
 
 use std::fs::{self, File, OpenOptions};
-use std::io::{self, Write};
+use std::io::{self, BufRead, BufReader, BufWriter, Write};
 use std::path::{Path, PathBuf};
-use std::sync::mpsc::{self, SyncSender};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::mpsc::{self, Sender};
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::host::spawn;
 
@@ -105,6 +109,59 @@ impl Log {
         self.file = Some((file, size));
         Ok(())
     }
+
+    /// Forgets the log, current and rotated: all of it, or only the picks of
+    /// one Extension's Results.
+    fn forget(&mut self, extension: Option<&str>) -> io::Result<()> {
+        self.file = None;
+        for path in [rotated(&self.path), self.path.clone()] {
+            let kept = match extension {
+                None => fs::remove_file(&path),
+                Some(extension) => drop_picks(&path, extension),
+            };
+            match kept {
+                Err(err) if err.kind() != io::ErrorKind::NotFound => return Err(err),
+                _ => {}
+            }
+        }
+        Ok(())
+    }
+}
+
+/// The part of a line that says whose Result was picked.
+#[derive(Deserialize)]
+struct Picked {
+    extension: Option<String>,
+}
+
+/// Rewrites the log at `path` without the picks of `extension`'s Results,
+/// replacing it whole so a crash leaves the old one.
+fn drop_picks(path: &Path, extension: &str) -> io::Result<()> {
+    let lines = BufReader::new(File::open(path)?).split(b'\n');
+    let mut partial = path.as_os_str().to_owned();
+    partial.push(".partial");
+    let partial = PathBuf::from(partial);
+    let _ = fs::remove_file(&partial);
+    let mut kept = BufWriter::new(open(&partial)?);
+    let mut dropped = false;
+    for line in lines {
+        let line = line?;
+        let picked = serde_json::from_slice::<Picked>(&line)
+            .is_ok_and(|picked| picked.extension.as_deref() == Some(extension));
+        if picked {
+            dropped = true;
+        } else {
+            kept.write_all(&line)?;
+            kept.write_all(b"\n")?;
+        }
+    }
+    kept.flush()?;
+    drop(kept);
+    if dropped {
+        fs::rename(&partial, path)
+    } else {
+        fs::remove_file(&partial)
+    }
 }
 
 /// The older log, which the current one replaces when it's full.
@@ -130,35 +187,76 @@ fn open(path: &Path) -> io::Result<File> {
 /// rather than held in memory.
 const PENDING: usize = 1024;
 
+/// Forgets the log at `path`, current and rotated, on a thread of its own, as
+/// [`Writer::forget`] does, for when no Writer is running.
+pub fn forget(path: PathBuf, extension: Option<String>) {
+    spawn("usage".into(), move || {
+        if let Err(err) = Log::new(path, MAX_BYTES).forget(extension.as_deref()) {
+            log::error!("couldn't forget the usage log: {err}");
+        }
+    });
+}
+
+/// What the Writer's thread is asked to do.
+enum Op {
+    Write(Entry),
+    /// Forget the log, or one Extension's picks in it.
+    Forget(Option<String>),
+}
+
 /// Writes the log on a thread of its own, so the Daemon never waits for the
 /// disk. The thread ends when this is dropped.
 pub struct Writer {
-    entries: SyncSender<Entry>,
+    ops: Sender<Op>,
+    /// How many entries wait to be written.
+    pending: Arc<AtomicUsize>,
 }
 
 impl Writer {
     pub fn new(path: PathBuf) -> Self {
-        let (entries, pending) = mpsc::sync_channel::<Entry>(PENDING);
+        let (ops, queue) = mpsc::channel::<Op>();
+        let pending = Arc::new(AtomicUsize::new(0));
+        let waiting = Arc::clone(&pending);
         spawn("usage".into(), move || {
             let mut log = Log::new(path, MAX_BYTES);
             let mut failing = false;
-            while let Ok(entry) = pending.recv() {
-                match log.write(&entry) {
-                    Ok(()) => failing = false,
-                    Err(err) if !failing => {
-                        failing = true;
-                        log::error!("couldn't write the usage log: {err}");
+            while let Ok(op) = queue.recv() {
+                match op {
+                    Op::Write(entry) => {
+                        waiting.fetch_sub(1, Ordering::Relaxed);
+                        match log.write(&entry) {
+                            Ok(()) => failing = false,
+                            Err(err) if !failing => {
+                                failing = true;
+                                log::error!("couldn't write the usage log: {err}");
+                            }
+                            Err(_) => {}
+                        }
                     }
-                    Err(_) => {}
+                    Op::Forget(extension) => {
+                        if let Err(err) = log.forget(extension.as_deref()) {
+                            log::error!("couldn't forget the usage log: {err}");
+                        }
+                    }
                 }
             }
         });
-        Writer { entries }
+        Writer { ops, pending }
     }
 
-    /// Never blocks: an entry that finds the queue full is dropped.
+    /// Never blocks: an entry that finds [`PENDING`] others waiting is dropped.
     pub fn write(&self, entry: Entry) {
-        let _ = self.entries.try_send(entry);
+        if self.pending.load(Ordering::Relaxed) < PENDING {
+            self.pending.fetch_add(1, Ordering::Relaxed);
+            let _ = self.ops.send(Op::Write(entry));
+        }
+    }
+
+    /// Forgets the log, current and rotated, once the entries before are
+    /// written: all of it, or only the picks of `extension`'s Results. Never
+    /// blocks, and is never dropped for a full queue.
+    pub fn forget(&self, extension: Option<String>) {
+        let _ = self.ops.send(Op::Forget(extension));
     }
 }
 
@@ -258,6 +356,66 @@ mod tests {
             .write(&query(11, "fir"))
             .unwrap();
         assert_eq!(fs::read_to_string(&path).unwrap().lines().count(), 2);
+    }
+
+    fn pick(at: u64, extension: &str, id: &str) -> Entry {
+        Entry {
+            at,
+            used: Used::Pick {
+                query: "fi".into(),
+                extension: extension.into(),
+                id: id.into(),
+                action: "open".into(),
+                row: Some(0),
+            },
+        }
+    }
+
+    /// A query and a pick of an app in the rotated log, then a pick of a
+    /// file and of an app in the current one.
+    fn rotated_log(dir: &Path) -> (Log, PathBuf, PathBuf) {
+        let older = dir.join("usage.jsonl.1");
+        let mut log = Log::new(older.clone(), MAX_BYTES);
+        log.write(&query(10, "fi")).unwrap();
+        log.write(&pick(11, "apps", "firefox")).unwrap();
+        let path = dir.join("usage.jsonl");
+        let mut log = Log::new(path.clone(), MAX_BYTES);
+        log.write(&pick(12, "files", "notes")).unwrap();
+        log.write(&pick(13, "apps", "fish")).unwrap();
+        (log, path, older)
+    }
+
+    #[test]
+    fn forgetting_everything_removes_the_log_and_the_rotated_one() {
+        let dir = tempfile::tempdir().unwrap();
+        let (mut log, path, older) = rotated_log(dir.path());
+        assert!(older.exists());
+        log.forget(None).unwrap();
+        assert!(!path.exists() && !older.exists());
+
+        log.write(&query(13, "fir")).unwrap();
+        assert_eq!(fs::read_to_string(&path).unwrap().lines().count(), 1);
+        log.forget(None).unwrap();
+        log.forget(None).unwrap();
+    }
+
+    #[test]
+    fn forgetting_one_extension_drops_its_picks_from_both_files() {
+        let dir = tempfile::tempdir().unwrap();
+        let (mut log, path, older) = rotated_log(dir.path());
+        log.forget(Some("apps")).unwrap();
+        let lines = |path: &Path| {
+            fs::read_to_string(path)
+                .unwrap()
+                .lines()
+                .map(|line| serde_json::from_str::<serde_json::Value>(line).unwrap()["at"].clone())
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(lines(&older), [10]);
+        assert_eq!(lines(&path), [12]);
+
+        log.write(&pick(14, "apps", "firefox")).unwrap();
+        assert_eq!(lines(&path).len(), 2, "the log goes on after it");
     }
 
     #[cfg(unix)]

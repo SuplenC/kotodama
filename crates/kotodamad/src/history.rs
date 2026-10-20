@@ -382,7 +382,7 @@ impl History {
     /// `above` the Results ranked above it, nearest first. A Result picked
     /// [`Settings::picks_to_learn`] times for one query becomes its Learned
     /// choice, and one picked [`Settings::picks_to_take_over`] times since the
-    /// choice was last picked replaces it.
+    /// choice was last picked replaces it. Returns the change, to undo it.
     pub fn pick(
         &mut self,
         extension: &str,
@@ -390,8 +390,8 @@ impl History {
         query: &str,
         above: &[ResultKey],
         when: When,
-    ) {
-        self.bump(extension, id, when);
+    ) -> Change {
+        let mut change = self.bump(extension, id, when);
         let at = when.at;
 
         let key = query_key(query);
@@ -402,7 +402,8 @@ impl History {
             ..
         } = self.settings;
         if !key.is_empty() {
-            let learned = self.learned.entry(key).or_insert_with(|| Learned {
+            let before = self.learned.get(&key).cloned();
+            let learned = self.learned.entry(key.clone()).or_insert_with(|| Learned {
                 choice: None,
                 strength: 0.0,
                 passed_over: Vec::new(),
@@ -442,24 +443,131 @@ impl History {
                 }
             }
             learned.at = at;
+            let after = Some(learned.clone());
+            change.learned.push(Replaced { key, before, after });
         }
-        self.trim();
+        self.trim(&mut change);
+        change
     }
 
     /// Records a pick for Frecency alone, with nothing learned for the query.
-    pub fn touch(&mut self, extension: &str, id: &str, when: When) {
-        self.bump(extension, id, when);
-        self.trim();
+    pub fn touch(&mut self, extension: &str, id: &str, when: When) -> Change {
+        let mut change = self.bump(extension, id, when);
+        self.trim(&mut change);
+        change
     }
 
-    fn bump(&mut self, extension: &str, id: &str, when: When) {
+    fn bump(&mut self, extension: &str, id: &str, when: When) -> Change {
         self.version += 1;
-        self.picks
-            .entry(extension.to_owned())
-            .or_default()
-            .entry(id.to_owned())
-            .or_insert(Picks::new(when.at))
-            .add(when, self.settings.half_life_secs);
+        let ids = self.picks.entry(extension.to_owned()).or_default();
+        let before = ids.get(id).copied();
+        let mut picks = before.unwrap_or(Picks::new(when.at));
+        picks.add(when, self.settings.half_life_secs);
+        ids.insert(id.to_owned(), picks);
+        let key = (extension.to_owned(), id.to_owned());
+        Change {
+            picks: vec![Replaced {
+                key,
+                before,
+                after: Some(picks),
+            }],
+            learned: Vec::new(),
+        }
+    }
+
+    /// Sets or removes what the History keeps for one Result.
+    fn set_picks(&mut self, (extension, id): ResultKey, picks: Option<Picks>) {
+        match picks {
+            Some(picks) => {
+                self.picks.entry(extension).or_default().insert(id, picks);
+            }
+            None => {
+                if let Some(ids) = self.picks.get_mut(&extension) {
+                    ids.remove(&id);
+                    if ids.is_empty() {
+                        self.picks.remove(&extension);
+                    }
+                }
+            }
+        }
+    }
+
+    /// Forgets the Results `keys` name: their picks, and every Learned choice
+    /// for them or count towards one. What other Learned choices were picked
+    /// over stays.
+    pub fn forget(&mut self, keys: &[ResultKey]) -> Change {
+        self.forget_where(|(extension, id)| {
+            keys.iter().any(|key| key.0 == extension && key.1 == id)
+        })
+    }
+
+    /// Forgets every Result `forgotten` is true for, as [`forget`](Self::forget) does.
+    pub fn forget_where(&mut self, forgotten: impl Fn((&str, &str)) -> bool) -> Change {
+        self.version += 1;
+        let mut change = Change::default();
+        for (extension, ids) in &mut self.picks {
+            ids.retain(|id, picks| {
+                let forget = forgotten((extension, id));
+                if forget {
+                    let key = (extension.clone(), id.clone());
+                    change.picks.push(Replaced::gone(key, *picks));
+                }
+                !forget
+            });
+        }
+        self.picks.retain(|_, ids| !ids.is_empty());
+        let is_forgotten = |key: &ResultKey| forgotten((&key.0, &key.1));
+        self.learned.retain(|query, learned| {
+            let choice = learned.choice.as_ref().is_some_and(is_forgotten);
+            if !choice && !learned.contenders.iter().any(|(key, _)| is_forgotten(key)) {
+                return true;
+            }
+            let before = learned.clone();
+            if choice {
+                learned.choice = None;
+                learned.strength = 0.0;
+                learned.passed_over.clear();
+            }
+            learned.contenders.retain(|(key, _)| !is_forgotten(key));
+            let keep = learned.choice.is_some() || !learned.contenders.is_empty();
+            let after = keep.then(|| learned.clone());
+            change.learned.push(Replaced {
+                key: query.clone(),
+                before: Some(before),
+                after,
+            });
+            keep
+        });
+        change
+    }
+
+    /// Undoes a change: puts back what it replaced, except where the History
+    /// changed again since, which stays as it is now.
+    pub fn undo(&mut self, change: Change) {
+        self.version += 1;
+        for Replaced { key, before, after } in change.picks.into_iter().rev() {
+            if self.picks(&key.0, &key.1).copied() == after {
+                self.set_picks(key, before);
+            }
+        }
+        for Replaced {
+            key: query,
+            before,
+            after,
+        } in change.learned.into_iter().rev()
+        {
+            if self.learned.get(&query) == after.as_ref() {
+                match before {
+                    Some(learned) => self.learned.insert(query, learned),
+                    None => self.learned.remove(&query),
+                };
+            }
+        }
+    }
+
+    /// Whether the History keeps picks of any of an Extension's Results.
+    pub fn has_extension(&self, extension: &str) -> bool {
+        self.picks.contains_key(extension)
     }
 
     /// How one Result was picked, if it was.
@@ -518,14 +626,25 @@ impl History {
     }
 
     /// Forgets everything.
-    pub fn clear(&mut self) {
+    pub fn clear(&mut self) -> Change {
         self.version += 1;
-        self.picks.clear();
-        self.learned.clear();
+        let mut change = Change::default();
+        for (extension, ids) in self.picks.drain() {
+            for (id, picks) in ids {
+                change
+                    .picks
+                    .push(Replaced::gone((extension.clone(), id), picks));
+            }
+        }
+        for (query, learned) in self.learned.drain() {
+            change.learned.push(Replaced::gone(query, learned));
+        }
+        change
     }
 
-    /// Forgets the weakest Results and the least recent queries past the caps.
-    fn trim(&mut self) {
+    /// Forgets the weakest Results and the least recent queries past the caps,
+    /// into `change`.
+    fn trim(&mut self, change: &mut Change) {
         let results: usize = self.picks.values().map(HashMap::len).sum();
         if results > MAX_RESULTS {
             let at = self.picked().map(|(.., p)| p.at).max().unwrap_or(0);
@@ -537,8 +656,15 @@ impl History {
             let cut = results - MAX_RESULTS;
             scores.select_nth_unstable_by(cut, f64::total_cmp);
             let floor = scores[cut];
-            for ids in self.picks.values_mut() {
-                ids.retain(|_, picks| picks.count(at, half_life) >= floor);
+            for (extension, ids) in &mut self.picks {
+                ids.retain(|id, picks| {
+                    let keep = picks.count(at, half_life) >= floor;
+                    if !keep {
+                        let key = (extension.clone(), id.clone());
+                        change.picks.push(Replaced::gone(key, *picks));
+                    }
+                    keep
+                });
             }
             self.picks.retain(|_, ids| !ids.is_empty());
         }
@@ -547,8 +673,58 @@ impl History {
             let cut = self.learned.len() - MAX_QUERIES;
             times.select_nth_unstable(cut);
             let floor = times[cut];
-            self.learned.retain(|_, learned| learned.at >= floor);
+            self.learned.retain(|query, learned| {
+                let keep = learned.at >= floor;
+                if !keep {
+                    change
+                        .learned
+                        .push(Replaced::gone(query.clone(), learned.clone()));
+                }
+                keep
+            });
         }
+    }
+}
+
+/// What one change to the History replaced, so it can be undone for a short
+/// while: each entry it touched, as it was before and after.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Change {
+    picks: Vec<Replaced<ResultKey, Picks>>,
+    /// By query, as [`query_key`] gives it.
+    learned: Vec<Replaced<String, Learned>>,
+}
+
+/// What the History kept under one key before and after a change; `None`
+/// when it kept nothing.
+#[derive(Clone, Debug, PartialEq)]
+struct Replaced<K, V> {
+    key: K,
+    before: Option<V>,
+    after: Option<V>,
+}
+
+impl<K, V> Replaced<K, V> {
+    /// What a change removed.
+    fn gone(key: K, before: V) -> Self {
+        Replaced {
+            key,
+            before: Some(before),
+            after: None,
+        }
+    }
+}
+
+impl Change {
+    /// Whether it changed nothing.
+    pub fn is_empty(&self) -> bool {
+        self.picks.is_empty() && self.learned.is_empty()
+    }
+
+    /// Adds a change made after this one, so undoing undoes both.
+    pub fn and(&mut self, later: Change) {
+        self.picks.extend(later.picks);
+        self.learned.extend(later.learned);
     }
 }
 
@@ -559,6 +735,9 @@ pub trait Store {
     /// Adds an entry to the Usage log. Called only while the config turns the
     /// log on. Must not block.
     fn log(&mut self, entry: Entry);
+    /// Forgets the Usage log, whether or not the config turns it on: all of
+    /// it, or the picks of one Extension's Results. Must not block.
+    fn forget_usage(&mut self, extension: Option<&str>);
 }
 
 /// Reads the History at `path`. A missing file is an empty History; one that
@@ -623,6 +802,15 @@ impl Store for Disk {
         self.usage_log
             .get_or_insert_with(|| usage::Writer::new(self.usage.clone()))
             .write(entry);
+    }
+
+    fn forget_usage(&mut self, extension: Option<&str>) {
+        let extension = extension.map(str::to_owned);
+        match &self.usage_log {
+            Some(writer) => writer.forget(extension),
+            // No thread is kept for a log that is off.
+            None => usage::forget(self.usage.clone(), extension),
+        }
     }
 }
 
@@ -715,6 +903,139 @@ mod tests {
         let after = counts(&history, "mail", when(74, 20 * HOUR));
         assert_eq!(before, 0.5, "never picked in the evening");
         assert!(after > 0.9, "picked as much in the evening lately: {after}");
+    }
+
+    fn key(extension: &str, id: &str) -> ResultKey {
+        (extension.to_owned(), id.to_owned())
+    }
+
+    /// Firefox picked through its Identity three times for `fi`, over Files,
+    /// and Fish three times for `sh`.
+    fn used() -> History {
+        let mut history = History::default();
+        let above = [key("apps", "files")];
+        for day in 0..3 {
+            history.pick(IDENTITIES, "app:firefox", "fi", &above, when(day, 9 * HOUR));
+            history.touch("apps", "firefox", when(day, 9 * HOUR));
+            history.pick("apps", "fish", "sh", &[], when(day, 10 * HOUR));
+        }
+        history
+    }
+
+    /// The History as it is kept, which undoing must restore.
+    fn kept(history: &History) -> serde_json::Value {
+        serde_json::to_value(history).unwrap()
+    }
+
+    fn firefox() -> [ResultKey; 2] {
+        [key(IDENTITIES, "app:firefox"), key("apps", "firefox")]
+    }
+
+    #[test]
+    fn forgetting_a_result_drops_its_picks_and_the_learned_choices_for_it() {
+        let mut history = used();
+        let at = when(3, 0).at;
+        assert!(!history.learned("fi", at).is_empty());
+        history.forget(&firefox());
+        assert!(history.picks(IDENTITIES, "app:firefox").is_none());
+        assert!(history.picks("apps", "firefox").is_none());
+        assert!(history.learned("fi", at).is_empty());
+        assert!(history.picks("apps", "fish").is_some(), "the rest stays");
+        assert_eq!(history.learned("sh", at)[0].id, "fish");
+    }
+
+    #[test]
+    fn a_result_picked_towards_a_learned_choice_is_forgotten_from_it_too() {
+        let mut history = History::default();
+        history.pick("apps", "fish", "fi", &[], when(0, 9 * HOUR));
+        history.forget(&[key("apps", "fish")]);
+        assert!(history.is_empty(), "{history:?}");
+    }
+
+    #[test]
+    fn undoing_a_forget_restores_the_history_exactly() {
+        let mut history = used();
+        let before = kept(&history);
+        let change = history.forget(&firefox());
+        history.undo(change);
+        assert_eq!(kept(&history), before);
+    }
+
+    #[test]
+    fn undoing_a_clear_restores_the_history_exactly() {
+        let mut history = used();
+        let before = kept(&history);
+        let change = history.clear();
+        assert!(history.is_empty());
+        history.undo(change);
+        assert_eq!(kept(&history), before);
+    }
+
+    #[test]
+    fn undoing_a_pick_restores_the_history_exactly() {
+        let mut history = used();
+        let before = kept(&history);
+        let above = [key("apps", "files")];
+        let mut change = history.pick(IDENTITIES, "app:firefox", "fi", &above, when(4, 9 * HOUR));
+        change.and(history.touch("apps", "firefox", when(4, 9 * HOUR)));
+        history.undo(change);
+        assert_eq!(kept(&history), before);
+
+        let change = history.pick("apps", "mail", "ma", &[], when(4, 9 * HOUR));
+        history.undo(change);
+        assert_eq!(kept(&history), before, "a Result picked for the first time");
+    }
+
+    #[test]
+    fn undoing_a_pick_puts_back_what_the_caps_trimmed_for_it() {
+        let mut history = History::default();
+        for n in 0..MAX_RESULTS {
+            // A second apart, so one is the weakest.
+            history.touch("apps", &n.to_string(), when(0, n as u32));
+        }
+        let before = kept(&history);
+        let change = history.touch("apps", "new", when(1, 9 * HOUR));
+        assert_eq!(history.picked().count(), MAX_RESULTS);
+        history.undo(change);
+        assert_eq!(kept(&history), before);
+    }
+
+    #[test]
+    fn undo_leaves_alone_what_changed_since() {
+        let mut history = used();
+        let change = history.clear();
+        history.touch("apps", "mail", when(4, 9 * HOUR));
+        history.touch("apps", "fish", when(4, 9 * HOUR));
+        let fish = *history.picks("apps", "fish").unwrap();
+        history.undo(change);
+        assert!(history.picks("apps", "mail").is_some(), "picked since");
+        assert_eq!(
+            history.picks("apps", "fish"),
+            Some(&fish),
+            "picked again since"
+        );
+        assert!(
+            history.picks(IDENTITIES, "app:firefox").is_some(),
+            "put back"
+        );
+        assert_eq!(history.learned("fi", when(4, 0).at)[0].id, "app:firefox");
+    }
+
+    #[test]
+    fn forgetting_what_one_extension_offered_keeps_the_rest() {
+        let mut history = used();
+        history.touch("files", "notes", when(0, 9 * HOUR));
+        let before = kept(&history);
+        let change = history.forget_where(|(extension, id)| {
+            extension == "apps" || (extension == IDENTITIES && id == "app:firefox")
+        });
+        let at = when(3, 0).at;
+        assert!(history.learned("fi", at).is_empty());
+        assert!(history.learned("sh", at).is_empty());
+        let left: Vec<_> = history.picked().map(|(e, i, _)| (e, i)).collect();
+        assert_eq!(left, [("files", "notes")]);
+        history.undo(change);
+        assert_eq!(kept(&history), before);
     }
 
     /// How much an app's picks count at `when`, of their decayed number.

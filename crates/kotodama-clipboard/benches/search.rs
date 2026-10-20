@@ -89,6 +89,7 @@ impl Desktop for Nothing {
 impl Store for Nothing {
     fn save(&mut self, _: &Picks) {}
     fn log(&mut self, _: Entry) {}
+    fn forget_usage(&mut self, _: Option<&str>) {}
 }
 
 /// A full history's Items, made the same on every run: commands, URLs,

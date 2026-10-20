@@ -62,11 +62,13 @@ impl Desktop for Outputs {
     }
 }
 
-/// The History as last saved, and what was put in the usage log.
+/// The History as last saved, what was put in the usage log, and what was
+/// forgotten of the log: `None` for all of it, or an Extension's name.
 #[derive(Clone, Default)]
 pub struct Saved(
     pub Rc<RefCell<Option<History>>>,
     pub Rc<RefCell<Vec<Entry>>>,
+    pub Rc<RefCell<Vec<Option<String>>>>,
 );
 
 impl Store for Saved {
@@ -76,6 +78,10 @@ impl Store for Saved {
 
     fn log(&mut self, entry: Entry) {
         self.1.borrow_mut().push(entry);
+    }
+
+    fn forget_usage(&mut self, extension: Option<&str>) {
+        self.2.borrow_mut().push(extension.map(str::to_owned));
     }
 }
 
