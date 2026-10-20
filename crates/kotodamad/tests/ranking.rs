@@ -323,6 +323,41 @@ fn the_kind_order_does_not_decide_between_results_of_one_thing() {
     assert_eq!(rows(&mut w, "fire"), ["firefox.desktop", "Firefox"]);
 }
 
+/// M1: though the shorter title would win a tie.
+#[test]
+fn an_exact_title_beats_an_exact_keyword() {
+    let mut w = World::with(vec![with_keywords(app("Ash"), &["fire"]), app("Fire")], "");
+    assert_eq!(rows(&mut w, "fire"), ["Fire", "Ash"]);
+}
+
+/// The rows for `query` of a desktop with `apps` and the emoji Extension's
+/// real Items.
+fn with_emoji(apps: &[&str], query: &str) -> Vec<String> {
+    let mut h = Harness::with_config(vec![plain("apps"), plain("emoji")], config(""));
+    let (apps_ext, emoji) = (h.up(0), h.up(1));
+    h.add(&apps_ext, apps.iter().map(|title| app(title)).collect());
+    h.add(&emoji, kotodama_emoji::items());
+    let ui = h.front_end();
+    titles(&h.query(&ui, query))
+        .into_iter()
+        .map(str::to_owned)
+        .collect()
+}
+
+// Regression: #121.
+#[test]
+fn the_emoji_named_as_the_query_comes_first_among_emoji() {
+    let rows = with_emoji(&[], "fire");
+    assert_eq!(rows[0], "🔥 Fire", "{rows:?}");
+}
+
+// Regression: #121.
+#[test]
+fn an_app_named_as_the_query_comes_before_the_emoji_of_that_name() {
+    let rows = with_emoji(&["Fire"], "fire");
+    assert_eq!(rows[..2], ["Fire", "🔥 Fire"], "{rows:?}");
+}
+
 // Case, accents and typos.
 
 /// T1
