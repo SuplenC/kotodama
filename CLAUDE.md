@@ -10,6 +10,10 @@ Read the root `CODEMAP.md` first, then the `CODEMAP.md` of the crate you work in
 - **Triage labels**: defaults (`needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`). See `docs/agents/triage-labels.md`.
 - **Domain docs**: single-context (`GLOSSARY.md` + `docs/adr/` at root). See `docs/agents/domain.md`.
 
+## Writing code
+
+Before writing or reviewing Rust in this repo, read `docs/agents/code-quality.md`: the coding and comment rules, each with its source. New code follows them; older code is brought in line by #108. Code comments carry the why, never an issue or ADR number; those belong in the issue and the PR.
+
 ## Priorities
 
 Speed and memory use come first. Every design choice is measured against keystroke-to-pixel latency and resident memory.
