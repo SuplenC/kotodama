@@ -56,7 +56,7 @@ Apps, Quicklinks and every other program started for the user run after the word
 
 ### Ranking that learns
 
-Results rank by how well they match before anything else, in tiers: the whole title (or one of the Item's keywords) is the query, then the query is the initials of consecutive words (`vsc` for Visual Studio Code) or a word starts with it, then the query is inside a word, then its letters are scattered. Within a tier, Frecency decides, then nucleo's score, then the shorter title. Neither case nor accents matter (`zolw` finds Żółw), every word of the query must match in any order, a single letter matches only at the start of a word, and a trailing space makes the last word a whole word. A subtitle is searched once the query has 3 letters, and only at word starts.
+Results rank by how well they match before anything else, in tiers: the whole title (or one of the Item's keywords) is the query, then the query is the initials of consecutive words (`vsc` for Visual Studio Code) or a word starts with it, then the query is inside a word, then its letters are scattered. Within a tier, Frecency decides, then the kind of Result (an app before a project, a project before a bookmark (a `url` Item), anything else, then a file), then nucleo's score, then the shorter title. Neither case nor accents matter (`zolw` finds Żółw), every word of the query must match in any order, a single letter matches only at the start of a word, and a trailing space makes the last word a whole word. A subtitle is searched once the query has 3 letters, and only at word starts.
 
 Every Action the user runs is recorded in `$XDG_STATE_HOME/kotodama/history.json` (by default `~/.local/state/kotodama/`). A picked Result gets a Frecency boost, which halves every 14 days but never quite reaches zero. Frecency also learns the time of day: picks count in full at the times of day the Result is usually picked, and half as much at a time of day it never is, so something used every morning ranks higher in the morning. A Result used about daily for a week ranks one tier higher, but never above an exact title. When the user picks the same Result 3 times for one query, it becomes that query's Learned choice: it ranks first for that query and for the queries that extend it or that it extends (`fi`, `fir`, `fire`), but only over the Results that ranked above it when it was picked, so a new app with exactly that title still wins. Two picks of another Result since the Learned choice was last picked take over from it. Learning fades with Frecency's half-life; when two Learned choices apply, the one picked more often wins, then the one learned for the closer query. Both apply to Indexed items and Live query results. Items that several Extensions offer with the same Identity (a page from bookmarks and from browser history) share their Frecency and Learned choices: picking one raises the others. Each still shows as a Result of its own, and the one the user picks through most takes the best place any of them ranks in. The "Clear history" Result empties the history.
 
@@ -93,6 +93,15 @@ menu = [
     { extension = "apps", item = "firefox" },
     { extension = "kotodama", item = "clear-history" },
 ]
+```
+
+The kind order is a setting too, which reloads with the config:
+
+```toml
+[ranking]
+# On an equal match, kinds earlier in the list rank first. `*` stands for every
+# kind not in it; without it, those rank last.
+kinds = ["app", "project", "url", "*", "file"]
 ```
 
 Aliases and Quicklinks live in the config directory and reload with it:

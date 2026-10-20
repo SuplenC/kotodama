@@ -30,6 +30,7 @@ use crate::history::{
 };
 use crate::index::{Index, Slot};
 use crate::keywords::{self, Keywords};
+use crate::kind_order::KindOrder;
 use crate::rank::{self, Haystack, Matched, Tier, Tiers};
 use crate::usage::{Entry, Used};
 
@@ -284,6 +285,9 @@ struct Candidate {
     /// Named by an Alias rather than by its own title or keyword, which wins
     /// a tie.
     by_alias: bool,
+    /// Where its Item kind ranks on an equal match, lowest first (see
+    /// [`KindOrder`]).
+    kind: u8,
     /// nucleo's score.
     score: u32,
     /// The title's length in characters: a shorter title wins a tie.
@@ -291,7 +295,7 @@ struct Candidate {
 }
 
 impl Candidate {
-    fn new(source: Source, tier: Tier, score: u32, len: u32) -> Self {
+    fn new(source: Source, tier: Tier, kind: u8, score: u32, len: u32) -> Self {
         Candidate {
             source,
             answer: false,
@@ -301,13 +305,14 @@ impl Candidate {
             direct: 0.0,
             fine: tier,
             by_alias: false,
+            kind,
             score,
             len,
         }
     }
 
-    /// Answers first, then by class, how well it matches, Frecency, and
-    /// nucleo's score.
+    /// Answers first, then by class, how well it matches, Frecency, its Item
+    /// kind, and nucleo's score.
     fn rank(&self, other: &Candidate) -> std::cmp::Ordering {
         other
             .answer
@@ -317,6 +322,7 @@ impl Candidate {
             .then(other.frecency.total_cmp(&self.frecency))
             .then(other.fine.cmp(&self.fine))
             .then(self.by_alias.cmp(&other.by_alias))
+            .then(self.kind.cmp(&other.kind))
             .then(other.score.cmp(&self.score))
             .then(self.len.cmp(&other.len))
             .then(self.source.cmp(&other.source))
@@ -606,6 +612,7 @@ pub struct Daemon<L, D, S> {
     started: Instant,
     keywords: Keywords,
     empty_query: EmptyQuery,
+    kinds: KindOrder,
     /// One per Quicklink, then the clear-history Item, then the Undo Item
     /// while there is something to undo.
     own: Vec<Own>,
@@ -659,6 +666,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             started: now,
             keywords: Keywords::default(),
             empty_query: EmptyQuery::default(),
+            kinds: KindOrder::default(),
             own: Vec::new(),
             undos: Vec::new(),
             frecent: Vec::new(),
@@ -670,6 +678,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
         daemon.load_keywords();
         daemon.load_settings();
         daemon.empty_query = EmptyQuery::from_config(&daemon.config);
+        daemon.kinds = KindOrder::from_config(&daemon.config);
         for id in 0..daemon.extensions.len() {
             daemon.start(ExtensionId(id), now);
         }
@@ -1886,6 +1895,11 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             self.empty_query = empty_query;
             self.mark_late();
         }
+        let kinds = KindOrder::from_config(&self.config);
+        if kinds != self.kinds {
+            self.kinds = kinds;
+            self.mark_late();
+        }
         for ext in &mut self.extensions {
             if ext.sender().is_none() {
                 continue;
@@ -2097,7 +2111,14 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
                         .item(&entry.haystack, &entry.item, &session.folded, matched)
             {
                 let len = entry.haystack.title.len() as u32;
-                candidates.push(Candidate::new(Source::Indexed(slot), tier, score, len));
+                let kind = self.kinds.place(&entry.item.kind);
+                candidates.push(Candidate::new(
+                    Source::Indexed(slot),
+                    tier,
+                    kind,
+                    score,
+                    len,
+                ));
             }
         }
         // Up to here the candidates are in slot order.
@@ -2118,8 +2139,14 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
                     .unwrap_or(Tier::Scattered);
                 let score = (result.score.get() * session.max_score as f32).round() as u32;
                 let len = result.item.title.chars().count() as u32;
-                let mut candidate =
-                    Candidate::new(Source::Live(ExtensionId(ext), n as u32), tier, score, len);
+                let kind = self.kinds.place(&result.item.kind);
+                let mut candidate = Candidate::new(
+                    Source::Live(ExtensionId(ext), n as u32),
+                    tier,
+                    kind,
+                    score,
+                    len,
+                );
                 candidate.answer = result.answer;
                 candidates.push(candidate);
             }
@@ -2134,7 +2161,14 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
                         .item(&own.haystack, &own.item, &session.folded, matched)
             {
                 let len = own.haystack.title.len() as u32;
-                candidates.push(Candidate::new(Source::Own(n as u32), tier, score, len));
+                let kind = self.kinds.place(&own.item.kind);
+                candidates.push(Candidate::new(
+                    Source::Own(n as u32),
+                    tier,
+                    kind,
+                    score,
+                    len,
+                ));
             }
         }
         let primary = self.learn(&mut session, &mut candidates, indexed, now);
@@ -2290,6 +2324,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
                     let mut candidate = Candidate::new(
                         source,
                         Tier::Exact,
+                        self.kinds.place(&item.kind),
                         session.max_score,
                         item.title.chars().count() as u32,
                     );
