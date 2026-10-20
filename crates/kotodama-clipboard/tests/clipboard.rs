@@ -370,17 +370,32 @@ fn a_shorter_age_in_a_new_config_expires_entries_at_once() {
     assert_eq!(extension.removed(), [old]);
 }
 
+/// The Daemon copies, so Copy to Clipboard works even while the Extension
+/// has no clipboard of its own (no Wayland display here).
 #[test]
-fn copying_without_a_clipboard_says_why() {
+fn copy_to_clipboard_hands_the_clip_to_the_daemon_to_copy() {
     let state = tempfile::tempdir().unwrap();
-    let id = copy(state.path(), text("hello"), 0);
+    let id = copy(state.path(), text("hello"), 10);
+    let data = png(64, 32);
+    let image = copy(
+        state.path(),
+        Copied::read("image/png", data.clone()).unwrap(),
+        5,
+    );
     let mut extension = Extension::start(state.path(), Table::new());
     extension.added();
 
-    match extension.run(&id, "copy") {
-        Outcome::Failed { message } => assert!(message.contains("clipboard"), "{message}"),
-        other => panic!("expected a failure, got {other:?}"),
-    }
+    assert_eq!(
+        extension.run(&id, "copy"),
+        Outcome::Copy(Clipboard::Text("hello".into()))
+    );
+    assert_eq!(
+        extension.run(&image, "copy"),
+        Outcome::Copy(Clipboard::Image {
+            mime: "image/png".into(),
+            data: Bytes(data),
+        })
+    );
 }
 
 #[test]

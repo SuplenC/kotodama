@@ -8,7 +8,7 @@ use std::process::ExitCode;
 use std::sync::mpsc::RecvTimeoutError;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use kotodama_clipboard::copied::{self, Copied};
+use kotodama_clipboard::copied::Copied;
 use kotodama_clipboard::history::{Content, History, Limits};
 use kotodama_clipboard::items::{self, CLEAR, COPY, DELETE, DETAIL_VIEW, HISTORY, LIST_VIEW};
 use kotodama_clipboard::wayland::{Change, Clipboard};
@@ -41,7 +41,7 @@ fn run() -> Result<(), String> {
         writer,
         history,
         limits: Limits::default(),
-        clipboard: None,
+        _watching: None,
         configured: false,
         list_open: false,
         detail: None,
@@ -69,7 +69,7 @@ fn run() -> Result<(), String> {
                 // already expires by the user's limits.
                 if first && extension.configured {
                     let events = events.clone();
-                    extension.clipboard = Clipboard::watch(move |change| {
+                    extension._watching = Clipboard::watch(move |change| {
                         let _ = events.send(Event::Own(change));
                     })
                     .map_err(|err| kotodama_extension::log!("not watching the clipboard: {err}"))
@@ -89,7 +89,9 @@ struct Extension {
     writer: Writer,
     history: History,
     limits: Limits,
-    clipboard: Option<Clipboard>,
+    /// The watched clipboard, held so the watching goes on. The Daemon sets
+    /// the clipboard, through the `copy` Outcome.
+    _watching: Option<Clipboard>,
     /// Whether the config has arrived. No Items are sent before it.
     configured: bool,
     /// Whether the list View is open, so it is updated as entries change.
@@ -201,21 +203,9 @@ impl Extension {
         let entry_id = entry.id;
         match action {
             items::PASTE => Ok(Outcome::Paste(self.paste(entry_id)?)),
-            COPY => {
-                let clipboard = self
-                    .clipboard
-                    .as_ref()
-                    .ok_or("Can't reach the clipboard: Kotodama isn't watching it")?;
-                let (mimes, data) = match self.paste(entry_id)? {
-                    Paste::Text(text) => (
-                        copied::TEXT.iter().map(|&mime| mime.to_owned()).collect(),
-                        text.into_bytes(),
-                    ),
-                    Paste::Image { mime, data } => (vec![mime], data.0),
-                };
-                clipboard.set(mimes, data)?;
-                Ok(Outcome::Close)
-            }
+            // The Daemon copies, as it pastes, and serves the clipboard from
+            // then on.
+            COPY => Ok(Outcome::Copy(self.paste(entry_id)?)),
             items::SHOW => {
                 self.detail = Some(entry_id);
                 let view = items::detail_view(&self.history, entry, now());
