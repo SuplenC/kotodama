@@ -4,7 +4,7 @@ The Daemon. Maintained by hand: fix stale lines when you find them, and update t
 
 - `lib.rs:run`: wires paths, config, discovery, watchers, server and the main loop.
 - `main.rs`: binary entry; calls `run`.
-- `daemon.rs`: the state machine. `Daemon::handle(Event)` is the one entry point; `Event`, `Output`, `Launcher`/`Desktop` traits. `Daemon::run_catalog_action` runs a confirmed Proposal (ADR 0019).
+- `daemon.rs`: the state machine. `Daemon::handle(Event)` is the one entry point; `Event`, `Output`, `Launcher`/`Desktop` traits. `Daemon::run_catalog_action` runs a confirmed Proposal (ADR 0019); when several Items offer it, `Daemon::offer_pick` lists them in a View of its own (`Daemon::picks`, `pick_lists`), `run_pick` runs the one picked, and `cancel_pick` (Esc, a new query, the Extension stopping) runs nothing (ADR 0022).
   - `Candidate` and `Candidate::rank`: the full Result order (`Standing`: answers first, fallbacks last, ADR 0016; then Tier, then Learned choices/Frecency, then an exact title over an exact keyword, then kind order; ADR 0006, 0011, 0021).
   - Aliases: `Daemon::alias_source`, `Source::Unavailable` and `Daemon::unavailable_row` (an Alias whose Item is gone or whose Extension is down: a row that can't run, the Item as `last_seen` before its Extension stopped); `row` badges a Result the Alias named.
   - `Session`: per-Front-end state (query, shown Results, list View filters). Late Results rerank the rows while `Session::reranks` (until `FromFrontEnd::SelectionMoved` or `RERANK_FOR` after the keystroke), then go below the rows `FromFrontEnd::Viewport` names (ADR 0020). `Session::send_results` numbers each `Results` and notes, in `Session::risen`, the version a late update last added or moved up each Result; `Daemon::unseen` refuses a `RunAction` whose `shown` version predates it.
@@ -26,6 +26,7 @@ The Daemon. Maintained by hand: fix stale lines when you find them, and update t
 - `keywords.rs`: Aliases and Quicklinks from config (`Keywords`, `Quicklink::command`); URL templates and the opener are `kotodama_extension::url`.
 - `open_view.rs`: `kotodama open --view` (ADR 0014): `ViewName` (`<extension>/<item>`), `Opening`. The Daemon side is `daemon.rs:Daemon::open_on_view` (runs the Item's primary Action, holds `Open`/`Toggle` back until the View is there, `OPEN_VIEW_TIMEOUT`).
 - `views.rs`: `Views`, every View Extensions have open, the top last; `Views::filter` matches a list View's Items with the search's matcher and Tiers, narrowing as the user types on (a `Narrowing` of positions in the list), highlights for the first `HIGHLIGHTED`.
+- `pick.rs`: `Pick`, a confirmed Proposal waiting for the user to pick its Item; `view`, the list that asks, each Item with the one Action `PICK`.
 - `arguments.rs`: text after a keyword filling an Action's Arguments, and the form for missing ones.
 - `config.rs`: `load` (merge every `*.toml` in config dirs), `watch` (a `kotodama_extension::watch::Watcher` on thread `config`), `extension_table` (`[extensions.<name>]`).
 - `discovery.rs`: `discover` (`<dir>/*/manifest.toml`), `watch` for Extension dirs (a `Watcher` on thread `extensions`); `Found`.
