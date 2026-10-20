@@ -4,7 +4,9 @@
 //! description are Items that run the bind; a `Keyboard Shortcuts` Item opens
 //! a View of every bind, grouped by modifier, read afresh each time it opens,
 //! so `kotodama open --view hyprland/shortcuts` opens on it. Outside Hyprland
-//! the Extension sends nothing and waits for the Daemon to hang up.
+//! the Extension sends nothing and waits, at no cost, for a Hyprland to start
+//! (in `$XDG_RUNTIME_DIR/hypr/`, see `Hyprland::wait`) or the Daemon to hang
+//! up; when Hyprland restarts it follows the new instance.
 
 use std::collections::BTreeMap;
 use std::process::ExitCode;
@@ -23,6 +25,9 @@ fn main() -> ExitCode {
 
 /// What the event thread sends.
 enum Own {
+    /// A Hyprland is running, and its events are followed.
+    #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+    Up(Hyprland),
     Change(Change),
     /// The event socket closed: Hyprland exited.
     Lost,
@@ -44,35 +49,36 @@ fn run() -> Result<(), Error> {
         sent_binds: SentItems::default(),
         view_open: false,
     };
-    // Outside Hyprland there is nothing to follow: only the Daemon's messages
-    // wake the Extension.
-    if let Some(hyprland) = Hyprland::from_env() {
-        // Events are followed before the windows are read, so none is missed
-        // in between; one about a window read already changes nothing.
-        match hyprland.events() {
-            Ok(mut stream) => {
-                thread::Builder::new()
-                    .name("events".into())
-                    .stack_size(STACK_SIZE)
-                    .spawn(move || {
-                        while let Some(change) = stream.next_change() {
-                            if events.send(Event::Own(Own::Change(change))).is_err() {
-                                return;
-                            }
-                        }
-                        let _ = events.send(Event::Own(Own::Lost));
-                    })?;
-                extension.hyprland = Some(hyprland);
-                extension.read_binds();
-                extension.publish_binds()?;
-                if let Some(windows) = extension.read("j/clients", Windows::from_clients) {
-                    extension.windows = windows;
+    // Waits for Hyprland, follows it, and once it exits waits for the next
+    // one: it may start after the Extension, or restart under a new
+    // signature. Waiting costs nothing, so outside Hyprland only the
+    // Daemon's messages wake the Extension.
+    #[cfg(target_os = "linux")]
+    thread::Builder::new()
+        .name("events".into())
+        .stack_size(STACK_SIZE)
+        .spawn(move || {
+            loop {
+                let (hyprland, mut stream) =
+                    Hyprland::wait(|err| log!("waiting for Hyprland: {err}"));
+                // Events are followed before the windows are read, so none is
+                // missed in between; one about a window read already changes
+                // nothing.
+                if events.send(Event::Own(Own::Up(hyprland))).is_err() {
+                    return;
                 }
-                extension.publish_windows()?;
+                while let Some(change) = stream.next_change() {
+                    if events.send(Event::Own(Own::Change(change))).is_err() {
+                        return;
+                    }
+                }
+                if events.send(Event::Own(Own::Lost)).is_err() {
+                    return;
+                }
             }
-            Err(err) => log!("not following Hyprland: {err}"),
-        }
-    }
+        })?;
+    #[cfg(not(target_os = "linux"))]
+    drop(events);
 
     while let Ok(mut event) = received.recv() {
         // Handle everything already waiting, so a burst of events sends its
@@ -132,6 +138,15 @@ impl Extension {
                 self.view_open = false;
             }
             Event::Message(_) => {}
+            Event::Own(Own::Up(hyprland)) => {
+                self.hyprland = Some(hyprland);
+                self.read_binds();
+                self.publish_binds()?;
+                if let Some(windows) = self.read("j/clients", Windows::from_clients) {
+                    self.windows = windows;
+                }
+                self.windows_changed = true;
+            }
             Event::Own(Own::Change(Change::ConfigReloaded)) => {
                 self.read_binds();
                 self.publish_binds()?;

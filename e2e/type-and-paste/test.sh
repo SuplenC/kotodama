@@ -25,7 +25,8 @@ install copier Copier '{"copy":{"text":" Copied."}}'
 spawn quickshell --path client.qml
 wait_for_log quickshell.log "ready"
 
-spawn "$target/debug/kotodamad"
+# At debug, the Daemon logs each copy once the compositor has it.
+KOTODAMA_LOG=debug spawn "$target/debug/kotodamad"
 front_end="$target/debug/examples/front-end"
 for _ in $(seq 50); do
     if "$front_end" clip 2>/dev/null | grep -q Clip; then
@@ -38,8 +39,10 @@ done
 wait_for_log quickshell.log "typed: Hello, Wayland!"
 "$front_end" --run clip
 wait_for_log quickshell.log "typed: Hello, Wayland! Pasted."
+mark=$(log_lines kotodamad.log)
 "$front_end" --run copier
-# The copy happens after the menu closes, on the Daemon's Wayland thread.
-sleep 1
+# The copy happens after the menu closes, on the Daemon's Wayland thread;
+# sway offers ext-data-control, which the Daemon prefers.
+wait_for_log kotodamad.log "copied to the clipboard through ext-data-control" "$mark"
 wtype -M ctrl v -m ctrl
 wait_for_log quickshell.log "typed: Hello, Wayland! Pasted. Copied."

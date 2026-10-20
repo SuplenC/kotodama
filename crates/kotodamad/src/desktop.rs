@@ -1,15 +1,30 @@
 //! Typing and pasting into the focused window over Wayland. Text is typed
 //! through the virtual-keyboard protocol with a keymap made for it, as `wtype`
 //! does, so any character can be typed whatever the user's layout. A copy
-//! sets the clipboard through wlr data-control; a paste does, then sends
-//! Ctrl+V.
+//! sets the clipboard through ext-data-control, or wlr-data-control on a
+//! compositor that has only that (`kotodama_extension::wayland`, shared with
+//! the clipboard Extension); a paste does, then sends Ctrl+V.
 //!
 //! The Wayland connection lives on a thread of its own, opened on the first
 //! request, and stays open: the Daemon must keep serving the clipboard it set
-//! until something else takes it.
+//! until something else takes it. The compositor is found without
+//! `WAYLAND_DISPLAY` too (`kotodama_extension::wayland::Display`), so a Daemon
+//! started before the compositor's environment reached it still types; a
+//! request that finds no compositor fails, and the next one tries again.
+//!
+//! Keys wait [`SETTLE`] after the menu closes before they go out. The window
+//! that gets the keyboard back may not take keys at once: QtWayland makes a
+//! window active only after a round trip that follows `wl_keyboard.enter`,
+//! and drops keys until then. Nothing on Wayland tells another client when
+//! that is done. `zwp_input_method_v2` would deliver text without key events,
+//! but a seat has one input method, which the user's own (fcitx, IBus) holds,
+//! and many apps never enable a text input, so it can't replace keys. The
+//! wait is the least bad bound: long enough for a client woken by `enter` to
+//! get the CPU and answer, short enough not to be seen.
 
 use std::fmt::Write as _;
 use std::process::Stdio;
+use std::time::{Duration, Instant};
 
 use kotodama_protocol::launch_command;
 
@@ -73,6 +88,19 @@ fn keysym(c: char) -> String {
 #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 const CONTROL: u32 = 1 << 2;
 
+/// How long after the menu closes keys wait, so the window that gets the
+/// keyboard back is ready for them (see the module docs). Two scheduler
+/// periods of a busy machine (CFS aims to run every runnable thread within
+/// about 24 ms on 8 CPUs).
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+const SETTLE: Duration = Duration::from_millis(50);
+
+/// How much longer keys wait, given when the request to send them came.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+fn settle_left(requested: Instant, now: Instant) -> Duration {
+    (requested + SETTLE).saturating_duration_since(now)
+}
+
 /// Starts `command` through the launch prefix ([`launch_command`]), with no
 /// stdio of its own, and reaps it on a thread when it exits.
 fn launch(command: Vec<String>) {
@@ -80,6 +108,8 @@ fn launch(command: Vec<String>) {
         return;
     };
     let started = launch_command(&command).and_then(|mut process| {
+        #[cfg(target_os = "linux")]
+        kotodama_extension::runtime::pass_wayland_display(&mut process);
         process
             .stdin(Stdio::null())
             .stdout(Stdio::null())
@@ -161,35 +191,31 @@ mod linux {
     use std::fs::File;
     use std::io::Write;
     use std::os::fd::{AsFd, OwnedFd};
-    use std::sync::Arc;
     use std::sync::mpsc::{self, Receiver, Sender};
+    use std::thread;
     use std::time::Instant;
 
+    use kotodama_extension::wayland::{DataControl, DataControlHandler, Display};
     use kotodama_protocol::Clipboard;
     use rustix::event::{PollFd, PollFlags};
     use wayland_client::globals::{GlobalListContents, registry_queue_init};
     use wayland_client::protocol::{wl_keyboard::KeyState, wl_registry, wl_seat};
-    use wayland_client::{
-        Connection, Dispatch, EventQueue, QueueHandle, delegate_noop, event_created_child,
-    };
+    use wayland_client::{Connection, Dispatch, EventQueue, QueueHandle, delegate_noop};
     use wayland_protocols_misc::zwp_virtual_keyboard_v1::client::{
         zwp_virtual_keyboard_manager_v1::ZwpVirtualKeyboardManagerV1,
         zwp_virtual_keyboard_v1::ZwpVirtualKeyboardV1,
     };
-    use wayland_protocols_wlr::data_control::v1::client::{
-        zwlr_data_control_device_v1::{self, ZwlrDataControlDeviceV1},
-        zwlr_data_control_manager_v1::ZwlrDataControlManagerV1,
-        zwlr_data_control_offer_v1::ZwlrDataControlOfferV1,
-        zwlr_data_control_source_v1::{self, ZwlrDataControlSourceV1},
-    };
 
-    use super::{CONTROL, Keymap, Output};
+    use super::{CONTROL, Keymap, Output, settle_left};
     use crate::host::spawn;
+
+    /// What to do, and when the Daemon asked: once the menu had closed.
+    type Request = (Output, Instant);
 
     /// The handle the Daemon holds: requests go down a channel, and a byte
     /// down a pipe wakes the thread, which also waits on the Wayland socket.
     pub struct Worker {
-        requests: Sender<Output>,
+        requests: Sender<Request>,
         wake: OwnedFd,
     }
 
@@ -203,11 +229,12 @@ mod linux {
 
         /// False once the thread has stopped.
         pub fn send(&self, output: Output) -> bool {
-            self.requests.send(output).is_ok() && rustix::io::write(&self.wake, &[1]).is_ok()
+            self.requests.send((output, Instant::now())).is_ok()
+                && rustix::io::write(&self.wake, &[1]).is_ok()
         }
     }
 
-    fn run(inbox: &Receiver<Output>, wake: &OwnedFd) {
+    fn run(inbox: &Receiver<Request>, wake: &OwnedFd) {
         let mut client: Option<Client> = None;
         loop {
             // Wait for a request, or for the compositor while we hold the
@@ -246,14 +273,14 @@ mod linux {
                 if matches!(rustix::io::read(wake, &mut buf), Ok(0)) {
                     return;
                 }
-                for output in inbox.try_iter() {
+                for (output, requested) in inbox.try_iter() {
                     if client.is_none() {
                         client = Client::connect()
                             .map_err(|err| log::error!("can't type or paste: {err}"))
                             .ok();
                     }
                     if let Some(c) = &mut client
-                        && let Err(err) = c.output(output)
+                        && let Err(err) = c.output(output, requested)
                     {
                         log::error!("can't type or paste: {err}");
                         client = None;
@@ -268,19 +295,17 @@ mod linux {
         state: State,
         qh: QueueHandle<State>,
         keyboard: ZwpVirtualKeyboardV1,
-        data: Option<(ZwlrDataControlManagerV1, ZwlrDataControlDeviceV1)>,
+        data: Result<DataControl, String>,
         start: Instant,
     }
 
-    #[derive(Default)]
-    struct State {
-        /// What we put on the clipboard, while we still own it.
-        selection: Option<(ZwlrDataControlSourceV1, Arc<Vec<u8>>)>,
-    }
+    /// Nothing to keep: what we put on the clipboard lives with its source
+    /// (`kotodama_extension::wayland::SourceData`).
+    struct State;
 
     impl Client {
         fn connect() -> Result<Self, String> {
-            let conn = Connection::connect_to_env().map_err(|err| err.to_string())?;
+            let conn = Display::from_env().connect()?;
             let (globals, mut queue) =
                 registry_queue_init::<State>(&conn).map_err(|err| err.to_string())?;
             let qh = queue.handle();
@@ -291,14 +316,9 @@ mod linux {
                 .bind(&qh, 1..=1, ())
                 .map_err(|err| format!("the compositor has no virtual keyboards: {err}"))?;
             let keyboard = manager.create_virtual_keyboard(&seat, &qh, ());
-            let data = globals
-                .bind::<ZwlrDataControlManagerV1, _, _>(&qh, 1..=2, ())
-                .ok()
-                .map(|manager| {
-                    let device = manager.get_data_device(&seat, &qh, ());
-                    (manager, device)
-                });
-            let mut state = State::default();
+            // Typing needs no clipboard, so it works without one.
+            let data = DataControl::bind(&globals, &seat, &qh);
+            let mut state = State;
             queue.roundtrip(&mut state).map_err(|err| err.to_string())?;
             Ok(Client {
                 queue,
@@ -310,17 +330,19 @@ mod linux {
             })
         }
 
-        fn output(&mut self, output: Output) -> Result<(), String> {
+        /// Does what was asked at `requested`, once the menu had closed.
+        fn output(&mut self, output: Output, requested: Instant) -> Result<(), String> {
             match output {
-                Output::Type(text) => self.type_text(&text),
-                Output::Paste(clipboard) => self.paste(clipboard),
+                Output::Type(text) => self.type_text(&text, requested),
+                Output::Paste(clipboard) => self.paste(clipboard, requested),
                 Output::Copy(clipboard) => self.copy(clipboard),
             }
         }
 
-        fn type_text(&mut self, text: &str) -> Result<(), String> {
+        fn type_text(&mut self, text: &str, requested: Instant) -> Result<(), String> {
             let keymap = Keymap::new(text);
             self.upload(&keymap)?;
+            settle(requested);
             for c in text.chars() {
                 if let Some(code) = keymap.code(c) {
                     self.tap(code);
@@ -329,10 +351,11 @@ mod linux {
             self.roundtrip()
         }
 
-        fn paste(&mut self, clipboard: Clipboard) -> Result<(), String> {
+        fn paste(&mut self, clipboard: Clipboard, requested: Instant) -> Result<(), String> {
             self.copy(clipboard)?;
             let keymap = Keymap::new("v");
             self.upload(&keymap)?;
+            settle(requested);
             self.keyboard.modifiers(CONTROL, 0, 0, 0);
             self.tap(keymap.code('v').unwrap_or(1));
             self.keyboard.modifiers(0, 0, 0, 0);
@@ -342,9 +365,10 @@ mod linux {
         /// Puts `clipboard` on the clipboard, and serves it until something
         /// else takes it.
         fn copy(&mut self, clipboard: Clipboard) -> Result<(), String> {
-            let Some((manager, device)) = &self.data else {
-                return Err("the compositor has no wlr data-control, so can't copy".into());
-            };
+            let data_control = self
+                .data
+                .as_ref()
+                .map_err(|err| format!("can't copy: {err}"))?;
             let (mimes, data) = match clipboard {
                 Clipboard::Text(text) => (
                     vec![
@@ -358,15 +382,11 @@ mod linux {
                 ),
                 Clipboard::Image { mime, data } => (vec![mime], data.0),
             };
-            let source = manager.create_data_source(&self.qh, ());
-            for mime in mimes {
-                source.offer(mime);
-            }
-            device.set_selection(Some(&source));
-            if let Some((old, _)) = self.state.selection.replace((source, Arc::new(data))) {
-                old.destroy();
-            }
-            self.roundtrip()
+            data_control.set_selection(mimes, data, &self.qh);
+            let protocol = data_control.protocol();
+            self.roundtrip()?;
+            log::debug!("copied to the clipboard through {protocol}");
+            Ok(())
         }
 
         fn upload(&mut self, keymap: &Keymap) -> Result<(), String> {
@@ -408,74 +428,36 @@ mod linux {
         }
     }
 
+    /// Waits out what is left of [`SETTLE`](super::SETTLE) since `requested`.
+    fn settle(requested: Instant) {
+        thread::sleep(settle_left(requested, Instant::now()));
+    }
+
+    /// The Daemon never reads the clipboard: every offer is dropped as it
+    /// comes.
+    impl DataControlHandler for State {}
+
     delegate_noop!(State: ignore wl_seat::WlSeat);
     delegate_noop!(State: ZwpVirtualKeyboardManagerV1);
     delegate_noop!(State: ZwpVirtualKeyboardV1);
-    delegate_noop!(State: ZwlrDataControlManagerV1);
-    delegate_noop!(State: ignore ZwlrDataControlOfferV1);
-
-    impl Dispatch<ZwlrDataControlDeviceV1, ()> for State {
-        fn event(
-            _: &mut Self,
-            _: &ZwlrDataControlDeviceV1,
-            event: zwlr_data_control_device_v1::Event,
-            _: &(),
-            _: &Connection,
-            _: &QueueHandle<Self>,
-        ) {
-            // We never read the clipboard; drop every offer as it arrives.
-            match event {
-                zwlr_data_control_device_v1::Event::Selection { id: Some(offer) }
-                | zwlr_data_control_device_v1::Event::PrimarySelection { id: Some(offer) } => {
-                    offer.destroy()
-                }
-                _ => {}
-            }
-        }
-
-        event_created_child!(State, ZwlrDataControlDeviceV1, [
-            zwlr_data_control_device_v1::EVT_DATA_OFFER_OPCODE => (ZwlrDataControlOfferV1, ()),
-        ]);
-    }
-
-    impl Dispatch<ZwlrDataControlSourceV1, ()> for State {
-        fn event(
-            state: &mut Self,
-            source: &ZwlrDataControlSourceV1,
-            event: zwlr_data_control_source_v1::Event,
-            _: &(),
-            _: &Connection,
-            _: &QueueHandle<Self>,
-        ) {
-            let ours = state
-                .selection
-                .as_ref()
-                .filter(|(selection, _)| selection == source);
-            match event {
-                zwlr_data_control_source_v1::Event::Send { fd, .. } => {
-                    if let Some((_, data)) = ours {
-                        let data = Arc::clone(data);
-                        // A slow reader mustn't hold up the next request.
-                        spawn("clipboard".into(), move || {
-                            let _ = File::from(fd).write_all(&data);
-                        });
-                    }
-                }
-                zwlr_data_control_source_v1::Event::Cancelled => {
-                    if ours.is_some() {
-                        state.selection = None;
-                    }
-                    source.destroy();
-                }
-                _ => {}
-            }
-        }
-    }
+    kotodama_extension::delegate_data_control!(State);
 }
 
 #[cfg(test)]
 mod tests {
-    use super::Keymap;
+    use std::time::{Duration, Instant};
+
+    use super::{Keymap, settle_left};
+
+    #[test]
+    fn keys_wait_a_bounded_moment_after_the_menu_closes() {
+        let closed = Instant::now();
+        let ms = Duration::from_millis;
+        assert_eq!(settle_left(closed, closed), ms(50));
+        // Connecting and uploading the keymap count towards it.
+        assert_eq!(settle_left(closed, closed + ms(20)), ms(30));
+        assert_eq!(settle_left(closed, closed + ms(80)), Duration::ZERO);
+    }
 
     #[test]
     fn each_distinct_character_gets_one_key() {

@@ -4,12 +4,16 @@
 # - extensions: the Bundled extensions, in share/kotodama/extensions.
 {
   lib,
+  stdenv,
   rustPlatform,
+  runCommand,
   qt6,
   pkg-config,
   libGL,
-  makeWrapper,
+  makeBinaryWrapper,
   curl,
+  curlMinimal,
+  runtimeShellPackage,
 }:
 
 let
@@ -18,6 +22,30 @@ let
   qt = qt6.env "kotodama-qt-${qt6.qtbase.version}" qtModules;
   # Where the QML module finds those modules and QtCore at run time.
   qtRunpath = lib.makeLibraryPath ([ qt6.qtbase ] ++ qtModules);
+
+  # The calculator fetches exchange rates with curl, by this path. HTTPS is all
+  # it needs, so curlMinimal, without HTTP/3, brotli, zstd or libpsl. Only the
+  # `curl` binary is copied: curl's bin output also holds wcurl, a shell script
+  # that would bring in bash.
+  curlOnly = runCommand "kotodama-curl-${curlMinimal.version}" { } ''
+    install -D -m 555 ${lib.getExe curlMinimal} $out/bin/curl
+  '';
+
+  # A Rust binary needs libgcc_s and nothing else from GCC, but the linker
+  # leaves a runpath to GCC's `lib` output, which also holds libstdc++ (10 MiB).
+  # GCC's `libgcc` output holds libgcc_s alone.
+  gccLibDir = "${lib.getLib stdenv.cc.cc}/lib";
+  libgccOnlyDir = "${stdenv.cc.cc.libgcc}/lib";
+
+  # What the command, the Daemon and the Bundled extensions must never need at
+  # run time: the build-time Qt, libstdc++, a shell, or the full curl.
+  notAtRunTime = [
+    qt
+    (lib.getLib stdenv.cc.cc)
+    runtimeShellPackage
+    curl.bin
+    curlMinimal.bin
+  ];
 in
 rustPlatform.buildRustPackage {
   pname = "kotodama";
@@ -41,7 +69,7 @@ rustPlatform.buildRustPackage {
 
   nativeBuildInputs = [
     pkg-config
-    makeWrapper
+    makeBinaryWrapper
   ];
   buildInputs = [
     qt
@@ -49,18 +77,34 @@ rustPlatform.buildRustPackage {
   ];
   env = {
     QMAKE = "${qt}/bin/qmake";
-    # The calculator fetches exchange rates with curl, by this path.
-    KOTODAMA_CURL = lib.getExe curl;
+    KOTODAMA_CURL = "${curlOnly}/bin/curl";
   };
   # Quickshell loads the QML module as a plugin: there is no Qt app to wrap.
   dontWrapQtApps = true;
-  # The build-time Qt environment stays out of every output (see postInstall).
-  disallowedReferences = [ qt ];
+  # outputChecks, which checks each output on its own, needs structured
+  # attributes, so the build's variables come from `env` above.
+  __structuredAttrs = true;
+  outputChecks = {
+    out.disallowedRequisites = notAtRunTime;
+    extensions.disallowedRequisites = notAtRunTime;
+    # The QML module runs in Quickshell, whose Qt already brings libstdc++ and
+    # bash. It must just not hold the build-time Qt environment (see postInstall).
+    qml.disallowedReferences = [ qt ];
+  };
   # CI runs the tests in the dev shell, where they have the processes and the
   # headless compositor they need.
   doCheck = false;
 
   postInstall = ''
+    # replaceRunpath FILE FROM TO: replace the directory FROM in FILE's runpath with TO.
+    replaceRunpath() {
+      local rpath
+      rpath=":$(patchelf --print-rpath "$1"):"
+      rpath=''${rpath//":$2:"/":$3:"}
+      rpath=''${rpath#:}
+      patchelf --set-rpath "''${rpath%:}" "$1"
+    }
+
     # The QML module, laid out as a QML import path expects (as scripts/qml-module does).
     module=$qml/lib/qt-6/qml/Kotodama
     mkdir -p $module
@@ -72,8 +116,7 @@ rustPlatform.buildRustPackage {
     # runpath names it, and the environment holds every Qt module's dev output
     # (#52). Point the runpath at the Qt libraries themselves: a Quickshell from
     # the same nixpkgs already has those store paths.
-    rpath=$(patchelf --print-rpath $module/libKotodama.so)
-    patchelf --set-rpath "''${rpath//"${qt}/lib"/"${qtRunpath}"}" $module/libKotodama.so
+    replaceRunpath $module/libKotodama.so ${qt}/lib ${qtRunpath}
 
     # Each Bundled extension's manifest runs its binary, beside it.
     for name in apps calculator clipboard emoji folders hyprland web-search; do
@@ -83,11 +126,18 @@ rustPlatform.buildRustPackage {
       mv $out/bin/kotodama-$name $dir/
     done
 
+    for bin in $out/bin/* $extensions/share/kotodama/extensions/*/kotodama-*; do
+      replaceRunpath "$bin" ${gccLibDir} ${libgccOnlyDir}
+    done
+
     # The Daemon finds the Bundled extensions on XDG_DATA_DIRS. They go first,
-    # before the caller's directories or, when it has none, the default ones,
-    # which an Extension such as apps reads too.
+    # before the caller's directories or, when the variable is unset, the
+    # default ones, which an Extension such as apps reads too. The wrapper is
+    # compiled, so it needs no shell. Unlike the shell's `:-`, it keeps an
+    # empty XDG_DATA_DIRS as it is.
     wrapProgram $out/bin/kotodamad \
-      --run 'export XDG_DATA_DIRS='"$extensions"'/share:''${XDG_DATA_DIRS:-/usr/local/share:/usr/share}'
+      --set-default XDG_DATA_DIRS /usr/local/share:/usr/share \
+      --prefix XDG_DATA_DIRS : $extensions/share
 
     mkdir -p $out/lib/systemd/user
     cp crates/kotodamad/systemd/kotodamad.socket $out/lib/systemd/user/

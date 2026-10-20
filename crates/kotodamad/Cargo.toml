@@ -7,7 +7,7 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
-kotodama-extension = { path = "../kotodama-extension", features = ["watch"] }
+kotodama-extension = { path = "../kotodama-extension", features = ["watch", "wayland"] }
 kotodama-protocol = { path = "../kotodama-protocol" }
 log = "0.4.34"
 nucleo-matcher = "0.3.1"
@@ -23,7 +23,6 @@ libc = "0.2"
 rustix = { version = "1.1.5", features = ["event", "fs", "pipe"] }
 wayland-client = "0.31.15"
 wayland-protocols-misc = { version = "0.3.12", features = ["client"] }
-wayland-protocols-wlr = { version = "0.3.12", features = ["client"] }
 
 [dev-dependencies]
 # The ranking scenarios answer math with the real calculator, and fall back

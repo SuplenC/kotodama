@@ -74,11 +74,15 @@ pub mod config;
 pub mod dirs;
 mod items;
 pub mod launch;
+#[cfg(target_os = "linux")]
+pub mod runtime;
 #[cfg(feature = "testing")]
 pub mod testing;
 pub mod url;
 #[cfg(feature = "watch")]
 pub mod watch;
+#[cfg(all(feature = "wayland", target_os = "linux"))]
+pub mod wayland;
 
 use std::fmt::Display;
 use std::io::{self, Stdout};

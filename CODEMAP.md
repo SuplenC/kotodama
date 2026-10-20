@@ -12,7 +12,7 @@ are in [docs/adr/](docs/adr/).
 - [`crates/kotodama-protocol/`](crates/kotodama-protocol/CODEMAP.md): messages, framing, handshake and Wire formats shared by everything.
 - [`crates/kotodama/`](crates/kotodama/CODEMAP.md): the `kotodama` CLI (`toggle`, `open`) that a compositor keybind runs.
 - [`crates/kotodama-qml/`](crates/kotodama-qml/CODEMAP.md): the Quickshell Front end, a Rust cdylib QML module (`Kotodama`) plus `qml/KotodamaMenu.qml`.
-- [`crates/kotodama-extension/`](crates/kotodama-extension/CODEMAP.md): the runtime Rust Extensions are built on (handshake, reader thread, `SentItems`, config, launch, XDG dirs, directory watcher; the dev-only `testing` harness the Bundled extensions' tests share). The Daemon uses its watcher.
+- [`crates/kotodama-extension/`](crates/kotodama-extension/CODEMAP.md): the runtime Rust Extensions are built on (handshake, reader thread, `SentItems`, config, launch, XDG dirs, directory watcher, waiting on `$XDG_RUNTIME_DIR`, and with feature `wayland` finding the compositor and data-control; the dev-only `testing` harness the Bundled extensions' tests share). The Daemon uses its watcher and its Wayland module.
 - [`crates/kotodama-apps/`](crates/kotodama-apps/CODEMAP.md): Bundled extension, desktop apps from `.desktop` files.
 - [`crates/kotodama-calculator/`](crates/kotodama-calculator/CODEMAP.md): Bundled extension, math, units, currency, dates.
 - [`crates/kotodama-clipboard/`](crates/kotodama-clipboard/CODEMAP.md): Bundled extension, clipboard history.
@@ -26,7 +26,7 @@ are in [docs/adr/](docs/adr/).
 - `docker/`: the dev image for machines without Nix (`just image`).
 - `examples/shell-extension/`: a minimal Extension in shell, also run by `kotodama-protocol/tests/shell_extension.rs`.
 - `docs/adr/`: decisions, one file per ADR named for the area it governs. `docs/agents/`: how agents use issues, labels and domain docs.
-- Root: `flake.nix` (dev shell, packages, `checks`), `justfile`, `release-please-config.json`, `GLOSSARY.md`.
+- Root: `flake.nix` (dev shell, packages, `overlays.default`, `checks`), `justfile`, `release-please-config.json`, `GLOSSARY.md`.
 
 ## Where to change X
 
@@ -43,7 +43,7 @@ are in [docs/adr/](docs/adr/).
 
 - Unit tests: `#[cfg(test)]` modules in each `src/*.rs`.
 - Integration: `crates/*/tests/*.rs`. Daemon: `kotodamad/tests/` (`common/` helpers, `fixtures/recorder`, `ranking.rs`, `interaction.rs`, `open_view.rs`, `views.rs`, `config.rs`, `forget.rs`, `reads_first.rs`: off-path indexing, hot Items and a property test against a full search). Protocol: `layout.rs`, `conformance.rs`, `shell_extension.rs`. Bundled extensions share `kotodama-extension`'s `testing` feature (`Spawned`, in-process Daemon setup).
-- e2e: `e2e/*/test.sh` under headless sway, which `e2e/run` gives a virtual keyboard for the whole run (without one, windows bind no keyboard and lose keys). `e2e/type-and-paste/client.qml` is the window typed into; it logs `ready` once it has the keys. `latency` is skipped on PRs. `emoji` types an emoji in a configured skin tone, and a symbol, into a test client. `open-view` checks `kotodama open --view` shows the View in the first frame (its `shell.qml` logs the top View as the window maps). `views` checks list View filtering and that no View change shows the search between two Views.
+- e2e: `e2e/*/test.sh` under headless sway, which `e2e/run` gives a virtual keyboard for the whole run (without one, windows bind no keyboard and lose keys). `e2e/type-and-paste/client.qml` is the window typed into; it logs `ready` once it has the keys. `latency` is skipped on PRs. `emoji` types an emoji in a configured skin tone, and a symbol, into a test client. `open-view` checks `kotodama open --view` shows the View in the first frame (its `shell.qml` logs the top View as the window maps). `views` checks list View filtering and that no View change shows the search between two Views. `late-display` starts the Daemon and the clipboard Extension with no compositor in sight, then links the socket into their runtime dir. `type-and-paste` and `clipboard` wait for the Daemon's debug log `copied to the clipboard` before Ctrl+V.
 - Benches: `kotodamad/benches/{query,daemon,memory}.rs` (+ `corpus/`; `memory.rs` is the heap per Indexed item), `kotodama-protocol/benches/batch.rs`, `kotodama-calculator/benches/answer.rs`, `kotodama-clipboard/benches/search.rs`, `kotodama-emoji/benches/search.rs`.
 - Nix: `nix/tests/vm.nix` (NixOS VM, `front-end.py`), `nix/tests/hyprland.nix` (Hyprland in a NixOS VM with a virtio GPU: windows, binds, `--view hyprland/shortcuts`), `nix/tests/qml-module.nix`; `flake.nix` `checks`.
 - Script tests: `scripts/tests/*.sh`.
