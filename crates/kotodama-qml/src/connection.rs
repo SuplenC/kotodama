@@ -23,6 +23,9 @@ const WRITE_TIMEOUT: Duration = Duration::from_millis(100);
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(5);
 /// The most messages handed over at once.
 const MAX_BATCH: usize = 64;
+/// How long a View an Extension popped waits for the one it pushes next, so
+/// the search doesn't show between them: about a frame.
+const PUSH_AFTER_POP: Duration = Duration::from_millis(16);
 
 /// What the connection hands the Qt thread.
 pub enum Update {
@@ -72,6 +75,17 @@ pub enum Update {
     Disconnected,
 }
 
+impl Update {
+    /// Whether it asks QML to act, by a signal, rather than changes what
+    /// the menu shows.
+    pub fn signals(&self) -> bool {
+        matches!(
+            self,
+            Update::Close | Update::Open { .. } | Update::Toggle | Update::ActionFailed(_)
+        )
+    }
+}
+
 /// The Qt thread's half of the connection.
 pub struct Writer {
     channel: ChannelWriter<UnixStream>,
@@ -110,12 +124,12 @@ fn run(deliver: &impl Fn(Vec<Update>) -> bool) {
     let mut retry = FIRST_RETRY;
     loop {
         match connect() {
-            Ok((reader, writer)) => {
+            Ok((reader, probe, writer)) => {
                 retry = FIRST_RETRY;
                 if !deliver(vec![Update::Connected(writer)]) {
                     return;
                 }
-                if let Err(err) = read(reader, deliver) {
+                if let Err(err) = read(reader, &probe, deliver) {
                     eprintln!("kotodama: lost the Daemon: {err}");
                 }
                 if !deliver(vec![Update::Disconnected]) {
@@ -135,7 +149,8 @@ fn run(deliver: &impl Fn(Vec<Update>) -> bool) {
 
 type Reader = kotodama_protocol::ChannelReader<UnixStream>;
 
-fn connect() -> Result<(Reader, Writer), Error> {
+/// The reader, the socket again for [`more_within`], and the writer.
+fn connect() -> Result<(Reader, UnixStream, Writer), Error> {
     let socket = socket_path().ok_or_else(|| {
         Error::Io(std::io::Error::new(
             std::io::ErrorKind::NotFound,
@@ -152,12 +167,19 @@ fn connect() -> Result<(Reader, Writer), Error> {
     stream.set_read_timeout(None)?;
     stream.set_write_timeout(Some(WRITE_TIMEOUT))?;
     let (reader, channel) = channel.split();
-    Ok((reader, Writer { channel, stream }))
+    Ok((reader, stream.try_clone()?, Writer { channel, stream }))
 }
 
 /// Reads until the Daemon hangs up or the model is gone. What has arrived
 /// already goes over with the message before it, up to [`MAX_BATCH`].
-fn read(mut reader: Reader, deliver: &impl Fn(Vec<Update>) -> bool) -> Result<(), Error> {
+///
+/// A View the Extension popped waits [`PUSH_AFTER_POP`] for more, as the
+/// Extension may push the next one in the same reply.
+fn read(
+    mut reader: Reader,
+    probe: &UnixStream,
+    deliver: &impl Fn(Vec<Update>) -> bool,
+) -> Result<(), Error> {
     let mut batch = Vec::new();
     loop {
         let message = match reader.recv::<ToFrontEnd>() {
@@ -182,7 +204,10 @@ fn read(mut reader: Reader, deliver: &impl Fn(Vec<Update>) -> bool) -> Result<()
         if let Some(message) = message {
             batch.push(update(message));
         }
-        if batch.is_empty() || (reader.has_buffered() && batch.len() < MAX_BATCH) {
+        let popped = matches!(batch.last(), Some(Update::PopView { .. }));
+        let more =
+            reader.has_buffered() || (popped && more_within(&mut reader, probe, PUSH_AFTER_POP));
+        if batch.is_empty() || (more && batch.len() < MAX_BATCH) {
             continue;
         }
         if !deliver(std::mem::take(&mut batch)) {
@@ -244,4 +269,15 @@ fn update(message: ToFrontEnd) -> Update {
         },
         ToFrontEnd::JobProgress { extension, job } => Update::JobProgress { extension, job },
     }
+}
+
+/// Whether the Daemon sends something within `wait`, or hangs up. The
+/// reader is between messages, so the socket's timeout is free to set.
+fn more_within(reader: &mut Reader, probe: &UnixStream, wait: Duration) -> bool {
+    if probe.set_read_timeout(Some(wait)).is_err() {
+        return false;
+    }
+    let more = reader.wait_for_more();
+    let _ = probe.set_read_timeout(None);
+    more
 }

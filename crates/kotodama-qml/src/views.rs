@@ -16,6 +16,20 @@ use crate::rows::Row;
 /// Item kind, as the Daemon sends them.
 pub type Contributed = BTreeMap<String, Vec<OfferedAction>>;
 
+/// [`Contributed`] as the rows hold it: each kind's list shared by every row.
+type Shared = BTreeMap<String, Arc<[OfferedAction]>>;
+
+/// What a change to the Views needs the menu to show again: the least
+/// first, so a batch of changes shows the most any of them needs, once.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Shown {
+    Same,
+    /// The rows of the list View on top.
+    Rows,
+    /// The View stack, and so the rows too.
+    View,
+}
+
 /// One open View.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Open {
@@ -26,7 +40,7 @@ pub struct Open {
     pub values: Vec<Value>,
     /// A list View's Contributed actions by kind, each list shared by the
     /// rows of that kind.
-    contributed: BTreeMap<String, Arc<[OfferedAction]>>,
+    contributed: Shared,
     /// What is typed to filter a list View; empty when it shows every Item.
     pub filter: String,
     /// The Daemon's matches for `filter`, best first; `None` until they come,
@@ -35,7 +49,7 @@ pub struct Open {
     /// A new form of a list the Daemon filters, held back while `filter`
     /// isn't empty: `matches` count Items of the form shown, and the
     /// Daemon's matches for the new one follow it.
-    pending: Option<(View, Contributed)>,
+    pending: Option<(View, Shared)>,
 }
 
 impl Open {
@@ -97,12 +111,14 @@ impl Open {
         )
     }
 
-    /// Takes the form held back for the Daemon's matches.
-    fn take_pending(&mut self) {
-        if let Some((view, contributed)) = self.pending.take() {
-            self.view = view;
-            self.contributed = shared(contributed);
-        }
+    /// Takes the form held back for the Daemon's matches, if there is one.
+    fn take_pending(&mut self) -> bool {
+        let Some((view, contributed)) = self.pending.take() else {
+            return false;
+        };
+        self.view = view;
+        self.contributed = contributed;
+        true
     }
 
     /// A list View's rows: the Items that match the filter, best first, or
@@ -133,7 +149,7 @@ impl Open {
     }
 }
 
-fn shared(contributed: Contributed) -> BTreeMap<String, Arc<[OfferedAction]>> {
+fn shared(contributed: Contributed) -> Shared {
     contributed
         .into_iter()
         .map(|(kind, offered)| (kind, offered.into()))
@@ -175,8 +191,9 @@ impl Views {
 
     /// Replaces the open View with the same id where it is. What was typed
     /// into a field the new form still has is kept, and so is a list's
-    /// filter. False if no such View is open, or if the new form waits for
-    /// the Daemon's matches for the filter, so what shows stays as it is.
+    /// filter, while it is still a list. False if no such View is open, or if
+    /// the new form waits for the Daemon's matches for the filter, so what
+    /// shows stays as it is.
     pub fn update(&mut self, extension: String, view: View, contributed: Contributed) -> bool {
         let Some(open) = self
             .stack
@@ -185,12 +202,14 @@ impl Views {
         else {
             return false;
         };
-        if open.filtered_by_daemon() && !open.filter.is_empty() {
-            open.pending = Some((view, contributed));
+        let mut new = Open::new(extension, view, contributed);
+        if new.filtered_by_daemon() && open.filtered_by_daemon() && !open.filter.is_empty() {
+            open.pending = Some((new.view, new.contributed));
             return false;
         }
-        let mut new = Open::new(extension, view, contributed);
-        new.filter = std::mem::take(&mut open.filter);
+        if matches!(new.view.content, ViewContent::List { .. }) {
+            new.filter = std::mem::take(&mut open.filter);
+        }
         if let (ViewContent::Form { fields: old, .. }, ViewContent::Form { fields: fresh, .. }) =
             (&open.view.content, &new.view.content)
         {
@@ -228,15 +247,15 @@ impl Views {
         })
     }
 
-    /// The Daemon's matches for `text` in a list View. Matches for a filter
-    /// since changed are dropped. True if the top View shows them.
+    /// The Daemon's matches for `text` in a list View, and the form of it
+    /// held back for them. Matches for a filter since changed are dropped.
     pub fn filtered(
         &mut self,
         extension: &str,
         id: &str,
         text: &str,
         matches: Vec<ListMatch>,
-    ) -> bool {
+    ) -> Shown {
         let top = self.stack.len().saturating_sub(1);
         let Some((at, open)) = self
             .stack
@@ -244,14 +263,18 @@ impl Views {
             .enumerate()
             .find(|(_, open)| open.is(extension, id))
         else {
-            return false;
+            return Shown::Same;
         };
         if open.filter != text || text.is_empty() {
-            return false;
+            return Shown::Same;
         }
-        open.take_pending();
+        let updated = open.take_pending();
         open.matches = Some(matches);
-        at == top
+        match (at == top, updated) {
+            (false, _) => Shown::Same,
+            (true, false) => Shown::Rows,
+            (true, true) => Shown::View,
+        }
     }
 
     /// The Extension popped one of its Views.
@@ -726,19 +749,23 @@ mod tests {
             "until it answers"
         );
 
-        assert!(views.filtered(
-            "bookmarks",
-            "all",
-            "a",
-            vec![found(2, &[1]), found(0, &[0])]
-        ));
+        assert_eq!(
+            views.filtered(
+                "bookmarks",
+                "all",
+                "a",
+                vec![found(2, &[1]), found(0, &[0])]
+            ),
+            Shown::Rows
+        );
         assert_eq!(titles(&views), ["gamma", "alpha"]);
         let rows = views.top().unwrap().rows().unwrap();
         assert_eq!(rows[0].highlights, [1]);
 
         assert_eq!(views.set_filter("am"), filter("bookmarks", "all", "am"));
-        assert!(
-            !views.filtered("bookmarks", "all", "a", vec![found(1, &[])]),
+        assert_eq!(
+            views.filtered("bookmarks", "all", "a", vec![found(1, &[])]),
+            Shown::Same,
             "matches for what was typed before are dropped"
         );
         assert_eq!(titles(&views), ["gamma", "alpha"]);
@@ -795,14 +822,32 @@ mod tests {
         assert!(!views.update("bookmarks".into(), updated, none()));
         assert_eq!(titles(&views), ["alpha", "beta"]);
 
-        assert!(views.filtered(
-            "bookmarks",
-            "all",
-            "a",
-            vec![found(0, &[4]), found(1, &[0]), found(2, &[3])]
-        ));
+        assert_eq!(
+            views.filtered(
+                "bookmarks",
+                "all",
+                "a",
+                vec![found(0, &[4]), found(1, &[0]), found(2, &[3])]
+            ),
+            Shown::View,
+            "the View's new form shows with its matches"
+        );
         assert_eq!(titles(&views), ["delta", "alpha", "beta"]);
         assert_eq!(views.top().unwrap().filter, "a");
+    }
+
+    #[test]
+    fn a_filtered_list_updated_into_another_kind_of_view_shows_it_at_once() {
+        let mut views = Views::default();
+        views.push(
+            "bookmarks".into(),
+            list("all", vec![url("alpha")], false),
+            none(),
+        );
+        views.set_filter("a");
+        assert!(views.update("bookmarks".into(), detail("all"), none()));
+        assert_eq!(views.top().unwrap().rows(), None);
+        assert_eq!(views.top().unwrap().filter, "", "only a list has a filter");
     }
 
     #[test]

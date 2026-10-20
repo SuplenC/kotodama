@@ -5,7 +5,8 @@
 # that takes it as "cancel", the same job running on after the menu closes,
 # and the desktop notification when it is done. Then its bookmarks list View:
 # typing narrows the rows, Ctrl+K lists what another Extension contributes to
-# them, and Esc clears the filter before it pops the View.
+# them, and Esc clears the filter before it pops the View. Last, a test
+# Extension that pops one View and pushes the next in one reply.
 root=$(cd ../.. && pwd)
 target=$(cargo metadata --format-version 1 --no-deps --manifest-path "$root/Cargo.toml" | jq -r .target_directory)
 cargo build --quiet --manifest-path "$root/Cargo.toml" -p kotodamad -p kotodama --bin kotodamad --bin kotodama
@@ -34,6 +35,19 @@ kind = "url"
 id = "copy-link"
 title = "Copy link"
 TOML
+# Its Wizard pops its first step and pushes the next in one reply, as an
+# Extension that predates replace_view would.
+cat >"$extensions/extras/items.json" <<'JSON'
+[{"id": "wizard", "kind": "extras.wizard", "title": "Wizard", "actions": [{"id": "begin", "title": "Begin"}]}]
+JSON
+echo '"keep_open"' >"$extensions/extras/outcome.json"
+cat >"$extensions/extras/replies-begin.json" <<'JSON'
+{"push_view": {"id": "step-1", "title": "Step one", "content": {"list": {"items": [{"id": "next", "kind": "extras.step", "title": "Next step", "actions": [{"id": "next", "title": "Next"}]}]}}}}
+JSON
+cat >"$extensions/extras/replies-next.json" <<'JSON'
+{"pop_view": {"view": "step-1"}}
+{"push_view": {"id": "step-2", "title": "Step two", "content": {"detail": {"markdown": "Done"}}}}
+JSON
 # Bookmarks for the shell example's list View.
 cat >"$XDG_CONFIG_HOME/kotodama/bookmarks.toml" <<'TOML'
 [extensions.shell-example]
@@ -148,3 +162,17 @@ press -k Escape "actions closed"
 # Esc clears the filter first, so every bookmark shows again, then pops.
 press -k Escape "rows: 3"
 press -k Escape "view: search"
+
+# The Wizard's next step pops one View and pushes another in one reply: the
+# search never shows between them.
+mark=$(log_lines quickshell.log)
+"$kotodama" toggle
+wait_for_log quickshell.log "hidden" "$mark"
+open --query Wizard
+press -k Return "view: list Step one"
+mark=$(log_lines quickshell.log)
+press -k Return "view: detail Step two"
+if tail -n "+$((mark + 1))" "$E2E_OUT/quickshell.log" | grep -qF "view: search"; then
+    echo "the search showed between the Wizard's steps" >&2
+    exit 1
+fi

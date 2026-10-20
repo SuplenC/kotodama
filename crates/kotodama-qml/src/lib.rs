@@ -27,7 +27,7 @@ use kotodama_protocol::{FromFrontEnd, Value};
 
 use connection::{Update, Writer};
 use rows::{Replace, Row};
-use views::{Open, Views};
+use views::{Open, Shown, Views};
 
 #[cxx_qt::bridge]
 pub mod qobject {
@@ -369,8 +369,9 @@ impl KotodamaSearch {
         };
         self.as_mut().rust_mut().send(&message);
         if text.is_empty() {
-            // No answer comes: every Item shows again.
-            self.as_mut().show_rows();
+            // No answer comes: every Item shows again, in the form last
+            // sent, which may have waited for the Daemon's matches.
+            self.as_mut().show_view();
         }
         true
     }
@@ -468,12 +469,22 @@ impl KotodamaSearch {
     fn apply(mut self: Pin<&mut Self>, updates: Vec<Update>) {
         let mut shown = Shown::Same;
         for update in updates {
+            // What QML is asked to do, such as open on the top View, sees
+            // what came before it.
+            if update.signals() {
+                self.as_mut()
+                    .show(std::mem::replace(&mut shown, Shown::Same));
+            }
             shown = shown.max(self.as_mut().apply_one(update));
         }
+        self.as_mut().show(shown);
+    }
+
+    fn show(self: Pin<&mut Self>, shown: Shown) {
         match shown {
             Shown::Same => {}
-            Shown::Rows => self.as_mut().show_rows(),
-            Shown::View => self.as_mut().show_view(),
+            Shown::Rows => self.show_rows(),
+            Shown::View => self.show_view(),
         }
     }
 
@@ -573,18 +584,11 @@ impl KotodamaSearch {
                 view,
                 text,
                 matches,
-            } => {
-                if self
-                    .as_mut()
-                    .rust_mut()
-                    .views
-                    .filtered(&extension, &view, &text, matches)
-                {
-                    Shown::Rows
-                } else {
-                    Shown::Same
-                }
-            }
+            } => self
+                .as_mut()
+                .rust_mut()
+                .views
+                .filtered(&extension, &view, &text, matches),
             Update::PopView { extension, view } => {
                 self.as_mut().rust_mut().views.pop(&extension, &view);
                 Shown::View
@@ -720,16 +724,6 @@ impl KotodamaSearch {
         }
         self.as_mut().data_changed(&first, &last, &changed);
     }
-}
-
-/// What a batch of updates changed, so it is shown once: the least first.
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-enum Shown {
-    Same,
-    /// The rows of the list View on top.
-    Rows,
-    /// The View stack, and so the rows too.
-    View,
 }
 
 impl SearchRust {
