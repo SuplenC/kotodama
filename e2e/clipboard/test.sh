@@ -47,7 +47,8 @@ copy_as() {
     wait_for_log copy.log "copy: copied" "$mark"
 }
 
-spawn "$target/debug/kotodamad"
+# At debug, the Daemon logs each copy once the compositor has it.
+KOTODAMA_LOG=debug spawn "$target/debug/kotodamad"
 wait_for_result "clipboard history" "Clipboard History"
 
 # Something copied as plain text shows up.
@@ -101,3 +102,15 @@ spawn quickshell --path ../type-and-paste/client.qml
 wait_for_log quickshell.log "ready"
 "$front_end" --run "first copy"
 wait_for_log quickshell.log "typed: first copy"
+
+# Copy to Clipboard hands the clip to the Daemon, which sets the clipboard:
+# the next Ctrl+V pastes it.
+mark=$(log_lines quickshell.log)
+"$target/debug/kotodama" open --query "after the secret"
+wait_for_log quickshell.log "focused: true" "$mark"
+press -M ctrl -k k -m ctrl "actions: Paste, Copy to Clipboard, Show Details, Delete from History"
+copied=$(log_lines kotodamad.log)
+press -k Down -k Return "visible: false"
+wait_for_log kotodamad.log "copied to the clipboard" "$copied"
+wtype -M ctrl v -m ctrl
+wait_for_log quickshell.log "typed: first copyafter the secret"

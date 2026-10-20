@@ -2,11 +2,11 @@
 //! `.socket.sock` answers one request per connection, as `hyprctl` sends
 //! them, and `.socket2.sock` streams events, one line each.
 
-use std::env;
+use std::ffi::OsStr;
 use std::io::{self, BufRead, BufReader, Read, Write};
 use std::os::unix::net::UnixStream;
-use std::path::PathBuf;
-use std::time::Duration;
+use std::path::{Path, PathBuf};
+use std::time::{Duration, SystemTime};
 
 use crate::events::Change;
 
@@ -21,14 +21,68 @@ pub struct Hyprland {
 }
 
 impl Hyprland {
-    /// The instance named by `HYPRLAND_INSTANCE_SIGNATURE`; `None` outside
-    /// Hyprland.
-    pub fn from_env() -> Option<Hyprland> {
-        let signature = env::var_os("HYPRLAND_INSTANCE_SIGNATURE")?;
-        let runtime = env::var_os("XDG_RUNTIME_DIR")?;
-        Some(Hyprland {
-            dir: PathBuf::from(runtime).join("hypr").join(signature),
-        })
+    /// The instances that may be running, best first: the one named by
+    /// `HYPRLAND_INSTANCE_SIGNATURE`, then every other in
+    /// `$XDG_RUNTIME_DIR/hypr/`, newest first. The variable may be missing,
+    /// when the Extension started before Hyprland's environment reached the
+    /// service manager, or stale, when Hyprland restarted since.
+    pub fn candidates(signature: Option<&OsStr>, runtime: &Path) -> Vec<Hyprland> {
+        let hypr = runtime.join("hypr");
+        let named = signature
+            .filter(|signature| !signature.is_empty())
+            .map(|signature| hypr.join(signature));
+        let mut others: Vec<(SystemTime, PathBuf)> = hypr
+            .read_dir()
+            .into_iter()
+            .flatten()
+            .flatten()
+            .map(|entry| entry.path())
+            .filter(|dir| Some(dir) != named.as_ref())
+            .filter_map(|dir| {
+                let made = dir.join(".socket2.sock").metadata().ok()?.modified().ok()?;
+                Some((made, dir))
+            })
+            .collect();
+        others.sort_unstable_by(|a, b| b.cmp(a));
+        named
+            .into_iter()
+            .chain(others.into_iter().map(|(_, dir)| dir))
+            .map(|dir| Hyprland { dir })
+            .collect()
+    }
+
+    /// The first of the [`candidates`](Hyprland::candidates) whose event
+    /// socket takes a connection, and its events.
+    pub fn connect(
+        signature: Option<&OsStr>,
+        runtime: &Path,
+    ) -> Result<(Hyprland, Events), String> {
+        Hyprland::candidates(signature, runtime)
+            .into_iter()
+            .find_map(|hyprland| Some((hyprland.clone(), hyprland.events().ok()?)))
+            .ok_or_else(|| format!("no Hyprland in {}", runtime.join("hypr").display()))
+    }
+
+    /// Waits until a Hyprland runs, from this process's environment, and
+    /// connects to it. Waiting costs nothing
+    /// ([`runtime::wait_for`](kotodama_extension::runtime::wait_for));
+    /// `waiting` hears why the first try failed. Without
+    /// `XDG_RUNTIME_DIR` it waits forever.
+    #[cfg(target_os = "linux")]
+    pub fn wait(waiting: impl FnOnce(&str)) -> (Hyprland, Events) {
+        let signature = std::env::var_os("HYPRLAND_INSTANCE_SIGNATURE");
+        let Some(runtime) = kotodama_extension::runtime::dir() else {
+            waiting("XDG_RUNTIME_DIR isn't set");
+            loop {
+                std::thread::park();
+            }
+        };
+        let hypr = runtime.join("hypr");
+        kotodama_extension::runtime::wait_for(
+            &[&hypr, &runtime],
+            || Hyprland::connect(signature.as_deref(), &runtime),
+            waiting,
+        )
     }
 
     /// Sends one request, as `hyprctl` writes it: its flags, a `/`, then the

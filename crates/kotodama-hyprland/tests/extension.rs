@@ -31,14 +31,19 @@ struct State {
 /// Hyprland's request socket and event socket in a runtime directory of its
 /// own, as `$XDG_RUNTIME_DIR/hypr/$HYPRLAND_INSTANCE_SIGNATURE/`.
 struct FakeHyprland {
-    runtime: TempDir,
+    runtime: Arc<TempDir>,
     state: Arc<(Mutex<State>, Condvar)>,
 }
 
 impl FakeHyprland {
     fn start() -> Self {
-        let runtime = tempfile::tempdir().unwrap();
-        let dir = runtime.path().join("hypr").join(SIGNATURE);
+        FakeHyprland::start_in(Arc::new(tempfile::tempdir().unwrap()), SIGNATURE)
+    }
+
+    /// A Hyprland instance `signature` in `runtime`, which another may have
+    /// run in before.
+    fn start_in(runtime: Arc<TempDir>, signature: &str) -> Self {
+        let dir = runtime.path().join("hypr").join(signature);
         std::fs::create_dir_all(&dir).unwrap();
         let state = Arc::new((
             Mutex::new(State {
@@ -386,8 +391,12 @@ fn stays_quiet_and_idle(mut extension: Spawned) {
 
 #[test]
 fn without_hyprland_the_extension_starts_and_stays_quiet() {
+    let runtime = tempfile::tempdir().unwrap();
     let mut command = Command::new(env!("CARGO_BIN_EXE_kotodama-hyprland"));
-    command.env_remove("HYPRLAND_INSTANCE_SIGNATURE");
+    // No Hyprland in its runtime directory either: it waits there for one.
+    command
+        .env("XDG_RUNTIME_DIR", runtime.path())
+        .env_remove("HYPRLAND_INSTANCE_SIGNATURE");
     let mut extension = Spawned::start(&mut command, WAIT);
     extension.send(ToExtension::Config(Table::new()));
     stays_quiet_and_idle(extension);
@@ -416,4 +425,38 @@ fn hyprland_exiting_takes_its_windows_away() {
     assert_eq!(removed.len(), 1 + 5 + 2);
     assert!(removed.contains(&FIREFOX.to_owned()));
     extension.quiet();
+}
+
+/// Under socket activation the Extension can start before Hyprland, or
+/// before `HYPRLAND_INSTANCE_SIGNATURE` reaches the service manager: it
+/// waits in the runtime directory and follows Hyprland once it is there.
+#[test]
+fn a_hyprland_that_starts_after_the_extension_is_followed() {
+    let runtime = Arc::new(tempfile::tempdir().unwrap());
+    let mut command = Command::new(env!("CARGO_BIN_EXE_kotodama-hyprland"));
+    command
+        .env("XDG_RUNTIME_DIR", runtime.path())
+        .env_remove("HYPRLAND_INSTANCE_SIGNATURE");
+    let mut extension = Spawned::start(&mut command, WAIT);
+    extension.send(ToExtension::Config(Table::new()));
+    extension.quiet();
+
+    let _hyprland = FakeHyprland::start_in(runtime, SIGNATURE);
+    let items = started(&extension);
+    assert!(ids(&items).contains(&FIREFOX), "{:?}", ids(&items));
+}
+
+/// A restarted Hyprland has a new instance signature; the Extension finds it
+/// without being restarted itself.
+#[test]
+fn a_restarted_hyprland_is_followed_again() {
+    let hyprland = FakeHyprland::start();
+    let extension = hyprland.extension();
+    started(&extension);
+    hyprland.exit();
+    let _gone = [extension.removed(), extension.removed()].concat();
+
+    let _again = FakeHyprland::start_in(hyprland.runtime.clone(), "fixture_1729000100_42");
+    let items = started(&extension);
+    assert!(ids(&items).contains(&FIREFOX), "{:?}", ids(&items));
 }

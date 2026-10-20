@@ -1,12 +1,15 @@
-//! Watching the Wayland clipboard, and setting it, through ext-data-control,
-//! or wlr-data-control on a compositor that has only that.
+//! Watching the Wayland clipboard, and setting it, through
+//! `kotodama_extension::wayland` (ext-data-control, or wlr-data-control on a
+//! compositor that has only that).
 //!
-//! The connection lives on a thread of its own. What each new selection
-//! offers is checked before anything is read: an offer a password manager
-//! marked sensitive is never read at all (see [`choose`](crate::copied::choose)).
-//! The rest are read one at a time on a second thread, which also decodes
-//! images for their thumbnails, so a slow source or a large image never holds
-//! up the clipboard or the Daemon.
+//! The connection lives on a thread of its own, which first waits for the
+//! compositor: the Extension may start before the compositor does, or before
+//! `WAYLAND_DISPLAY` reaches it (see `kotodama_extension::wayland::Display`).
+//! What each new selection offers is checked before anything is read: an
+//! offer a password manager marked sensitive is never read at all (see
+//! [`choose`](crate::copied::choose)). The rest are read one at a time on a
+//! second thread, which also decodes images for their thumbnails, so a slow
+//! source or a large image never holds up the clipboard or the Daemon.
 
 use crate::copied::Copied;
 
@@ -38,35 +41,20 @@ impl Clipboard {
 
 #[cfg(target_os = "linux")]
 mod linux {
-    use std::collections::HashMap;
     use std::fs::File;
-    use std::io::{Read, Write};
-    use std::os::fd::{AsFd, OwnedFd};
+    use std::io::Read;
+    use std::os::fd::OwnedFd;
     use std::sync::Arc;
     use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
     use std::thread;
-    use std::time::Duration;
+    use std::time::{Duration, Instant};
 
+    use kotodama_extension::wayland::{DataControl, DataControlHandler, Display, Offer};
     use rustix::event::{PollFd, PollFlags, Timespec};
     use rustix::pipe::PipeFlags;
-    use wayland_client::backend::ObjectId;
     use wayland_client::globals::{GlobalListContents, registry_queue_init};
     use wayland_client::protocol::{wl_registry, wl_seat};
-    use wayland_client::{
-        Connection, Dispatch, EventQueue, Proxy, QueueHandle, delegate_noop, event_created_child,
-    };
-    use wayland_protocols::ext::data_control::v1::client::{
-        ext_data_control_device_v1::{self as ext_device, ExtDataControlDeviceV1},
-        ext_data_control_manager_v1::ExtDataControlManagerV1,
-        ext_data_control_offer_v1::{self as ext_offer, ExtDataControlOfferV1},
-        ext_data_control_source_v1::{self as ext_source, ExtDataControlSourceV1},
-    };
-    use wayland_protocols_wlr::data_control::v1::client::{
-        zwlr_data_control_device_v1::{self as wlr_device, ZwlrDataControlDeviceV1},
-        zwlr_data_control_manager_v1::ZwlrDataControlManagerV1,
-        zwlr_data_control_offer_v1::{self as wlr_offer, ZwlrDataControlOfferV1},
-        zwlr_data_control_source_v1::{self as wlr_source, ZwlrDataControlSourceV1},
-    };
+    use wayland_client::{Connection, Dispatch, EventQueue, QueueHandle, delegate_noop};
 
     use super::Change;
     use crate::copied::{Choice, Copied, choose};
@@ -79,46 +67,24 @@ mod linux {
     const READ_TIMEOUT: Duration = Duration::from_secs(5);
     const STACK: usize = 256 * 1024;
 
-    /// What to put on the clipboard, and where to say it is there.
-    type Request = (Vec<String>, Vec<u8>, Sender<()>);
+    /// What to put on the clipboard, until when (`set` has given up after),
+    /// and where to say it is there.
+    type Request = (Vec<String>, Vec<u8>, Instant, Sender<()>);
 
-    /// The watched clipboard. Dropping it stops the watching.
+    /// The watched clipboard. Dropping it stops the watching, once the
+    /// compositor is there.
     pub struct Clipboard {
         requests: Sender<Request>,
         wake: OwnedFd,
     }
 
     impl Clipboard {
-        /// Connects to the compositor in `WAYLAND_DISPLAY` and calls
-        /// `changed` with each thing copied from now on, on a thread of its
-        /// own.
+        /// Calls `changed` with each thing copied from now on, on a thread of
+        /// its own, which first waits for the compositor if it isn't there
+        /// yet.
         pub fn watch(
             changed: impl Fn(Change) + Send + Sync + 'static,
         ) -> Result<Clipboard, String> {
-            let conn = Connection::connect_to_env().map_err(|err| err.to_string())?;
-            let (globals, mut queue) =
-                registry_queue_init::<State>(&conn).map_err(|err| err.to_string())?;
-            let qh = queue.handle();
-            let seat: wl_seat::WlSeat = globals
-                .bind(&qh, 1..=1, ())
-                .map_err(|err| format!("no seat: {err}"))?;
-            let control = match globals.bind::<ExtDataControlManagerV1, _, _>(&qh, 1..=1, ()) {
-                Ok(manager) => {
-                    let device = manager.get_data_device(&seat, &qh, ());
-                    Control::Ext(manager, device)
-                }
-                Err(_) => {
-                    let manager = globals
-                        .bind::<ZwlrDataControlManagerV1, _, _>(&qh, 1..=2, ())
-                        .map_err(|_| {
-                            "the compositor has neither ext-data-control nor wlr-data-control"
-                                .to_owned()
-                        })?;
-                    let device = manager.get_data_device(&seat, &qh, ());
-                    Control::Wlr(manager, device)
-                }
-            };
-
             let (reads, to_read) = mpsc::channel::<(String, OwnedFd)>();
             let changed = Arc::new(changed);
             let reporter = Arc::clone(&changed);
@@ -128,15 +94,6 @@ mod linux {
                 .spawn(move || read_all(&to_read, &*reporter))
                 .map_err(|err| err.to_string())?;
 
-            let mut state = State {
-                control,
-                offers: HashMap::new(),
-                selection: None,
-                reads,
-                finished: false,
-            };
-            queue.roundtrip(&mut state).map_err(|err| err.to_string())?;
-
             let (wake_rx, wake) =
                 rustix::pipe::pipe_with(PipeFlags::CLOEXEC).map_err(|err| err.to_string())?;
             let (requests, inbox) = mpsc::channel();
@@ -144,6 +101,25 @@ mod linux {
                 .name("wayland".into())
                 .stack_size(STACK)
                 .spawn(move || {
+                    let mut waited = false;
+                    let connected = Display::from_env().wait(
+                        |conn| connect(&conn, reads.clone()),
+                        |err| {
+                            waited = true;
+                            kotodama_extension::log!("waiting for the compositor: {err}");
+                        },
+                    );
+                    let (queue, state) = match connected {
+                        Ok(connected) => connected,
+                        // Waiting longer won't help.
+                        Err(err) => {
+                            kotodama_extension::log!("not watching the clipboard: {err}");
+                            return;
+                        }
+                    };
+                    if waited {
+                        kotodama_extension::log!("watching the clipboard");
+                    }
                     run(queue, state, &inbox, &wake_rx);
                     changed(Change::Lost);
                 })
@@ -154,11 +130,14 @@ mod linux {
         /// Puts `data` on the clipboard, offered as each of `mimes`, and
         /// returns once the compositor has it there, so what is copied next
         /// comes after it. The clipboard keeps it until something else is
-        /// copied. A compositor that doesn't answer within `READ_TIMEOUT` is
-        /// taken as hung.
+        /// copied. A compositor that doesn't answer within `READ_TIMEOUT`,
+        /// or isn't there yet, fails it.
         pub fn set(&self, mimes: Vec<String>, data: Vec<u8>) -> Result<(), String> {
             let (done, copied) = mpsc::channel();
-            if self.requests.send((mimes, data, done)).is_err()
+            if self
+                .requests
+                .send((mimes, data, Instant::now() + READ_TIMEOUT, done))
+                .is_err()
                 || rustix::io::write(&self.wake, &[1]).is_err()
             {
                 return Err("lost the connection to the compositor".into());
@@ -171,6 +150,32 @@ mod linux {
                 }
             }
         }
+    }
+
+    /// Binds the clipboard on a new connection, and takes in what it holds.
+    /// The outer error is worth another try; the inner one, a compositor
+    /// with no data-control, is not.
+    fn connect(
+        conn: &Connection,
+        reads: Sender<(String, OwnedFd)>,
+    ) -> Result<Result<(EventQueue<State>, State), String>, String> {
+        let (globals, mut queue) =
+            registry_queue_init::<State>(conn).map_err(|err| err.to_string())?;
+        let qh = queue.handle();
+        let seat: wl_seat::WlSeat = globals
+            .bind(&qh, 1..=1, ())
+            .map_err(|err| format!("no seat: {err}"))?;
+        let control = match DataControl::bind(&globals, &seat, &qh) {
+            Ok(control) => control,
+            Err(err) => return Ok(Err(err)),
+        };
+        let mut state = State {
+            control,
+            reads,
+            finished: false,
+        };
+        queue.roundtrip(&mut state).map_err(|err| err.to_string())?;
+        Ok(Ok((queue, state)))
     }
 
     /// Dispatches Wayland events and sets the clipboard when asked, until
@@ -216,8 +221,14 @@ mod linux {
                     return;
                 }
                 let mut waiting = Vec::new();
-                for (mimes, data, done) in inbox.try_iter() {
-                    state.set_selection(mimes, data, &qh);
+                let now = Instant::now();
+                for (mimes, data, until, done) in inbox.try_iter() {
+                    // Asked before the compositor was there, and failed
+                    // since: setting it now would undo a later copy.
+                    if until < now {
+                        continue;
+                    }
+                    state.control.set_selection(mimes, data, &qh);
                     waiting.push(done);
                 }
                 // A round trip: the compositor has handled the requests sent.
@@ -274,83 +285,18 @@ mod linux {
         }
     }
 
-    enum Control {
-        Ext(ExtDataControlManagerV1, ExtDataControlDeviceV1),
-        Wlr(ZwlrDataControlManagerV1, ZwlrDataControlDeviceV1),
-    }
-
-    enum Offer {
-        Ext(ExtDataControlOfferV1),
-        Wlr(ZwlrDataControlOfferV1),
-    }
-
-    impl Offer {
-        fn id(&self) -> ObjectId {
-            match self {
-                Offer::Ext(offer) => offer.id(),
-                Offer::Wlr(offer) => offer.id(),
-            }
-        }
-
-        fn receive(&self, mime: String, fd: &OwnedFd) {
-            match self {
-                Offer::Ext(offer) => offer.receive(mime, fd.as_fd()),
-                Offer::Wlr(offer) => offer.receive(mime, fd.as_fd()),
-            }
-        }
-
-        fn destroy(&self) {
-            match self {
-                Offer::Ext(offer) => offer.destroy(),
-                Offer::Wlr(offer) => offer.destroy(),
-            }
-        }
-    }
-
-    #[derive(PartialEq)]
-    enum Source {
-        Ext(ExtDataControlSourceV1),
-        Wlr(ZwlrDataControlSourceV1),
-    }
-
-    impl Source {
-        fn destroy(&self) {
-            match self {
-                Source::Ext(source) => source.destroy(),
-                Source::Wlr(source) => source.destroy(),
-            }
-        }
-    }
-
     struct State {
-        control: Control,
-        /// The MIME types of each offer not yet taken or dropped.
-        offers: HashMap<ObjectId, (Offer, Vec<String>)>,
-        /// What we put on the clipboard, while it is still there.
-        selection: Option<(Source, Arc<Vec<u8>>)>,
+        control: DataControl,
         /// Hands an offer's read end to the reading thread.
         reads: Sender<(String, OwnedFd)>,
         /// The compositor took the data device away.
         finished: bool,
     }
 
-    impl State {
-        fn offered(&mut self, offer: Offer) {
-            self.offers.insert(offer.id(), (offer, Vec::new()));
-        }
-
-        fn mime(&mut self, offer: ObjectId, mime: String) {
-            if let Some((_, mimes)) = self.offers.get_mut(&offer) {
-                mimes.push(mime);
-            }
-        }
-
+    impl DataControlHandler for State {
         /// A new selection: reads it unless it is sensitive or holds nothing
         /// worth keeping.
-        fn selected(&mut self, offer: Option<ObjectId>) {
-            let Some((offer, mimes)) = offer.and_then(|id| self.offers.remove(&id)) else {
-                return;
-            };
+        fn selected(&mut self, offer: &Offer, mimes: Vec<String>) {
             match choose(mimes.iter().map(String::as_str)) {
                 Choice::Read(mime) => match rustix::pipe::pipe_with(PipeFlags::CLOEXEC) {
                     Ok((read, write)) => {
@@ -364,63 +310,10 @@ mod linux {
                 },
                 Choice::Sensitive | Choice::Nothing => {}
             }
-            offer.destroy();
         }
 
-        /// Drops an offer that won't be read, such as the primary selection.
-        fn dropped(&mut self, offer: Option<ObjectId>) {
-            if let Some((offer, _)) = offer.and_then(|id| self.offers.remove(&id)) {
-                offer.destroy();
-            }
-        }
-
-        fn set_selection(&mut self, mimes: Vec<String>, data: Vec<u8>, qh: &QueueHandle<State>) {
-            let source = match &self.control {
-                Control::Ext(manager, device) => {
-                    let source = manager.create_data_source(qh, ());
-                    for mime in mimes {
-                        source.offer(mime);
-                    }
-                    device.set_selection(Some(&source));
-                    Source::Ext(source)
-                }
-                Control::Wlr(manager, device) => {
-                    let source = manager.create_data_source(qh, ());
-                    for mime in mimes {
-                        source.offer(mime);
-                    }
-                    device.set_selection(Some(&source));
-                    Source::Wlr(source)
-                }
-            };
-            if let Some((old, _)) = self.selection.replace((source, Arc::new(data))) {
-                old.destroy();
-            }
-        }
-
-        /// A paste asks for what we put on the clipboard.
-        fn send(&self, source: &Source, fd: OwnedFd) {
-            if let Some((_, data)) = self.selection.as_ref().filter(|(ours, _)| ours == source) {
-                let data = Arc::clone(data);
-                // A slow reader mustn't hold up the clipboard.
-                let _ = thread::Builder::new()
-                    .name("paste".into())
-                    .stack_size(STACK)
-                    .spawn(move || {
-                        let _ = File::from(fd).write_all(&data);
-                    });
-            }
-        }
-
-        fn cancelled(&mut self, source: Source) {
-            if self
-                .selection
-                .as_ref()
-                .is_some_and(|(ours, _)| *ours == source)
-            {
-                self.selection = None;
-            }
-            source.destroy();
+        fn finished(&mut self) {
+            self.finished = true;
         }
     }
 
@@ -437,96 +330,5 @@ mod linux {
     }
 
     delegate_noop!(State: ignore wl_seat::WlSeat);
-
-    /// The Dispatch impls for one data-control protocol; ext and wlr are the
-    /// same protocol by two names.
-    macro_rules! data_control {
-        ($variant:ident, $manager:ty, $device:ty, $device_mod:ident, $offer:ty, $offer_mod:ident, $source:ty, $source_mod:ident) => {
-            delegate_noop!(State: $manager);
-
-            impl Dispatch<$device, ()> for State {
-                fn event(
-                    state: &mut Self,
-                    _: &$device,
-                    event: $device_mod::Event,
-                    _: &(),
-                    _: &Connection,
-                    _: &QueueHandle<Self>,
-                ) {
-                    match event {
-                        $device_mod::Event::DataOffer { id } => state.offered(Offer::$variant(id)),
-                        $device_mod::Event::Selection { id } => {
-                            state.selected(id.map(|offer| offer.id()))
-                        }
-                        $device_mod::Event::PrimarySelection { id } => {
-                            state.dropped(id.map(|offer| offer.id()))
-                        }
-                        $device_mod::Event::Finished => state.finished = true,
-                        _ => {}
-                    }
-                }
-
-                event_created_child!(State, $device, [
-                    $device_mod::EVT_DATA_OFFER_OPCODE => ($offer, ()),
-                ]);
-            }
-
-            impl Dispatch<$offer, ()> for State {
-                fn event(
-                    state: &mut Self,
-                    offer: &$offer,
-                    event: $offer_mod::Event,
-                    _: &(),
-                    _: &Connection,
-                    _: &QueueHandle<Self>,
-                ) {
-                    if let $offer_mod::Event::Offer { mime_type } = event {
-                        state.mime(offer.id(), mime_type);
-                    }
-                }
-            }
-
-            impl Dispatch<$source, ()> for State {
-                fn event(
-                    state: &mut Self,
-                    source: &$source,
-                    event: $source_mod::Event,
-                    _: &(),
-                    _: &Connection,
-                    _: &QueueHandle<Self>,
-                ) {
-                    match event {
-                        $source_mod::Event::Send { fd, .. } => {
-                            state.send(&Source::$variant(source.clone()), fd)
-                        }
-                        $source_mod::Event::Cancelled => {
-                            state.cancelled(Source::$variant(source.clone()))
-                        }
-                        _ => {}
-                    }
-                }
-            }
-        };
-    }
-
-    data_control!(
-        Ext,
-        ExtDataControlManagerV1,
-        ExtDataControlDeviceV1,
-        ext_device,
-        ExtDataControlOfferV1,
-        ext_offer,
-        ExtDataControlSourceV1,
-        ext_source
-    );
-    data_control!(
-        Wlr,
-        ZwlrDataControlManagerV1,
-        ZwlrDataControlDeviceV1,
-        wlr_device,
-        ZwlrDataControlOfferV1,
-        wlr_offer,
-        ZwlrDataControlSourceV1,
-        wlr_source
-    );
+    kotodama_extension::delegate_data_control!(State);
 }
