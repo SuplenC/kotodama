@@ -14,5 +14,5 @@ The shared protocol. Maintained by hand: fix stale lines when you find them, and
 - `frame.rs`: length-prefixed frames, `MAX_FRAME_LEN` (ADR 0004).
 - `wire.rs`: `WireFormat` (postcard, JSON, MessagePack) `encode`/`decode`.
 - `channel.rs`: `Channel::handshake`, `send`, `recv`, `split`; `ChannelReader::has_buffered` (what came with the last message).
-- `launch.rs:launch_command`: detached program start, `KOTODAMA_LAUNCH_PREFIX`.
+- `launch.rs:launch_command`: detached program start, `KOTODAMA_LAUNCH_PREFIX`; `launch_prefix` (none when `KOTODAMA_LAUNCH_SCOPED` marks it as `SCOPE_PREFIX`, which only makes a scope).
 - `../benches/batch.rs`: encoding and decoding 10k Indexed items in each Wire format.

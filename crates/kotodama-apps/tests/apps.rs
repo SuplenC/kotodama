@@ -617,6 +617,49 @@ fn apps_start_through_the_launch_prefix_and_a_missing_program_still_fails() {
     assert!(matches!(apps.run("broken", "open"), Outcome::Failed { .. }));
 }
 
+/// The Daemon hands Extensions a prefix that only makes a scope, for those
+/// that can't make one themselves; this one makes its own.
+#[test]
+fn a_prefix_that_only_makes_a_scope_is_passed_over() {
+    let dir = data_dirs();
+    let out = dir.path().join("wrapped");
+    let ran = dir.path().join("ran");
+    let wrapper = dir.path().join("wrap");
+    fs::write(
+        &wrapper,
+        format!("#!/bin/sh\necho wrapped > {}\nexec \"$@\"\n", out.display()),
+    )
+    .unwrap();
+    fs::set_permissions(&wrapper, fs::Permissions::from_mode(0o755)).unwrap();
+    install(
+        dir.path(),
+        "system",
+        "app.desktop",
+        &app("App", &format!("touch {}", ran.display())),
+    );
+    let mut apps = Apps::start_with(
+        dir,
+        &[
+            ("KOTODAMA_LAUNCH_PREFIX", wrapper.to_str().unwrap()),
+            ("KOTODAMA_LAUNCH_SCOPED", "1"),
+            // No user manager, so the app starts without a scope.
+            ("XDG_RUNTIME_DIR", "/nonexistent"),
+        ],
+    );
+    apps.send(ToExtension::Config(Table::new()));
+    apps.added();
+
+    assert_eq!(apps.run("app", "open"), Outcome::Close);
+    for _ in 0..100 {
+        if ran.exists() {
+            break;
+        }
+        thread::sleep(Duration::from_millis(50));
+    }
+    assert!(ran.exists(), "the app ran");
+    assert!(!out.exists(), "the app ran through the prefix");
+}
+
 #[test]
 fn an_app_that_exits_right_after_it_starts_has_its_pick_withdrawn() {
     let dir = data_dirs();

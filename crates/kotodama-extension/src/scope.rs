@@ -8,6 +8,9 @@
 //! starting `systemd-run` for every program. A launch prefix
 //! ([`kotodama_protocol::LAUNCH_PREFIX`]), when set, replaces this: the
 //! program then starts after the prefix, in no scope of Kotodama's making.
+//! Extensions that start programs through the prefix alone get
+//! [`kotodama_protocol::SCOPE_PREFIX`] from the Daemon instead
+//! ([`pass_scope_prefix`]).
 //!
 //! # Owns
 //!
@@ -21,6 +24,52 @@
 
 #[cfg(target_os = "linux")]
 pub use linux::spawn;
+
+use std::path::Path;
+use std::process::Command;
+
+use kotodama_protocol::{LAUNCH_PREFIX, LAUNCH_SCOPED, SCOPE_PREFIX};
+
+/// Gives the Extension `command` starts a launch prefix that makes a scope
+/// for each program ([`SCOPE_PREFIX`], marked [`LAUNCH_SCOPED`]), when this
+/// process has no prefix and there is a user manager to make scopes. An
+/// Extension that starts programs through the prefix, in any language, then
+/// gets the scope too; one built on this crate makes it itself.
+pub fn pass_scope_prefix(command: &mut Command) {
+    pass_scope_prefix_from(
+        command,
+        std::env::var_os(LAUNCH_PREFIX).is_some(),
+        std::env::var_os("XDG_RUNTIME_DIR")
+            .as_deref()
+            .map(Path::new),
+    );
+}
+
+/// [`pass_scope_prefix`] for a process whose own prefix is `prefixed`, with
+/// `runtime_dir` its `XDG_RUNTIME_DIR`.
+fn pass_scope_prefix_from(command: &mut Command, prefixed: bool, runtime_dir: Option<&Path>) {
+    let Some(dir) = runtime_dir.filter(|_| !prefixed) else {
+        return;
+    };
+    if has_user_manager(&dir.join("systemd/private")) {
+        command
+            .env(LAUNCH_PREFIX, SCOPE_PREFIX)
+            .env(LAUNCH_SCOPED, "1");
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn has_user_manager(socket: &Path) -> bool {
+    use std::os::unix::fs::FileTypeExt;
+    socket
+        .metadata()
+        .is_ok_and(|meta| meta.file_type().is_socket())
+}
+
+#[cfg(not(target_os = "linux"))]
+fn has_user_manager(_socket: &Path) -> bool {
+    false
+}
 
 /// Spawns `command`. Without systemd there is no scope to start it in.
 ///
@@ -68,7 +117,7 @@ mod linux {
     use std::thread;
     use std::time::{Duration, Instant};
 
-    use kotodama_protocol::LAUNCH_PREFIX;
+    use kotodama_protocol::launch_prefix;
 
     use super::unit_name;
     use crate::dbus::{Bus, Call, Error, Marshal, Message};
@@ -96,7 +145,7 @@ mod linux {
         command: &mut Command,
         unscoped: impl FnOnce(Error) + Send + 'static,
     ) -> io::Result<Child> {
-        if std::env::var_os(LAUNCH_PREFIX).is_some() {
+        if launch_prefix().is_some() {
             return command.spawn();
         }
         match Bus::user_manager() {
@@ -273,6 +322,43 @@ mod tests {
             "app-kotodama-\\x2ehidden\\x20\\xc3\\xbc-1.scope"
         );
         assert!(unit_name(&"x".repeat(1000), u32::MAX).len() < 256);
+    }
+
+    /// The variables `command` sets.
+    #[cfg(target_os = "linux")]
+    fn set(command: &Command) -> Vec<(String, String)> {
+        command
+            .get_envs()
+            .filter_map(|(name, value)| {
+                Some((name.to_str()?.to_owned(), value?.to_str()?.to_owned()))
+            })
+            .collect()
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn extensions_get_the_scope_prefix_only_when_there_is_a_user_manager_and_no_prefix() {
+        let runtime = tempfile::tempdir().unwrap();
+        let mut command = Command::new("true");
+        pass_scope_prefix_from(&mut command, false, Some(runtime.path()));
+        assert_eq!(set(&command), [], "no user manager");
+
+        std::fs::create_dir(runtime.path().join("systemd")).unwrap();
+        let _manager =
+            std::os::unix::net::UnixListener::bind(runtime.path().join("systemd/private")).unwrap();
+        let mut command = Command::new("true");
+        pass_scope_prefix_from(&mut command, true, Some(runtime.path()));
+        assert_eq!(set(&command), [], "a prefix of the Daemon's own");
+
+        let mut command = Command::new("true");
+        pass_scope_prefix_from(&mut command, false, Some(runtime.path()));
+        assert_eq!(
+            set(&command),
+            [
+                (LAUNCH_PREFIX.to_owned(), SCOPE_PREFIX.to_owned()),
+                (LAUNCH_SCOPED.to_owned(), "1".to_owned())
+            ]
+        );
     }
 
     #[cfg(target_os = "linux")]
