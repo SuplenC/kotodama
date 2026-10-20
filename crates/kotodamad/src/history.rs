@@ -349,7 +349,13 @@ impl Picks {
         // say after the picks of an older History were spread evenly.
         let counted: f64 = counts.iter().sum();
         self.score = left as f32;
-        self.parts = counts.map(|count| (count / counted * SHARES).round() as u16);
+        // With nothing counted in any part, when the picks left were made
+        // isn't known.
+        self.parts = if counted > 0.0 {
+            counts.map(|count| (count / counted * SHARES).round() as u16)
+        } else {
+            [0; PARTS]
+        };
         Some(self)
     }
 }
