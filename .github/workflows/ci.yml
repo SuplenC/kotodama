@@ -294,7 +294,9 @@ jobs:
 
   # The image only copies files onto nixos/nix, so both platforms build without emulation.
   image:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    # `test` and `e2e` need the PR-only `changes` job, which is skipped on
+    # pushes; without `!cancelled()` that skip would skip this job too.
+    if: ${{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.test.result == 'success' && needs.e2e.result == 'success' }}
     needs: [test, e2e]
     runs-on: ubuntu-latest
     permissions:
