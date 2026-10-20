@@ -13,7 +13,7 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
-use notify::event::{EventKind, ModifyKind};
+use notify::event::{CreateKind, EventKind, ModifyKind, RemoveKind};
 use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 
 use crate::projects::{self, Project, ProjectFolder};
@@ -68,14 +68,14 @@ impl Scanner {
     pub fn start(scanned: impl Fn(Scan) + Send + 'static) -> io::Result<Self> {
         let (requests, received) = mpsc::channel();
         let touched = requests.clone();
-        let filter = Arc::new(Mutex::new(Folders::default()));
+        let filter = Arc::new(Mutex::new(Filter::default()));
         let watching = Arc::clone(&filter);
         let watcher = notify::recommended_watcher(move |event: notify::Result<notify::Event>| {
             let Ok(event) = event else {
                 return;
             };
-            let folders = watching.lock().unwrap_or_else(|poison| poison.into_inner());
-            if matters(&event, &folders) {
+            let filter = watching.lock().unwrap_or_else(|poison| poison.into_inner());
+            if filter.matters(&event) {
                 let _ = touched.send(Request::Touched);
             }
         })
@@ -102,7 +102,6 @@ impl Scanner {
                             }
                         },
                     }
-                    *filter.lock().unwrap_or_else(|poison| poison.into_inner()) = folders.clone();
                     let (scan, mut dirs) = scan(&folders);
                     // A folder that isn't there yet is watched for through
                     // its parent.
@@ -119,6 +118,10 @@ impl Scanner {
                         }
                     }
                     watch.set(dirs);
+                    *filter.lock().unwrap_or_else(|poison| poison.into_inner()) = Filter {
+                        folders: folders.clone(),
+                        watched: watch.watched.clone(),
+                    };
                     scanned(scan);
                 }
             })?;
@@ -158,36 +161,60 @@ impl Watch {
     }
 }
 
-/// Whether `event` can change what a search finds. In a scripts folder any
-/// change can, a header edit included. In a projects folder only a folder
-/// coming or going can, or the files that make a repository or list its
-/// submodules, so editing files at the top of a project searches nothing.
-fn matters(event: &notify::Event, folders: &Folders) -> bool {
-    if matches!(event.kind, EventKind::Access(_)) {
-        return false;
-    }
-    event.paths.iter().any(|path| {
-        if folders
-            .scripts
-            .iter()
-            .any(|folder| path.starts_with(folder))
-        {
-            return true;
-        }
-        if !folders
-            .projects
-            .iter()
-            .any(|folder| path.starts_with(&folder.path))
-        {
+/// What the watcher needs to tell which changes matter.
+#[derive(Default)]
+struct Filter {
+    folders: Folders,
+    /// The folders watched.
+    watched: HashSet<PathBuf>,
+}
+
+impl Filter {
+    /// Whether `event` can change what a search finds. In a scripts folder
+    /// any change can, a header edit included. In a projects folder only a
+    /// folder coming or going can, or the files that make a repository or
+    /// list its submodules, so saving or deleting files at the top of a
+    /// project searches nothing.
+    fn matters(&self, event: &notify::Event) -> bool {
+        if matches!(event.kind, EventKind::Access(_)) {
             return false;
         }
-        let telling = path
-            .file_name()
-            .is_some_and(|name| name == ".git" || name == ".gitmodules" || name == "HEAD");
-        match event.kind {
-            EventKind::Create(_) => telling || Path::is_dir(path),
-            EventKind::Modify(ModifyKind::Data(_) | ModifyKind::Metadata(_)) => telling,
-            _ => true,
-        }
-    })
+        event.paths.iter().any(|path| {
+            if self
+                .folders
+                .scripts
+                .iter()
+                .any(|folder| path.starts_with(folder))
+            {
+                return true;
+            }
+            if !self
+                .folders
+                .projects
+                .iter()
+                .any(|folder| path.starts_with(&folder.path))
+            {
+                return false;
+            }
+            let telling = path
+                .file_name()
+                .is_some_and(|name| name == ".git" || name == ".gitmodules" || name == "HEAD");
+            // What is gone can't be looked at: it was a folder if it was
+            // watched.
+            let folder = || self.watched.contains(path) || Path::is_dir(path);
+            telling
+                || match event.kind {
+                    EventKind::Create(CreateKind::Folder)
+                    | EventKind::Remove(RemoveKind::Folder) => true,
+                    EventKind::Create(CreateKind::File) | EventKind::Remove(RemoveKind::File) => {
+                        false
+                    }
+                    EventKind::Create(_)
+                    | EventKind::Remove(_)
+                    | EventKind::Modify(ModifyKind::Name(_)) => folder(),
+                    EventKind::Modify(_) => false,
+                    _ => true,
+                }
+        })
+    }
 }

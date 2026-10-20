@@ -16,7 +16,7 @@ use kotodama_folders::items::{
 };
 use kotodama_folders::launch::{self, Ended};
 use kotodama_folders::projects::Project;
-use kotodama_folders::scan::{Folders, Scan, Scanner};
+use kotodama_folders::scan::{Scan, Scanner};
 use kotodama_folders::scripts::Script;
 use kotodama_folders::settings::{Settings, fill};
 use kotodama_protocol::{
@@ -136,10 +136,7 @@ impl Extension {
             ToExtension::Config(config) => {
                 self.settings = Settings::from_config(&config, self.home.as_deref());
                 // Items follow once the folders are searched.
-                self.scanner.search(Folders {
-                    projects: self.settings.projects.clone(),
-                    scripts: self.settings.scripts.clone(),
-                });
+                self.scanner.search(self.settings.folders.clone());
                 Ok(())
             }
             ToExtension::RunAction {

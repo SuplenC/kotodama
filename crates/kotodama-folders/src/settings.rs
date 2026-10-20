@@ -25,14 +25,14 @@ use std::path::{Path, PathBuf};
 use kotodama_protocol::{Table, Value};
 
 use crate::projects::ProjectFolder;
+use crate::scan::Folders;
 
 /// How deep projects are looked for when a folder doesn't say.
 pub const DEFAULT_DEPTH: usize = 3;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Settings {
-    pub projects: Vec<ProjectFolder>,
-    pub scripts: Vec<PathBuf>,
+    pub folders: Folders,
     pub terminal: Vec<String>,
     pub open: Vec<String>,
     pub shell: Vec<String>,
@@ -48,8 +48,7 @@ fn words(words: &[&str]) -> Vec<String> {
 impl Default for Settings {
     fn default() -> Self {
         Settings {
-            projects: Vec::new(),
-            scripts: Vec::new(),
+            folders: Folders::default(),
             terminal: words(&["ghostty", "--wait-after-command=true", "-e"]),
             open: words(&[
                 "ghostty",
@@ -123,13 +122,13 @@ impl Settings {
                     Some(Value::Integer(depth)) if *depth >= 0 => *depth as usize,
                     Some(_) => return Err("has a `depth` that isn't a whole number".into()),
                 };
-                self.projects.push(ProjectFolder { path, depth });
+                self.folders.projects.push(ProjectFolder { path, depth });
             }
             Some(Value::String(kind)) if kind == "scripts" => {
                 if folder.contains_key("depth") {
                     warn("a scripts folder is searched whole; its `depth` is skipped");
                 }
-                self.scripts.push(path);
+                self.folders.scripts.push(path);
             }
             _ => return Err("needs a `kind`, `projects` or `scripts`".into()),
         }
@@ -228,7 +227,7 @@ mod tests {
         )]);
         let settings = Settings::from_config(&config, Some(Path::new("/home/me")));
         assert_eq!(
-            settings.projects,
+            settings.folders.projects,
             [
                 ProjectFolder {
                     path: "/home/me/Projects".into(),
@@ -240,7 +239,10 @@ mod tests {
                 },
             ]
         );
-        assert_eq!(settings.scripts, [PathBuf::from("/home/me/Scripts")]);
+        assert_eq!(
+            settings.folders.scripts,
+            [PathBuf::from("/home/me/Scripts")]
+        );
     }
 
     #[test]

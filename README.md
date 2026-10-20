@@ -215,11 +215,11 @@ rates_url = "https://api.frankfurter.app/latest"
 
 ### Folder sources
 
-`kotodama-folders` (`crates/kotodama-folders`, Extension name `folders`) turns the contents of the folders named in its config into Items, in two kinds of folder: projects and scripts. It watches them, so a project cloned or a script added, renamed or removed while it runs shows up or goes within a moment. It watches only the folders it searched, each on its own, never the files inside a project, so a large projects folder costs no more than its repositories.
+`kotodama-folders` (`crates/kotodama-folders`, Extension name `folders`) turns the contents of the folders named in its config into Items, in two kinds of folder: projects and scripts. It watches them, so a project cloned or a script added, renamed or removed while it runs shows up or goes within a moment. It watches only the folders it searched, each on its own, never the files inside a project, so a large projects folder costs no more than its repositories. Saving files inside a project searches nothing again.
 
 **Projects** are the git repositories found down to the folder's `depth` (3 if not given), with their worktrees and checked-out submodules. A repository stops the search: nothing inside it is searched. Each is an Item of kind `project` with its path, titled with the name `tms` (tmux-sessionizer) gives it, so the menu and `tms` land in the same tmux sessions: the folder's name; `<repository>#<worktree>` for a worktree; `<repository>>`, then the folder's name, for a submodule; and, for a name found more than once, as many parent folders as tell them apart (`work/api`, `home/api`). The tmux session is that name with every `.` made `_`. Its primary Action, "Open", opens the session in a terminal, with the editor in it. "Open Terminal Here", "Open in Lazygit", "Open in File Manager" and "Copy Path" follow, then other Extensions' Contributed actions for `project`.
 
-**Scripts** are every executable file in the folder and its subfolders, except hidden ones. Each is an Item of kind `file` with its path, titled with its name without the extension, after its subfolders (`work/backup.sh` shows as "work › backup"). Its primary Action runs it in a terminal that stays open after it exits. A comment among its first 10 lines can change that:
+**Scripts** are every executable file in the folder and its subfolders, down to 4 deep, except hidden ones. Each is an Item of kind `file` with its path, titled with its name without the extension, after its subfolders (`work/backup.sh` shows as "work › backup"). Its primary Action runs it in a terminal that stays open after it exits. A comment among its first 10 lines can change that:
 
 ```sh
 #!/bin/sh

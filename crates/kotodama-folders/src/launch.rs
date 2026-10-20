@@ -91,6 +91,9 @@ pub fn background(
     // The command holds the pipe's write ends too; only the child's may
     // keep it open.
     drop(command);
+    // The reading thread ends when the last holder of the output closes it,
+    // which may be something the script left running; it takes a small stack
+    // and a pipe until then.
     let (read, last_line) = mpsc::channel();
     thread::Builder::new()
         .name("job-output".into())

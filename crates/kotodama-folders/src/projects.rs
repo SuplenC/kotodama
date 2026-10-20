@@ -62,7 +62,7 @@ pub fn find(folders: &[ProjectFolder]) -> Found {
     let mut seen = HashSet::new();
     // By name, in the order found, as `tms` groups them before telling
     // equal names apart.
-    let mut by_name: BTreeMap<String, Vec<Repository>> = BTreeMap::new();
+    let mut by_name: BTreeMap<String, Vec<PathBuf>> = BTreeMap::new();
     let mut queue: VecDeque<(PathBuf, usize)> = folders
         .iter()
         .map(|folder| (folder.path.clone(), folder.depth))
@@ -85,22 +85,21 @@ pub fn find(folders: &[ProjectFolder]) -> Found {
         names.sort();
         if let Some(git_dir) = git_dir(&path, &names) {
             found.dirs.push(path.clone());
-            if !seen.insert(path.clone()) || is_linked_worktree(&path, git_dir.as_deref()) {
+            if !seen.insert(path.clone()) || is_linked_worktree(&path, &git_dir) {
                 continue;
             }
             let Some(name) = path.file_name() else {
                 continue;
             };
             let name = name.to_string_lossy().into_owned();
-            let git_dir = git_dir.unwrap_or_else(|| path.clone());
             for (id, worktree) in worktrees(&git_dir) {
                 found.dirs.push(worktree.clone());
                 by_name
                     .entry(format!("{name}#{id}"))
                     .or_default()
-                    .push(Repository { path: worktree });
+                    .push(worktree);
             }
-            by_name.entry(name).or_default().push(Repository { path });
+            by_name.entry(name).or_default().push(path);
             continue;
         }
         found.dirs.push(path.clone());
@@ -121,7 +120,7 @@ pub fn find(folders: &[ProjectFolder]) -> Found {
         let named: Vec<Project> = if repositories.len() == 1 {
             vec![Project {
                 name,
-                path: repositories.pop().map(|repo| repo.path).unwrap_or_default(),
+                path: repositories.pop().unwrap_or_default(),
             }]
         } else {
             tell_apart(repositories)
@@ -141,19 +140,16 @@ enum Kind {
     Other,
 }
 
-struct Repository {
-    path: PathBuf,
-}
-
 /// Whether `path`, whose entries are `names`, is a repository, as `tms`
-/// tells: `Some(Some(git dir))` for one with a `.git` entry, `Some(None)` for
-/// a bare one, which is its own git dir.
-fn git_dir(path: &Path, names: &[(OsString, Kind)]) -> Option<Option<PathBuf>> {
+/// tells, and if so its git dir: the one its `.git` names, or for a bare one
+/// the folder itself.
+fn git_dir(path: &Path, names: &[(OsString, Kind)]) -> Option<PathBuf> {
     if names.iter().any(|(name, _)| name == ".git") {
-        return Some(Some(dot_git(path)));
+        return Some(dot_git(path));
     }
     let has = |want: &str, kind: Kind| names.iter().any(|(name, k)| name == want && *k == kind);
-    (has("HEAD", Kind::File) && has("objects", Kind::Dir) && has("refs", Kind::Dir)).then_some(None)
+    (has("HEAD", Kind::File) && has("objects", Kind::Dir) && has("refs", Kind::Dir))
+        .then(|| path.to_owned())
 }
 
 /// The git dir a repository's `.git` names: the folder itself, or the one a
@@ -176,9 +172,8 @@ fn dot_git(path: &Path) -> PathBuf {
 /// A linked worktree's `.git` is a file naming a git dir with a `commondir`,
 /// which leads back to its repository's. A submodule's, or one pointing at a
 /// bare repository, has none.
-fn is_linked_worktree(path: &Path, git_dir: Option<&Path>) -> bool {
-    git_dir
-        .is_some_and(|git_dir| path.join(".git").is_file() && git_dir.join("commondir").is_file())
+fn is_linked_worktree(path: &Path, git_dir: &Path) -> bool {
+    path.join(".git").is_file() && git_dir.join("commondir").is_file()
 }
 
 /// The worktrees of the repository whose git dir is `git_dir`, by id, in id
@@ -210,17 +205,17 @@ fn worktrees(git_dir: &Path) -> Vec<(String, PathBuf)> {
 /// sessions match even where its rule is odd: every name takes the same
 /// number of folders, enough to tell apart the pair that needs most, as
 /// `tms` counts it.
-fn tell_apart(mut repositories: Vec<Repository>) -> Vec<Project> {
+fn tell_apart(mut paths: Vec<PathBuf>) -> Vec<Project> {
     let mut depth = 1;
-    let mut popped = Vec::with_capacity(repositories.len());
-    while let Some(current) = repositories.pop() {
+    let mut popped = Vec::with_capacity(paths.len());
+    while let Some(current) = paths.pop() {
         let mut current_depth = 1;
         let mut equal = true;
         while equal {
             equal = false;
-            if let Some(part) = current.path.iter().rev().nth(current_depth) {
-                for other in &repositories {
-                    if other.path.iter().rev().nth(current_depth) == Some(part) {
+            if let Some(part) = current.iter().rev().nth(current_depth) {
+                for other in &paths {
+                    if other.iter().rev().nth(current_depth) == Some(part) {
                         current_depth += 1;
                         equal = true;
                         break;
@@ -233,9 +228,8 @@ fn tell_apart(mut repositories: Vec<Repository>) -> Vec<Project> {
     }
     popped
         .into_iter()
-        .map(|repo| {
-            let mut parts: Vec<String> = repo
-                .path
+        .map(|path| {
+            let mut parts: Vec<String> = path
                 .iter()
                 .rev()
                 .take(depth + 1)
@@ -244,7 +238,7 @@ fn tell_apart(mut repositories: Vec<Repository>) -> Vec<Project> {
             parts.reverse();
             Project {
                 name: parts.join("/"),
-                path: repo.path,
+                path,
             }
         })
         .collect()

@@ -5,6 +5,7 @@
 //! what the Daemon sends it.
 
 use std::fs;
+use std::os::unix::fs::PermissionsExt;
 use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -74,8 +75,11 @@ fn start(root: &Path) -> Client {
     fs::write(
         config.join("config.toml"),
         format!(
-            "[extensions.folders]\nfolders = [{{ path = \"{}\", kind = \"projects\" }}]\nopen = [\"true\"]\n",
-            root.join("Projects").display()
+            "[extensions.folders]\n\
+             folders = [{{ path = \"{}\", kind = \"projects\" }}, {{ path = \"{}\", kind = \"scripts\" }}]\n\
+             open = [\"true\"]\nterminal = [\"true\"]\n",
+            root.join("Projects").display(),
+            root.join("Scripts").display()
         ),
     )
     .unwrap();
@@ -219,5 +223,24 @@ fn a_picked_project_ranks_first_after() {
     ui.run(&other.id, "folders", "open");
 
     let after = ui.projects("app", 2);
+    assert_eq!(after[0].item.title, other.title);
+}
+
+#[test]
+fn a_picked_script_ranks_first_after() {
+    let root = root();
+    for name in ["deploy-one.sh", "deploy-two.sh"] {
+        let path = root.path().join("Scripts").join(name);
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(&path, "#!/bin/sh\n").unwrap();
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    let mut ui = start(root.path());
+
+    let before = ui.projects("deploy", 2);
+    let other = before[1].item.clone();
+    ui.run(&other.id, "folders", "run");
+
+    let after = ui.projects("deploy", 2);
     assert_eq!(after[0].item.title, other.title);
 }

@@ -10,6 +10,9 @@ use std::path::{Path, PathBuf};
 const HEADER_BYTES: usize = 1024;
 /// How many of its first lines may hold the header.
 const HEADER_LINES: usize = 10;
+/// How many subfolders deep scripts are looked for, so a stray dependency
+/// tree in a scripts folder isn't searched and watched whole.
+const MAX_DEPTH: usize = 4;
 /// Shows a subfolder before the script's name: `work › backup`.
 pub const SEPARATOR: &str = " › ";
 
@@ -143,9 +146,10 @@ pub struct Found {
     pub dirs: Vec<PathBuf>,
 }
 
-/// Finds the scripts in `folder` and its subfolders. Hidden files and
-/// folders are skipped, as a `.git` folder's hooks would be, and so are links
-/// to folders, so a loop can't be followed; links to files count.
+/// Finds the scripts in `folder` and its subfolders, down to [`MAX_DEPTH`].
+/// Hidden files and folders are skipped, as a `.git` folder's hooks would
+/// be, and so are links to folders, so a loop can't be followed; links to
+/// files count.
 pub fn find(folder: &Path, found: &mut Found) {
     search(folder, &mut Vec::new(), found);
 }
@@ -167,6 +171,9 @@ fn search(dir: &Path, folders: &mut Vec<String>, found: &mut Found) {
         let path = entry.path();
         let name = entry.file_name().to_string_lossy().into_owned();
         if kind.is_dir() {
+            if folders.len() == MAX_DEPTH {
+                continue;
+            }
             folders.push(name);
             search(&path, folders, found);
             folders.pop();
