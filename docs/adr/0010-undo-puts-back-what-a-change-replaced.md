@@ -2,7 +2,7 @@
 
 Status: accepted (2026-10-20)
 
-Forget, clearing one Extension's history and "Clear history" can be undone for a minute, and a launch that turns out to be a mistake should be withdrawn (#42). Each change to the History returns what it replaced: every entry it touched, as it was before and after. The Daemon keeps these in memory, by id, until they expire, and undoing one puts back each entry whose value is still what the change left. An entry changed since, say by a pick made after "Clear history", stays as it is now. So one mechanism undoes a Forget, a whole clear or a single pick, in any order, and never loses a later pick.
+Forget, clearing one Extension's History and "Clear history" can be undone for a minute, and a launch that turns out to be a mistake should be withdrawn (#42). Each change to the History returns what it replaced: every entry it touched, as it was before and after. The Daemon keeps these in memory, by id, until they expire, and undoing one puts back each entry whose value is still what the change left. An entry changed since, say by a pick made after "Clear history", stays as it is now. So one mechanism undoes a Forget, a whole clear or a single pick, in any order, and never loses a later pick.
 
 The user undoes through an Undo Result of the Daemon's own, found by typing `undo`, which undoes the latest change still kept. It needs nothing new from Front ends.
 
