@@ -2,7 +2,6 @@
 //! `.socket.sock` answers one request per connection, as `hyprctl` sends
 //! them, and `.socket2.sock` streams events, one line each.
 
-
 use std::ffi::OsStr;
 use std::io::{self, BufRead, BufReader, Read, Write};
 use std::os::unix::net::UnixStream;
@@ -54,7 +53,10 @@ impl Hyprland {
 
     /// The first of the [`candidates`](Hyprland::candidates) whose event
     /// socket takes a connection, and its events.
-    pub fn connect(signature: Option<&OsStr>, runtime: &Path) -> Result<(Hyprland, Events), String> {
+    pub fn connect(
+        signature: Option<&OsStr>,
+        runtime: &Path,
+    ) -> Result<(Hyprland, Events), String> {
         Hyprland::candidates(signature, runtime)
             .into_iter()
             .find_map(|hyprland| Some((hyprland.clone(), hyprland.events().ok()?)))

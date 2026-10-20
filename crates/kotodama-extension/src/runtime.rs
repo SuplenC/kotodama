@@ -266,7 +266,11 @@ mod tests {
         let made = Instant::now();
         std::fs::write(&socket, "").unwrap();
         waited.recv_timeout(Duration::from_secs(10)).unwrap();
-        assert!(made.elapsed() < Duration::from_millis(600), "{:?}", made.elapsed());
+        assert!(
+            made.elapsed() < Duration::from_millis(600),
+            "{:?}",
+            made.elapsed()
+        );
     }
 
     #[test]

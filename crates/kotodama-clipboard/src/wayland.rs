@@ -134,7 +134,10 @@ mod linux {
         /// or isn't there yet, fails it.
         pub fn set(&self, mimes: Vec<String>, data: Vec<u8>) -> Result<(), String> {
             let (done, copied) = mpsc::channel();
-            if self.requests.send((mimes, data, Instant::now() + READ_TIMEOUT, done)).is_err()
+            if self
+                .requests
+                .send((mimes, data, Instant::now() + READ_TIMEOUT, done))
+                .is_err()
                 || rustix::io::write(&self.wake, &[1]).is_err()
             {
                 return Err("lost the connection to the compositor".into());
