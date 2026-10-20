@@ -101,7 +101,7 @@ Aliases and Quicklinks live in the config directory and reload with it:
 [aliases]
 ff = { extension = "apps", item = "firefox" }
 # An Alias for one of the Item's own Actions makes that Action primary.
-code = { extension = "projects", item = "kotodama", action = "open-editor" }
+term = { extension = "folders", item = "/home/me/Projects/kotodama", action = "shell" }
 
 [quicklinks.gh]
 title = "GitHub"
@@ -212,6 +212,43 @@ network = true
 # Where the rates come from: frankfurter's API, or anything answering like it.
 rates_url = "https://api.frankfurter.app/latest"
 ```
+
+### Folder sources
+
+`kotodama-folders` (`crates/kotodama-folders`, Extension name `folders`) turns the contents of the folders named in its config into Items, in two kinds of folder: projects and scripts. It watches them, so a project cloned or a script added, renamed or removed while it runs shows up or goes within a moment. It watches only the folders it searched, each on its own, never the files inside a project, so a large projects folder costs no more than its repositories.
+
+**Projects** are the git repositories found down to the folder's `depth` (3 if not given), with their worktrees and checked-out submodules. A repository stops the search: nothing inside it is searched. Each is an Item of kind `project` with its path, titled with the name `tms` (tmux-sessionizer) gives it, so the menu and `tms` land in the same tmux sessions: the folder's name; `<repository>#<worktree>` for a worktree; `<repository>>`, then the folder's name, for a submodule; and, for a name found more than once, as many parent folders as tell them apart (`work/api`, `home/api`). The tmux session is that name with every `.` made `_`. Its primary Action, "Open", opens the session in a terminal, with the editor in it. "Open Terminal Here", "Open in Lazygit", "Open in File Manager" and "Copy Path" follow, then other Extensions' Contributed actions for `project`.
+
+**Scripts** are every executable file in the folder and its subfolders, except hidden ones. Each is an Item of kind `file` with its path, titled with its name without the extension, after its subfolders (`work/backup.sh` shows as "work › backup"). Its primary Action runs it in a terminal that stays open after it exits. A comment among its first 10 lines can change that:
+
+```sh
+#!/bin/sh
+# kotodama: name=Deploy staging terminal=false args=prompt
+```
+
+`name=` is shown instead of the file's name, which still finds it. `terminal=false` runs it in the background as a job, whose end notifies the desktop with the script's last line of output. `args=prompt` asks for its arguments in a form first, split as a shell would split them.
+
+Each Item's id is its path. A project's Identity is `folder:` and its path, a script's `file:` and its path, and a `.desktop` file's `app:` and its file name, the apps Extension's spelling.
+
+```toml
+[extensions.folders]
+folders = [
+  { path = "~/Projects", kind = "projects", depth = 2 },
+  { path = "~/Scripts", kind = "scripts" },
+]
+# What a script runs in; the script and its arguments follow. It should keep
+# the window open once the script exits.
+terminal = ["ghostty", "--wait-after-command=true", "-e"]
+# The commands a project's Actions run, in the project's folder: `{path}` is
+# the folder and `{session}` its tmux session. These are the defaults.
+open = ["ghostty", "-e", "tmux", "new-session", "-A", "-s", "{session}", "-c", "{path}", "nvim"]
+shell = ["ghostty", "--working-directory={path}"]
+lazygit = ["ghostty", "-e", "lazygit", "--path", "{path}"]
+file_manager = ["xdg-open", "{path}"]
+copy_path = ["wl-copy", "{path}"]
+```
+
+Its `manifest.toml` runs `./kotodama-folders`, so a package installs the binary next to it in `$XDG_DATA_DIRS/kotodama/extensions/folders/`.
 
 ## The Quickshell Front end
 
