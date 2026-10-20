@@ -17,12 +17,43 @@ defaults:
     shell: bash
 
 jobs:
+  # On pull requests, decides which jobs the change needs. It lists the paths
+  # that can be ignored, so a path nobody listed runs everything. Pushes to main
+  # skip this and run every job.
+  changes:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    outputs:
+      rust: ${{ steps.diff.outputs.rust }}
+      e2e: ${{ steps.diff.outputs.e2e }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - id: diff
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+        run: |
+          rust=false e2e=false
+          while read -r path; do
+            case $path in
+              *.md | docs/* | LICENSE) ;;
+              e2e/* | examples/*) e2e=true ;;
+              *) rust=true e2e=true ;;
+            esac
+          done < <(git diff --name-only "$BASE"...HEAD)
+          echo "rust=$rust e2e=$e2e"
+          echo "rust=$rust" >> "$GITHUB_OUTPUT"
+          echo "e2e=$e2e" >> "$GITHUB_OUTPUT"
+
   # check and test, and e2e, run as separate jobs so they overlap. Each restores
   # a cargo cache (the registry and target/) keyed on the lockfiles; only runs
   # on main save it, so PRs start from main's build without filling the
   # repository's cache quota.
   test:
     name: check, test (${{ matrix.runner }})
+    needs: changes
+    if: ${{ !cancelled() && (github.event_name == 'push' || needs.changes.outputs.rust == 'true') }}
     strategy:
       fail-fast: false
       matrix:
@@ -62,6 +93,8 @@ jobs:
 
   e2e:
     name: e2e (${{ matrix.runner }})
+    needs: changes
+    if: ${{ !cancelled() && (github.event_name == 'push' || needs.changes.outputs.e2e == 'true') }}
     strategy:
       fail-fast: false
       matrix:
@@ -113,6 +146,8 @@ jobs:
   # a baseline saved by another run to mean anything. Only the relative change is
   # checked: 50% for timings, 10% for the Daemon's resident memory.
   bench:
+    needs: changes
+    if: ${{ !cancelled() && (github.event_name == 'push' || needs.changes.outputs.rust == 'true') }}
     runs-on: ubuntu-latest
     env:
       BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
@@ -207,3 +242,21 @@ jobs:
           tags: |
             ghcr.io/suplenc/kotodama-dev:latest
             ${{ steps.image.outputs.name }}
+
+  # The one required check: fails if a job it needs failed or was cancelled, and
+  # passes when each succeeded or was skipped as not needed.
+  ci:
+    needs: [changes, test, e2e, bench]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          echo "$RESULTS"
+          for result in $RESULTS; do
+            case $result in
+              success | skipped) ;;
+              *) exit 1 ;;
+            esac
+          done

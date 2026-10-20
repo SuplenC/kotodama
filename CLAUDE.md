@@ -2,6 +2,8 @@
 
 A fast, extensible command menu for Wayland. Rust everywhere; the default front end is a Quickshell QML module. Kotodama knows nothing about any particular distro: OS-specific features arrive as Extensions. Architecture: `docs/adr/0001-architecture.md`.
 
+Read the root `CODEMAP.md` first, then the `CODEMAP.md` of the crate you work in. In the same PR, update the map of each crate you change when you add, move or rename a module, test suite or bench, and the root map when you add a crate, top-level dir or recipe.
+
 ## Agent skills
 
 - **Issues**: GitHub Issues via `gh`. See `docs/agents/issue-tracker.md`.

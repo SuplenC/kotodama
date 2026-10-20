@@ -336,6 +336,8 @@ Hyprland can't run here: it needs a DRM device. Its live tests will run in the N
 
 GitHub Actions runs `check` and `test`, and `e2e` as a separate job, on x86_64 and arm64. Each restores a cargo cache keyed on `Cargo.lock` and `flake.lock`, which only runs on `main` save. On pull requests, `e2e` skips the `latency` test (set `E2E_SKIP` to a space-separated list of tests to leave out a full run), and the NixOS VM job (x86_64) doesn't run: both need a full build that no cache can save, so they run after every merge to `main` instead. The bench job (x86_64 only) runs the benchmarks of the base commit and of the change on the same runner, one after the other, and fails when one is more than 50% slower or the Daemon's resident memory is more than 10% higher. Shared runners differ too much for absolute timings, or a baseline saved by another run, to mean anything, so CI only compares the two runs it made itself.
 
+On pull requests, a `changes` job skips the jobs a change can't affect: a change only to Markdown, `docs/` or `LICENSE` runs none of them, and one only to `e2e/` or `examples/` runs only `e2e`. Any other path runs everything. The `ci` job is the one required check. It passes when every job it needs succeeded or was skipped.
+
 On pushes to `main`, CI publishes:
 
 - the dev container image to **`ghcr.io/suplenc/kotodama-dev`** (linux/amd64 and linux/arm64), tagged `latest` and with git's hash of `docker/`, which is the tag `just` uses;
