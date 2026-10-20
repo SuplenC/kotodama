@@ -18,6 +18,7 @@ are in [docs/adr/](docs/adr/).
 - [`crates/kotodama-clipboard/`](crates/kotodama-clipboard/CODEMAP.md): Bundled extension, clipboard history.
 - [`crates/kotodama-emoji/`](crates/kotodama-emoji/CODEMAP.md): Bundled extension, emoji (with skin tones) and symbols, typed or copied.
 - [`crates/kotodama-folders/`](crates/kotodama-folders/CODEMAP.md): Bundled extension, git projects and scripts from configured folders.
+- [`crates/kotodama-web-search/`](crates/kotodama-web-search/CODEMAP.md): Bundled extension, the fallback: web searches for what nothing matches, and addresses opened.
 - `e2e/`: end-to-end tests against headless sway (`e2e/run`, `e2e/lib.sh`, one dir per test).
 - `nix/`: `package.nix` (the package and Bundled extension layout), `home-manager.nix`, `tests/` (NixOS VM and QML module checks).
 - `scripts/`: dev environment (`dev-env`, `dev-image`), bench runners (`bench-run`, `bench-compare`, `bench-crates`), `has-crates`/`has-benches`, `qml-module`, `tests/` (script tests).

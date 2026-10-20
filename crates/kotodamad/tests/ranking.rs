@@ -1145,6 +1145,291 @@ fn a_bare_number_gives_no_answer_but_an_expression_or_conversion_takes_the_top_r
     assert_eq!(w.rows("2048/2")[0], "1024");
 }
 
+// Web search, with its real Manifest and its real rows: a fallback, asked
+// only what real matches leave rows empty for, ranked after every real match.
+
+/// Apps, and the web search Bundled extension, searching Google and then
+/// DuckDuckGo, answering what it is sent.
+struct Searching {
+    h: Harness,
+    web: Ext,
+    ui: FrontEnd,
+    engines: Vec<kotodama_web_search::Engine>,
+    /// The queries web search was asked, in order.
+    asked: Vec<String>,
+}
+
+impl Searching {
+    fn new(titles: &[&str]) -> Self {
+        let web_search = manifest(include_str!("../../kotodama-web-search/manifest.toml"));
+        let mut h = Harness::new(vec![plain("apps"), web_search]);
+        let apps = h.up(0);
+        h.add(&apps, titles.iter().map(|title| app(title)).collect());
+        let web = h.up(1);
+        web.drain();
+        let ui = h.front_end();
+        let engines = kotodama_web_search::engines(&config(
+            "engines = [\n\
+             { name = \"Google\", url = \"https://www.google.com/search?q={query}\" },\n\
+             { name = \"DuckDuckGo\", url = \"https://duckduckgo.com/?q={query}\" },\n\
+             ]",
+        ));
+        Searching {
+            h,
+            web,
+            ui,
+            engines,
+            asked: Vec::new(),
+        }
+    }
+
+    fn shown(&mut self, query: &str) -> Vec<ShownResult> {
+        let mut rows = self.h.query(&self.ui, query);
+        for message in self.web.drain() {
+            let ToExtension::LiveQuery { id, query, .. } = message else {
+                continue;
+            };
+            let results = kotodama_web_search::results(&query, &self.engines);
+            self.asked.push(query);
+            self.h.send(
+                &self.web,
+                FromExtension::LiveResults {
+                    live_query: id,
+                    results,
+                    done: true,
+                },
+            );
+            rows = self.ui.results().unwrap_or(rows);
+        }
+        rows
+    }
+
+    fn rows(&mut self, query: &str) -> Vec<String> {
+        titles(&self.shown(query))
+            .into_iter()
+            .map(str::to_owned)
+            .collect()
+    }
+
+    fn pick(&mut self, query: &str, title: &str) {
+        let rows = self.shown(query);
+        let row = rows
+            .iter()
+            .find(|row| row.item.title == title)
+            .unwrap_or_else(|| panic!("no row {title:?} in {:?}", titles(&rows)));
+        let id = row.item.id.clone();
+        run(
+            &mut self.h,
+            &self.ui,
+            "web-search",
+            &id,
+            "web-search",
+            "open",
+        );
+        self.ui.drain();
+        self.web.drain();
+    }
+}
+
+/// V3
+#[test]
+fn web_search_is_offered_below_the_real_matches_when_they_leave_rows_empty() {
+    let mut w = Searching::new(&["Firefox", "Terminal"]);
+    assert_eq!(
+        w.rows("fire"),
+        [
+            "Firefox",
+            "Search Google for fire",
+            "Search DuckDuckGo for fire"
+        ]
+    );
+}
+
+/// V3
+#[test]
+fn web_search_is_offered_for_a_query_nothing_matches() {
+    let mut w = Searching::new(&["Firefox"]);
+    assert_eq!(
+        w.rows("weather"),
+        ["Search Google for weather", "Search DuckDuckGo for weather"]
+    );
+}
+
+/// V3, ADR 0013
+#[test]
+fn web_search_ranks_below_a_near_miss() {
+    let mut w = Searching::new(&["Firefox"]);
+    assert_eq!(
+        w.rows("fierfox"),
+        [
+            "Firefox",
+            "Search Google for fierfox",
+            "Search DuckDuckGo for fierfox"
+        ]
+    );
+}
+
+/// V3
+#[test]
+fn web_search_picked_every_time_still_ranks_below_every_real_match() {
+    let mut w = Searching::new(&["Firefox", "Fire Alarm"]);
+    for _ in 0..20 {
+        w.pick("fire", "Search DuckDuckGo for fire");
+        w.h.advance(Duration::from_secs(60));
+    }
+    let rows = w.rows("fire");
+    let mut real = rows[..2].to_vec();
+    real.sort();
+    assert_eq!(real, ["Fire Alarm", "Firefox"]);
+    // Among themselves, the engine used goes first.
+    assert_eq!(
+        rows[2..],
+        ["Search DuckDuckGo for fire", "Search Google for fire"].map(String::from)
+    );
+    let rows = w.rows("fierfox");
+    assert_eq!(rows[0], "Firefox", "{rows:?}");
+}
+
+/// V3: the fallback costs nothing while the real matches fill the rows.
+#[test]
+fn web_search_is_not_asked_while_real_matches_fill_the_rows() {
+    let titles: Vec<String> = (0..12).map(|n| format!("Note {n}")).collect();
+    let titles: Vec<&str> = titles.iter().map(String::as_str).collect();
+    let mut w = Searching::new(&titles);
+    let rows = w.rows("note");
+    assert!(rows.iter().all(|row| row.starts_with("Note")), "{rows:?}");
+    assert!(w.asked.is_empty(), "{:?}", w.asked);
+    w.rows("nothing");
+    assert_eq!(w.asked, ["nothing"]);
+}
+
+/// V3: web search back up after a restart is asked what is typed already.
+#[test]
+fn web_search_up_after_the_query_is_typed_is_asked_it() {
+    let mut w = Searching::new(&["Firefox"]);
+    w.h.down(&w.web);
+    w.h.advance(Duration::from_millis(100));
+    assert_eq!(w.rows("weather"), Vec::<String>::new());
+    w.web = w.h.up(1);
+    let asked: Vec<String> = w
+        .web
+        .drain()
+        .into_iter()
+        .filter_map(|message| match message {
+            ToExtension::LiveQuery { query, .. } => Some(query),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(asked, ["weather"]);
+}
+
+/// V3, ADR 0003: a real match arriving late, from a slower Live query, goes
+/// above the searches already on screen.
+#[test]
+fn a_late_real_match_goes_above_web_search_on_screen() {
+    let notes = manifest(
+        "name = \"notes\"\ncommand = [\"x\"]\n\
+         [live_query]\ntriggers = ['.']\ndebounce_ms = 50",
+    );
+    let web_search = manifest(include_str!("../../kotodama-web-search/manifest.toml"));
+    let mut h = Harness::new(vec![notes, web_search]);
+    let notes = h.up(0);
+    let web = h.up(1);
+    let ui = h.front_end();
+    h.query(&ui, "zebra");
+    let engines = kotodama_web_search::default_engines();
+    for message in web.drain() {
+        if let ToExtension::LiveQuery { id, query, .. } = message {
+            let results = kotodama_web_search::results(&query, &engines[..1]);
+            let done = true;
+            h.send(
+                &web,
+                FromExtension::LiveResults {
+                    live_query: id,
+                    results,
+                    done,
+                },
+            );
+        }
+    }
+    let rows = ui.results().unwrap();
+    assert_eq!(titles(&rows), ["Search DuckDuckGo for zebra"]);
+
+    h.advance(Duration::from_millis(50));
+    let Some(ToExtension::LiveQuery { id, .. }) = notes.drain().pop() else {
+        panic!("notes wasn't asked");
+    };
+    let note = LiveResult {
+        item: item("zebra", "Zebra crossing", ItemKind::Url { url: "x".into() }),
+        score: Fraction::new(1.0).unwrap(),
+        answer: false,
+    };
+    let (results, done) = (vec![note], true);
+    h.send(
+        &notes,
+        FromExtension::LiveResults {
+            live_query: id,
+            results,
+            done,
+        },
+    );
+    let rows = ui.results().unwrap();
+    assert_eq!(
+        titles(&rows),
+        ["Zebra crossing", "Search DuckDuckGo for zebra"]
+    );
+}
+
+/// V3: picking a search for a query never stops what the user learned
+/// among the real matches from applying.
+#[test]
+fn a_picked_search_leaves_the_learned_choice_among_real_matches_alone() {
+    let mut w = Searching::new(&["Fox", "Firefox"]);
+    let firefox = |w: &mut Searching| w.rows("fox").iter().position(|row| row == "Firefox");
+    let before = firefox(&mut w);
+    for _ in 0..3 {
+        let rows = w.shown("fox");
+        let id = rows
+            .iter()
+            .find(|row| row.item.title == "Firefox")
+            .unwrap()
+            .item
+            .id
+            .clone();
+        run(&mut w.h, &w.ui, "apps", &id, "apps", "open");
+        w.ui.drain();
+    }
+    assert_eq!(firefox(&mut w), Some(0), "learned, from {before:?}");
+    for _ in 0..5 {
+        w.pick("fox", "Search Google for fox");
+    }
+    assert_eq!(firefox(&mut w), Some(0));
+}
+
+/// V3: what looks like an address opens first, whatever else matches.
+#[test]
+fn an_address_opens_in_the_first_row_with_its_searches_last() {
+    let mut w = Searching::new(&["Example Notes"]);
+    assert_eq!(
+        w.rows("example.com"),
+        [
+            "Open example.com",
+            "Search Google for example.com",
+            "Search DuckDuckGo for example.com"
+        ]
+    );
+    let titles: Vec<String> = (0..12).map(|n| format!("Example.com {n}")).collect();
+    let titles: Vec<&str> = titles.iter().map(String::as_str).collect();
+    let mut w = Searching::new(&titles);
+    let rows = w.rows("example.com");
+    assert_eq!(rows[0], "Open example.com");
+    // The rows are full, so no search is offered.
+    assert!(
+        rows[1..].iter().all(|row| row.starts_with("Example.com")),
+        "{rows:?}"
+    );
+}
+
 // Invariants, over a desktop's worth of apps and a range of queries.
 
 const DESKTOP: &[&str] = &[
