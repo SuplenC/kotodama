@@ -32,7 +32,7 @@ The Daemon. Maintained by hand: fix stale lines when you find them, and update t
 - `link.rs:pump`: post-handshake connection threads (Extension or Front end).
 - `server.rs`: `listen`, `serve`, the Front end Unix socket.
 - `desktop.rs`: paste/type worker over Wayland (virtual keyboard, `Keymap`, `Wayland`, `Worker`); `launch` and `host.rs` pass `WAYLAND_DISPLAY` on; data-control and finding the compositor are `kotodama_extension::wayland`; keys wait `SETTLE` after the menu closes (`settle_left`).
-- `notify.rs:send`: desktop notifications over D-Bus.
+- `notify.rs:send`: desktop notifications over D-Bus (`kotodama_extension::dbus`).
 - `paths.rs:Paths::from_env`: socket, config, state, cache and Extension dirs from XDG.
 - `usage.rs`: opt-in Usage log (`Writer`, `forget`).
 - `../benches/`: `query.rs` (criterion: keystrokes, empty query, batches, cold cache, long titles), `instructions.rs` (gungraun: instructions per keystroke and for the empty query with 2,000 Results picked, compared against the base commit in CI), `daemon.rs` (the real Daemon: socket p99 and resident memory with 10k Items), `memory.rs` (heap per Indexed item); `setup/` is the Daemon `query.rs` and `instructions.rs` both drive, `corpus/` the Items.

@@ -13,9 +13,11 @@ use std::process::Command;
 /// it from the Daemon's environment.
 ///
 /// Under systemd every process the Daemon starts sits in its service's
-/// cgroup, so stopping the service would kill the user's apps with it. The
-/// Daemon's unit therefore sets the prefix to `systemd-run --user --scope …`,
-/// which gives each program a scope of its own.
+/// cgroup, so stopping the service would kill the user's apps with it.
+/// When the prefix isn't set, the Daemon and the Rust Extensions therefore
+/// ask the user manager for a scope for each program
+/// (`kotodama_extension::scope`). Setting it, even empty, replaces that
+/// scope: for another way to start apps, such as `uwsm app --`, or for none.
 pub const LAUNCH_PREFIX: &str = "KOTODAMA_LAUNCH_PREFIX";
 
 /// A command that runs `argv` after the launch prefix, if one is set. Fails if

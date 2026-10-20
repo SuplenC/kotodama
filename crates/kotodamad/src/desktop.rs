@@ -26,6 +26,7 @@ use std::fmt::Write as _;
 use std::process::Stdio;
 use std::time::{Duration, Instant};
 
+use kotodama_extension::Chain;
 use kotodama_protocol::launch_command;
 
 use crate::daemon::{Desktop, Output};
@@ -101,27 +102,35 @@ fn settle_left(requested: Instant, now: Instant) -> Duration {
     (requested + SETTLE).saturating_duration_since(now)
 }
 
-/// Starts `command` through the launch prefix ([`launch_command`]), with no
-/// stdio of its own, and reaps it on a thread when it exits.
+/// Starts `command` through the launch prefix ([`launch_command`]) if one is
+/// set, else in a systemd scope of its own when it can have one
+/// (`kotodama_extension::scope`), with no stdio of its own. A thread of its
+/// own starts it, so the Daemon never waits for the user manager, and reaps
+/// it when it exits.
 fn launch(command: Vec<String>) {
-    let Some(program) = command.first() else {
+    let Some(program) = command.first().cloned() else {
         return;
     };
-    let started = launch_command(&command).and_then(|mut process| {
-        #[cfg(target_os = "linux")]
-        kotodama_extension::runtime::pass_wayland_display(&mut process);
-        process
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .spawn()
+    spawn(format!("launch-{program}"), move || {
+        let started = launch_command(&command).and_then(|mut process| {
+            #[cfg(target_os = "linux")]
+            kotodama_extension::runtime::pass_wayland_display(&mut process);
+            process
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null());
+            let named = program.clone();
+            kotodama_extension::scope::spawn(&mut process, move |err| {
+                log::warn!("{named} runs without a scope of its own: {}", Chain(&err));
+            })
+        });
+        match started {
+            Ok(mut child) => {
+                let _ = child.wait();
+            }
+            Err(err) => log::error!("couldn't start {program}: {err}"),
+        }
     });
-    match started {
-        Ok(mut child) => spawn(format!("launch-{program}"), move || {
-            let _ = child.wait();
-        }),
-        Err(err) => log::error!("couldn't start {program}: {err}"),
-    }
 }
 
 /// Sends a desktop notification on a thread of its own, so a slow session bus
@@ -129,7 +138,10 @@ fn launch(command: Vec<String>) {
 fn notify(summary: String, body: String) {
     spawn("notify".into(), move || {
         if let Err(err) = crate::notify::send(&summary, &body) {
-            log::warn!("couldn't show the notification “{summary}”: {err}");
+            log::warn!(
+                "couldn't show the notification “{summary}”: {}",
+                Chain(&err)
+            );
         }
     });
 }

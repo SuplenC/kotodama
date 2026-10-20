@@ -19,6 +19,7 @@ wayland = ["dep:wayland-client", "dep:wayland-protocols", "dep:wayland-protocols
 [dependencies]
 kotodama-protocol = { path = "../kotodama-protocol" }
 notify = { version = "8", optional = true }
+thiserror = "2.0.21"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 libc = "0.2"

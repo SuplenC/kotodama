@@ -13,7 +13,9 @@
 //! - [`config`] reads settings from the Extension's config table, logging the
 //!   ones of the wrong shape.
 //! - [`dirs`] finds where the Extension keeps its state and cache.
-//! - [`launch`] starts the programs Actions run, detached from the Extension.
+//! - [`launch`] starts the programs Actions run, detached from the Extension,
+//!   each in a systemd scope of its own ([`scope`], over [`dbus`]) when
+//!   there is a user manager to make one.
 //! - `watch` (with the `watch` feature) watches directories, and acts once
 //!   they settle after a change.
 //!
@@ -71,11 +73,13 @@
 //! ```
 
 pub mod config;
+pub mod dbus;
 pub mod dirs;
 mod items;
 pub mod launch;
 #[cfg(target_os = "linux")]
 pub mod runtime;
+pub mod scope;
 #[cfg(feature = "testing")]
 pub mod testing;
 pub mod url;
@@ -194,6 +198,22 @@ pub fn lean_memory() {
 }
 
 static NAME: OnceLock<String> = OnceLock::new();
+
+/// An error and each of its causes, `: `-separated, for a log line.
+#[derive(Debug)]
+pub struct Chain<'a>(pub &'a dyn std::error::Error);
+
+impl Display for Chain<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)?;
+        let mut cause = self.0.source();
+        while let Some(err) = cause {
+            write!(f, ": {err}")?;
+            cause = err.source();
+        }
+        Ok(())
+    }
+}
 
 /// The name the Extension logs under: the one given to [`main`], or else its
 /// program's file name.
