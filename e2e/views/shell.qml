@@ -51,6 +51,9 @@ ShellRoot {
             function onRowsRemoved() {
                 console.log("rows: " + menu.search.rowCount());
             }
+            function onModelReset() {
+                console.log("model reset");
+            }
             function onViewChanged() {
                 const view = menu.search.view;
                 let line = "view: " + (view.kind ?? "search") + " " + (view.title ?? "");

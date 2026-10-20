@@ -6,11 +6,11 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use kotodama_protocol::{
-    FormInput, FromFrontEnd, Job, JobState, ListMatch, OfferedAction, Table, Value, View,
+    FormInput, FromFrontEnd, Item, Job, JobState, ListMatch, OfferedAction, Table, Value, View,
     ViewContent,
 };
 
-use crate::rows::Row;
+use crate::rows::{Fresh, Row};
 
 /// The Actions other Extensions contribute to the Items of a list View, by
 /// Item kind, as the Daemon sends them.
@@ -100,6 +100,10 @@ impl Open {
         }
     }
 
+    pub fn is_list(&self) -> bool {
+        matches!(self.view.content, ViewContent::List { .. })
+    }
+
     /// Whether the Daemon filters this list, rather than its Extension.
     fn filtered_by_daemon(&self) -> bool {
         matches!(
@@ -122,30 +126,77 @@ impl Open {
     }
 
     /// A list View's rows: the Items that match the filter, best first, or
-    /// every Item in order. `None` for other Views.
-    pub fn rows(&self) -> Option<Vec<Row>> {
+    /// every Item in order. `None` for other Views. Each row is made only
+    /// when [`crate::rows::diff`] needs it.
+    pub fn listed(&self) -> Option<Listed<'_>> {
         let ViewContent::List { items, .. } = &self.view.content else {
             return None;
         };
-        let none: Arc<[OfferedAction]> = Arc::new([]);
-        let row = |at: usize, highlights: Vec<u32>| {
-            let item = items.get(at)?;
-            let contributed = self
-                .contributed
-                .get(item.kind.name())
-                .unwrap_or(&none)
-                .clone();
-            Some(Row::listed(&self.extension, item, contributed, highlights))
-        };
-        Some(match &self.matches {
+        let shown = match &self.matches {
             Some(matches) => matches
                 .iter()
-                .filter_map(|found| row(found.item as usize, found.highlights.clone()))
+                .filter_map(|found| {
+                    let item = items.get(found.item as usize)?;
+                    Some((item, found.highlights.as_slice()))
+                })
                 .collect(),
-            None => (0..items.len())
-                .filter_map(|at| row(at, Vec::new()))
-                .collect(),
+            None => items.iter().map(|item| (item, &[][..])).collect(),
+        };
+        Some(Listed {
+            open: self,
+            shown,
+            none: Arc::new([]),
         })
+    }
+
+    /// The rows [`Open::listed`] gives, all made.
+    #[cfg(test)]
+    pub fn rows(&self) -> Option<Vec<Row>> {
+        let listed = self.listed()?;
+        Some((0..listed.len()).map(|n| listed.row(n)).collect())
+    }
+}
+
+/// A list View's rows, as [`Open::listed`] gives them.
+pub struct Listed<'a> {
+    open: &'a Open,
+    /// The Items shown, in order, each with its matched characters.
+    shown: Vec<(&'a Item, &'a [u32])>,
+    none: Arc<[OfferedAction]>,
+}
+
+impl Listed<'_> {
+    fn contributed(&self, item: &Item) -> &Arc<[OfferedAction]> {
+        self.open
+            .contributed
+            .get(item.kind.name())
+            .unwrap_or(&self.none)
+    }
+}
+
+impl Fresh for Listed<'_> {
+    fn len(&self) -> usize {
+        self.shown.len()
+    }
+
+    fn key(&self, n: usize) -> (&str, &str) {
+        (&self.open.extension, &self.shown[n].0.id)
+    }
+
+    fn row(&self, n: usize) -> Row {
+        let (item, highlights) = self.shown[n];
+        let contributed = self.contributed(item).clone();
+        Row::listed(&self.open.extension, item, contributed, highlights.to_vec())
+    }
+
+    fn refresh(&self, n: usize, old: &mut Row) -> bool {
+        let (item, highlights) = self.shown[n];
+        old.relist(
+            &self.open.extension,
+            item,
+            self.contributed(item),
+            highlights,
+        )
     }
 }
 
@@ -706,12 +757,7 @@ mod tests {
             "url".into(),
             vec![OfferedAction {
                 extension: "links".into(),
-                action: Action {
-                    id: "copy".into(),
-                    title: "Copy link".into(),
-                    shortcut: None,
-                    arguments: Vec::new(),
-                },
+                action: Action::new("copy", "Copy link"),
             }],
         );
         let project = item(

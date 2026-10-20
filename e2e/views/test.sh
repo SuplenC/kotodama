@@ -38,8 +38,21 @@ TOML
 # Its Wizard pops its first step and pushes the next in one reply, as an
 # Extension that predates replace_view would.
 cat >"$extensions/extras/items.json" <<'JSON'
-[{"id": "wizard", "kind": "extras.wizard", "title": "Wizard", "actions": [{"id": "begin", "title": "Begin"}]}]
+[{"id": "wizard", "kind": "extras.wizard", "title": "Wizard", "actions": [{"id": "begin", "title": "Begin"}]},
+ {"id": "notes", "kind": "extras.notes", "title": "Notes", "actions": [{"id": "notes", "title": "Show notes"}]}]
 JSON
+# Its Notes, a list View of 1000 Items, odd and even by turns, whose Action
+# names each.
+{
+    printf '{"push_view": {"id": "notes", "title": "Notes", "content": {"list": {"items": ['
+    for n in $(seq 0 999); do
+        [ "$n" = 0 ] || printf ','
+        parity=even
+        [ $((n % 2)) = 0 ] || parity=odd
+        printf '{"id": "note-%d", "kind": "extras.note", "title": "Note %d %s", "actions": [{"id": "paste", "title": "Paste %d"}]}' "$n" "$n" "$parity" "$n"
+    done
+    printf ']}}}}\n'
+} >"$extensions/extras/replies-notes.json"
 echo '"keep_open"' >"$extensions/extras/outcome.json"
 cat >"$extensions/extras/replies-begin.json" <<'JSON'
 {"push_view": {"id": "step-1", "title": "Step one", "content": {"list": {"items": [{"id": "next", "kind": "extras.step", "title": "Next step", "actions": [{"id": "next", "title": "Next"}]}]}}}}
@@ -174,5 +187,33 @@ mark=$(log_lines quickshell.log)
 press -k Return "view: detail Step two"
 if tail -n "+$((mark + 1))" "$E2E_OUT/quickshell.log" | grep -qF "view: search"; then
     echo "the search showed between the Wizard's steps" >&2
+    exit 1
+fi
+
+# Typing in a list View of 1000 Items removes the rows that stop matching and
+# inserts those that match again, never resetting the model, and the Item
+# selected stays selected while it matches. Ctrl+K names it.
+press -k Escape "view: search"
+mark=$(log_lines quickshell.log)
+"$kotodama" toggle
+wait_for_log quickshell.log "hidden" "$mark"
+open --query Notes
+press -k Return "rows: 1000"
+wtype -s 200 -k Down -k Down -k Down
+press -M ctrl -k k -m ctrl "actions: Paste 3"
+press -k Escape "actions closed"
+mark=$(log_lines quickshell.log)
+press odd "rows: 500"
+press -M ctrl -k k -m ctrl "actions: Paste 3"
+press -k Escape "actions closed"
+# Esc clears the filter: every Item shows again, Note 3 still selected.
+press -k Escape "rows: 1000"
+press -M ctrl -k k -m ctrl "actions: Paste 3"
+press -k Escape "actions closed"
+# Note 3 doesn't match `even`: the top row is selected, as in the search.
+press even "rows: 500"
+press -M ctrl -k k -m ctrl "actions: Paste 0"
+if tail -n "+$((mark + 1))" "$E2E_OUT/quickshell.log" | grep -qF "model reset"; then
+    echo "filtering the list View reset the model" >&2
     exit 1
 fi
