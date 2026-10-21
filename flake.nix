@@ -162,6 +162,8 @@
               old.nativeBuildInputs
               ++ (with pkgs; [
                 wayvnc
+                # demo/vnc-proxy.py, which lets Screen Sharing in.
+                python3Minimal
                 # A terminal, a Qt editor, and a `Terminal=true` app that runs in the terminal.
                 foot
                 featherpad

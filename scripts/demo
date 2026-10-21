@@ -16,12 +16,13 @@ set -euo pipefail
 
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 port=5900
-# Screen Sharing on macOS refuses a VNC server without a password. The server
-# listens on localhost only, so a fixed one keeps nothing out but costs nothing.
-# Screen Sharing logs in with plain VNC authentication, which has a password
-# and no username, so the address carries the password and it asks nothing.
-user=kotodama
+# Screen Sharing on macOS refuses a VNC server without a password, and wayvnc
+# has none of the kind it asks for, so demo/vnc-proxy.py greets it and takes
+# any password. The address carries one, so Screen Sharing asks nothing; the
+# port is published to localhost only.
 password=kotodama
+# Where wayvnc itself listens, without a login, behind the proxy.
+wayvnc_port=5901
 
 keep=0
 for arg in "$@"; do
@@ -209,14 +210,12 @@ if [ -f /.dockerenv ]; then
     address=0.0.0.0
 fi
 cat >"$home/wayvnc.conf" <<CONF
-address=$address
-port=$port
-enable_auth=true
-username=$user
-password=$password
-relax_encryption=true
+address=127.0.0.1
+port=$wayvnc_port
 CONF
 wayvnc --config "$home/wayvnc.conf" --render-cursor >"$logs/wayvnc.log" 2>&1 &
+pids+=("$!")
+python3 "$root/demo/vnc-proxy.py" "$address" "$port" "$wayvnc_port" >"$logs/vnc-proxy.log" 2>&1 &
 pids+=("$!")
 
 export QT_QPA_PLATFORM=wayland QT_QUICK_BACKEND=software
