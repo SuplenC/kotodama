@@ -49,9 +49,13 @@ jobs:
           rust=false e2e=false bench=false latency=false nix=false
           while read -r path; do
             case $path in
+              # The protocol reference is written by a test, which fails when it is stale.
+              docs/protocol.md) rust=true ;;
               *.md | docs/* | LICENSE) ;;
               e2e/latency/* | e2e/run | e2e/lib.sh | e2e/sway.conf) e2e=true latency=true ;;
-              e2e/* | examples/*) e2e=true ;;
+              e2e/*) e2e=true ;;
+              # Tests in the crates run the example Extensions.
+              examples/*) rust=true e2e=true ;;
               crates/*)
                 rust=true e2e=true nix=true
                 crate=${path#crates/}

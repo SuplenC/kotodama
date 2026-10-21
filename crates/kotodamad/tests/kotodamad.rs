@@ -806,3 +806,37 @@ fn an_extension_built_for_a_newer_major_version_is_turned_away_with_the_reason()
     let mut ui = daemon.connect();
     assert_eq!(ui.titles("fir"), Vec::<String>::new());
 }
+
+#[test]
+fn an_extension_is_told_in_words_why_a_message_of_its_was_rejected() {
+    let root = Daemon::home();
+    install(&root, "bookmarks", "", &[]);
+    fs::write(
+        extension_dir(&root, "bookmarks").join("items.json"),
+        r#"[{"id":"a","kind":"url","url":"https://a","title":"A","actions":[]}]"#,
+    )
+    .unwrap();
+    let mut theirs = item("b", "B");
+    theirs.kind = ItemKind::Namespaced(NamespacedKind::new("other.note").unwrap());
+    install(&root, "notes", "", &[theirs]);
+    let daemon = Daemon::start(root);
+
+    for (extension, reason) in [
+        (
+            "bookmarks",
+            "Item `a` has no Actions; it needs at least its primary Action",
+        ),
+        (
+            "notes",
+            "Item `b` has another Extension's kind `other.note`; name your own kinds `notes.<kind>`",
+        ),
+    ] {
+        let dir = daemon.extension_dir(extension);
+        let rejection = wait_for(&format!("{extension}'s rejection"), || {
+            received(&dir)
+                .into_iter()
+                .find(|line| line.starts_with(r#"{"rejected":{"reason":"#))
+        });
+        assert!(rejection.contains(reason), "{rejection}");
+    }
+}

@@ -34,7 +34,7 @@
 //! use std::process::ExitCode;
 //!
 //! use kotodama_extension::{Connection, Event, SentItems, config};
-//! use kotodama_protocol::{Error, FromExtension, Item, ItemKind, ToExtension};
+//! use kotodama_protocol::{Action, Error, Item, ItemKind, ToExtension};
 //!
 //! fn main() -> ExitCode {
 //!     kotodama_extension::main("kotodama-hello", run)
@@ -64,7 +64,7 @@
 //!                     keywords: Vec::new(),
 //!                     hidden: false,
 //!                     app_only: false,
-//!                     actions: Vec::new(),
+//!                     actions: vec![Action::new("open", "Open")],
 //!                 };
 //!                 sent.publish(&mut writer, [item])?;
 //!             }
@@ -155,7 +155,10 @@ pub fn main<E: Display>(name: &'static str, run: impl FnOnce() -> Result<(), E>)
 /// and starts a thread that reads its messages into the channel it returns.
 /// A message that can't be decoded is logged and skipped; once the Daemon
 /// hangs up, or a message can't be read at all, the thread sends
-/// [`Event::Hangup`] and ends.
+/// [`Event::Hangup`] and ends. When the Daemon rejects a message the
+/// Extension sent ([`ToExtension::Rejected`]), its reason is logged, and the
+/// message still arrives as an [`Event::Message`] for an Extension that
+/// does more with it.
 pub fn connect<T: Send + 'static>() -> Result<Connection<T>, Error> {
     let channel = Channel::handshake(io::stdin(), io::stdout(), &Hello::new(&WireFormat::ALL))?;
     let (mut reader, writer) = channel.split();
@@ -168,6 +171,9 @@ pub fn connect<T: Send + 'static>() -> Result<Connection<T>, Error> {
             loop {
                 match reader.recv::<ToExtension>() {
                     Ok(Some(message)) => {
+                        if let ToExtension::Rejected { reason } = &message {
+                            log!("the Daemon rejected a message: {reason}");
+                        }
                         if messages.send(Event::Message(message)).is_err() {
                             return;
                         }

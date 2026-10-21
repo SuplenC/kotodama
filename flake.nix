@@ -124,8 +124,14 @@
               # A session bus, for the fake notification service
               dbus
 
-              # The shell example Extension
+              # The example Extensions and `kotodama extension new`'s scaffolds:
+              # shell and jq, Python (already in the shell's closure, so free),
+              # and Node, which runs the TypeScript example without a build
+              # step or npm (about 115 MiB the shell didn't have; Go would add
+              # 250).
               jq
+              python3
+              nodejs-slim
 
               # The calculator: exchange rates through curl, and a time zone
               # database the tests read the same everywhere

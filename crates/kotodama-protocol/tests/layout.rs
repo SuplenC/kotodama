@@ -704,6 +704,9 @@ fn to_extension() -> Vec<ToExtension> {
                 action: action(),
             }],
         },
+        ToExtension::Rejected {
+            reason: "Item `a` has no Actions".into(),
+        },
     ]
 }
 

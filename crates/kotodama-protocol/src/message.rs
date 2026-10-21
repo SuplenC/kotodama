@@ -60,6 +60,13 @@ pub enum ToExtension {
     /// [`FromExtension::RequestActionCatalog`] and again whenever it changes.
     /// Only Extensions whose Manifest asks for it receive it.
     ActionCatalog { entries: Vec<CatalogEntry> },
+    /// The Daemon refused a message the Extension sent, and says why in
+    /// words meant for the Extension's author: a message that doesn't
+    /// decode, such as an Item without Actions, or one the Extension may not
+    /// send, such as an Item of another Extension's kind. What was refused is
+    /// dropped, and the connection goes on. Nothing answers it: an
+    /// Extension logs it, and one that ignores it loses nothing.
+    Rejected { reason: String },
 }
 
 /// From an Extension to the Daemon.

@@ -336,6 +336,7 @@ message ToExtension {
     ToExtension.ViewPopped view_popped = 6;
     ToExtension.FilterView filter_view = 7;
     ToExtension.ActionCatalog action_catalog = 8;
+    ToExtension.Rejected rejected = 9;
   }
 
   message ActionCatalog {
@@ -355,6 +356,10 @@ message ToExtension {
     uint64 id = 1;
     string query = 2;
     optional string prefix = 3;
+  }
+
+  message Rejected {
+    string reason = 1;
   }
 
   message RunAction {

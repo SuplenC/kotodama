@@ -1,0 +1,114 @@
+#!/usr/bin/env python3
+"""{{name}}: a Kotodama Extension in Python, with the standard library alone.
+
+It offers one Item, which types a greeting, and answers the Live query
+`{{name}} <text>` with <text>, to copy. docs/extensions.md in the Kotodama
+repository explains each message.
+
+stdin and stdout carry the protocol, so nothing else may write to stdout:
+log to stderr.
+"""
+
+import json
+import sys
+
+NAME = "{{name}}"
+# The protocol version this script is written for. A newer Daemon talks to it
+# in 1.0's terms; an older one can't.
+VERSION = (1, 0)
+
+STDIN = sys.stdin.buffer
+STDOUT = sys.stdout.buffer
+
+
+def log(message):
+    print(f"{NAME}: {message}", file=sys.stderr, flush=True)
+
+
+def read_frame():
+    """One frame's payload, or None once the Daemon hangs up."""
+    header = STDIN.readline()
+    if not header:
+        return None
+    length = int(header)
+    payload = STDIN.read(length)
+    if len(payload) < length:
+        return None
+    return payload
+
+
+def send(message):
+    """Sends a message as one frame: its length in bytes, a newline, then the JSON."""
+    payload = json.dumps(message, separators=(",", ":")).encode()
+    STDOUT.write(b"%d\n" % len(payload) + payload)
+    STDOUT.flush()
+
+
+# Its own kinds are named `{{name}}.<kind>`. The first Action is the primary
+# one, which Enter runs.
+GREETING = {
+    "id": "hello",
+    "kind": f"{NAME}.greeting",
+    "title": "Say hello",
+    "subtitle": "Types a greeting into the window you came from",
+    "actions": [{"id": "greet", "title": "Type the greeting"}],
+}
+
+
+def echo(query):
+    """The Live results for `query`, which comes without the prefix."""
+    if not query:
+        return []
+    item = {
+        "id": query,
+        "kind": f"{NAME}.echo",
+        "title": query,
+        "subtitle": "Copy it",
+        "actions": [{"id": "copy", "title": "Copy"}],
+    }
+    return [{"item": item, "score": 1}]
+
+
+def outcome(action, item):
+    if action == "greet":
+        return {"type": {"text": f"Hello from {NAME}"}}
+    if action == "copy":
+        return {"copy": {"text": item["id"]}}
+    return {"failed": {"message": f"unknown Action {action}"}}
+
+
+def main():
+    # The handshake, always in JSON: this script offers JSON alone.
+    send({"version": VERSION[0], "minor": VERSION[1], "formats": ["json"]})
+    frame = read_frame()
+    if frame is None:
+        return 1
+    daemon = json.loads(frame)
+    if (daemon["version"], daemon.get("minor", 0)) < VERSION:
+        log(f"the Daemon is older than protocol {VERSION[0]}.{VERSION[1]}")
+        return 1
+
+    while (frame := read_frame()) is not None:
+        message = json.loads(frame)
+        # A message is {"<name>": {...}}, or just "<name>" when it has no fields.
+        kind, body = next(iter(message.items())) if isinstance(message, dict) else (message, None)
+        if kind == "config":
+            # The [extensions.{{name}}] table, sent after the handshake and
+            # again whenever it changes. Adding an Item again replaces it.
+            send({"add_items": {"items": [GREETING]}})
+        elif kind == "live_query":
+            results = echo(body["query"])
+            send({"live_results": {"live_query": body["id"], "results": results, "done": True}})
+        elif kind == "run_action":
+            # Every run_action is answered with action_done and its invocation.
+            done = outcome(body["action"], body["item"])
+            send({"action_done": {"invocation": body["invocation"], "outcome": done}})
+        elif kind == "rejected":
+            # The Daemon refused a message this script sent, and says why.
+            log(f"the Daemon rejected a message: {body['reason']}")
+        # Anything else is ignored, so newer Daemons can send more.
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

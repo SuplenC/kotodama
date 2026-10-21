@@ -162,6 +162,9 @@ fn to_extension_messages() -> Vec<ToExtension> {
                 },
             }],
         },
+        ToExtension::Rejected {
+            reason: "Item `a` has no Actions".into(),
+        },
     ]
 }
 
@@ -346,9 +349,10 @@ fn to_extension_variant(message: &ToExtension) -> usize {
         ToExtension::ViewPopped { .. } => 5,
         ToExtension::FilterView { .. } => 6,
         ToExtension::ActionCatalog { .. } => 7,
+        ToExtension::Rejected { .. } => 8,
     }
 }
-const TO_EXTENSION_VARIANTS: usize = 8;
+const TO_EXTENSION_VARIANTS: usize = 9;
 
 fn from_extension_variant(message: &FromExtension) -> usize {
     match message {
