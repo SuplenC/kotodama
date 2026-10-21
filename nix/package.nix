@@ -171,7 +171,7 @@ craneLib.buildPackage (
       install -D -m 444 crates/kotodama-qml/shell/shell.qml $qml/share/kotodama/quickshell/shell.qml
 
       # Each Bundled extension's manifest runs its binary, beside it.
-      for name in ai apps calculator clipboard emoji folders hyprland web-search; do
+      for name in ai apps calculator clipboard emoji folders hyprland system web-search; do
         dir=$extensions/share/kotodama/extensions/$name
         mkdir -p $dir
         cp crates/kotodama-$name/manifest.toml $dir/
