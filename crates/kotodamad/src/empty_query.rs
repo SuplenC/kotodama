@@ -1,5 +1,5 @@
 //! The Empty query: the Results most used at this time of day, then the Fixed
-//! menu.
+//! menu, or without one the apps.
 
 use kotodama_protocol::{Table, Value};
 
@@ -11,7 +11,8 @@ use crate::keywords::string;
 /// ```toml
 /// [empty_query]
 /// most_used = 3  # how many of the Results most used at this time of day come first
-/// # Then these, in this order, each unless it is shown already.
+/// # Then these, in this order, each unless it is shown already. Without
+/// # `menu`, the apps' entry Items; `menu = []` shows nothing more.
 /// menu = [
 ///     { extension = "apps", item = "firefox" },
 ///     { extension = "kotodama", item = "clear-history" },
@@ -25,15 +26,16 @@ pub struct EmptyQuery {
     /// How many of the Results most used at this time of day come first.
     pub most_used: usize,
     /// The Fixed menu: the Items shown after them, by the name of the Extension that owns each
-    /// and its id.
-    pub menu: Vec<ResultKey>,
+    /// and its id. Unset, the apps' entry Items are shown instead, so a first run, with
+    /// nothing used yet, shows what there is to enter.
+    pub menu: Option<Vec<ResultKey>>,
 }
 
 impl Default for EmptyQuery {
     fn default() -> Self {
         EmptyQuery {
             most_used: 3,
-            menu: Vec::new(),
+            menu: None,
         }
     }
 }
@@ -61,9 +63,10 @@ impl EmptyQuery {
                 },
                 "menu" => match value {
                     Value::Array(items) => {
+                        let menu = empty.menu.insert(Vec::new());
                         for (n, item) in items.iter().enumerate() {
                             match menu_item(item) {
-                                Ok(item) => empty.menu.push(item),
+                                Ok(item) => menu.push(item),
                                 Err(err) => log::error!("empty_query.menu[{n}]: {err}"),
                             }
                         }

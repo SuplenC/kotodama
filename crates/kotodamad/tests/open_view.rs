@@ -377,7 +377,8 @@ fn a_hidden_item_never_shows_in_the_search_but_opens_its_view() {
     calc.drain();
 
     assert_eq!(titles(&h.query(&menu, "calculator history")), [""; 0]);
-    assert_eq!(titles(&h.query(&menu, "")), [""; 0]);
+    // The Empty query lists the calc app's entry Item, never the hidden Item.
+    assert_eq!(titles(&h.query(&menu, "")), ["calc"]);
 
     open_on(&mut h, &command, "calc/history");
     ran(&calc, "show-history", "history");

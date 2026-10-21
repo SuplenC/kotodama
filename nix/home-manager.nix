@@ -279,7 +279,7 @@ in
               };
             }
           ))
-          "`menu`: the Fixed menu, the Items shown after the most used, in this order, each unless it is shown already.";
+          "`menu`: the Fixed menu, the Items shown after the most used, in this order, each unless it is shown already. Unset, the apps' entry Items; `[ ]` shows nothing more.";
     };
 
     ranking.kinds = optional (lib.types.listOf lib.types.str) ''
@@ -541,6 +541,7 @@ in
         maxRows = optional lib.types.ints.positive "How many rows show at most. Unset, 8.";
         top = optional lib.types.number "The menu's distance from the top of the screen, in pixels. Unset, a fifth of the screen's height.";
         placeholder = optional lib.types.str "What the empty search box says. Unset, `Search`.";
+        showHints = optional lib.types.bool "Whether the footer names the keys the selected row takes, such as `↵ Open · Tab Enter app · ⌃K Actions`. Unset, true.";
       };
     };
   };

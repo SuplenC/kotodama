@@ -22,7 +22,7 @@ The Daemon. Maintained by hand: fix stale lines when you find them, and update t
 - `history.rs`: `History` on disk (`$XDG_STATE_HOME/kotodama/history.json`, scores as `f32`); `Habit::frecency`, `Frecent` (picks as a struct of arrays, decayed in one vectorised loop for the empty query and a search's Frecency), `part_of_day` (the part of the day a time falls in), `next_part` (when the next one starts), `History::learned` (Learned choices), `History::choices` (every Learned choice and its strength), `Settings::from_config`.
 - `clock.rs`: `Clock`, `When` (time of day for Frecency, ADR 0009); the time zone is read again (`tzset`) once a wall-clock minute, `ZONE_SECS`.
 - `kind_order.rs`: `KindOrder::place`, configurable kind order for equal matches (shared kinds by `ItemKind::shared_index`); `KindPlaces`, the place of each Segment's kinds, worked out per search.
-- `empty_query.rs`: `EmptyQuery::from_config`, the Empty query and its Fixed menu.
+- `empty_query.rs`: `EmptyQuery::from_config`, the Empty query and its Fixed menu (`None` when unset: `Daemon::empty_query` then lists the apps' entry Items).
 - `most_used.rs`: the Empty query's most used Results: `Picked` (the picked Indexed items, shared with the indexing thread), `Usage::rank`, and `Ahead` (the rankings made ahead and when one stands, ADR 0023).
 - `keywords.rs`: Aliases and Quicklinks from config (`Keywords`, `Quicklink::command`), `Keywords::holder` and `Keywords::conflicts`; URL templates and the opener are `kotodama_extension::url`.
 - `conflict.rs`: the keyword table's precedence (ADR 0028): `Holder`, `Conflict` (a keyword lost, and what the loser got), `report`, the one place conflicts reach the user (a warning in the log). `Daemon::load_apps` reports them when they change.

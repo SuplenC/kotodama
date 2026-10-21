@@ -2034,7 +2034,10 @@ fn the_empty_query_shows_the_same_thing_once_by_the_result_picked_through_most()
     pick(&mut h, &ui, "hub", "visited", "1");
     pick(&mut h, &ui, "hub", "visited", "1");
     pick(&mut h, &ui, "lab", "visited", "2");
-    assert_eq!(titles(&h.query(&ui, "")), ["github.com", "GitLab"]);
+    assert_eq!(
+        titles(&h.query(&ui, "")),
+        ["github.com", "GitLab", "apps", "bookmarks", "visited"]
+    );
 }
 
 #[test]
@@ -2051,11 +2054,11 @@ fn the_empty_query_is_ranked_again_when_the_menu_opens() {
         pick(&mut h, &menu, "music", "apps", "music");
     }
     h.advance_to(8);
-    assert_eq!(titles(&h.query(&menu, "")), ["Mail", "Music"]);
+    assert_eq!(titles(&h.query(&menu, "")), ["Mail", "Music", "apps"]);
 
     h.advance_to(20);
     h.front_end_sends(&command, FromFrontEnd::Toggle);
-    assert_eq!(titles(&menu.results().unwrap()), ["Music", "Mail"]);
+    assert_eq!(titles(&menu.results().unwrap()), ["Music", "Mail", "apps"]);
     assert_eq!(command.drain(), [], "it never searched");
 }
 

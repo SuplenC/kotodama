@@ -28,6 +28,9 @@ PanelWindow {
     property int maxRows: 8
     property real top: screen ? screen.height / 5 : 120
     property string placeholder: "Search"
+    // Whether the footer names the keys the selected row takes, such as
+    // "↵ Open · Tab Enter app · ⌃K Actions", when it has nothing else to say.
+    property bool showHints: true
 
     readonly property KotodamaSearch search: search
     // Whether keys reach the menu: the compositor has given the window
@@ -42,6 +45,17 @@ PanelWindow {
     // `{title, group, shortcut}`, as `KotodamaSearch.actions` gives them.
     property var actions: []
     readonly property bool actionsOpen: actions.length > 0
+    // The keys the selected row takes, built for that row alone. Reading the
+    // row's markup and unavailable makes the hints follow a new Result in
+    // the same place, not only a move of the selection.
+    readonly property string hints: {
+        const row = list.currentItem;
+        if (!menu.showHints || !row || (menu.kind !== "" && menu.kind !== "list"))
+            return "";
+        row.markup;
+        row.unavailable;
+        return search.hints(list.currentIndex);
+    }
 
     function show(query) {
         menu.failure = "";
@@ -870,7 +884,7 @@ PanelWindow {
             color: menu.failure !== "" ? menu.error : menu.dimmed
             font.family: menu.fontFamily
             font.pixelSize: menu.fontSize - 3
-            text: menu.failure !== "" ? menu.failure : search.down.length > 0 ? "Unavailable: " + search.down.join(", ") : ""
+            text: menu.failure !== "" ? menu.failure : search.down.length > 0 ? "Unavailable: " + search.down.join(", ") : menu.hints
         }
 
         // The Toast: what Forget or "Clear history" just did, and the key that

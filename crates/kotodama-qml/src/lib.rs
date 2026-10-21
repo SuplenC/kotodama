@@ -113,6 +113,11 @@ pub mod qobject {
         #[qinvokable]
         fn actions(self: &KotodamaSearch, row: i32) -> QList_QVariant;
 
+        /// The keys the Result in `row` takes, such as
+        /// `↵ Open · Tab Enter app · ⌃K Actions`, or empty. See `Row::hints`.
+        #[qinvokable]
+        fn hints(self: &KotodamaSearch, row: i32) -> QString;
+
         /// Runs the `n`th Action of the Result in `row`'s Action panel.
         #[qinvokable]
         #[cxx_name = "runAction"]
@@ -564,6 +569,12 @@ impl KotodamaSearch {
 
     fn actions(&self, row: i32) -> variant::List {
         self.row(row).map(variant::actions).unwrap_or_default()
+    }
+
+    fn hints(&self, row: i32) -> QString {
+        self.row(row)
+            .map(|row| QString::from(&row.hints()))
+            .unwrap_or_default()
     }
 
     fn run_action(mut self: Pin<&mut Self>, row: i32, n: i32) -> bool {

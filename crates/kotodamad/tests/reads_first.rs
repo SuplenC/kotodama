@@ -455,9 +455,12 @@ fn the_empty_querys_rows_for_the_next_part_of_the_day_are_ranked_before_the_menu
 
     assert_eq!(
         before_noon,
-        (vec!["Firefox".to_owned(), "Mail".to_owned()], false)
+        (
+            vec!["Firefox".to_owned(), "Mail".to_owned(), "apps".to_owned()],
+            false
+        )
     );
-    assert_eq!(titles(&after_noon), ["Mail", "Firefox"]);
+    assert_eq!(titles(&after_noon), ["Mail", "Firefox", "apps"]);
     assert_eq!(titles(&after_noon), titles(&here));
     assert_eq!(both.ahead.daemon.ranked_here(), ranked_here, "ranked ahead");
 }
@@ -495,12 +498,15 @@ fn rows_ranked_ahead_are_ranked_again_once_the_items_or_the_history_change() {
             .map(|&title| title.to_owned())
             .collect::<Vec<_>>()
     };
-    assert_eq!(ranked, (rows(&["Firefox", "Mail"]), false));
+    assert_eq!(ranked, (rows(&["Firefox", "Mail", "apps"]), false));
     assert_eq!(
         terminal_added,
-        (rows(&["Terminal", "Firefox", "Mail"]), true)
+        (rows(&["Terminal", "Firefox", "Mail", "apps"]), true)
     );
-    assert_eq!(mail_picked, (rows(&["Mail", "Terminal", "Firefox"]), true));
+    assert_eq!(
+        mail_picked,
+        (rows(&["Mail", "Terminal", "Firefox", "apps"]), true)
+    );
     assert_eq!(planned_again, (mail_picked.0, false));
 }
 

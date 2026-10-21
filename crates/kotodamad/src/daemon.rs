@@ -4114,17 +4114,25 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
     }
 
     /// What the Empty query shows: the Results most used at this time of day,
-    /// then the Fixed menu, each thing once.
+    /// then the Fixed menu, or without one the apps' entry Items, each thing
+    /// once.
     fn empty_query(&mut self, session: &Session, when: When) -> Vec<Source> {
         let mut shown = self.most_used(when);
         let identity = |source: Source| self.identity(session, source);
-        for (extension, id) in &self.empty_query.menu {
+        let menu: Vec<Source> = match &self.empty_query.menu {
+            Some(menu) => menu
+                .iter()
+                .filter_map(|(extension, id)| self.source_of(session, extension, id))
+                .collect(),
+            None => (self.own.iter().enumerate())
+                .filter(|(_, own)| matches!(own.does, OwnAction::App(_)))
+                .map(|(n, _)| Source::Own(n as u32))
+                .collect(),
+        };
+        for source in menu {
             if shown.len() >= MAX_RESULTS {
                 break;
             }
-            let Some(source) = self.source_of(session, extension, id) else {
-                continue;
-            };
             let same = |&shown: &Source| {
                 shown == source || identity(shown).is_some_and(|id| identity(source) == Some(id))
             };

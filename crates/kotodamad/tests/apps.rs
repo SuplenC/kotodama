@@ -296,6 +296,36 @@ fn the_empty_query_shows_the_entry_item_picked_but_not_what_was_picked_in_the_ap
 }
 
 #[test]
+fn without_a_menu_the_empty_query_lists_the_apps() {
+    let mut desk = Desk::new("");
+
+    assert_eq!(desk.titles(""), ["apps", "Emoji"]);
+}
+
+#[test]
+fn the_apps_follow_the_most_used_on_the_empty_query() {
+    let mut desk = Desk::new("");
+    desk.pick("edit", "Editor");
+
+    assert_eq!(desk.titles(""), ["Editor", "apps", "Emoji"]);
+}
+
+#[test]
+fn a_menu_in_the_config_replaces_the_apps_on_the_empty_query() {
+    for (toml, titles) in [
+        ("[empty_query]\nmenu = []", &[][..]),
+        (
+            "[empty_query]\nmenu = [{ extension = \"apps\", item = \"firefox\" }]",
+            &["Firefox"][..],
+        ),
+    ] {
+        let mut desk = Desk::new(toml);
+
+        assert_eq!(desk.titles(""), titles, "{toml}");
+    }
+}
+
+#[test]
 fn a_near_miss_is_never_an_app_only_item() {
     let mut desk = Desk::new("");
 

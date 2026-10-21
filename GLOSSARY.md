@@ -121,7 +121,7 @@ A Result the user repeatedly picked for a given query, which that query, and the
 _Avoid_: Pin, favorite
 
 **Empty query**:
-The search with nothing typed, and what the menu shows for it: the Results most used at this time of day, then the Fixed menu.
+The search with nothing typed, and what the menu shows for it: the Results most used at this time of day, then the Fixed menu, or without one the Apps' entry Items.
 _Avoid_: Blank query, empty search, home screen
 
 **Fixed menu**:
