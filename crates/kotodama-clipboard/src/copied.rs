@@ -2,7 +2,9 @@
 
 use std::io::Cursor;
 
-use image::{ImageFormat, ImageReader, Limits};
+use image::ImageFormat;
+use image::ImageReader;
+use image::Limits;
 
 /// The MIME type password managers add to what they copy, so clipboard
 /// histories leave it out. Its presence is enough: nothing in that offer is
@@ -83,15 +85,14 @@ impl Copied {
     /// text, and for an image that doesn't decode.
     pub fn read(mime: &str, data: Vec<u8>) -> Result<Copied, String> {
         if TEXT.contains(&mime) {
-            let text = String::from_utf8(data)
-                .unwrap_or_else(|err| String::from_utf8_lossy(err.as_bytes()).into_owned());
+            let text =
+                String::from_utf8(data).unwrap_or_else(|err| String::from_utf8_lossy(err.as_bytes()).into_owned());
             if text.trim().is_empty() {
                 return Err("blank text".into());
             }
             return Ok(Copied::Text(text));
         }
-        let format =
-            ImageFormat::from_mime_type(mime).ok_or_else(|| format!("{mime} isn't kept"))?;
+        let format = ImageFormat::from_mime_type(mime).ok_or_else(|| format!("{mime} isn't kept"))?;
         let mut reader = ImageReader::with_format(Cursor::new(&data), format);
         let mut limits = Limits::default();
         limits.max_alloc = Some(DECODE_LIMIT);

@@ -45,19 +45,36 @@ mod linux {
     use std::io::Read;
     use std::os::fd::OwnedFd;
     use std::sync::Arc;
-    use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
+    use std::sync::mpsc;
+    use std::sync::mpsc::Receiver;
+    use std::sync::mpsc::RecvTimeoutError;
+    use std::sync::mpsc::Sender;
     use std::thread;
-    use std::time::{Duration, Instant};
+    use std::time::Duration;
+    use std::time::Instant;
 
-    use kotodama_extension::wayland::{DataControl, DataControlHandler, Display, Offer};
-    use rustix::event::{PollFd, PollFlags, Timespec};
+    use kotodama_extension::wayland::DataControl;
+    use kotodama_extension::wayland::DataControlHandler;
+    use kotodama_extension::wayland::Display;
+    use kotodama_extension::wayland::Offer;
+    use rustix::event::PollFd;
+    use rustix::event::PollFlags;
+    use rustix::event::Timespec;
     use rustix::pipe::PipeFlags;
-    use wayland_client::globals::{GlobalListContents, registry_queue_init};
-    use wayland_client::protocol::{wl_registry, wl_seat};
-    use wayland_client::{Connection, Dispatch, EventQueue, QueueHandle, delegate_noop};
+    use wayland_client::Connection;
+    use wayland_client::Dispatch;
+    use wayland_client::EventQueue;
+    use wayland_client::QueueHandle;
+    use wayland_client::delegate_noop;
+    use wayland_client::globals::GlobalListContents;
+    use wayland_client::globals::registry_queue_init;
+    use wayland_client::protocol::wl_registry;
+    use wayland_client::protocol::wl_seat;
 
     use super::Change;
-    use crate::copied::{Choice, Copied, choose};
+    use crate::copied::Choice;
+    use crate::copied::Copied;
+    use crate::copied::choose;
 
     /// The most bytes one copy may have; anything bigger isn't kept. Well
     /// under the protocol's 64 MiB frame, so it can always be pasted back.
@@ -82,9 +99,7 @@ mod linux {
         /// Calls `changed` with each thing copied from now on, on a thread of
         /// its own, which first waits for the compositor if it isn't there
         /// yet.
-        pub fn watch(
-            changed: impl Fn(Change) + Send + Sync + 'static,
-        ) -> Result<Clipboard, String> {
+        pub fn watch(changed: impl Fn(Change) + Send + Sync + 'static) -> Result<Clipboard, String> {
             let (reads, to_read) = mpsc::channel::<(String, OwnedFd)>();
             let changed = Arc::new(changed);
             let reporter = Arc::clone(&changed);
@@ -94,8 +109,7 @@ mod linux {
                 .spawn(move || read_all(&to_read, &*reporter))
                 .map_err(|err| err.to_string())?;
 
-            let (wake_rx, wake) =
-                rustix::pipe::pipe_with(PipeFlags::CLOEXEC).map_err(|err| err.to_string())?;
+            let (wake_rx, wake) = rustix::pipe::pipe_with(PipeFlags::CLOEXEC).map_err(|err| err.to_string())?;
             let (requests, inbox) = mpsc::channel();
             thread::Builder::new()
                 .name("wayland".into())
@@ -145,9 +159,7 @@ mod linux {
             match copied.recv_timeout(READ_TIMEOUT) {
                 Ok(()) => Ok(()),
                 Err(RecvTimeoutError::Timeout) => Err("the compositor did not answer".into()),
-                Err(RecvTimeoutError::Disconnected) => {
-                    Err("lost the connection to the compositor".into())
-                }
+                Err(RecvTimeoutError::Disconnected) => Err("lost the connection to the compositor".into()),
             }
         }
     }
@@ -159,12 +171,9 @@ mod linux {
         conn: &Connection,
         reads: Sender<(String, OwnedFd)>,
     ) -> Result<Result<(EventQueue<State>, State), String>, String> {
-        let (globals, mut queue) =
-            registry_queue_init::<State>(conn).map_err(|err| err.to_string())?;
+        let (globals, mut queue) = registry_queue_init::<State>(conn).map_err(|err| err.to_string())?;
         let qh = queue.handle();
-        let seat: wl_seat::WlSeat = globals
-            .bind(&qh, 1..=1, ())
-            .map_err(|err| format!("no seat: {err}"))?;
+        let seat: wl_seat::WlSeat = globals.bind(&qh, 1..=1, ()).map_err(|err| format!("no seat: {err}"))?;
         let control = match DataControl::bind(&globals, &seat, &qh) {
             Ok(control) => control,
             Err(err) => return Ok(Err(err)),
@@ -180,12 +189,7 @@ mod linux {
 
     /// Dispatches Wayland events and sets the clipboard when asked, until
     /// the [`Clipboard`] is dropped or the connection is lost.
-    fn run(
-        mut queue: EventQueue<State>,
-        mut state: State,
-        inbox: &Receiver<Request>,
-        wake: &OwnedFd,
-    ) {
+    fn run(mut queue: EventQueue<State>, mut state: State, inbox: &Receiver<Request>, wake: &OwnedFd) {
         let qh = queue.handle();
         loop {
             if queue.dispatch_pending(&mut state).is_err() || state.finished {

@@ -1,9 +1,8 @@
 //! The clipboard history on disk, in `$XDG_STATE_HOME/kotodama/clipboard/`:
 //!
-//! - `index.json`: every entry, oldest first, with a short preview of each
-//!   text and the size of each image;
-//! - `data/<id>`: what was copied, byte for byte, read only to paste or show
-//!   it;
+//! - `index.json`: every entry, oldest first, with a short preview of each text and the size of
+//!   each image;
+//! - `data/<id>`: what was copied, byte for byte, read only to paste or show it;
 //! - `thumbs/<id>.png`: each image's thumbnail, for the detail View.
 //!
 //! Only the index is held in memory, so the history costs the Extension a
@@ -13,12 +12,20 @@
 //! Times are seconds since the Unix epoch, passed in by the caller, so expiry
 //! runs the same on a made-up clock in tests.
 
-use std::fs::{self, DirBuilder, File, OpenOptions};
-use std::io::{self, Read, Write};
-use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt};
-use std::path::{Path, PathBuf};
+use std::fs;
+use std::fs::DirBuilder;
+use std::fs::File;
+use std::fs::OpenOptions;
+use std::io;
+use std::io::Read;
+use std::io::Write;
+use std::os::unix::fs::DirBuilderExt;
+use std::os::unix::fs::OpenOptionsExt;
+use std::path::Path;
+use std::path::PathBuf;
 
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
+use serde::Serialize;
 
 use crate::copied::Copied;
 
@@ -110,18 +117,12 @@ impl History {
     pub fn open(dir: &Path) -> Self {
         let index = match fs::read(dir.join(INDEX)) {
             Ok(bytes) => serde_json::from_slice(&bytes).unwrap_or_else(|err| {
-                warn(&format!(
-                    "{}: {err}; starting afresh",
-                    dir.join(INDEX).display()
-                ));
+                warn(&format!("{}: {err}; starting afresh", dir.join(INDEX).display()));
                 Index::default()
             }),
             Err(err) if err.kind() == io::ErrorKind::NotFound => Index::default(),
             Err(err) => {
-                warn(&format!(
-                    "{}: {err}; starting afresh",
-                    dir.join(INDEX).display()
-                ));
+                warn(&format!("{}: {err}; starting afresh", dir.join(INDEX).display()));
                 Index::default()
             }
         };
@@ -191,11 +192,7 @@ impl History {
                             let _ = fs::remove_file(self.data_path(id));
                             return Err(err);
                         }
-                        Content::Image {
-                            mime,
-                            width,
-                            height,
-                        }
+                        Content::Image { mime, width, height }
                     }
                 };
                 self.index.next_id += 1;
@@ -234,12 +231,7 @@ impl History {
         self.index
             .entries
             .iter()
-            .map(|entry| {
-                entry
-                    .copied
-                    .saturating_add(limits.max_age_secs)
-                    .saturating_add(1)
-            })
+            .map(|entry| entry.copied.saturating_add(limits.max_age_secs).saturating_add(1))
             .min()
     }
 
@@ -348,10 +340,7 @@ impl History {
     /// Writes the index whole, then renames it into place, so a crash leaves
     /// the old one or the new one.
     fn save(&self) -> io::Result<()> {
-        DirBuilder::new()
-            .recursive(true)
-            .mode(0o700)
-            .create(&self.dir)?;
+        DirBuilder::new().recursive(true).mode(0o700).create(&self.dir)?;
         let json = serde_json::to_vec(&self.index).map_err(io::Error::other)?;
         let partial = self.dir.join(format!("{INDEX}.partial"));
         write_private(&partial, &json)?;
@@ -360,10 +349,7 @@ impl History {
 
     fn save_or_warn(&self) {
         if let Err(err) = self.save() {
-            warn(&format!(
-                "couldn't save {}: {err}",
-                self.dir.join(INDEX).display()
-            ));
+            warn(&format!("couldn't save {}: {err}", self.dir.join(INDEX).display()));
         }
     }
 }

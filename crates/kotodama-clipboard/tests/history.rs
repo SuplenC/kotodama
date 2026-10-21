@@ -6,8 +6,12 @@ use std::fs;
 use std::io::Cursor;
 use std::path::Path;
 
-use kotodama_clipboard::copied::{Choice, Copied, choose};
-use kotodama_clipboard::history::{Content, History, Limits};
+use kotodama_clipboard::copied::Choice;
+use kotodama_clipboard::copied::Copied;
+use kotodama_clipboard::copied::choose;
+use kotodama_clipboard::history::Content;
+use kotodama_clipboard::history::History;
+use kotodama_clipboard::history::Limits;
 
 const DAY: u64 = 24 * 60 * 60;
 /// 2026-10-19, as seconds since the Unix epoch.
@@ -55,10 +59,7 @@ fn files(dir: &Path) -> Vec<String> {
 fn copied_text_survives_a_restart() {
     let dir = tempfile::tempdir().unwrap();
     let mut history = History::open(dir.path());
-    let first = history
-        .record(text("first"), NOW, &Limits::default())
-        .unwrap()
-        .id;
+    let first = history.record(text("first"), NOW, &Limits::default()).unwrap().id;
     history
         .record(text("second\nline"), NOW + 1, &Limits::default())
         .unwrap();
@@ -73,17 +74,10 @@ fn copied_text_survives_a_restart() {
 fn copying_the_same_again_moves_it_to_the_top() {
     let dir = tempfile::tempdir().unwrap();
     let mut history = History::open(dir.path());
-    let hello = history
-        .record(text("hello"), NOW, &Limits::default())
-        .unwrap()
-        .id;
-    history
-        .record(text("world"), NOW + 1, &Limits::default())
-        .unwrap();
+    let hello = history.record(text("hello"), NOW, &Limits::default()).unwrap().id;
+    history.record(text("world"), NOW + 1, &Limits::default()).unwrap();
 
-    let again = history
-        .record(text("hello"), NOW + 2, &Limits::default())
-        .unwrap();
+    let again = history.record(text("hello"), NOW + 2, &Limits::default()).unwrap();
     assert_eq!(again.id, hello);
     assert!(again.removed.is_empty());
     assert_eq!(shown(&history), ["hello", "world"]);
@@ -130,9 +124,7 @@ fn entries_expire_once_older_than_the_most_age() {
 fn a_shorter_age_from_the_config_expires_more() {
     let dir = tempfile::tempdir().unwrap();
     let mut history = History::open(dir.path());
-    history
-        .record(text("old"), NOW, &Limits::default())
-        .unwrap();
+    history.record(text("old"), NOW, &Limits::default()).unwrap();
     let limits = Limits {
         max_age_secs: DAY,
         ..Limits::default()
@@ -144,14 +136,8 @@ fn a_shorter_age_from_the_config_expires_more() {
 fn deleting_an_entry_deletes_its_data() {
     let dir = tempfile::tempdir().unwrap();
     let mut history = History::open(dir.path());
-    let keep = history
-        .record(text("keep"), NOW, &Limits::default())
-        .unwrap()
-        .id;
-    let gone = history
-        .record(text("gone"), NOW + 1, &Limits::default())
-        .unwrap()
-        .id;
+    let keep = history.record(text("keep"), NOW, &Limits::default()).unwrap().id;
+    let gone = history.record(text("gone"), NOW + 1, &Limits::default()).unwrap().id;
 
     assert!(history.delete(gone));
     assert!(!history.delete(gone));
@@ -165,9 +151,7 @@ fn deleting_an_entry_deletes_its_data() {
 fn clearing_leaves_nothing_on_disk_but_an_empty_index() {
     let dir = tempfile::tempdir().unwrap();
     let mut history = History::open(dir.path());
-    history
-        .record(text("secret-ish"), NOW, &Limits::default())
-        .unwrap();
+    history.record(text("secret-ish"), NOW, &Limits::default()).unwrap();
     history
         .record(
             Copied::read("image/png", png(40, 30)).unwrap(),
@@ -201,11 +185,9 @@ fn an_image_is_kept_with_a_small_thumbnail() {
 
     let entry = history.entries().next().unwrap();
     match &entry.content {
-        Content::Image {
-            mime,
-            width,
-            height,
-        } => assert_eq!((mime.as_str(), *width, *height), ("image/png", 1200, 600)),
+        Content::Image { mime, width, height } => {
+            assert_eq!((mime.as_str(), *width, *height), ("image/png", 1200, 600))
+        }
         other => panic!("expected an image, got {other:?}"),
     }
     assert_eq!(history.read(id).unwrap(), data);
@@ -218,10 +200,7 @@ fn a_text_preview_is_one_short_line() {
     let long = format!("  fn main() {{\n\t{}\n}}", "x".repeat(500));
     let dir = tempfile::tempdir().unwrap();
     let mut history = History::open(dir.path());
-    let id = history
-        .record(text(&long), NOW, &Limits::default())
-        .unwrap()
-        .id;
+    let id = history.record(text(&long), NOW, &Limits::default()).unwrap().id;
 
     let entry = history.entries().next().unwrap();
     let Content::Text { preview, chars } = &entry.content else {
@@ -244,60 +223,38 @@ fn blank_text_and_broken_images_are_not_kept() {
 fn a_password_managers_offer_is_sensitive() {
     let offer = |mimes: &[&str]| choose(mimes.iter().copied());
     assert_eq!(
-        offer(&[
-            "text/plain;charset=utf-8",
-            "x-kde-passwordManagerHint",
-            "TEXT"
-        ]),
+        offer(&["text/plain;charset=utf-8", "x-kde-passwordManagerHint", "TEXT"]),
         Choice::Sensitive
     );
     assert_eq!(
         offer(&["TEXT", "text/plain", "text/plain;charset=utf-8"]),
         Choice::Read("text/plain;charset=utf-8".into())
     );
-    assert_eq!(
-        offer(&["text/html", "image/png"]),
-        Choice::Read("image/png".into())
-    );
+    assert_eq!(offer(&["text/html", "image/png"]), Choice::Read("image/png".into()));
     // Text wins over an image, as most clipboard tools read it.
-    assert_eq!(
-        offer(&["image/png", "UTF8_STRING"]),
-        Choice::Read("UTF8_STRING".into())
-    );
-    assert_eq!(
-        offer(&["text/html", "application/x-other"]),
-        Choice::Nothing
-    );
+    assert_eq!(offer(&["image/png", "UTF8_STRING"]), Choice::Read("UTF8_STRING".into()));
+    assert_eq!(offer(&["text/html", "application/x-other"]), Choice::Nothing);
 }
 
 #[test]
 fn a_broken_index_starts_an_empty_history_and_drops_the_data() {
     let dir = tempfile::tempdir().unwrap();
     let mut history = History::open(dir.path());
-    history
-        .record(text("hello"), NOW, &Limits::default())
-        .unwrap();
+    history.record(text("hello"), NOW, &Limits::default()).unwrap();
     drop(history);
     fs::write(dir.path().join("index.json"), "{not json").unwrap();
 
     let history = History::open(dir.path());
     assert_eq!(shown(&history), Vec::<String>::new());
     // Data no index names is never left behind.
-    assert!(
-        files(dir.path())
-            .iter()
-            .all(|file| !file.contains("/data/"))
-    );
+    assert!(files(dir.path()).iter().all(|file| !file.contains("/data/")));
 }
 
 #[test]
 fn reading_the_start_of_a_text_never_splits_a_character() {
     let dir = tempfile::tempdir().unwrap();
     let mut history = History::open(dir.path());
-    let id = history
-        .record(text("aéé"), NOW, &Limits::default())
-        .unwrap()
-        .id;
+    let id = history.record(text("aéé"), NOW, &Limits::default()).unwrap().id;
     // "a" is one byte and each "é" two, so four bytes end inside the second.
     assert_eq!(history.read_start(id, 4).unwrap(), "aé");
     assert_eq!(history.read_start(id, 100).unwrap(), "aéé");

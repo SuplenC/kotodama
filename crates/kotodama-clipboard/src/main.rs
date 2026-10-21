@@ -8,14 +8,32 @@
 
 use std::process::ExitCode;
 use std::sync::mpsc::RecvTimeoutError;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::Duration;
+use std::time::SystemTime;
+use std::time::UNIX_EPOCH;
 
 use kotodama_clipboard::copied::Copied;
-use kotodama_clipboard::history::{Content, History, Limits};
-use kotodama_clipboard::items::{self, CLEAR, COPY, DELETE, DETAIL_VIEW, HISTORY, LIST_VIEW};
-use kotodama_clipboard::wayland::{Change, Clipboard};
-use kotodama_extension::{Connection, Event, Writer, dirs};
-use kotodama_protocol::{Bytes, Clipboard as Paste, FromExtension, Outcome, ToExtension};
+use kotodama_clipboard::history::Content;
+use kotodama_clipboard::history::History;
+use kotodama_clipboard::history::Limits;
+use kotodama_clipboard::items;
+use kotodama_clipboard::items::CLEAR;
+use kotodama_clipboard::items::COPY;
+use kotodama_clipboard::items::DELETE;
+use kotodama_clipboard::items::DETAIL_VIEW;
+use kotodama_clipboard::items::HISTORY;
+use kotodama_clipboard::items::LIST_VIEW;
+use kotodama_clipboard::wayland::Change;
+use kotodama_clipboard::wayland::Clipboard;
+use kotodama_extension::Connection;
+use kotodama_extension::Event;
+use kotodama_extension::Writer;
+use kotodama_extension::dirs;
+use kotodama_protocol::Bytes;
+use kotodama_protocol::Clipboard as Paste;
+use kotodama_protocol::FromExtension;
+use kotodama_protocol::Outcome;
+use kotodama_protocol::ToExtension;
 
 const GONE: &str = "That clip is no longer in the clipboard history";
 
@@ -133,10 +151,7 @@ impl Extension {
                 let outcome = self
                     .run(&item.id, &action)
                     .unwrap_or_else(|message| Outcome::Failed { message });
-                self.send(&FromExtension::ActionDone {
-                    invocation,
-                    outcome,
-                })
+                self.send(&FromExtension::ActionDone { invocation, outcome })
             }
             ToExtension::ViewPopped { view } => {
                 if view == LIST_VIEW {
@@ -197,11 +212,7 @@ impl Extension {
                 _ => Err(format!("Clipboard History has no Action `{action}`")),
             };
         }
-        let entry = id
-            .parse::<u64>()
-            .ok()
-            .and_then(|id| self.history.get(id))
-            .ok_or(GONE)?;
+        let entry = id.parse::<u64>().ok().and_then(|id| self.history.get(id)).ok_or(GONE)?;
         let entry_id = entry.id;
         match action {
             items::PASTE => Ok(Outcome::Paste(self.paste(entry_id)?)),
@@ -233,8 +244,7 @@ impl Extension {
             .map_err(|err| format!("Couldn't read the clip: {err}"))?;
         Ok(match &entry.content {
             Content::Text { .. } => Paste::Text(
-                String::from_utf8(data)
-                    .unwrap_or_else(|err| String::from_utf8_lossy(err.as_bytes()).into_owned()),
+                String::from_utf8(data).unwrap_or_else(|err| String::from_utf8_lossy(err.as_bytes()).into_owned()),
             ),
             Content::Image { mime, .. } => Paste::Image {
                 mime: mime.clone(),
