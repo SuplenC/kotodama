@@ -11,6 +11,7 @@
 //! - Reading the answer: `proposal.rs`.
 //! - When a request starts or is cancelled: `main.rs`.
 
+use std::fmt::Write as _;
 use std::io;
 use std::io::Read;
 use std::io::Write;
@@ -155,24 +156,27 @@ pub fn curl_config(key: Option<&Secret>, body: &str) -> String {
     let mut config = String::with_capacity(body.len() + 256);
     if let Some(key) = key {
         let header = format!("x-api-key: {}", key.expose());
-        config.push_str(&format!("header = {}\n", quoted(&header)));
+        let _ = writeln!(config, "header = {}", quoted(&header));
     }
     config.push_str("header = \"anthropic-version: 2023-06-01\"\n");
     config.push_str("header = \"content-type: application/json\"\n");
-    config.push_str(&format!("data-binary = {}\n", quoted(body)));
+    let _ = writeln!(config, "data-binary = {}", quoted(body));
     config
 }
 
 /// Why a request got no proposals.
 #[derive(Debug, thiserror::Error)]
 pub enum Failure {
+    /// A new query, a new config or a closed View cancelled it.
     #[error("the request was cancelled")]
     Cancelled,
     /// The endpoint refused the key, which is read again next time.
     #[error("the endpoint refused the API key")]
     Unauthorized,
+    /// `api_key_command` gave no key.
     #[error("reading the API key")]
     Key(#[source] KeyError),
+    /// `curl` couldn't start.
     #[error("can't run {program}")]
     Start {
         program: String,
@@ -182,14 +186,26 @@ pub enum Failure {
     /// What curl said on stderr, which never holds the key or the body.
     #[error("the model's endpoint didn't answer: {0}")]
     Endpoint(String),
+    /// The answer isn't a Messages API response.
     #[error("reading the model's answer")]
     Answer(#[source] ParseError),
+}
+
+impl Failure {
+    fn start(program: &str) -> impl FnOnce(io::Error) -> Self {
+        move |source| Failure::Start {
+            program: program.to_owned(),
+            source,
+        }
+    }
 }
 
 /// A request's `curl`, which a cancel kills.
 #[derive(Debug, Default)]
 pub struct InFlight {
+    /// Set by [`InFlight::cancel`]; a request that sees it answers `Cancelled`.
     cancelled: bool,
+    /// The running `curl`, from its spawn until it is waited on.
     child: Option<Child>,
 }
 
@@ -211,6 +227,10 @@ impl InFlight {
 ///
 /// When cancelled, when `curl` can't start, or when the endpoint fails or
 /// refuses the key.
+///
+/// # Panics
+///
+/// When the `in_flight` mutex is poisoned.
 pub fn post(
     curl: &str,
     url: &str,
@@ -230,17 +250,11 @@ pub fn post(
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()
-            .map_err(|source| Failure::Start {
-                program: curl.to_owned(),
-                source,
-            })?;
+            .map_err(Failure::start(curl))?;
         let (Some(stdin), Some(stdout), Some(stderr)) = (child.stdin.take(), child.stdout.take(), child.stderr.take())
         else {
             let _ = child.kill();
-            return Err(Failure::Start {
-                program: curl.to_owned(),
-                source: io::Error::other("its stdio wasn't piped"),
-            });
+            return Err(Failure::start(curl)(io::Error::other("its stdio wasn't piped")));
         };
         state.child = Some(child);
         (stdin, stdout, stderr)

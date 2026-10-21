@@ -20,6 +20,7 @@ use std::process::Stdio;
 pub struct Secret(String);
 
 impl Secret {
+    /// Wraps `key`, which from here on prints as `<redacted>`.
     #[must_use]
     pub fn new(key: impl Into<String>) -> Self {
         Secret(key.into())
@@ -39,18 +40,31 @@ impl fmt::Debug for Secret {
 /// Why `api_key_command` gave no key. No variant holds what it printed.
 #[derive(Debug, thiserror::Error)]
 pub enum KeyError {
+    /// The command names no program.
     #[error("`api_key_command` is empty")]
     Empty,
+    /// The program couldn't start.
     #[error("can't run `api_key_command` ({program})")]
     Start {
         program: String,
         #[source]
         source: io::Error,
     },
+    /// The command exited with this status.
     #[error("`api_key_command` failed: {0}")]
     Failed(ExitStatus),
+    /// The command's first line is blank, or isn't UTF-8.
     #[error("`api_key_command` printed no key")]
     NoKey,
+}
+
+impl KeyError {
+    fn start(program: &str) -> impl FnOnce(io::Error) -> Self {
+        move |source| KeyError::Start {
+            program: program.to_owned(),
+            source,
+        }
+    }
 }
 
 /// Runs `api_key_command` and reads the key from its first line. Its stderr
@@ -68,10 +82,7 @@ pub fn read_key(command: &[String]) -> Result<Secret, KeyError> {
         .stdin(Stdio::null())
         .stderr(Stdio::null())
         .output()
-        .map_err(|source| KeyError::Start {
-            program: program.clone(),
-            source,
-        })?;
+        .map_err(KeyError::start(program))?;
     if !output.status.success() {
         return Err(KeyError::Failed(output.status));
     }

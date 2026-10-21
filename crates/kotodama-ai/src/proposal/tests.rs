@@ -24,7 +24,7 @@ fn catalog() -> Vec<CatalogEntry> {
     ]
 }
 
-fn answer(input: serde_json::Value) -> Vec<u8> {
+fn answer(input: &serde_json::Value) -> Vec<u8> {
     json!({
         "stop_reason": "tool_use",
         "content": [
@@ -38,7 +38,7 @@ fn answer(input: serde_json::Value) -> Vec<u8> {
 
 #[test]
 fn proposals_outside_the_catalog_and_arguments_an_action_does_not_take_are_dropped() {
-    let answer = answer(json!({ "proposals": [
+    let answer = answer(&json!({ "proposals": [
         { "action": 1, "arguments": [
             { "name": "name", "value": " demo " },
             { "name": "path", "value": "/etc" },

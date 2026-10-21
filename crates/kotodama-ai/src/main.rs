@@ -34,7 +34,6 @@
 #![forbid(unsafe_code)]
 
 use std::collections::VecDeque;
-use std::error::Error as _;
 use std::process::ExitCode;
 use std::sync::Arc;
 use std::sync::Mutex;
@@ -59,6 +58,7 @@ use kotodama_ai::post;
 use kotodama_ai::proposal_id;
 use kotodama_ai::read_key;
 use kotodama_ai::request_body;
+use kotodama_extension::Chain;
 use kotodama_extension::Connection;
 use kotodama_extension::Event;
 use kotodama_extension::STACK_SIZE;
@@ -202,15 +202,15 @@ impl Extension {
                     _ => None,
                 });
                 self.cancel();
-                if !self.settings.enabled() {
-                    self.pending = None;
-                    self.status.unusable(&mut self.writer, NOT_CONFIGURED_NOTE)?;
-                } else {
+                if self.settings.enabled() {
                     self.status.usable(&mut self.writer)?;
                     if !self.asked_catalog {
                         self.asked_catalog = true;
                         self.writer.send(&FromExtension::RequestActionCatalog)?;
                     }
+                } else {
+                    self.pending = None;
+                    self.status.unusable(&mut self.writer, NOT_CONFIGURED_NOTE)?;
                 }
                 // The open View would wait on the cancelled request forever,
                 // so it asks again under the new settings, or says it can't.
@@ -401,7 +401,7 @@ impl Extension {
             Ok(proposals) => (proposals, None),
             Err(Failure::Cancelled) => return Ok(()),
             Err(failure) => {
-                let message = report(&failure);
+                let message = Chain(&failure).to_string();
                 kotodama_extension::log!("{message}");
                 (Vec::new(), Some(message))
             }
@@ -471,15 +471,4 @@ fn detail(markdown: String) -> ViewContent {
         markdown,
         metadata: Vec::new(),
     }
-}
-
-/// `failure` and its causes, on one line.
-fn report(failure: &Failure) -> String {
-    let mut message = failure.to_string();
-    let mut cause = failure.source();
-    while let Some(err) = cause {
-        message.push_str(&format!(": {err}"));
-        cause = err.source();
-    }
-    message
 }
