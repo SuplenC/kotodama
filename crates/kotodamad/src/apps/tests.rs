@@ -1,6 +1,6 @@
 use super::*;
 
-fn apps(manifests: &[&str], config: Table) -> Apps {
+fn apps(manifests: &[&str], config: &Table) -> Apps {
     let manifests: Vec<Manifest> = manifests
         .iter()
         .map(|toml| Manifest::from_toml(toml).unwrap())
@@ -10,8 +10,8 @@ fn apps(manifests: &[&str], config: Table) -> Apps {
             .iter()
             .enumerate()
             .map(|(n, manifest)| (ExtensionId(n), manifest)),
-        &config,
-        &crate::keywords::from_config(&config, &mut Report::new()),
+        config,
+        &crate::keywords::from_config(config, &mut Report::new()),
         &mut Report::new(),
     )
 }
@@ -22,7 +22,7 @@ fn emoji() -> Apps {
             "name = \"apps\"\ncommand = [\"x\"]",
             "name = \"emoji\"\ncommand = [\"x\"]\nword = \"emo\"\nin_search = false",
         ],
-        Table::new(),
+        &Table::new(),
     )
 }
 
@@ -83,7 +83,7 @@ const E: &str = "name = \"e\"\ncommand = [\"x\"]";
 #[test]
 fn two_apps_never_share_a_word_the_name_sorting_first_keeps_it() {
     let manifests = [EMOJI_E, EDITORS_E, E];
-    let apps = apps(&manifests, Table::new());
+    let apps = apps(&manifests, &Table::new());
 
     // A Manifest's word goes before an Extension's name, so `e` the
     // Extension, whose word is its name, gets `e-2`.
@@ -100,15 +100,15 @@ fn the_words_dont_depend_on_the_order_extensions_are_found_in() {
     let other = [E, EDITORS_E, EMOJI_E];
 
     assert_eq!(
-        words_by_name(&apps(&one, Table::new()), &one),
-        words_by_name(&apps(&other, Table::new()), &other)
+        words_by_name(&apps(&one, &Table::new()), &one),
+        words_by_name(&apps(&other, &Table::new()), &other)
     );
 }
 
 #[test]
 fn a_word_the_config_sets_goes_before_one_a_manifest_sets() {
     let manifests = [EDITORS_E, "name = \"zed\"\ncommand = [\"x\"]"];
-    let apps = apps(&manifests, config("zed", "word", Value::String("e".into())));
+    let apps = apps(&manifests, &config("zed", "word", Value::String("e".into())));
 
     assert_eq!(
         words_by_name(&apps, &manifests),
@@ -157,7 +157,7 @@ fn keywords(quicklinks: &[&str], aliases: &[&str]) -> Table {
 #[test]
 fn a_quicklink_keeps_its_keyword_and_the_app_goes_by_its_name() {
     let manifests = ["name = \"calculator\"\ncommand = [\"x\"]\nword = \"calc\""];
-    let apps = apps(&manifests, keywords(&["calc"], &[]));
+    let apps = apps(&manifests, &keywords(&["calc"], &[]));
 
     assert_eq!(words(&apps), ["calculator"]);
     assert_eq!(
@@ -173,7 +173,7 @@ fn a_quicklink_keeps_its_keyword_and_the_app_goes_by_its_name() {
 
 #[test]
 fn an_alias_keeps_its_keyword() {
-    let apps = apps(&[EMOJI_E], keywords(&[], &["e"]));
+    let apps = apps(&[EMOJI_E], &keywords(&[], &["e"]));
 
     assert_eq!(words(&apps), ["emoji"]);
     assert!(matches!(
@@ -187,7 +187,7 @@ fn an_alias_keeps_its_keyword() {
 
 #[test]
 fn an_app_whose_word_and_name_are_both_held_still_gets_a_word() {
-    let apps = apps(&[EMOJI_E], keywords(&["e", "emoji"], &[]));
+    let apps = apps(&[EMOJI_E], &keywords(&["e", "emoji"], &[]));
 
     assert_eq!(words(&apps), ["emoji-2"]);
     assert_eq!(apps.scope_of("emoji-2 fire").map(|(n, _)| n), Some(0));
@@ -207,7 +207,7 @@ fn an_alias_over_a_quicklink_is_a_conflict() {
 fn the_config_chooses_the_word() {
     let apps = apps(
         &["name = \"emoji\"\ncommand = [\"x\"]\nword = \"emo\""],
-        config("emoji", "word", Value::String("Smile".into())),
+        &config("emoji", "word", Value::String("Smile".into())),
     );
 
     assert_eq!(words(&apps), ["smile"]);
@@ -217,7 +217,7 @@ fn the_config_chooses_the_word() {
 fn the_configs_prefix_is_still_read_as_the_word() {
     let apps = apps(
         &["name = \"emoji\"\ncommand = [\"x\"]\nword = \"emo\""],
-        config("emoji", "prefix", Value::String("smile".into())),
+        &config("emoji", "prefix", Value::String("smile".into())),
     );
 
     assert_eq!(words(&apps), ["smile"]);
@@ -228,7 +228,7 @@ fn a_word_in_the_config_that_isnt_one_word_is_ignored() {
     for word in ["two words", ""] {
         let apps = apps(
             &["name = \"emoji\"\ncommand = [\"x\"]\nword = \"emo\""],
-            config("emoji", "word", Value::String(word.into())),
+            &config("emoji", "word", Value::String(word.into())),
         );
 
         assert_eq!(words(&apps), ["emo"], "{word:?}");
@@ -239,7 +239,7 @@ fn a_word_in_the_config_that_isnt_one_word_is_ignored() {
 fn in_search_false_in_the_config_puts_the_whole_extension_behind_its_app() {
     let apps = apps(
         &["name = \"apps\"\ncommand = [\"x\"]"],
-        config("apps", "in_search", Value::Bool(false)),
+        &config("apps", "in_search", Value::Bool(false)),
     );
 
     assert_eq!(apps.searched(1), [false, false]);
@@ -249,7 +249,7 @@ fn in_search_false_in_the_config_puts_the_whole_extension_behind_its_app() {
 fn in_search_true_in_the_config_puts_every_item_in_the_search() {
     let apps = apps(
         &["name = \"emoji\"\ncommand = [\"x\"]\nin_search = false"],
-        config("emoji", "in_search", Value::Bool(true)),
+        &config("emoji", "in_search", Value::Bool(true)),
     );
 
     assert_eq!(apps.searched(1), [true, true]);
@@ -259,7 +259,7 @@ fn in_search_true_in_the_config_puts_every_item_in_the_search() {
 fn the_intro_falls_back_to_the_description_and_shows_only_before_typing() {
     let apps = apps(
         &["name = \"emoji\"\ncommand = [\"x\"]\ndescription = \"Emoji and symbols\""],
-        Table::new(),
+        &Table::new(),
     );
     let app = apps.get(0).unwrap();
 
@@ -273,7 +273,7 @@ fn the_intro_falls_back_to_the_description_and_shows_only_before_typing() {
 
 #[test]
 fn the_intro_carries_the_extensions_note() {
-    let apps = apps(&["name = \"clipboard\"\ncommand = [\"x\"]"], Table::new());
+    let apps = apps(&["name = \"clipboard\"\ncommand = [\"x\"]"], &Table::new());
     let app = apps.get(0).unwrap();
 
     let intro = app.scope(false, Some("Paused")).intro.unwrap();

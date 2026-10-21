@@ -104,7 +104,7 @@ fn local_utc_offset(at: u64) -> i64 {
     // SAFETY: an all-zero `tm` is valid, and `localtime_r` only writes to it.
     let mut tm: libc::tm = unsafe { std::mem::zeroed() };
     // SAFETY: both pointers are valid for the call.
-    if unsafe { libc::localtime_r(&time, &mut tm) }.is_null() {
+    if unsafe { libc::localtime_r(&raw const time, &raw mut tm) }.is_null() {
         return 0;
     }
     tm.tm_gmtoff as i64

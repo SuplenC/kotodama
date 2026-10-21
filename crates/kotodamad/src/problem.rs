@@ -18,6 +18,8 @@
 //! - Reading the settings that report them: each setting's owner (`engine.rs`, `paths.rs`,
 //!   `history.rs`, `empty_query.rs`, `kind_order.rs`, `keywords.rs`, `configured.rs`, `apps.rs`).
 
+use std::fmt::Write as _;
+
 use kotodama_protocol::Action;
 use kotodama_protocol::Item;
 use kotodama_protocol::ItemKind;
@@ -123,6 +125,10 @@ pub fn replace(group: &mut Vec<Problem>, problems: Vec<Problem>) -> bool {
 
 /// The Daemon's own Item that opens the list of `count` problems: found by
 /// "problems", and shown only while there are any.
+///
+/// # Panics
+///
+/// Never: `kotodama.command` is a valid kind.
 pub fn item(count: usize) -> Item {
     let title = match count {
         1 => "1 problem".to_owned(),
@@ -148,10 +154,15 @@ pub fn view(problems: &[Problem]) -> View {
     let markdown = if problems.is_empty() {
         "Nothing is wrong.".to_owned()
     } else {
-        problems
-            .iter()
-            .map(|problem| format!("- **{}**: {}\n", escape(&problem.about), escape(&problem.message)))
-            .collect()
+        problems.iter().fold(String::new(), |mut markdown, problem| {
+            let _ = writeln!(
+                markdown,
+                "- **{}**: {}",
+                escape(&problem.about),
+                escape(&problem.message)
+            );
+            markdown
+        })
     };
     View {
         id: PROBLEMS.into(),

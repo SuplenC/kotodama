@@ -160,9 +160,8 @@ impl Views {
         let Some(open) = self.stack.iter_mut().find(|open| open.is(extension, id)) else {
             return Vec::new();
         };
-        let items = match &open.view.content {
-            ViewContent::List { items, .. } => items,
-            _ => return Vec::new(),
+        let ViewContent::List { items, .. } = &open.view.content else {
+            return Vec::new();
         };
         let haystacks = open
             .haystacks

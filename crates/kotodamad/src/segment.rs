@@ -242,7 +242,7 @@ impl Segment {
                     if item.hidden {
                         self.remove(&item.id);
                     } else {
-                        self.add(item, &mut shelved);
+                        self.add(&item, &mut shelved);
                     }
                 }
                 self.shelve(&shelved);
@@ -255,8 +255,8 @@ impl Segment {
         }
         self.compact();
         if self.shelf_garbage * 2 >= self.end.max(SMALL_SHELF) {
-            let shelf = Shelf::new(self.dir.as_deref());
-            if let Err(err) = self.reshelve(shelf) {
+            let fresh = Shelf::new(self.dir.as_deref());
+            if let Err(err) = self.reshelve(fresh) {
                 log::warn!("can't copy Items to a new file: {err}");
             }
         }
@@ -266,38 +266,33 @@ impl Segment {
         self.ids.is_empty()
     }
 
-    fn add(&mut self, item: Item, shelved: &mut Shelved) {
-        let row = match self.ids.get(item.id.as_str()) {
-            Some(&row) => {
-                self.release(row);
+    fn add(&mut self, item: &Item, shelved: &mut Shelved) {
+        let row = if let Some(&row) = self.ids.get(item.id.as_str()) {
+            self.release(row);
+            row
+        } else {
+            let row = if let Some(row) = self.free.pop() {
                 row
-            }
-            None => {
-                let row = match self.free.pop() {
-                    Some(row) => row,
-                    None => {
-                        self.held.push(None);
-                        self.every_letter.push(Letters::NONE);
-                        self.initials.push(Letters::NONE);
-                        self.keys.push(Keys::default());
-                        (self.held.len() - 1) as Row
-                    }
-                };
-                self.ids.insert(item.id.as_str().into(), row);
-                row
-            }
+            } else {
+                self.held.push(None);
+                self.every_letter.push(Letters::NONE);
+                self.initials.push(Letters::NONE);
+                self.keys.push(Keys::default());
+                (self.held.len() - 1) as Row
+            };
+            self.ids.insert(item.id.as_str().into(), row);
+            row
         };
-        let folded = Folded::new(&item);
+        let folded = Folded::new(item);
         let starts = self.starts.len() as u32;
         self.starts.extend(&folded.title_starts);
         self.starts.extend(&folded.words_starts);
         let kind = item.kind.name();
-        let kind = match self.kinds.iter().position(|known| known == kind) {
-            Some(n) => n,
-            None => {
-                self.kinds.push(kind.to_owned());
-                self.kinds.len() - 1
-            }
+        let kind = if let Some(n) = self.kinds.iter().position(|known| known == kind) {
+            n
+        } else {
+            self.kinds.push(kind.to_owned());
+            self.kinds.len() - 1
         } as u16;
         let keys = Keys {
             title: self.push_text(&folded.title),
@@ -328,26 +323,25 @@ impl Segment {
             .actions
             .iter()
             .map(|action| {
-                let n = match self
+                let n = if let Some(n) = self
                     .offered
                     .iter()
                     .position(|offered| offered.kind == kind && *offered.action == *action.id)
                 {
-                    Some(n) => n,
-                    None => {
-                        self.offered.push(Offered {
-                            kind,
-                            action: action.id.as_str().into(),
-                            rows: BTreeSet::new(),
-                        });
-                        self.offered.len() - 1
-                    }
+                    n
+                } else {
+                    self.offered.push(Offered {
+                        kind,
+                        action: action.id.as_str().into(),
+                        rows: BTreeSet::new(),
+                    });
+                    self.offered.len() - 1
                 };
                 self.offered[n].rows.insert(row);
                 n as u32
             })
             .collect();
-        encode(&item, &mut shelved.item);
+        encode(item, &mut shelved.item);
         let place = Place {
             at: shelved.at + shelved.bytes.len() as u64,
             len: shelved.item.len() as u32,
@@ -410,14 +404,14 @@ impl Segment {
         if shelved.bytes.is_empty() {
             return;
         }
-        let shelf = Arc::clone(self.shelf.get_or_insert_with(|| Shelf::new(self.dir.as_deref())));
-        let Err(err) = shelf.put(shelved.at, &shelved.bytes) else {
+        let store = Arc::clone(self.shelf.get_or_insert_with(|| Shelf::new(self.dir.as_deref())));
+        let Err(err) = store.put(shelved.at, &shelved.bytes) else {
             return;
         };
         log::error!("keeping Items in memory: can't write them to their file: {err}");
         let memory = Shelf::in_memory();
         let mut before = Vec::new();
-        let moved = shelf
+        let moved = store
             .read_up_to(0, shelved.at, &mut before)
             .and_then(|()| memory.put(0, &before))
             .and_then(|()| memory.put(shelved.at, &shelved.bytes));
@@ -427,11 +421,11 @@ impl Segment {
         self.shelf = Some(memory);
     }
 
-    /// Moves the payloads rows still hold to `shelf`, dropping the garbage:
+    /// Moves the payloads rows still hold to `to`, dropping the garbage:
     /// one read of the old Shelf and one write of the new.
-    fn reshelve(&mut self, shelf: Arc<Shelf>) -> io::Result<()> {
+    fn reshelve(&mut self, to: Arc<Shelf>) -> io::Result<()> {
         let Some(old) = self.shelf.clone() else {
-            self.shelf = Some(shelf);
+            self.shelf = Some(to);
             self.end = 0;
             return Ok(());
         };
@@ -452,13 +446,13 @@ impl Segment {
             places.push(place);
         }
         let end = kept.len() as u64;
-        shelf.put(0, &kept)?;
+        to.put(0, &kept)?;
         for (held, place) in self.held.iter_mut().zip(places) {
             if let Some(held) = held {
                 held.place = place;
             }
         }
-        self.shelf = Some(shelf);
+        self.shelf = Some(to);
         self.end = end;
         self.shelf_garbage = 0;
         Ok(())
@@ -660,13 +654,13 @@ impl Segment {
             subtitle_initials: keys.subtitle_initials,
         };
         let subtitle = || self.text(keys.subtitle);
-        let (score, matched) = searched.score(subtitle, pattern, matcher, filter)?;
+        let (score, hits) = searched.score(subtitle, pattern, matcher, filter)?;
         let ranked = Ranked {
             segment: self,
             row,
             keys,
         };
-        Some((ranked, score, matched))
+        Some((ranked, score, hits))
     }
 
     /// What ranking reads of `row`, if it holds an Item.

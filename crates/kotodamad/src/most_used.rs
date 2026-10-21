@@ -80,7 +80,7 @@ pub struct Usage {
 struct Used {
     source: Source,
     group: Option<Slot>,
-    used: Habit,
+    habit: Habit,
     /// How much it was picked through itself rather than its Identity: of
     /// the Results of one Identity, the one picked through most stands for it.
     direct: f64,
@@ -91,7 +91,7 @@ impl Used {
         Used {
             source,
             group,
-            used: Habit::default(),
+            habit: Habit::default(),
             direct: 0.0,
         }
     }
@@ -122,7 +122,7 @@ impl Usage {
             }
             let entry = most.last_mut().expect("just pushed");
             if counts != Counts::Direct {
-                entry.used = used;
+                entry.habit = used;
             }
             if counts != Counts::Shared {
                 entry.direct = used.overall;
@@ -132,15 +132,15 @@ impl Usage {
             let used = other.picks.habit(when, half_life);
             if !other.alias {
                 most.push(Used {
-                    used,
+                    habit: used,
                     ..Used::new(other.source, other.group)
                 });
                 continue;
             }
             match most.iter_mut().find(|entry| entry.source == other.source) {
-                Some(entry) => entry.used = entry.used.and(used),
+                Some(entry) => entry.habit = entry.habit.and(used),
                 None => most.push(Used {
-                    used,
+                    habit: used,
                     ..Used::new(other.source, other.group)
                 }),
             }
@@ -162,13 +162,13 @@ impl Usage {
                 (other, n)
             };
             // They share their Identity's picks, but an Alias may name one.
-            most[best].used = most[best].used.max(most[rest].used);
+            most[best].habit = most[best].habit.max(most[rest].habit);
             keep[rest] = false;
             stands_for.insert(group, best);
         }
         let mut kept = keep.iter();
         most.retain(|_| *kept.next().expect("one per Result"));
-        let rank = |a: &Used, b: &Used| a.used.rank(&b.used).then(a.source.cmp(&b.source));
+        let rank = |a: &Used, b: &Used| a.habit.rank(&b.habit).then(a.source.cmp(&b.source));
         if most.len() > self.wanted {
             most.select_nth_unstable_by(self.wanted - 1, rank);
         }

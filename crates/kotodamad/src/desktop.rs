@@ -14,11 +14,11 @@
 //! request that finds no compositor fails, and the next one tries again.
 //!
 //! Keys wait `[desktop] settle_ms` after the menu closes before they go out. The window
-//! that gets the keyboard back may not take keys at once: QtWayland makes a
+//! that gets the keyboard back may not take keys at once: `QtWayland` makes a
 //! window active only after a round trip that follows `wl_keyboard.enter`,
 //! and drops keys until then. Nothing on Wayland tells another client when
 //! that is done. `zwp_input_method_v2` would deliver text without key events,
-//! but a seat has one input method, which the user's own (fcitx, IBus) holds,
+//! but a seat has one input method, which the user's own (`fcitx`, `IBus`) holds,
 //! and many apps never enable a text input, so it can't replace keys. The
 //! wait is the least bad bound: long enough for a client woken by `enter` to
 //! get the CPU and answer, short enough not to be seen.
@@ -36,6 +36,7 @@ use crate::host::spawn;
 
 /// The keymap a virtual keyboard uploads to type some text: one key per
 /// distinct character, so the keymap stays small.
+#[derive(Debug)]
 pub struct Keymap {
     chars: Vec<char>,
 }
@@ -124,7 +125,7 @@ fn notify(summary: String, body: String) {
 }
 
 /// Types, pastes and copies on the Wayland display in `WAYLAND_DISPLAY`.
-#[derive(Default)]
+#[derive(Debug, Default)]
 pub struct Wayland {
     #[cfg(target_os = "linux")]
     worker: Option<linux::Worker>,
@@ -230,6 +231,7 @@ mod linux {
 
     /// The handle the Daemon holds: requests go down a channel, and a byte
     /// down a pipe wakes the thread, which also waits on the Wayland socket.
+    #[derive(Debug)]
     pub struct Worker {
         requests: Sender<Request>,
         wake: OwnedFd,

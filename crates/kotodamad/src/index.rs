@@ -180,8 +180,8 @@ pub fn read(segments: &[Arc<Segment>], slot: Slot) -> Option<Read> {
     })
 }
 
-/// Hashes a [`Slot`] with a multiply per word, as rustc's FxHash does. The
-/// Daemon makes the Slots, so SipHash's guard against keys picked to collide
+/// Hashes a [`Slot`] with a multiply per word, as rustc's `FxHash` does. The
+/// Daemon makes the Slots, so `SipHash`'s guard against keys picked to collide
 /// buys nothing, and would cost each row a keystroke shows.
 #[derive(Default)]
 pub struct SlotHasher(u64);
@@ -378,11 +378,7 @@ impl Index {
         cleared
     }
 
-    fn slots<'a>(
-        &'a self,
-        segment: usize,
-        rows: impl IntoIterator<Item = &'a Row> + 'a,
-    ) -> impl Iterator<Item = Slot> + 'a {
+    fn slots<'a>(segment: usize, rows: impl IntoIterator<Item = &'a Row> + 'a) -> impl Iterator<Item = Slot> + 'a {
         rows.into_iter().map(move |&row| Slot {
             segment: segment as u32,
             row,
@@ -396,7 +392,7 @@ impl Index {
             .iter()
             .enumerate()
             .filter(move |&(n, _)| reach.reads(n, &self.searched))
-            .flat_map(move |(n, segment)| self.slots(n, segment.keyed(keyword)))
+            .flat_map(move |(n, segment)| Self::slots(n, segment.keyed(keyword)))
     }
 
     /// The Items, of any Extension, whose Identity is `identity`.
@@ -404,7 +400,7 @@ impl Index {
         self.segments
             .iter()
             .enumerate()
-            .flat_map(move |(n, segment)| self.slots(n, segment.identified(identity)))
+            .flat_map(move |(n, segment)| Self::slots(n, segment.identified(identity)))
     }
 
     /// Where one Extension's Item is, in whichever of its Segments.
@@ -439,23 +435,23 @@ impl Index {
     /// resident.
     pub fn item(&self, slot: Slot) -> Option<Arc<Item>> {
         let segment = self.segments.get(slot.segment as usize)?;
-        let (shelf, place) = segment.payload(slot.row)?;
+        let (store, place) = segment.payload(slot.row)?;
         let read = self.reads.get() + 1;
         self.reads.set(read);
         let mut resident = self.resident.borrow_mut();
         if let Some(kept) = resident.get_mut(&slot)
-            && kept.shelf == shelf.id()
+            && kept.shelf == store.id()
             && kept.at == place.at
         {
             kept.read = read;
             return Some(Arc::clone(&kept.item));
         }
-        let item = Arc::new(shelf.get_with(place, &mut self.read_buf.borrow_mut())?);
+        let item = Arc::new(store.get_with(place, &mut self.read_buf.borrow_mut())?);
         self.shelf_reads.set(self.shelf_reads.get() + 1);
         resident.insert(
             slot,
             Resident {
-                shelf: shelf.id(),
+                shelf: store.id(),
                 at: place.at,
                 item: Arc::clone(&item),
                 read,
@@ -471,7 +467,7 @@ impl Index {
 
     /// Whether the Item in `slot` is resident, rather than on its Shelf.
     pub fn is_resident(&self, slot: Slot) -> bool {
-        let Some((shelf, place)) = self
+        let Some((store, place)) = self
             .segments
             .get(slot.segment as usize)
             .and_then(|segment| segment.payload(slot.row))
@@ -481,7 +477,7 @@ impl Index {
         self.resident
             .borrow()
             .get(&slot)
-            .is_some_and(|kept| kept.shelf == shelf.id() && kept.at == place.at)
+            .is_some_and(|kept| kept.shelf == store.id() && kept.at == place.at)
     }
 
     /// The id of the Item in `slot`.
@@ -528,7 +524,7 @@ impl Index {
             .segments
             .iter()
             .enumerate()
-            .flat_map(|(n, segment)| self.slots(n, segment.keyed_rows()))
+            .flat_map(|(n, segment)| Self::slots(n, segment.keyed_rows()))
             .collect();
         keyed.sort_unstable();
         keyed.dedup();
@@ -777,7 +773,7 @@ mod tests {
 
     fn words(random: &mut Random, most: usize) -> String {
         let mut text = String::new();
-        for n in 0..1 + random.below(most) {
+        for n in 0..=random.below(most) {
             if n > 0 {
                 text.push_str(random.pick(SEPARATORS));
             }
@@ -810,7 +806,7 @@ mod tests {
             keywords: (0..random.below(3)).map(|_| words(random, 2)).collect(),
             hidden: random.below(10) == 0,
             app_only: random.below(4) == 0,
-            actions: (0..1 + random.below(2))
+            actions: (0..=random.below(2))
                 .map(|n| Action {
                     id: ["open", "copy"][n].into(),
                     title: format!("Action {n}"),
@@ -824,12 +820,12 @@ mod tests {
 
     fn query(random: &mut Random) -> String {
         let mut text = String::new();
-        for n in 0..1 + random.below(2) {
+        for n in 0..=random.below(2) {
             if n > 0 {
                 text.push(' ');
             }
             let word: Vec<char> = random.pick(WORDS).chars().collect();
-            let mut word: Vec<char> = word[..1 + random.below(word.len())].to_vec();
+            let mut word: Vec<char> = word[..=random.below(word.len())].to_vec();
             if word.len() > 2 && random.below(3) == 0 {
                 // A typo.
                 let at = random.below(word.len() - 1);
@@ -926,7 +922,7 @@ mod tests {
             for _ in 0..30 {
                 let extension = random.below(2);
                 if random.below(4) == 0 {
-                    let ids: Vec<String> = (0..1 + random.below(5))
+                    let ids: Vec<String> = (0..=random.below(5))
                         .map(|_| format!("item-{}", random.below(40)))
                         .collect();
                     for id in &ids {
@@ -936,7 +932,7 @@ mod tests {
                     }
                     index.edit(ExtensionId(extension), Edit::Remove(ids));
                 } else {
-                    let batch: Vec<Item> = (0..1 + random.below(8)).map(|_| item(&mut random)).collect();
+                    let batch: Vec<Item> = (0..=random.below(8)).map(|_| item(&mut random)).collect();
                     for item in &batch {
                         let other = segment_of(extension, !item.app_only);
                         items.remove(&(other, item.id.clone()));

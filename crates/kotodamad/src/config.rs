@@ -50,11 +50,19 @@ pub type Sources = BTreeMap<String, PathBuf>;
 /// Reads and merges every config file in `dirs`, least important directory
 /// first. A directory that doesn't exist counts as empty. Fails on the first
 /// file that can't be read or parsed.
+///
+/// # Errors
+///
+/// When a directory or a file in it can't be read, or a file isn't TOML.
 pub fn load(dirs: &[PathBuf]) -> Result<Table, Error> {
     load_from(dirs, None)
 }
 
 /// [`load`], and where each value came from.
+///
+/// # Errors
+///
+/// As [`load`].
 pub fn load_with_sources(dirs: &[PathBuf]) -> Result<(Table, Sources), Error> {
     let mut sources = Sources::new();
     let config = load_from(dirs, Some(&mut sources))?;
@@ -81,6 +89,10 @@ fn load_from(dirs: &[PathBuf], mut sources: Option<&mut Sources>) -> Result<Tabl
 }
 
 /// One config file's text as a table.
+///
+/// # Errors
+///
+/// When `text` isn't TOML.
 pub fn parse(text: &str) -> Result<Table, String> {
     let table: toml::Table = text.parse().map_err(|err: toml::de::Error| err.message().to_owned())?;
     Ok(from_toml_table(table))
@@ -107,6 +119,10 @@ fn note_sources(table: &Table, prefix: &str, path: &Path, sources: &mut Sources)
 /// each change, or [`Event::ConfigFailed`] when it can't be loaded, and the
 /// Daemon keeps the last good config. Watching stops when the watcher is
 /// dropped.
+///
+/// # Errors
+///
+/// When the watcher can't start.
 pub fn watch(dirs: Vec<PathBuf>, events: Sender<Event>) -> notify::Result<Watcher> {
     let filter = dirs.clone();
     let watcher = Watcher::start(
@@ -150,7 +166,7 @@ fn files(dir: &Path) -> Result<Vec<PathBuf>, Error> {
         }
     };
     let mut files: Vec<PathBuf> = entries
-        .filter_map(|entry| entry.ok())
+        .filter_map(Result::ok)
         .map(|entry| entry.path())
         .filter(|path| path.extension().is_some_and(|ext| ext == "toml") && path.is_file())
         .collect();
@@ -203,7 +219,7 @@ pub const MANIFEST_KEYS: [&str; 8] = [
 /// Manifest's keys too.
 pub fn extension_settings(config: &Table, name: &str, inline: bool) -> Table {
     let mut table = extension_table(config, name);
-    table.retain(|key, _| !DAEMON_KEYS.contains(&key.as_str()) && !(inline && MANIFEST_KEYS.contains(&key.as_str())));
+    table.retain(|key, _| !DAEMON_KEYS.contains(&key.as_str()) && (!inline || !MANIFEST_KEYS.contains(&key.as_str())));
     table
 }
 

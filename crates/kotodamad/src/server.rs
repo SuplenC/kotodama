@@ -32,7 +32,7 @@ pub fn listen(path: &Path) -> io::Result<UnixListener> {
 }
 
 /// The listening socket systemd passed in as file descriptor 3, if `LISTEN_PID`
-/// names this process and `LISTEN_FDS` counts at least one (sd_listen_fds(3)).
+/// names this process and `LISTEN_FDS` counts at least one (`sd_listen_fds(3)`).
 /// systemd owns its socket file and keeps it while the Daemon is stopped, so
 /// connections made meanwhile wait for the next Daemon.
 #[cfg(target_os = "linux")]

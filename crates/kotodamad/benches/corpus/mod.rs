@@ -25,9 +25,7 @@ pub fn items() -> Vec<Item> {
             let words = 1 + next() % 3;
             let title = (0..words)
                 .map(|_| {
-                    let mut word: String = (0..1 + next() % 3)
-                        .map(|_| SYLLABLES[next() % SYLLABLES.len()])
-                        .collect();
+                    let mut word: String = (0..=next() % 3).map(|_| SYLLABLES[next() % SYLLABLES.len()]).collect();
                     word[..1].make_ascii_uppercase();
                     word
                 })
@@ -71,7 +69,7 @@ pub fn long_titles(n: usize, chars: usize, seed: u32) -> Vec<Item> {
                 if !title.is_empty() {
                     title.push(' ');
                 }
-                for _ in 0..1 + next() % 3 {
+                for _ in 0..=next() % 3 {
                     title.push_str(SYLLABLES[next() % SYLLABLES.len()]);
                 }
             }

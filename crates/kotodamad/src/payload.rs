@@ -12,6 +12,7 @@ use std::fs::OpenOptions;
 use std::io;
 use std::path::Path;
 use std::sync::Arc;
+use std::sync::PoisonError;
 use std::sync::RwLock;
 use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering;
@@ -76,7 +77,7 @@ impl Shelf {
         match &self.store {
             Store::File(file) => std::os::unix::fs::FileExt::write_all_at(file, bytes, at),
             Store::Memory(memory) => {
-                let mut memory = memory.write().unwrap_or_else(|err| err.into_inner());
+                let mut memory = memory.write().unwrap_or_else(PoisonError::into_inner);
                 let at = at as usize;
                 if memory.len() < at + bytes.len() {
                     memory.resize(at + bytes.len(), 0);
@@ -101,7 +102,7 @@ impl Shelf {
         match &self.store {
             Store::File(file) => std::os::unix::fs::FileExt::read_exact_at(file, buf, start),
             Store::Memory(memory) => {
-                let memory = memory.read().unwrap_or_else(|err| err.into_inner());
+                let memory = memory.read().unwrap_or_else(PoisonError::into_inner);
                 let at = start as usize;
                 let bytes = memory.get(at..at + len).ok_or(io::ErrorKind::UnexpectedEof)?;
                 buf.copy_from_slice(bytes);

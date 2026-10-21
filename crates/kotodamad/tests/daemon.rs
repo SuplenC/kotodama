@@ -319,7 +319,7 @@ fn ran_ids(ext: &Ext) -> Vec<String> {
 fn a_late_result_that_ranks_first_takes_the_top_row_until_the_rerank_is_over() {
     let mut s = rust_on_screen();
 
-    s.web_answers_rust(RERANK_FOR - Duration::from_millis(1));
+    s.web_answers_rust(RERANK_FOR.checked_sub(Duration::from_millis(1)).unwrap());
 
     let rows = s.late_titles();
     assert_eq!(rows[0], "rust");
@@ -1554,7 +1554,7 @@ fn an_extension_that_never_finishes_its_handshake_is_stopped_and_restarted() {
     let mut h = Harness::new(vec![plain("apps")]);
     let ui = h.front_end();
 
-    h.advance(HANDSHAKE_TIMEOUT - Duration::from_millis(1));
+    h.advance(HANDSHAKE_TIMEOUT.checked_sub(Duration::from_millis(1)).unwrap());
     assert_eq!(stops(&h), []);
     h.advance(Duration::from_millis(1));
     assert_eq!(stops(&h), [(ExtensionId(0), 1)]);
@@ -1736,7 +1736,7 @@ fn an_extension_removed_while_running_is_stopped_and_never_marked_down_or_restar
     h.add(&bookmarks, vec![app("Fire Ghost")]);
     h.advance(Duration::from_secs(60));
     assert_eq!(h.launches.0.borrow().len(), 2);
-    assert!(statuses(&ui).iter().all(|down| down.is_empty()));
+    assert!(statuses(&ui).iter().all(Vec::is_empty));
     assert_eq!(titles(&h.query(&ui, "fire")), ["Firefox"]);
 }
 
@@ -1849,9 +1849,9 @@ fn frecency_breaks_a_tie_and_a_pick_only_ever_weakens() {
     pick(&mut h, &ui, "firefox", "apps", "firefox");
     assert_eq!(first(&mut h, &ui, "fi"), "Firefox");
 
-    h.advance(Duration::from_secs(7 * 24 * 60 * 60));
+    h.advance(Duration::from_hours(7 * 24));
     assert_eq!(first(&mut h, &ui, "fi"), "Firefox", "a week later");
-    h.advance(Duration::from_secs(60 * 24 * 60 * 60));
+    h.advance(Duration::from_hours(60 * 24));
     assert_eq!(first(&mut h, &ui, "fi"), "Firefox", "two months later");
 
     pick(&mut h, &ui, "fish", "apps", "fish");

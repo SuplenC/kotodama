@@ -138,7 +138,7 @@ impl KindOrder {
 /// kind (see [`Segment::kinds`](crate::segment::Segment::kinds)). Worked out
 /// per search from the few kinds there are. Ranking then looks up each
 /// Result's place, and doesn't compare kind names.
-#[derive(Default)]
+#[derive(Debug, Default)]
 pub struct KindPlaces {
     places: Vec<Vec<u8>>,
     others: u8,

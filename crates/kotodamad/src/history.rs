@@ -205,7 +205,7 @@ pub type ResultKey = (String, String);
 pub const IDENTITIES: &str = "*";
 
 /// A map by name that hashes with fixed keys rather than a random seed per
-/// process: SipHash as fast as `HashMap`'s own, but a lookup runs the same
+/// process: `SipHash` as fast as `HashMap`'s own, but a lookup runs the same
 /// instructions in every Daemon, so the empty query's instruction count is
 /// the same from run to run.
 type ByName<V> = HashMap<String, V, BuildHasherDefault<DefaultHasher>>;
@@ -297,6 +297,7 @@ pub struct Habit {
 
 impl Habit {
     /// What two ways to one Result add up to.
+    #[must_use]
     pub fn and(self, other: Habit) -> Habit {
         Habit {
             near_now: self.near_now + other.near_now,
@@ -305,6 +306,7 @@ impl Habit {
     }
 
     /// The more used of the two, for each count.
+    #[must_use]
     pub fn max(self, other: Habit) -> Habit {
         Habit {
             near_now: self.near_now.max(other.near_now),
@@ -1075,6 +1077,7 @@ pub fn load(path: &Path) -> History {
 /// Saves that pile up while the disk is slow are written once, latest only.
 /// The Usage log goes to a file of its own, on another thread, started only
 /// once there is something to log.
+#[derive(Debug)]
 pub struct Disk {
     saves: Sender<Vec<u8>>,
     usage: PathBuf,
@@ -1140,6 +1143,10 @@ fn write(path: &Path, bytes: &[u8]) -> io::Result<()> {
 }
 
 #[cfg(test)]
+#[expect(
+    clippy::float_cmp,
+    reason = "the History's counts are exact: a test checks the very number a pick decays to"
+)]
 mod tests {
     use super::*;
 
@@ -1183,7 +1190,7 @@ mod tests {
     fn picked_2000() -> History {
         let mut history = History::default();
         for n in 0..2000u64 {
-            for k in 0..1 + n % 7 {
+            for k in 0..=n % 7 {
                 let day = (n * 13 + k * 5) % 60;
                 let hour = ((n * 7 + k * 11) % 24) as u32 * HOUR + (n % 3600) as u32;
                 let id = format!("item-{n}");
@@ -1244,9 +1251,9 @@ mod tests {
                 .picks("apps", "firefox")
                 .expect("the picks are kept")
                 .count(at.at, DAY),
-            481.8121337890625
+            481.812_133_789_062_5
         );
-        assert_eq!(history.learned("fi", at.at)[0].strength, 3.1415927410125732);
+        assert_eq!(history.learned("fi", at.at)[0].strength, 3.141_592_741_012_573_2);
     }
 
     #[test]

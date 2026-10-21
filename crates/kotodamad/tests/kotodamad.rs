@@ -2,6 +2,7 @@
 //! Extension processes. The test Extension is a bash script, so these need
 //! bash 4+, which the dev environment provides.
 
+use std::collections::BTreeMap;
 use std::fs;
 use std::os::unix::fs::symlink;
 use std::os::unix::net::UnixStream;
@@ -166,8 +167,8 @@ struct Client {
 }
 
 impl Client {
-    fn send(&mut self, message: FromFrontEnd) {
-        self.channel.send(&message).unwrap();
+    fn send(&mut self, message: &FromFrontEnd) {
+        self.channel.send(message).unwrap();
     }
 
     fn recv(&mut self) -> ToFrontEnd {
@@ -184,7 +185,7 @@ impl Client {
     }
 
     fn titles(&mut self, query: &str) -> Vec<String> {
-        self.send(FromFrontEnd::Query { text: query.into() });
+        self.send(&FromFrontEnd::Query { text: query.into() });
         let (version, titles) = self.until(|message| match message {
             ToFrontEnd::Results { version, results, .. } => {
                 Some((version, results.into_iter().map(|row| row.item.title).collect()))
@@ -196,7 +197,7 @@ impl Client {
     }
 
     fn run(&mut self, extension: &str, id: &str, action: &str) {
-        self.send(FromFrontEnd::RunAction {
+        self.send(&FromFrontEnd::RunAction {
             result: ResultRef {
                 extension: extension.into(),
                 id: id.into(),
@@ -206,7 +207,7 @@ impl Client {
                 extension: extension.into(),
                 id: action.into(),
             },
-            arguments: Default::default(),
+            arguments: BTreeMap::default(),
         });
         self.until(|message| (message == ToFrontEnd::Close).then_some(()));
     }
@@ -549,7 +550,7 @@ fn an_alias_that_cannot_run_reaches_the_front_end_as_a_row_that_decodes() {
     let daemon = Daemon::start(root);
     let mut ui = daemon.connect();
 
-    ui.send(FromFrontEnd::Query { text: "n".into() });
+    ui.send(&FromFrontEnd::Query { text: "n".into() });
     let results = ui.until(|message| match message {
         ToFrontEnd::Results { results, .. } => Some(results),
         _ => None,

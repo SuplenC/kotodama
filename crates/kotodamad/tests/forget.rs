@@ -220,7 +220,7 @@ fn undo_is_there_only_for_a_short_while() {
     let ui = h.front_end();
     pick(&mut h, &ui, "fi", "apps", "firefox");
     run_daemon_action(&mut h, &ui, "apps", "firefox", FORGET);
-    h.advance(UNDO_FOR - Duration::from_secs(1));
+    h.advance(UNDO_FOR.checked_sub(Duration::from_secs(1)).unwrap());
     assert!(undo_row(&mut h, &ui).is_some());
     assert!(h.daemon.next_deadline().is_some(), "it is put away on time");
     h.advance(Duration::from_secs(1));

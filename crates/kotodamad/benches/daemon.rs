@@ -73,7 +73,7 @@ fn main() {
 
     let mut times: Vec<Duration> = (0..QUERIES)
         .map(|n| {
-            let typed = &TYPED[..n % TYPED.len() + 1];
+            let typed = &TYPED[..=n % TYPED.len()];
             let start = Instant::now();
             query(typed);
             start.elapsed()
@@ -94,7 +94,7 @@ fn main() {
             println!(
                 "kotodamad, {} items: {:.1} MiB resident",
                 corpus::ITEMS,
-                bytes as f64 / (1 << 20) as f64
+                bytes as f64 / f64::from(1 << 20)
             );
             println!("test daemon/10k_items/resident ... bench: {bytes} bytes (+/- 0)");
         }

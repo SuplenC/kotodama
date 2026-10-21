@@ -241,25 +241,24 @@ impl Filter {
     /// where row `k`, with `letters[k]` and `initials[k]`, may match.
     #[inline]
     pub fn may_match_block(&self, letters: &[Letters; BLOCK], initials: &[Letters; BLOCK]) -> Mask {
-        match self.letter {
-            // A one-letter query's letters are its letter and
-            // `Letters::OTHER`, which every filled row has, and a row's
-            // initials are among its letters: the letter starting a word
-            // decides. An empty row has no initials.
-            Some(letter) => Letters::meet_block(initials, letter),
-            None => {
-                let wanted = self.letters.0;
-                let mut bits = 0;
-                // HAZARD: vectorised (NEON `cmeq`/`and`, SSE2
-                // `pcmpeqd`/`pand`): no branch, call or early exit here. It
-                // is the first pass of every search over all the rows; see
-                // `Index::search`. Without branches per row, a first
-                // keystroke runs 1.9% fewer instructions and 3% faster.
-                for (k, letters) in letters.iter().enumerate() {
-                    bits |= Mask::from(letters.0 & wanted == wanted) << k;
-                }
-                bits
+        // A one-letter query's letters are its letter and `Letters::OTHER`,
+        // which every filled row has, and a row's initials are among its
+        // letters: the letter starting a word decides. An empty row has no
+        // initials.
+        if let Some(letter) = self.letter {
+            Letters::meet_block(initials, letter)
+        } else {
+            let wanted = self.letters.0;
+            let mut bits = 0;
+            // HAZARD: vectorised (NEON `cmeq`/`and`, SSE2
+            // `pcmpeqd`/`pand`): no branch, call or early exit here. It
+            // is the first pass of every search over all the rows; see
+            // `Index::search`. Without branches per row, a first
+            // keystroke runs 1.9% fewer instructions and 3% faster.
+            for (k, letters) in letters.iter().enumerate() {
+                bits |= Mask::from(letters.0 & wanted == wanted) << k;
             }
+            bits
         }
     }
 }
@@ -335,6 +334,7 @@ pub struct Texts<'a> {
 
 /// An Item's texts folded as [`fold`] does, with all that [`Texts`] holds:
 /// what the Index copies into its arena, and [`Haystack`] keeps on its own.
+#[derive(Debug)]
 pub struct Folded {
     pub title: Utf32String,
     pub words: Utf32String,
@@ -393,6 +393,7 @@ impl Folded {
 
 /// What an Item is searched by, on its own rather than in the Index: the
 /// Daemon's own Items and Live query results.
+#[derive(Debug)]
 pub struct Haystack {
     pub title: Utf32String,
     words: Utf32String,
@@ -733,7 +734,7 @@ fn score(pattern: &Pattern, haystack: Utf32Str<'_>, matcher: &mut Matcher) -> Op
 /// What [`Texts::score`] reads of an Item's texts before nucleo turns most
 /// Items down: the Index scores a row from these alone, and reads the rest
 /// of its texts only for a match.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub struct Searched<'a> {
     /// The folded title.
     pub title: Utf32Str<'a>,
@@ -762,13 +763,13 @@ impl<'a> Searched<'a> {
         } else {
             score(pattern, self.words, matcher)
         };
-        let matched = Matched {
+        let hits = Matched {
             title: title.is_some(),
             words: words.is_some(),
             subtitle: false,
         };
         match title.max(words) {
-            Some(score) => Some((score, matched)),
+            Some(score) => Some((score, hits)),
             None if filter
                 .subtitles
                 .is_some_and(|initials| self.subtitle_initials.contains(initials)) =>
@@ -860,7 +861,7 @@ fn starts_with<C: Char>(chars: &[C], at: usize, word: &[char]) -> bool {
 }
 
 /// Works out tiers, reusing its buffers from one text to the next.
-#[derive(Default)]
+#[derive(Debug, Default)]
 pub struct Tiers {
     chars: Vec<char>,
     /// Where each word of the subtitle starts, while it is searched.
@@ -885,10 +886,10 @@ impl Tiers {
     pub fn texts(&mut self, texts: Texts, query: &Query, matched: Matched) -> Option<Tier> {
         let mut best = None;
         if matched.title {
-            best = self.text(texts.title, query);
+            best = Self::text(texts.title, query);
         }
         if matched.words && best < Some(Tier::Exact) && !texts.words.is_empty() {
-            let words = self.text(texts.words, query);
+            let words = Self::text(texts.words, query);
             best = best.max(words.map(|tier| tier.min(Tier::Keyword)));
         }
         if best.is_none() && matched.subtitle && query.searches_subtitles() && !texts.subtitle.is_empty() {
@@ -899,7 +900,7 @@ impl Tiers {
                 chars: texts.subtitle,
                 starts: &starts,
             };
-            if self.text(subtitle, query) >= Some(Tier::WordStart) {
+            if Self::text(subtitle, query) >= Some(Tier::WordStart) {
                 best = Some(Tier::Inside);
             }
             self.starts = starts;
@@ -995,7 +996,7 @@ impl Tiers {
     /// `Exact` if the whole text, or one of its parts between
     /// [`SEPARATOR`]s, is the query, with or without any symbols that lead it.
     /// A one-letter word only matches at the start of a word.
-    fn text(&mut self, text: Text, query: &Query) -> Option<Tier> {
+    fn text(text: Text, query: &Query) -> Option<Tier> {
         if query.is_empty() {
             return None;
         }
@@ -1215,7 +1216,7 @@ mod tests {
             chars: chars.slice(..),
             starts: &starts,
         };
-        Tiers::default().text(text, &Query::new(query))
+        Tiers::text(text, &Query::new(query))
     }
 
     #[test]

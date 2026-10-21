@@ -46,6 +46,11 @@ pub struct Found {
 impl Found {
     /// Refuses a Manifest whose Live query trigger doesn't compile, or that
     /// takes the name the Daemon's own Results go by.
+    ///
+    /// # Errors
+    ///
+    /// When the Manifest takes the Daemon's own name, or a Live query trigger
+    /// isn't a regex.
     pub fn new(manifest: Manifest, dir: PathBuf) -> Result<Self, String> {
         if manifest.name == OWN {
             return Err(format!("the name `{OWN}` is reserved for the Daemon"));
@@ -134,10 +139,7 @@ pub fn discover(dirs: &[PathBuf]) -> Discovered {
         let Ok(entries) = fs::read_dir(dir) else {
             continue;
         };
-        let mut paths: Vec<PathBuf> = entries
-            .filter_map(|entry| entry.ok())
-            .map(|entry| entry.path())
-            .collect();
+        let mut paths: Vec<PathBuf> = entries.filter_map(Result::ok).map(|entry| entry.path()).collect();
         paths.sort();
         for path in paths {
             let manifest_path = path.join("manifest.toml");
@@ -179,6 +181,10 @@ fn load(dir: &Path, manifest_path: &Path, report: &mut Report) -> Result<Found, 
 /// change: an Extension directory added, removed or renamed, or a
 /// `manifest.toml` written. Files an Extension writes in its own directory
 /// are ignored. Watching stops when the watcher is dropped.
+///
+/// # Errors
+///
+/// When the watcher can't start.
 pub fn watch(dirs: Vec<PathBuf>, events: Sender<Event>) -> notify::Result<Watcher> {
     let filter = dirs.clone();
     let first = watched(&dirs);

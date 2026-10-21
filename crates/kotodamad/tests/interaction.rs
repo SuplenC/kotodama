@@ -4,7 +4,9 @@
 
 mod common;
 
+use std::cell::Cell;
 use std::collections::BTreeMap;
+use std::sync::Arc;
 use std::sync::mpsc;
 
 use common::*;
@@ -289,8 +291,8 @@ fn reopened(h: &mut Harness) -> FrontEnd {
     FrontEnd {
         id,
         rx,
-        closed: Default::default(),
-        shown: Default::default(),
+        closed: Arc::default(),
+        shown: Cell::default(),
     }
 }
 

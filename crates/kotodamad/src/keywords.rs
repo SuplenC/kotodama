@@ -107,6 +107,10 @@ impl Quicklink {
     }
 
     /// The Item the Daemon shows for this Quicklink.
+    ///
+    /// # Panics
+    ///
+    /// Never: `kotodama.quicklink` is a valid kind.
     pub fn item(&self) -> Item {
         let subtitle = match &self.target {
             Target::Url { template, .. } => template.clone(),

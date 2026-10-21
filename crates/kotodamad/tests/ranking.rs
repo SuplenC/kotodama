@@ -17,7 +17,7 @@ use kotodamad::rank::Query;
 use kotodamad::rank::Tier;
 use kotodamad::rank::Tiers;
 
-const DAY: Duration = Duration::from_secs(24 * 60 * 60);
+const DAY: Duration = Duration::from_hours(24);
 
 /// One user's desktop: one Extension, `apps`, and a Front end.
 struct World {
@@ -978,7 +978,7 @@ fn showing_the_menu_in_another_part_of_the_day_ranks_the_empty_query_again() {
     w.at(8);
     assert_eq!(rows(&mut w, ""), ["Mail", "News", "Calendar", "apps"]);
 
-    w.later(Duration::from_secs(30 * 60));
+    w.later(Duration::from_mins(30));
     w.h.front_end_sends(&w.ui, FromFrontEnd::Shown);
     assert!(w.ui.results().is_none(), "shown in the same part of the day");
 
@@ -988,7 +988,7 @@ fn showing_the_menu_in_another_part_of_the_day_ranks_the_empty_query_again() {
     let evening = w.ui.results().expect("shown in the evening");
     assert_eq!(titles(&evening), ["Music", "Editor", "Games", "apps"]);
 
-    w.later(Duration::from_secs(50 * 60));
+    w.later(Duration::from_mins(50));
     w.h.front_end_sends(&w.ui, FromFrontEnd::Shown);
     assert!(w.ui.results().is_none(), "shown again in the same part");
 
@@ -1212,7 +1212,7 @@ impl Calculating {
             h,
             calc,
             ui,
-            calculator: kotodama_calculator::Calculator::new(Default::default()),
+            calculator: kotodama_calculator::Calculator::new(kotodama_calculator::Rates::default()),
         }
     }
 
@@ -1257,7 +1257,7 @@ fn a_bare_number_gives_no_answer_but_an_expression_or_conversion_takes_the_top_r
 // only what real matches leave rows empty for, ranked after every real match.
 
 /// Apps, and the web search Bundled extension, searching Google and then
-/// DuckDuckGo, answering what it is sent.
+/// `DuckDuckGo`, answering what it is sent.
 struct Searching {
     h: Harness,
     web: Ext,

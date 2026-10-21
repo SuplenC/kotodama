@@ -39,7 +39,7 @@ pub fn fill(wanted: &[Argument], typed: &str, given: &mut BTreeMap<String, Strin
 pub fn missing<'a>(wanted: &'a [Argument], given: &BTreeMap<String, String>) -> Option<&'a Argument> {
     wanted
         .iter()
-        .find(|argument| !argument.optional && given.get(&argument.name).is_none_or(|value| value.is_empty()))
+        .find(|argument| !argument.optional && given.get(&argument.name).is_none_or(String::is_empty))
 }
 
 /// The form that asks for `wanted`, with what `given` has already filled in.

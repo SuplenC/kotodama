@@ -125,7 +125,7 @@ pub fn run(paths: &Paths) -> Result<(), String> {
 
     let (config, unreadable) = match config {
         Ok(config) => (config, None),
-        Err(err) => (Default::default(), Some(err)),
+        Err(err) => (kotodama_protocol::Table::default(), Some(err)),
     };
     let mut daemon = Daemon::new(
         found,

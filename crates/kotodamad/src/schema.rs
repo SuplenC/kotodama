@@ -11,6 +11,7 @@
 //! - Reading each key: its table's owner (`engine.rs`, `paths.rs`, `history.rs`, `empty_query.rs`,
 //!   `kind_order.rs`, `keywords.rs`, `configured.rs`, `apps.rs`).
 
+use std::fmt::Write as _;
 use std::io;
 use std::io::Write;
 use std::path::Path;
@@ -285,7 +286,7 @@ fn defaults(paths: &Paths) -> Table {
         if let Some(default) = key.default
             && !key.name.contains('<')
         {
-            text.push_str(&format!("{} = {default}\n", key.name));
+            let _ = writeln!(text, "{} = {default}", key.name);
         }
     }
     let mut defaults = config::parse(&text).expect("the schema's defaults are TOML");

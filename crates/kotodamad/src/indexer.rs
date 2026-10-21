@@ -14,6 +14,7 @@
 
 use std::collections::HashMap;
 use std::collections::HashSet;
+use std::fmt;
 use std::hash::BuildHasherDefault;
 use std::path::Path;
 use std::sync::Arc;
@@ -62,6 +63,29 @@ pub struct Kept {
     /// were planned.
     pub(crate) ahead: Option<Ahead>,
     pub(crate) reads: Vec<Read>,
+}
+
+/// The Segments and the reads by count: their rows would fill a log.
+impl fmt::Debug for Indexed {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Indexed")
+            .field("extension", &self.extension)
+            .field("change", &self.change)
+            .field("segments", &self.segments.len())
+            .field("reads", &self.reads.len())
+            .finish()
+    }
+}
+
+/// The reads by count, as [`Indexed`] has them.
+impl fmt::Debug for Kept {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Kept")
+            .field("hot", &self.hot)
+            .field("ahead", &self.ahead)
+            .field("reads", &self.reads.len())
+            .finish()
+    }
 }
 
 /// How long before a time of day an Item picked then is hot.
@@ -207,7 +231,7 @@ impl Indexer {
         let (jobs, queue) = mpsc::channel();
         if let Err(err) = thread::Builder::new()
             .name("index".into())
-            .spawn(move || work(queue, dir, |event| events.send(event).is_ok()))
+            .spawn(move || work(&queue, dir.as_ref(), |event| events.send(event).is_ok()))
         {
             log::error!("can't start the thread that indexes Items: {err}");
         }
@@ -309,8 +333,8 @@ impl Keeping {
 /// Makes the changes from `queue`, all that are waiting at once, and passes
 /// each new version, then what to keep resident, to `send`, until it fails
 /// or the queue closes.
-fn work(queue: Receiver<Job>, dir: Option<Arc<Path>>, mut send: impl FnMut(Event) -> bool) {
-    let empty = || Arc::new(Segment::new(dir.clone()));
+fn work(queue: &Receiver<Job>, dir: Option<&Arc<Path>>, mut send: impl FnMut(Event) -> bool) {
+    let empty = || Arc::new(Segment::new(dir.cloned()));
     let mut segments: Vec<Arc<Segment>> = Vec::new();
     let mut keeping = Keeping::default();
     while let Ok(first) = queue.recv() {
@@ -335,12 +359,11 @@ fn work(queue: Receiver<Job>, dir: Option<Arc<Path>>, mut send: impl FnMut(Event
                     // A change that touches neither Segment still makes a
                     // version, of the first, so whoever waits for it hears.
                     let untouched = edits.iter().all(Vec::is_empty);
-                    let n = match changed.iter().position(|(ext, ..)| *ext == extension) {
-                        Some(n) => n,
-                        None => {
-                            changed.push((extension, change, [false; SIDES]));
-                            changed.len() - 1
-                        }
+                    let n = if let Some(n) = changed.iter().position(|(ext, ..)| *ext == extension) {
+                        n
+                    } else {
+                        changed.push((extension, change, [false; SIDES]));
+                        changed.len() - 1
                     };
                     let (_, last, sides) = &mut changed[n];
                     *last = change;
@@ -473,7 +496,7 @@ mod tests {
         }
         drop(sender);
         let mut built = Vec::new();
-        work(queue, None, |event| {
+        work(&queue, None, |event| {
             if let Event::Indexed(indexed) = event {
                 built.push(indexed);
             }
@@ -525,7 +548,7 @@ mod tests {
         }
         drop(sender);
         let mut sent = Vec::new();
-        work(queue, None, |event| {
+        work(&queue, None, |event| {
             let reads = match event {
                 Event::Indexed(indexed) => indexed.reads,
                 Event::Kept(kept) => kept.reads,

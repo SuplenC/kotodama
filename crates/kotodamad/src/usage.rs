@@ -99,13 +99,12 @@ impl Log {
         serde_json::to_writer(&mut self.line, entry)?;
         self.line.push(b'\n');
         let len = self.line.len() as u64;
-        let (mut file, mut size) = match self.file.take() {
-            Some(open) => open,
-            None => {
-                let file = open(&self.path)?;
-                let size = file.metadata()?.len();
-                (file, size)
-            }
+        let (mut file, mut size) = if let Some(open) = self.file.take() {
+            open
+        } else {
+            let file = open(&self.path)?;
+            let size = file.metadata()?.len();
+            (file, size)
         };
         // A file an earlier run left full is rotated too.
         if size > 0 && size + len > self.max {
@@ -214,6 +213,7 @@ enum Op {
 
 /// Writes the log on a thread of its own, so the Daemon never waits for the
 /// disk. The thread ends when this is dropped.
+#[derive(Debug)]
 pub struct Writer {
     ops: Sender<Op>,
     /// How many entries wait to be written.

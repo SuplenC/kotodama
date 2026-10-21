@@ -173,6 +173,10 @@ impl Apps {
         let mut conflicts = Vec::new();
         for (n, holder) in lost {
             let (_, name, app) = &mut asked[n];
+            #[expect(
+                clippy::maybe_infinite_iter,
+                reason = "the keywords and the apps hold finitely many words, so one of endless candidates is free"
+            )]
             let instead = (1..)
                 .map(|n| match n {
                     1 => (*name).to_owned(),
@@ -237,9 +241,8 @@ impl App {
         };
         let searched = match in_search {
             Some(true) => [true, true],
-            Some(false) => [false, false],
             None if manifest.in_search => [true, false],
-            None => [false, false],
+            Some(false) | None => [false, false],
         };
         let title = manifest.title.clone().unwrap_or_else(|| name.clone());
         let about = manifest

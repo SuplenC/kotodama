@@ -196,7 +196,7 @@ fn routine(hot: usize) -> (Harness, FrontEnd) {
     let ui = h.front_end();
     for (firefox_by, mail_by) in FIREFOX_BY.into_iter().zip(MAIL_BY) {
         h.advance_to(8);
-        h.advance(Duration::from_secs(30 * 60));
+        h.advance(Duration::from_mins(30));
         pick(&mut h, &ui, &apps, firefox_by, "firefox");
         h.advance_to(20);
         pick(&mut h, &ui, &apps, mail_by, "mail");
@@ -252,7 +252,7 @@ fn the_hot_items_are_planned_and_read_on_the_indexing_thread() {
     let ui = h.front_end();
     for query in FIREFOX_BY {
         h.advance_to(8);
-        h.advance(Duration::from_secs(30 * 60));
+        h.advance(Duration::from_mins(30));
         pick(&mut h, &ui, &apps, query, "firefox");
     }
     // Plans asked for while picking.
@@ -416,7 +416,7 @@ fn the_empty_querys_rows_for_the_next_part_of_the_day_are_ranked_before_the_menu
     let mut both = AheadAndHere::new(morning_and_afternoon(), &["Firefox", "Mail"]);
     let before_noon = both.empty_query("at 11:58");
     // Before the hot Items are planned again, at 12:03.
-    both.advance(Duration::from_secs(3 * 60));
+    both.advance(Duration::from_mins(3));
     let ranked_here = both.ahead.daemon.ranked_here();
 
     for (h, ui) in [(&mut both.ahead, &both.ahead_ui), (&mut both.here, &both.here_ui)] {
@@ -537,7 +537,7 @@ const WORDS: &[&str] = &[
 ];
 
 fn words(random: &mut Random, most: usize) -> String {
-    let words: Vec<&str> = (0..1 + random.below(most)).map(|_| random.pick(WORDS)).collect();
+    let words: Vec<&str> = (0..=random.below(most)).map(|_| random.pick(WORDS)).collect();
     words.join(random.pick(&[" ", "-", ""]))
 }
 
@@ -563,12 +563,12 @@ fn random_item(random: &mut Random) -> Item {
 
 fn random_query(random: &mut Random) -> String {
     let mut text = String::new();
-    for n in 0..1 + random.below(2) {
+    for n in 0..=random.below(2) {
         if n > 0 {
             text.push(' ');
         }
         let word: Vec<char> = random.pick(WORDS).chars().collect();
-        let mut word = word[..1 + random.below(word.len())].to_vec();
+        let mut word = word[..=random.below(word.len())].to_vec();
         if word.len() > 2 && random.below(3) == 0 {
             let at = random.below(word.len() - 1);
             word.swap(at, at + 1);
@@ -676,11 +676,11 @@ fn results_are_those_of_a_full_search_after_any_changes_picks_and_keystrokes() {
             let ext = random.below(2);
             match random.below(6) {
                 0 | 1 => {
-                    let items = (0..1 + random.below(6)).map(|_| random_item(&mut random)).collect();
+                    let items = (0..=random.below(6)).map(|_| random_item(&mut random)).collect();
                     twins.send(ext, FromExtension::AddItems { items });
                 }
                 2 => {
-                    let ids = (0..1 + random.below(3))
+                    let ids = (0..=random.below(3))
                         .map(|_| format!("item-{}", random.below(30)))
                         .collect();
                     twins.send(ext, FromExtension::RemoveItems { ids });

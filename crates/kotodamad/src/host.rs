@@ -10,6 +10,7 @@ use std::process::Command;
 use std::process::Stdio;
 use std::sync::Arc;
 use std::sync::Mutex;
+use std::sync::PoisonError;
 use std::sync::mpsc::Sender;
 use std::thread;
 
@@ -27,7 +28,7 @@ use crate::daemon::Launcher;
 use crate::discovery::Found;
 use crate::link::pump;
 
-/// Enough for decoding the deepest message serde_json allows, and small, since
+/// Enough for decoding the deepest message `serde_json` allows, and small, since
 /// every Extension has two of these threads.
 pub(crate) const STACK_SIZE: usize = 256 * 1024;
 
@@ -94,20 +95,20 @@ impl Launcher for Processes {
                 return;
             }
         };
-        let stdio = (child.stdout.take(), child.stdin.take());
+        let pipes = (child.stdout.take(), child.stdin.take());
         let child = Arc::new(Mutex::new(child));
         self.running.insert(extension, (generation, Arc::clone(&child)));
 
         let events = self.events.clone();
         spawn(format!("ext-{name}"), move || {
-            let spoke = match stdio {
+            let spoke = match pipes {
                 (Some(stdout), Some(stdin)) => speak(extension, generation, &name, stdout, stdin, &events),
                 _ => Ok(()),
             };
             // Kill before waiting, so a process that closed its stdout but kept
             // running doesn't hold this thread. std won't signal a process it
             // has already reaped, so `stop` can't hit a reused pid.
-            let mut child = child.lock().unwrap_or_else(|poison| poison.into_inner());
+            let mut child = child.lock().unwrap_or_else(PoisonError::into_inner);
             let _ = child.kill();
             let status = child.wait();
             drop(child);
@@ -130,7 +131,7 @@ impl Launcher for Processes {
         if let Some((running, child)) = self.running.get(&extension)
             && *running == generation
         {
-            let _ = child.lock().unwrap_or_else(|poison| poison.into_inner()).kill();
+            let _ = child.lock().unwrap_or_else(PoisonError::into_inner).kill();
         }
     }
 }

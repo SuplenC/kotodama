@@ -11,6 +11,7 @@ use std::cell::Cell;
 use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::collections::HashSet;
+use std::fmt;
 use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -227,6 +228,61 @@ pub enum Event {
     Kept(Kept),
 }
 
+/// Every field but a Front end's `disconnect`, a closure.
+impl fmt::Debug for Event {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Event::ExtensionUp {
+                extension,
+                generation,
+                sender,
+            } => f
+                .debug_struct("ExtensionUp")
+                .field("extension", extension)
+                .field("generation", generation)
+                .field("sender", sender)
+                .finish(),
+            Event::FromExtension {
+                extension,
+                generation,
+                message,
+            } => f
+                .debug_struct("FromExtension")
+                .field("extension", extension)
+                .field("generation", generation)
+                .field("message", message)
+                .finish(),
+            Event::ExtensionDown {
+                extension,
+                generation,
+                ended,
+            } => f
+                .debug_struct("ExtensionDown")
+                .field("extension", extension)
+                .field("generation", generation)
+                .field("ended", ended)
+                .finish(),
+            Event::FrontEndUp { front_end, sender, .. } => f
+                .debug_struct("FrontEndUp")
+                .field("front_end", front_end)
+                .field("sender", sender)
+                .finish_non_exhaustive(),
+            Event::FromFrontEnd { front_end, message } => f
+                .debug_struct("FromFrontEnd")
+                .field("front_end", front_end)
+                .field("message", message)
+                .finish(),
+            Event::FrontEndDown { front_end } => f.debug_struct("FrontEndDown").field("front_end", front_end).finish(),
+            Event::Config(config) => f.debug_tuple("Config").field(config).finish(),
+            Event::ConfigFailed(err) => f.debug_tuple("ConfigFailed").field(err).finish(),
+            Event::Extensions(discovered) => f.debug_tuple("Extensions").field(discovered).finish(),
+            Event::ProgramsChanged => f.write_str("ProgramsChanged"),
+            Event::Indexed(indexed) => f.debug_tuple("Indexed").field(indexed).finish(),
+            Event::Kept(kept) => f.debug_tuple("Kept").field(kept).finish(),
+        }
+    }
+}
+
 /// How a run of an Extension ended, as [`Event::ExtensionDown`] tells.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Ended {
@@ -270,7 +326,7 @@ pub const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(5);
 /// opens (ADR 0017).
 pub const HOT_CAPACITY: usize = 256;
 /// How often the hot Items are worked out again, ahead of the time of day.
-const HOT_EVERY: Duration = Duration::from_secs(5 * 60);
+const HOT_EVERY: Duration = Duration::from_mins(5);
 /// How soon after the Index or the History changes they are, once it
 /// settles.
 const HOT_SETTLE: Duration = Duration::from_secs(1);
@@ -294,11 +350,15 @@ enum State {
         reason: String,
         stamp: Option<Stamp>,
     },
-    /// Uninstalled. The slot stays so ExtensionIds keep their meaning, and is
+    /// Uninstalled. The slot stays so `ExtensionId`s keep their meaning, and is
     /// reused if an Extension of the same name comes back.
     Removed,
 }
 
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "each flag is a fact about one run on its own, with no states they combine into"
+)]
 struct Extension {
     found: Found,
     generation: u64,
@@ -311,7 +371,7 @@ struct Extension {
     catalog: bool,
     /// Hung: it left its channel full, or never finished the handshake.
     hung: Cell<bool>,
-    /// Asked the Launcher to stop this run; its ExtensionDown is on its way.
+    /// Asked the Launcher to stop this run; its `ExtensionDown` is on its way.
     stopping: bool,
     /// The Manifest's `live_query.fallback`, read once per Manifest: every
     /// refresh asks it.
@@ -398,7 +458,7 @@ impl Extension {
 
     /// Never blocks. An Extension that has left its channel full has stopped
     /// reading, so it is marked hung, and stopped once the event is handled.
-    /// A disconnected channel means it is gone, and its ExtensionDown is on its
+    /// A disconnected channel means it is gone, and its `ExtensionDown` is on its
     /// way. Returns whether it is still answering.
     fn send(&self, message: ToExtension) -> bool {
         if let Some(sender) = self.sender()
@@ -556,6 +616,21 @@ impl Candidate {
             .then_with(|| self.len.cmp(&other.len))
             .then_with(|| self.source.cmp(&other.source))
     }
+}
+
+/// Takes the answers out of `candidates`, ranked: they take the top rows,
+/// above the rest and the rows on screen.
+fn take_answers(candidates: &mut Vec<Candidate>) -> Vec<Candidate> {
+    let mut answers: Vec<Candidate> = Vec::new();
+    candidates.retain(|candidate| {
+        let answer = candidate.standing == Standing::Answer;
+        if answer {
+            answers.push(*candidate);
+        }
+        !answer
+    });
+    answers.sort_unstable_by(Candidate::rank);
+    answers
 }
 
 /// One Extension's Live query for one session.
@@ -1181,6 +1256,17 @@ pub struct Daemon<L, D, S> {
     highlights: Vec<u32>,
 }
 
+/// The Extensions and the Front ends by count: the rest is the Index, the
+/// History and the sessions, too much for a log line.
+impl<L, D, S> fmt::Debug for Daemon<L, D, S> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Daemon")
+            .field("extensions", &self.extensions.len())
+            .field("sessions", &self.sessions.len())
+            .finish_non_exhaustive()
+    }
+}
+
 impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
     /// Starts every Extension.
     pub fn new(
@@ -1389,13 +1475,12 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
                 versions: self.hot_versions,
             }
         };
-        match &mut self.indexer {
-            Some(indexer) => indexer.plan(plan),
-            None => {
-                let (hot, ahead) = plan.run();
-                self.index.set_hot(hot);
-                self.ahead = self.plans().then_some(ahead);
-            }
+        if let Some(indexer) = &mut self.indexer {
+            indexer.plan(plan);
+        } else {
+            let (hot, ahead) = plan.run();
+            self.index.set_hot(hot);
+            self.ahead = self.plans().then_some(ahead);
         }
     }
 
@@ -1514,7 +1599,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             Event::FromFrontEnd { front_end, message } => self.front_end_message(front_end, message, now),
             Event::FrontEndDown { front_end } => self.front_end_down(front_end),
             Event::Config(config) => self.set_config(config, now),
-            Event::ConfigFailed(err) => self.config_failed(err),
+            Event::ConfigFailed(err) => self.config_failed(&err),
             Event::Extensions(Discovered { found, problems }) => {
                 self.problems.dirty |= problem::replace(&mut self.problems.manifests, problems);
                 self.installed = found;
@@ -1890,7 +1975,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             if self.view_contributed(id, &open.view) != contributed {
                 let view = open.view.clone();
                 let name = self.extensions[id.0].name().to_owned();
-                self.update_view(id, &name, view);
+                self.update_view(id, &name, &view);
             }
         }
     }
@@ -1902,33 +1987,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             log::warn!("{name}: dropped {released} key bindings the menu keeps for itself");
         }
         match message {
-            FromExtension::AddItems { mut items } => {
-                let ext = &self.extensions[id.0];
-                items.retain(|item| {
-                    let theirs = item.kind.extension().is_some_and(|owner| owner != name);
-                    if theirs {
-                        let reason = format!(
-                            "Item `{}` has another Extension's kind `{}`; name your own kinds `{name}.<kind>`",
-                            item.id,
-                            item.kind.name()
-                        );
-                        log::warn!("{name}: {reason}");
-                        ext.send(ToExtension::Rejected { reason });
-                    }
-                    !theirs
-                });
-                // A hidden Item is kept out of the index: the Segment drops
-                // it, and the Daemon keeps it for `kotodama open --view`.
-                let hidden = self.hidden.entry(id).or_default();
-                for item in &items {
-                    if item.hidden {
-                        hidden.insert(item.id.clone(), item.clone());
-                    } else {
-                        hidden.remove(&item.id);
-                    }
-                }
-                self.edit_items(id, Edit::Add(items), now);
-            }
+            FromExtension::AddItems { items } => self.add_items(id, &name, items, now),
             FromExtension::RemoveItems { ids } => {
                 if let Some(hidden) = self.hidden.get_mut(&id) {
                     for item in &ids {
@@ -1962,7 +2021,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
                     contributed: contributed.clone(),
                 });
             }
-            FromExtension::UpdateView(view) => self.update_view(id, &name, view),
+            FromExtension::UpdateView(view) => self.update_view(id, &name, &view),
             FromExtension::PopView { view } => {
                 self.forget_filters(id, &view);
                 self.views.pop(id, &view);
@@ -1985,23 +2044,57 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
                 });
             }
             FromExtension::JobProgress(job) => self.job_progress(id, &name, job),
-            FromExtension::RequestActionCatalog => {
-                let ext = &mut self.extensions[id.0];
-                if !ext.found.manifest.action_catalog {
-                    log::warn!("{name} asked for the Action catalog, but its Manifest doesn't");
-                    ext.send(ToExtension::Rejected {
-                        reason: "asked for the Action catalog without `action_catalog = true` in the Manifest".into(),
-                    });
-                    return;
-                }
-                ext.catalog = true;
-                let catalog = self.compute_catalog();
-                self.extensions[id.0].send(ToExtension::ActionCatalog {
-                    entries: catalog.clone(),
-                });
-                self.catalog = Some(catalog);
+            FromExtension::RequestActionCatalog => self.send_catalog(id, &name),
+        }
+    }
+
+    /// Adds or replaces the Items of the Extension `id`, called `name`, but
+    /// for those of another Extension's kind, which it is told it may not send.
+    fn add_items(&mut self, id: ExtensionId, name: &str, mut items: Vec<Item>, now: Instant) {
+        let ext = &self.extensions[id.0];
+        items.retain(|item| {
+            let theirs = item.kind.extension().is_some_and(|owner| owner != name);
+            if theirs {
+                let reason = format!(
+                    "Item `{}` has another Extension's kind `{}`; name your own kinds `{name}.<kind>`",
+                    item.id,
+                    item.kind.name()
+                );
+                log::warn!("{name}: {reason}");
+                ext.send(ToExtension::Rejected { reason });
+            }
+            !theirs
+        });
+        // A hidden Item is kept out of the index: the Segment drops
+        // it, and the Daemon keeps it for `kotodama open --view`.
+        let hidden = self.hidden.entry(id).or_default();
+        for item in &items {
+            if item.hidden {
+                hidden.insert(item.id.clone(), item.clone());
+            } else {
+                hidden.remove(&item.id);
             }
         }
+        self.edit_items(id, Edit::Add(items), now);
+    }
+
+    /// Sends the Action catalog to the Extension `id`, called `name`, and
+    /// keeps it up to date from then on, if its Manifest asks for it.
+    fn send_catalog(&mut self, id: ExtensionId, name: &str) {
+        let ext = &mut self.extensions[id.0];
+        if !ext.found.manifest.action_catalog {
+            log::warn!("{name} asked for the Action catalog, but its Manifest doesn't");
+            ext.send(ToExtension::Rejected {
+                reason: "asked for the Action catalog without `action_catalog = true` in the Manifest".into(),
+            });
+            return;
+        }
+        ext.catalog = true;
+        let catalog = self.compute_catalog();
+        self.extensions[id.0].send(ToExtension::ActionCatalog {
+            entries: catalog.clone(),
+        });
+        self.catalog = Some(catalog);
     }
 
     /// Applies `change` to what the Extension `id` said of itself. The
@@ -2022,17 +2115,14 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
     /// Changes an Extension's Items: here and now, or on the indexing
     /// thread, whose new version comes back as an [`Event::Indexed`].
     fn edit_items(&mut self, id: ExtensionId, edit: Edit, now: Instant) {
-        match &mut self.indexer {
-            Some(indexer) => {
-                indexer.edit(id, edit);
-            }
-            None => {
-                self.index.edit(id, edit);
-                self.repin_index();
-                self.items_changed();
-                self.items_landed(id);
-                self.run_openings(now);
-            }
+        if let Some(indexer) = &mut self.indexer {
+            indexer.edit(id, edit);
+        } else {
+            self.index.edit(id, edit);
+            self.repin_index();
+            self.items_changed();
+            self.items_landed(id);
+            self.run_openings(now);
         }
     }
 
@@ -2074,8 +2164,8 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
 
     /// Replaces an open View. Each menu filtering a list View is sent the
     /// new Items that match its filter along with it.
-    fn update_view(&mut self, id: ExtensionId, name: &str, view: View) {
-        let contributed = self.view_contributed(id, &view);
+    fn update_view(&mut self, id: ExtensionId, name: &str, view: &View) {
+        let contributed = self.view_contributed(id, view);
         let view_id = view.id.clone();
         let filtered =
             self.views.update(id, view.clone()) && self.views.get(id, &view_id).is_some_and(Open::filtered_here);
@@ -2625,7 +2715,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
                 } else if daemons && action.id == CLEAR_EXTENSION_HISTORY {
                     self.clear_extension_history(id, &result, now)
                 } else if result.extension == OWN {
-                    self.run_own(id, &result, &action, arguments, now)
+                    self.run_own(id, &result, &action, &arguments, now)
                 } else {
                     self.run_action(id, &result, &action, arguments, Missing::AskInForm, now)
                 };
@@ -2999,37 +3089,34 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             }
         }
         for found in found {
-            match self.extensions.iter().position(|ext| ext.name() == found.manifest.name) {
-                Some(id) => {
-                    let ext = &mut self.extensions[id];
-                    let removed = matches!(ext.state, State::Removed);
-                    if !removed
-                        && ext.found.manifest == found.manifest
-                        && ext.found.dir == found.dir
-                        && ext.found.env == found.env
-                    {
-                        continue;
-                    }
-                    log::info!("extension {} changed; restarting it", found.manifest.name);
-                    ext.fallback = is_fallback(&found);
-                    ext.found = found;
-                    ext.failures = 0;
-                    if !removed {
-                        self.retire(ExtensionId(id));
-                    }
-                    self.start(ExtensionId(id), now);
+            if let Some(id) = self.extensions.iter().position(|ext| ext.name() == found.manifest.name) {
+                let ext = &mut self.extensions[id];
+                let removed = matches!(ext.state, State::Removed);
+                if !removed
+                    && ext.found.manifest == found.manifest
+                    && ext.found.dir == found.dir
+                    && ext.found.env == found.env
+                {
+                    continue;
                 }
-                None => {
-                    log::info!("extension {} was installed", found.manifest.name);
-                    let id = ExtensionId(self.extensions.len());
-                    self.extensions.push(Extension::new(found, now));
-                    self.index.add_extension();
-                    self.stale.push(0);
-                    for session in self.sessions.values_mut() {
-                        session.live.push(Live::default());
-                    }
-                    self.start(id, now);
+                log::info!("extension {} changed; restarting it", found.manifest.name);
+                ext.fallback = is_fallback(&found);
+                ext.found = found;
+                ext.failures = 0;
+                if !removed {
+                    self.retire(ExtensionId(id));
                 }
+                self.start(ExtensionId(id), now);
+            } else {
+                log::info!("extension {} was installed", found.manifest.name);
+                let id = ExtensionId(self.extensions.len());
+                self.extensions.push(Extension::new(found, now));
+                self.index.add_extension();
+                self.stale.push(0);
+                for session in self.sessions.values_mut() {
+                    session.live.push(Live::default());
+                }
+                self.start(id, now);
             }
         }
         self.load_apps();
@@ -3037,7 +3124,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
 
     /// Ends the current run of an Extension, leaving it removed until started
     /// again: stops its process and forgets what it left behind. Moving on to the next generation
-    /// means nothing from the old run, its ExtensionDown included, is heard any more.
+    /// means nothing from the old run, its `ExtensionDown` included, is heard any more.
     fn retire(&mut self, id: ExtensionId) {
         let ext = &mut self.extensions[id.0];
         match ext.state {
@@ -3204,7 +3291,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
         front_end: FrontEndId,
         result: &ResultRef,
         action: &ActionRef,
-        arguments: BTreeMap<String, String>,
+        arguments: &BTreeMap<String, String>,
         now: Instant,
     ) -> Result<(), String> {
         let gone = || "that Result is gone".to_owned();
@@ -3432,7 +3519,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
     /// Lets go of the changes to the History whose time to be undone ran
     /// out, and withdraws the offers to undo them.
     fn expire_undos(&mut self, now: Instant) {
-        if !self.undos.first().is_some_and(|undo| undo.until <= now) {
+        if self.undos.first().is_none_or(|undo| undo.until > now) {
             return;
         }
         let (expired, kept): (Vec<_>, Vec<_>) = std::mem::take(&mut self.undos)
@@ -3611,7 +3698,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
 
     /// The config can't be loaded, as `err` says: the last good one stays,
     /// and the user hears why until it loads again.
-    fn config_failed(&mut self, err: config::Error) {
+    fn config_failed(&mut self, err: &config::Error) {
         let problem = Problem {
             about: err.path.display().to_string(),
             message: format!("{}; keeping the last good config", err.reason),
@@ -3879,7 +3966,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
     fn send_due_live_queries(&mut self, now: Instant) {
         for (&front_end, session) in &mut self.sessions {
             for (ext_id, live) in session.live.iter_mut().enumerate() {
-                if !live.due.is_some_and(|due| due <= now) {
+                if live.due.is_none_or(|due| due > now) {
                     continue;
                 }
                 live.due = None;
@@ -3909,40 +3996,10 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
         session.update = Update::None;
         let typed = !session.searched().trim().is_empty();
         let app = session.scope.and_then(|n| self.apps.get(n));
-        let scope = app.map(|app| app.scope(typed, self.extensions[app.extension.0].note()));
+        let app_scope = app.map(|app| app.scope(typed, self.extensions[app.extension.0].note()));
 
-        if session.query.is_empty() || (scope.is_some() && !typed) {
-            session.last_search.forget();
-            let when = self.when(now);
-            let mut ranked = match session.reach {
-                Reach::Root => {
-                    session.empty_ranked_in = Some(history::part_of_day(when));
-                    self.empty_query(&session, when)
-                }
-                Reach::App(_) => match session.scope {
-                    Some(n) => self.empty_app(n, when),
-                    None => Vec::new(),
-                },
-            };
-            if keep {
-                // The rows on screen stay put, as for any query.
-                let visible: Vec<Source> = session
-                    .shown
-                    .iter()
-                    .take(session.rows)
-                    .map(|&(source, _)| source)
-                    .filter(|source| ranked.contains(source))
-                    .collect();
-                ranked.retain(|source| !visible.contains(source));
-                ranked.splice(0..0, visible);
-            }
-            session.via_alias = None;
-            let results = ranked
-                .iter()
-                .filter_map(|&source| self.row(&session, source, None))
-                .collect();
-            let shown = ranked.into_iter().map(|source| (source, false)).collect();
-            session.send_results(shown, results, scope, fresh);
+        if session.query.is_empty() || (app_scope.is_some() && !typed) {
+            self.send_empty(&mut session, keep, fresh, app_scope, now);
             self.sessions.insert(id, session);
             return;
         }
@@ -3986,74 +4043,13 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
         );
         // Up to here the candidates are in slot order.
         let indexed = candidates.len();
-        let mut fallbacks = Vec::new();
-        for (ext, live) in session.live.iter().enumerate() {
-            if live.results.is_empty() {
-                continue;
-            }
-            let fallback = self.extensions[ext].fallback();
-            // Matched against what the Extension was asked, without its
-            // routing prefix. Its own idea of what matches stands, at worst as
-            // letters scattered.
-            let asked = rank::Query::new(&live.query);
-            for (n, result) in live.results.iter().enumerate() {
-                let haystack = Haystack::new(&result.item);
-                let tier = self
-                    .tiers
-                    .item(&haystack, &result.item, &asked, Matched::ALL)
-                    .unwrap_or(Tier::Scattered);
-                let score = (result.score.get() * session.max_score as f32).round() as u32;
-                let len = result.item.title.chars().count() as u32;
-                let kind = self.kinds.place(&result.item.kind);
-                let mut candidate = Candidate::new(Source::Live(ExtensionId(ext), n as u32), tier, kind, score, len);
-                candidate.standing = if result.answer {
-                    Standing::Answer
-                } else if fallback {
-                    Standing::Fallback
-                } else {
-                    Standing::Match
-                };
-                if candidate.standing == Standing::Fallback {
-                    fallbacks.push(candidate);
-                } else {
-                    candidates.push(candidate);
-                }
-            }
-        }
-        // In an app, the Extension's Items alone: none of the Daemon's.
-        let own = match session.reach {
-            Reach::Root => &self.own[..],
-            Reach::App(_) => &[],
-        };
-        for (n, own) in own.iter().enumerate() {
-            let filter = session.folded.filter();
-            if let Some((score, matched)) = own.haystack.score(&session.pattern, &mut self.matcher, filter)
-                && let Some(tier) = self.tiers.item(&own.haystack, &own.item, &session.folded, matched)
-            {
-                let len = own.haystack.title.len() as u32;
-                let kind = self.kinds.place(&own.item.kind);
-                candidates.push(Candidate::new(
-                    Source::Own(n as u32),
-                    tier.min(own.tier_cap()),
-                    kind,
-                    score,
-                    len,
-                ));
-            }
-        }
+        let fallbacks = self.add_live(&session, &mut candidates);
+        self.add_own(&session, &mut candidates);
         let indexed = self.add_near_misses(&mut session, &mut candidates, indexed, narrow, fresh);
         let primary = self.learn(&mut session, &mut candidates, indexed, now);
         self.add_fallbacks(&mut session, &mut candidates, fallbacks, now);
 
-        let mut answers: Vec<Candidate> = Vec::new();
-        candidates.retain(|candidate| {
-            let answer = candidate.standing == Standing::Answer;
-            if answer {
-                answers.push(*candidate);
-            }
-            !answer
-        });
-        answers.sort_unstable_by(Candidate::rank);
+        let answers = take_answers(&mut candidates);
 
         let mut kept: Vec<Candidate> = Vec::new();
         if keep {
@@ -4093,8 +4089,108 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             .iter()
             .map(|candidate| (candidate.source, candidate.standing == Standing::Answer))
             .collect();
-        session.send_results(shown, results, scope, fresh);
+        session.send_results(shown, results, app_scope, fresh);
         self.sessions.insert(id, session);
+    }
+
+    /// Sends what shows before anything is typed: the Empty query's Results,
+    /// or with `app_scope` those of an app. With `keep`, the rows on screen
+    /// stay put, as for any query.
+    fn send_empty(&mut self, session: &mut Session, keep: bool, fresh: bool, app_scope: Option<Scope>, now: Instant) {
+        session.last_search.forget();
+        let when = self.when(now);
+        let mut ranked = match session.reach {
+            Reach::Root => {
+                session.empty_ranked_in = Some(history::part_of_day(when));
+                self.empty_query(session, when)
+            }
+            Reach::App(_) => match session.scope {
+                Some(n) => self.empty_app(n, when),
+                None => Vec::new(),
+            },
+        };
+        if keep {
+            let visible: Vec<Source> = session
+                .shown
+                .iter()
+                .take(session.rows)
+                .map(|&(source, _)| source)
+                .filter(|source| ranked.contains(source))
+                .collect();
+            ranked.retain(|source| !visible.contains(source));
+            ranked.splice(0..0, visible);
+        }
+        session.via_alias = None;
+        let results = ranked
+            .iter()
+            .filter_map(|&source| self.row(session, source, None))
+            .collect();
+        let shown = ranked.into_iter().map(|source| (source, false)).collect();
+        session.send_results(shown, results, app_scope, fresh);
+    }
+
+    /// Adds the session's Live results to `candidates`, and returns those of
+    /// fallback Extensions, which rank apart. Each is matched against what its
+    /// Extension was asked, without its routing prefix; the Extension's own
+    /// idea of what matches stands, at worst as letters scattered.
+    fn add_live(&mut self, session: &Session, candidates: &mut Vec<Candidate>) -> Vec<Candidate> {
+        let mut fallbacks = Vec::new();
+        for (ext, live) in session.live.iter().enumerate() {
+            if live.results.is_empty() {
+                continue;
+            }
+            let fallback = self.extensions[ext].fallback();
+            let asked = rank::Query::new(&live.query);
+            for (n, result) in live.results.iter().enumerate() {
+                let haystack = Haystack::new(&result.item);
+                let tier = self
+                    .tiers
+                    .item(&haystack, &result.item, &asked, Matched::ALL)
+                    .unwrap_or(Tier::Scattered);
+                let score = (result.score.get() * session.max_score as f32).round() as u32;
+                let len = result.item.title.chars().count() as u32;
+                let kind = self.kinds.place(&result.item.kind);
+                let mut candidate = Candidate::new(Source::Live(ExtensionId(ext), n as u32), tier, kind, score, len);
+                candidate.standing = if result.answer {
+                    Standing::Answer
+                } else if fallback {
+                    Standing::Fallback
+                } else {
+                    Standing::Match
+                };
+                if candidate.standing == Standing::Fallback {
+                    fallbacks.push(candidate);
+                } else {
+                    candidates.push(candidate);
+                }
+            }
+        }
+        fallbacks
+    }
+
+    /// Adds the Daemon's own Items that match the session's query to
+    /// `candidates`. In an app, none: it shows its Extension's Items alone.
+    fn add_own(&mut self, session: &Session, candidates: &mut Vec<Candidate>) {
+        let own = match session.reach {
+            Reach::Root => &self.own[..],
+            Reach::App(_) => &[],
+        };
+        for (n, own) in own.iter().enumerate() {
+            let filter = session.folded.filter();
+            if let Some((score, matched)) = own.haystack.score(&session.pattern, &mut self.matcher, filter)
+                && let Some(tier) = self.tiers.item(&own.haystack, &own.item, &session.folded, matched)
+            {
+                let len = own.haystack.title.len() as u32;
+                let kind = self.kinds.place(&own.item.kind);
+                candidates.push(Candidate::new(
+                    Source::Own(n as u32),
+                    tier.min(own.tier_cap()),
+                    kind,
+                    score,
+                    len,
+                ));
+            }
+        }
     }
 
     /// Adds the fallback Extensions' results to `candidates`, after what
@@ -4265,41 +4361,58 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             return None;
         }
         let when = self.when(now);
-        let at = when.at;
         if !self.history.is_empty() {
-            let settings = *self.history.settings();
-            self.cache_frecent();
-            let mut frecencies = std::mem::take(&mut self.frecencies);
-            self.frecent.picks.frecency(when, settings.time_of_day, &mut frecencies);
-            for (&(slot, counts), &frecency) in self.frecent.slots.iter().zip(&frecencies) {
-                if let Ok(n) = candidates[..indexed].binary_search_by_key(&Source::Indexed(slot), |c| c.source) {
-                    if counts != Counts::Direct {
-                        candidates[n].frecency = frecency;
-                    }
-                    if counts != Counts::Shared {
-                        candidates[n].direct = frecency;
-                    }
+            self.add_frecency(session, candidates, indexed, when);
+        }
+        let primary = self.add_named(session, candidates, when);
+        self.add_learned(session, candidates, when.at);
+        primary
+    }
+
+    /// Gives each candidate its Frecency, and lifts a Tier those used enough,
+    /// from [`Settings::lift_threshold`]. The candidates before `indexed`
+    /// must be the Indexed items, in slot order.
+    fn add_frecency(&mut self, session: &Session, candidates: &mut [Candidate], indexed: usize, when: When) {
+        let settings = *self.history.settings();
+        self.cache_frecent();
+        let mut frecencies = std::mem::take(&mut self.frecencies);
+        self.frecent.picks.frecency(when, settings.time_of_day, &mut frecencies);
+        for (&(slot, counts), &frecency) in self.frecent.slots.iter().zip(&frecencies) {
+            if let Ok(n) = candidates[..indexed].binary_search_by_key(&Source::Indexed(slot), |c| c.source) {
+                if counts != Counts::Direct {
+                    candidates[n].frecency = frecency;
                 }
-            }
-            self.frecencies = frecencies;
-            for candidate in &mut candidates[indexed..] {
-                if let Some((extension, item)) = self.item(session, candidate.source) {
-                    (candidate.frecency, candidate.direct) = self.frecency(extension, &item, when);
-                }
-            }
-            for candidate in candidates.iter_mut() {
-                if candidate.frecency >= settings.lift_threshold {
-                    candidate.tier = rank::lift(candidate.tier);
+                if counts != Counts::Shared {
+                    candidates[n].direct = frecency;
                 }
             }
         }
+        self.frecencies = frecencies;
+        for candidate in &mut candidates[indexed..] {
+            if let Some((extension, item)) = self.item(session, candidate.source) {
+                (candidate.frecency, candidate.direct) = self.frecency(extension, &item, when);
+            }
+        }
+        for candidate in candidates.iter_mut() {
+            if candidate.frecency >= settings.lift_threshold {
+                candidate.tier = rank::lift(candidate.tier);
+            }
+        }
+    }
 
-        // What the query names: an Alias, typed alone or before an Argument,
-        // goes first. A Quicklink's keyword or an Item's own keyword counts as
-        // an exact match, which a Learned choice can beat. An app's word
-        // counts as a word start, so an application named like the app ranks
-        // above its entry Item. In an app, only its Extension's Items'
-        // keywords count, typed first past its word.
+    /// Ranks what the query names. An Alias, typed alone or before an
+    /// Argument, goes first. A Quicklink's keyword or an Item's own keyword
+    /// counts as an exact match, which a Learned choice can beat. An app's
+    /// word counts as a word start, so an application named like the app
+    /// ranks above its entry Item. In an app, only its Extension's Items'
+    /// keywords count, typed first past its word. Returns the Action an Alias
+    /// makes primary, with the Result it is for.
+    fn add_named(
+        &self,
+        session: &mut Session,
+        candidates: &mut Vec<Candidate>,
+        when: When,
+    ) -> Option<(Source, String)> {
         let root = session.reach == Reach::Root;
         let mut words = session.key.split(' ');
         let first = if root { words.next() } else { words.nth(1) };
@@ -4387,9 +4500,14 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
                 candidate.frecency = frecency;
             }
         }
+        primary
+    }
 
-        // The strongest Learned choice that applies and is among the
-        // candidates: every Result of it, when several Extensions offer it.
+    /// Ranks the strongest Learned choice that applies and is among the
+    /// candidates (every Result of it, when several Extensions offer it) with
+    /// the exact matches, and the exact matches first, unless the Learned
+    /// choice was picked over them.
+    fn add_learned(&self, session: &Session, candidates: &mut [Candidate], at: u64) {
         let choices = self.history.learned(&session.key, at);
         let mut passed_over = None;
         for choice in &choices {
@@ -4431,7 +4549,6 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
                 candidate.class = Class::Named;
             }
         }
-        primary
     }
 
     /// What the Empty query shows: the Results most used at this time of day,
@@ -4580,7 +4697,12 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
     fn cache_frecent(&mut self) {
         let versions = (self.index.version(), self.history.version());
         let half_life = self.history.settings().half_life_secs;
-        if self.frecent_versions == Some(versions) && self.frecent.picks.half_life() == half_life {
+        #[expect(
+            clippy::float_cmp,
+            reason = "both are the setting as read: any change to it, however small, changes how picks decay"
+        )]
+        let unchanged = self.frecent_versions == Some(versions) && self.frecent.picks.half_life() == half_life;
+        if unchanged {
             return;
         }
         let mut frecent = Vec::with_capacity(self.frecent.slots.len());

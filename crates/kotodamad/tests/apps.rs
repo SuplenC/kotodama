@@ -103,8 +103,8 @@ fn last_results(sent: Vec<ToFrontEnd>) -> (Vec<(String, String)>, Option<Scope>)
     (rows, scope)
 }
 
-fn emoji_scope(intro: bool) -> Option<Scope> {
-    Some(Scope {
+fn emoji_scope(intro: bool) -> Scope {
+    Scope {
         word: "emoji".into(),
         title: "Emoji".into(),
         icon: Some("face-smile".into()),
@@ -116,7 +116,7 @@ fn emoji_scope(intro: bool) -> Option<Scope> {
             }],
             note: None,
         }),
-    })
+    }
 }
 
 #[test]
@@ -169,7 +169,7 @@ fn entering_the_app_keeps_what_follows_the_word() {
     );
     let (rows, scope) = last_results(sent);
     assert_eq!(rows[0].1, "🔥 Fire");
-    assert_eq!(scope, emoji_scope(false));
+    assert_eq!(scope, Some(emoji_scope(false)));
 }
 
 #[test]
@@ -205,7 +205,7 @@ fn running_the_entry_item_enters_the_app_with_its_intro_in_the_same_flush() {
     desk.pick("emo", "Emoji");
 
     let sent = desk.ui.drain();
-    let set = sent
+    let set_at = sent
         .iter()
         .position(|message| *message == ToFrontEnd::SetQuery { text: "emoji ".into() })
         .unwrap_or_else(|| panic!("{sent:?}"));
@@ -213,10 +213,10 @@ fn running_the_entry_item_enters_the_app_with_its_intro_in_the_same_flush() {
         .iter()
         .rposition(|message| matches!(message, ToFrontEnd::Results { .. }))
         .unwrap();
-    assert!(set < results, "{sent:?}");
+    assert!(set_at < results, "{sent:?}");
     assert!(!sent.contains(&ToFrontEnd::Close), "the menu stays open");
     let (rows, scope) = last_results(sent);
-    assert_eq!(scope, emoji_scope(true));
+    assert_eq!(scope, Some(emoji_scope(true)));
     let titles: Vec<String> = rows.into_iter().map(|(_, title)| title).collect();
     let sent: Vec<String> = characters().into_iter().map(|item| item.title).collect();
     assert_eq!(titles, sent);
@@ -231,7 +231,7 @@ fn typing_in_the_app_searches_only_its_extensions_items() {
 
     assert_eq!(rows[0].1, "🔥 Fire");
     assert!(rows.iter().all(|(extension, _)| extension == "emoji"), "{rows:?}");
-    assert_eq!(scope, emoji_scope(false));
+    assert_eq!(scope, Some(emoji_scope(false)));
 }
 
 #[test]
@@ -242,7 +242,7 @@ fn the_word_is_kept_in_any_case() {
     let (rows, scope) = desk.search("Emoji fire");
 
     assert_eq!(rows[0].1, "🔥 Fire");
-    assert_eq!(scope, emoji_scope(false));
+    assert_eq!(scope, Some(emoji_scope(false)));
 }
 
 #[test]
@@ -444,7 +444,7 @@ fn opening_on_an_apps_word_enters_it() {
         },
     );
 
-    assert_eq!(desk.search("emoji fire").1, emoji_scope(false));
+    assert_eq!(desk.search("emoji fire").1, Some(emoji_scope(false)));
 }
 
 /// The Live queries in `sent`, and the prefix each was routed by.
