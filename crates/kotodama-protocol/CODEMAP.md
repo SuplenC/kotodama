@@ -18,6 +18,6 @@ The shared protocol. Maintained by hand: fix stale lines when you find them, and
 - `channel.rs`: `Channel::handshake` (a peer's side), `Channel::accept` (the Daemon's), `send` (for the peer's version), `reads` (whether the peer's version reads a message), `recv`, `split`; `ChannelReader::has_buffered` (what came with the last message).
 - `launch.rs:launch_command`: detached program start, `KOTODAMA_LAUNCH_PREFIX`; `launch_prefix` (none when `KOTODAMA_LAUNCH_SCOPED` marks it as `SCOPE_PREFIX`, which only makes a scope).
 - `../benches/batch.rs`: encoding and decoding 10k Indexed items in each Wire format.
-- `../benches/formats/`: the Daemon's real messages in every Wire format and in prost, müsli `wire` and bilrost (`mirror.rs`: their copies of the types; `messages.rs`: the messages, shared with `tests/protobuf.rs`).
+- `../benches/formats.rs`: the Daemon's real messages in every Wire format and in prost, müsli `wire` and bilrost (`tests/support/mirror.rs`: their copies of the types; `tests/support/messages.rs`: the messages; both shared with `tests/protobuf.rs`).
 - `../kotodama.proto`: the protobuf schema for other languages, written by `tests/layout.rs`.
-- `../tests/layout.rs`: pins every message's encodings per version in `tests/layouts/<major>.<minor>.txt` and checks what an older minor version is sent; `tests/layout/schema.rs` writes `kotodama.proto`. `../tests/protobuf.rs`: prost reads the protobuf Wire format and back.
+- `../tests/layout.rs`: pins every message's encodings per version in `tests/layouts/<major>.<minor>.txt` and checks what an older minor version is sent; `tests/support/schema.rs` writes `kotodama.proto`. `../tests/protobuf.rs`: prost reads the protobuf Wire format and back.

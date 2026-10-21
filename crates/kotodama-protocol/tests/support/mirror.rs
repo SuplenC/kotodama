@@ -3,8 +3,6 @@
 //! protocol's own. Only the formats benchmark and the protobuf
 //! interoperability test use them; the protocol itself has one set of types.
 
-#![allow(dead_code)]
-
 use kotodama_protocol as real;
 
 /// The protocol's types as `prost` derives them: the same field numbers the

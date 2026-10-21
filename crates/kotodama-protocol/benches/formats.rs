@@ -12,7 +12,9 @@ use kotodama_protocol::{FromExtension, FromFrontEnd, ToFrontEnd, WireFormat};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 
+#[path = "../tests/support/messages.rs"]
 mod messages;
+#[path = "../tests/support/mirror.rs"]
 mod mirror;
 
 fn wire<T: Serialize + DeserializeOwned>(c: &mut Criterion, group: &str, message: &T) {

@@ -53,7 +53,7 @@ A new major version keeps every older one. When 2.0 comes, the 1.x types are fro
 
 The issue asked whether one binary format that tolerates added and missing fields could replace postcard. The owner also asked for Protocol Buffers as a Wire format in any case, so that non-Rust Extensions get a fast, tolerant binary format, and for müsli's `wire` format (and bilrost) to be measured only as a replacement for postcard between Rust peers. FlatBuffers, Cap'n Proto and CBOR were not measured.
 
-`benches/formats` encodes and decodes the Daemon's real messages: a query, 50 Results (the keystroke path), and a batch of 1,000 Items. Medians in µs, criterion, on an Apple M-series host:
+`benches/formats.rs` in `kotodama-protocol` encodes and decodes the Daemon's real messages: a query, 50 Results (the keystroke path), and a batch of 1,000 Items. Medians in µs, criterion, on an Apple M-series host:
 
 | Message | postcard | protobuf (ours) | MessagePack | JSON | prost | müsli `wire` | bilrost |
 |---|---|---|---|---|---|---|---|
@@ -64,7 +64,7 @@ The issue asked whether one binary format that tolerates added and missing field
 | 1k Items, decode | 350 | 653 | 697 | 730 | 482 | 477 | 432 |
 | Query, decode | 0.017 | 0.028 | 0.062 | 0.050 | 0.023 | 0.026 | 0.024 |
 
-prost, müsli and bilrost need types of their own (`benches/formats/mirror.rs`). So postcard and our protobuf are measured both on the protocol's own types, which check every Item as they decode it, and on those same copies. The table shows the copies for those two, so every column decodes the same types. On the protocol's own types the figures are within a few percent of these.
+prost, müsli and bilrost need types of their own (`tests/support/mirror.rs`). So postcard and our protobuf are measured both on the protocol's own types, which check every Item as they decode it, and on those same copies. The table shows the copies for those two, so every column decodes the same types. On the protocol's own types the figures are within a few percent of these.
 
 - **Postcard stays between peers on the same version.** It is the fastest to decode, and a keystroke is the Daemon encoding Results and the Front end decoding them. müsli `wire` encodes faster but decodes 27% slower: 17% more for the two together. bilrost and prost are 24–27% slower together. None of them comes within a few percent, which the issue set as the bar.
 - **Protobuf is added as a Wire format,** preferred after postcard and before MessagePack. It is written and read straight from the serde types (`src/protobuf.rs`), not through prost's derive. prost would need a second copy of every type and a conversion on every message, and the protocol would have two sets of types to keep in step. Ours decodes 1.5 to 1.9 times slower than prost, but faster than MessagePack and JSON, the other formats a peer on another version can use. The mapping:

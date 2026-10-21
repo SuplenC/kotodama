@@ -32,7 +32,7 @@ use kotodama_protocol::*;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 
-#[path = "layout/schema.rs"]
+#[path = "support/schema.rs"]
 mod schema;
 
 const BLESS: &str = "KOTODAMA_BLESS_LAYOUT";

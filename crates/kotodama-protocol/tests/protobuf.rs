@@ -9,9 +9,10 @@ use prost::Message;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 
-#[path = "../benches/formats/messages.rs"]
+#[path = "support/messages.rs"]
 mod messages;
-#[path = "../benches/formats/mirror.rs"]
+#[path = "support/mirror.rs"]
+#[expect(dead_code, reason = "only the prost copies are read back here")]
 mod mirror;
 
 fn both_ways<T, P>(ours: &T, theirs: &P)
