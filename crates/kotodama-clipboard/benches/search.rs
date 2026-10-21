@@ -6,23 +6,42 @@
 //! Extension's own resident memory with that history, in the bencher format
 //! with `bytes` as its unit, so CI compares it with the baseline.
 
+use std::fmt::Write as _;
 use std::hint::black_box;
-use std::path::{Path, PathBuf};
+use std::path::Path;
+use std::path::PathBuf;
 use std::process::Command;
-use std::sync::mpsc::{self, Receiver};
-use std::time::{Duration, Instant};
+use std::sync::mpsc;
+use std::sync::mpsc::Receiver;
+use std::time::Duration;
+use std::time::Instant;
 
-use criterion::{Criterion, criterion_group, criterion_main};
+use criterion::Criterion;
+use criterion::criterion_group;
+use criterion::criterion_main;
 use kotodama_clipboard::copied::Copied;
-use kotodama_clipboard::history::{History, Limits};
+use kotodama_clipboard::history::History;
+use kotodama_clipboard::history::Limits;
 use kotodama_clipboard::items;
 use kotodama_extension::testing::Spawned;
-use kotodama_protocol::{
-    FromExtension, FromFrontEnd, Item, Manifest, Table, ToExtension, ToFrontEnd, WireFormat,
-};
-use kotodamad::daemon::{Daemon, Desktop, Event, ExtensionId, FrontEndId, Launcher, Output};
+use kotodama_protocol::FromExtension;
+use kotodama_protocol::FromFrontEnd;
+use kotodama_protocol::Item;
+use kotodama_protocol::Manifest;
+use kotodama_protocol::Table;
+use kotodama_protocol::ToExtension;
+use kotodama_protocol::ToFrontEnd;
+use kotodama_protocol::WireFormat;
+use kotodamad::daemon::Daemon;
+use kotodamad::daemon::Desktop;
+use kotodamad::daemon::Event;
+use kotodamad::daemon::ExtensionId;
+use kotodamad::daemon::FrontEndId;
+use kotodamad::daemon::Launcher;
+use kotodamad::daemon::Output;
 use kotodamad::discovery::Found;
-use kotodamad::history::{History as Picks, Store};
+use kotodamad::history::History as Picks;
+use kotodamad::history::Store;
 use kotodamad::usage::Entry;
 
 const ENTRIES: usize = 1000;
@@ -69,8 +88,8 @@ const COMMON: [&str; 32] = [
     "\n",
 ];
 const SYLLABLES: [&str; 24] = [
-    "fi", "re", "fox", "ter", "mi", "nal", "code", "ka", "to", "da", "ma", "set", "tings", "vol",
-    "ume", "blue", "tooth", "net", "work", "wall", "pa", "per", "dis", "play",
+    "fi", "re", "fox", "ter", "mi", "nal", "code", "ka", "to", "da", "ma", "set", "tings", "vol", "ume", "blue",
+    "tooth", "net", "work", "wall", "pa", "per", "dis", "play",
 ];
 
 struct Nothing;
@@ -110,14 +129,12 @@ fn items(dir: &Path) -> Vec<Item> {
                 if next() % 4 == 0 {
                     COMMON[next() % COMMON.len()].to_owned()
                 } else {
-                    (0..1 + next() % 3)
-                        .map(|_| SYLLABLES[next() % SYLLABLES.len()])
-                        .collect()
+                    (0..=next() % 3).map(|_| SYLLABLES[next() % SYLLABLES.len()]).collect()
                 }
             })
             .collect::<Vec<String>>()
             .join(" ");
-        text.push_str(&format!(" {n}"));
+        write!(text, " {n}").unwrap();
         history
             .record(
                 Copied::read("text/plain;charset=utf-8", text.into_bytes()).unwrap(),
@@ -127,11 +144,7 @@ fn items(dir: &Path) -> Vec<Item> {
             .unwrap();
     }
     std::iter::once(items::history_item())
-        .chain(
-            history
-                .entries()
-                .map(|entry| items::clip_item(&history, entry)),
-        )
+        .chain(history.entries().map(|entry| items::clip_item(&history, entry)))
         .collect()
 }
 
@@ -200,9 +213,7 @@ impl Setup {
         );
         let results = self.results.try_recv().unwrap();
         self.buf.clear();
-        WireFormat::Postcard
-            .encode_into(&results, &mut self.buf)
-            .unwrap();
+        WireFormat::Postcard.encode_into(&results, &mut self.buf).unwrap();
         self.buf.len()
     }
 }
@@ -216,21 +227,21 @@ fn bench(c: &mut Criterion) {
         b.iter(|| {
             alternate = !alternate;
             black_box(setup.query(if alternate { "c" } else { "t" }))
-        })
+        });
     });
     group.bench_function("next_keystroke", |b| {
         let mut len = 1;
         b.iter(|| {
             len = len % TYPED.len() + 1;
             black_box(setup.query(&TYPED[..len]))
-        })
+        });
     });
     group.finish();
 
     // Every keystroke of typing, then clearing, many times over.
     let mut times: Vec<Duration> = (0..2000)
         .map(|n| {
-            let typed = &TYPED[..n % TYPED.len() + 1];
+            let typed = &TYPED[..=n % TYPED.len()];
             let start = Instant::now();
             black_box(setup.query(typed));
             start.elapsed()
@@ -265,7 +276,7 @@ fn resident(state: &Path) {
         Some(bytes) => {
             println!(
                 "kotodama-clipboard, {ENTRIES} entries: {:.1} MiB resident",
-                bytes as f64 / (1 << 20) as f64
+                bytes as f64 / f64::from(1 << 20)
             );
             println!("test clipboard/1k_entries/resident ... bench: {bytes} bytes (+/- 0)");
         }

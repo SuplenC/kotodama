@@ -3,47 +3,77 @@
 //! `clipboard.clip` that paste it back. A `Clipboard History` Item lists
 //! them all, newest first, and clears them. What a password manager marks
 //! sensitive is never kept. See `items.rs` for the config table.
+//!
+//! # Owns
+//!
+//! - The protocol loop: the config, the Actions, and the Items and Views sent.
+//! - Expiring entries on time, and starting to watch the clipboard once the config is in.
+//!
+//! # Not here
+//!
+//! - The history on disk: `history.rs`.
+//! - What the Items and Views show: `items.rs`.
+//! - Watching the clipboard: `wayland.rs`. The Daemon sets it, through the `copy` and `paste`
+//!   Outcomes.
 
 #![forbid(unsafe_code)]
 
+use std::io;
 use std::process::ExitCode;
 use std::sync::mpsc::RecvTimeoutError;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::Duration;
+use std::time::SystemTime;
+use std::time::UNIX_EPOCH;
 
 use kotodama_clipboard::copied::Copied;
-use kotodama_clipboard::history::{Content, History, Limits};
-use kotodama_clipboard::items::{self, CLEAR, COPY, DELETE, DETAIL_VIEW, HISTORY, LIST_VIEW};
-use kotodama_clipboard::wayland::{Change, Clipboard};
-use kotodama_extension::{Connection, Event, Writer, dirs};
-use kotodama_protocol::{Bytes, Clipboard as Paste, FromExtension, Outcome, ToExtension};
-
-const GONE: &str = "That clip is no longer in the clipboard history";
+use kotodama_clipboard::history::Content;
+use kotodama_clipboard::history::History;
+use kotodama_clipboard::history::Limits;
+use kotodama_clipboard::items;
+use kotodama_clipboard::items::CLEAR;
+use kotodama_clipboard::items::COPY;
+use kotodama_clipboard::items::DELETE;
+use kotodama_clipboard::items::DETAIL_VIEW;
+use kotodama_clipboard::items::HISTORY;
+use kotodama_clipboard::items::LIST_VIEW;
+use kotodama_clipboard::wayland::Change;
+use kotodama_clipboard::wayland::Clipboard;
+use kotodama_extension::Chain;
+use kotodama_extension::Connection;
+use kotodama_extension::Event;
+use kotodama_extension::Writer;
+use kotodama_extension::dirs;
+use kotodama_protocol::Bytes;
+use kotodama_protocol::Clipboard as Paste;
+use kotodama_protocol::FromExtension;
+use kotodama_protocol::Outcome;
+use kotodama_protocol::ToExtension;
 
 fn main() -> ExitCode {
     kotodama_extension::main("kotodama-clipboard", run)
 }
 
-/// `$XDG_STATE_HOME/kotodama/clipboard`.
+/// Seconds since the Unix epoch, or 0 on a clock set before it.
 fn now() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_or(0, |since| since.as_secs())
 }
 
-fn run() -> Result<(), String> {
-    let state = dirs::state("clipboard").ok_or("neither XDG_STATE_HOME nor HOME is set")?;
+fn run() -> Result<(), Error> {
+    let state = dirs::state("clipboard").ok_or(Error::NoStateDir)?;
     let history = History::open(&state);
     let Connection {
         writer,
         events,
         received,
-    } = kotodama_extension::connect::<Change>().map_err(|err| err.to_string())?;
+    } = kotodama_extension::connect::<Change>().map_err(Error::Protocol)?;
 
     let mut extension = Extension {
         writer,
         history,
         limits: Limits::default(),
-        _watching: None,
+        watching: None,
         configured: false,
         list_open: false,
         detail: None,
@@ -71,7 +101,7 @@ fn run() -> Result<(), String> {
                 // already expires by the user's limits.
                 if first && extension.configured {
                     let events = events.clone();
-                    extension._watching = Clipboard::watch(move |change| {
+                    extension.watching = Clipboard::watch(move |change| {
                         let _ = events.send(Event::Own(change));
                     })
                     .map_err(|err| kotodama_extension::log!("not watching the clipboard: {err}"))
@@ -80,7 +110,7 @@ fn run() -> Result<(), String> {
             }
             Event::Own(Change::Copied(copied)) => extension.copied(copied)?,
             // The Daemon starts the Extension again, which connects again.
-            Event::Own(Change::Lost) => return Err("lost the Wayland connection".into()),
+            Event::Own(Change::Lost) => return Err(Error::WaylandLost),
             Event::Hangup => break,
         }
     }
@@ -91,9 +121,10 @@ struct Extension {
     writer: Writer,
     history: History,
     limits: Limits,
-    /// The watched clipboard, held so the watching goes on. The Daemon sets
-    /// the clipboard, through the `copy` Outcome.
-    _watching: Option<Clipboard>,
+    /// The watched clipboard, held so the watching goes on: dropping it stops
+    /// it. The Daemon sets the clipboard, through the `copy` Outcome, so
+    /// nothing calls `Clipboard::set` here.
+    watching: Option<Clipboard>,
     /// Whether the config has arrived. No Items are sent before it.
     configured: bool,
     /// Whether the list View is open, so it is updated as entries change.
@@ -102,7 +133,7 @@ struct Extension {
     detail: Option<u64>,
 }
 
-type Sent = Result<(), String>;
+type Sent = Result<(), Error>;
 
 impl Extension {
     fn message(&mut self, message: ToExtension) -> Sent {
@@ -111,7 +142,7 @@ impl Extension {
                 self.limits = items::limits(&config);
                 let removed = self.history.expire(now(), &self.limits);
                 if self.configured {
-                    self.removed(removed)
+                    self.removed(&removed)
                 } else {
                     self.configured = true;
                     let items = std::iter::once(items::history_item())
@@ -130,13 +161,10 @@ impl Extension {
                 item,
                 ..
             } => {
-                let outcome = self
-                    .run(&item.id, &action)
-                    .unwrap_or_else(|message| Outcome::Failed { message });
-                self.send(&FromExtension::ActionDone {
-                    invocation,
-                    outcome,
-                })
+                let outcome = self.run(&item.id, &action).unwrap_or_else(|err| Outcome::Failed {
+                    message: Chain(&err).to_string(),
+                });
+                self.send(&FromExtension::ActionDone { invocation, outcome })
             }
             ToExtension::ViewPopped { view } => {
                 if view == LIST_VIEW {
@@ -160,7 +188,7 @@ impl Extension {
             }
         };
         if !recorded.removed.is_empty() {
-            self.removed(recorded.removed)?;
+            self.removed(&recorded.removed)?;
         }
         if let Some(entry) = self.history.get(recorded.id) {
             let item = items::clip_item(&self.history, entry);
@@ -171,7 +199,7 @@ impl Extension {
 
     fn expire(&mut self) -> Sent {
         let removed = self.history.expire(now(), &self.limits);
-        self.removed(removed)
+        self.removed(&removed)
     }
 
     /// How long until the next entry turns too old.
@@ -185,23 +213,24 @@ impl Extension {
     }
 
     /// Runs one Action on an entry or on the history Item.
-    fn run(&mut self, id: &str, action: &str) -> Result<Outcome, String> {
+    fn run(&mut self, id: &str, action: &str) -> Result<Outcome, RunError> {
         if id == HISTORY {
             return match action {
                 items::OPEN => {
                     self.list_open = true;
-                    self.send(&FromExtension::PushView(items::list_view(&self.history)))?;
+                    self.send(&FromExtension::PushView(items::list_view(&self.history)))
+                        .map_err(RunError::Send)?;
                     Ok(Outcome::KeepOpen)
                 }
                 CLEAR => self.clear(),
-                _ => Err(format!("Clipboard History has no Action `{action}`")),
+                _ => Err(RunError::no_history_action(action)),
             };
         }
         let entry = id
             .parse::<u64>()
             .ok()
             .and_then(|id| self.history.get(id))
-            .ok_or(GONE)?;
+            .ok_or(RunError::Gone)?;
         let entry_id = entry.id;
         match action {
             items::PASTE => Ok(Outcome::Paste(self.paste(entry_id)?)),
@@ -211,30 +240,26 @@ impl Extension {
             items::SHOW => {
                 self.detail = Some(entry_id);
                 let view = items::detail_view(&self.history, entry, now());
-                self.send(&FromExtension::PushView(view))?;
+                self.send(&FromExtension::PushView(view)).map_err(RunError::Send)?;
                 Ok(Outcome::KeepOpen)
             }
             DELETE => {
                 self.history.delete(entry_id);
-                self.removed(vec![entry_id])?;
+                self.removed(&[entry_id]).map_err(RunError::Send)?;
                 Ok(Outcome::KeepOpen)
             }
             CLEAR => self.clear(),
-            _ => Err(format!("A clip has no Action `{action}`")),
+            _ => Err(RunError::no_clip_action(action)),
         }
     }
 
     /// What to paste for an entry, read from disk.
-    fn paste(&self, id: u64) -> Result<Paste, String> {
-        let entry = self.history.get(id).ok_or(GONE)?;
-        let data = self
-            .history
-            .read(id)
-            .map_err(|err| format!("Couldn't read the clip: {err}"))?;
+    fn paste(&self, id: u64) -> Result<Paste, RunError> {
+        let entry = self.history.get(id).ok_or(RunError::Gone)?;
+        let data = self.history.read(id).map_err(RunError::Read)?;
         Ok(match &entry.content {
             Content::Text { .. } => Paste::Text(
-                String::from_utf8(data)
-                    .unwrap_or_else(|err| String::from_utf8_lossy(err.as_bytes()).into_owned()),
+                String::from_utf8(data).unwrap_or_else(|err| String::from_utf8_lossy(err.as_bytes()).into_owned()),
             ),
             Content::Image { mime, .. } => Paste::Image {
                 mime: mime.clone(),
@@ -243,15 +268,15 @@ impl Extension {
         })
     }
 
-    fn clear(&mut self) -> Result<Outcome, String> {
+    fn clear(&mut self) -> Result<Outcome, RunError> {
         let removed = self.history.clear();
-        self.removed(removed)?;
+        self.removed(&removed).map_err(RunError::Send)?;
         Ok(Outcome::KeepOpen)
     }
 
     /// Tells the Daemon these entries are gone, and closes or updates the
     /// Views that showed them.
-    fn removed(&mut self, ids: Vec<u64>) -> Sent {
+    fn removed(&mut self, ids: &[u64]) -> Sent {
         if ids.is_empty() {
             return Ok(());
         }
@@ -277,6 +302,46 @@ impl Extension {
     }
 
     fn send(&mut self, message: &FromExtension) -> Sent {
-        self.writer.send(message).map_err(|err| err.to_string())
+        self.writer.send(message).map_err(Error::Protocol)
+    }
+}
+
+/// Why the Extension stopped. `kotodama_extension::main` logs it.
+#[derive(Debug, thiserror::Error)]
+enum Error {
+    #[error("neither XDG_STATE_HOME nor HOME is set")]
+    NoStateDir,
+    /// Talking to the Daemon failed; its error is the message as it is.
+    #[error(transparent)]
+    Protocol(kotodama_protocol::Error),
+    #[error("lost the Wayland connection")]
+    WaylandLost,
+}
+
+/// Why an Action failed. Its `Display`, with its causes after it, is the
+/// failed Outcome's message.
+#[derive(Debug, thiserror::Error)]
+enum RunError {
+    #[error("That clip is no longer in the clipboard history")]
+    Gone,
+    #[error("Clipboard History has no Action `{0}`")]
+    NoHistoryAction(String),
+    #[error("A clip has no Action `{0}`")]
+    NoClipAction(String),
+    #[error("Couldn't read the clip")]
+    Read(#[source] io::Error),
+    /// A View couldn't be sent to the Daemon; its error is the message as it
+    /// is.
+    #[error(transparent)]
+    Send(Error),
+}
+
+impl RunError {
+    fn no_history_action(action: &str) -> Self {
+        RunError::NoHistoryAction(action.to_owned())
+    }
+
+    fn no_clip_action(action: &str) -> Self {
+        RunError::NoClipAction(action.to_owned())
     }
 }

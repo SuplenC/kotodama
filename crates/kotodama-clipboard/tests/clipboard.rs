@@ -6,14 +6,19 @@
 use std::collections::BTreeMap;
 use std::fs;
 use std::io::Cursor;
-use std::ops::{Deref, DerefMut};
-use std::path::{Path, PathBuf};
+use std::ops::Deref;
+use std::ops::DerefMut;
+use std::path::Path;
+use std::path::PathBuf;
 use std::process::Command;
 use std::thread;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::Duration;
+use std::time::SystemTime;
+use std::time::UNIX_EPOCH;
 
 use kotodama_clipboard::copied::Copied;
-use kotodama_clipboard::history::{History, Limits};
+use kotodama_clipboard::history::History;
+use kotodama_clipboard::history::Limits;
 use kotodama_extension::testing::Spawned;
 use kotodama_protocol::*;
 use tempfile::TempDir;
@@ -84,10 +89,7 @@ impl Extension {
 }
 
 fn now() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap()
-        .as_secs()
+    SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs()
 }
 
 /// The history directory under a state directory.
@@ -99,9 +101,7 @@ fn history_dir(state: &Path) -> PathBuf {
 /// would. Returns the clip's Item id.
 fn copy(state: &Path, copied: Copied, ago: u64) -> String {
     let mut history = History::open(&history_dir(state));
-    let recorded = history
-        .record(copied, now() - ago, &Limits::default())
-        .unwrap();
+    let recorded = history.record(copied, now() - ago, &Limits::default()).unwrap();
     recorded.id.to_string()
 }
 
@@ -154,10 +154,7 @@ fn the_history_is_sent_as_items_after_a_restart() {
     let clip = clips[0];
     assert_eq!(clip.subtitle.as_deref(), Some("Text, 27 characters"));
     assert_eq!(
-        clip.actions
-            .iter()
-            .map(|action| action.id.as_str())
-            .collect::<Vec<_>>(),
+        clip.actions.iter().map(|action| action.id.as_str()).collect::<Vec<_>>(),
         ["paste", "copy", "show", "delete"]
     );
 }
@@ -168,18 +165,11 @@ fn the_primary_action_pastes_the_whole_clip() {
     let long = format!("first line\n{}", "y".repeat(300));
     let id = copy(state.path(), text(&long), 10);
     let data = png(64, 32);
-    let image = copy(
-        state.path(),
-        Copied::read("image/png", data.clone()).unwrap(),
-        5,
-    );
+    let image = copy(state.path(), Copied::read("image/png", data.clone()).unwrap(), 5);
     let mut extension = Extension::start(state.path(), Table::new());
     extension.added();
 
-    assert_eq!(
-        extension.run(&id, "paste"),
-        Outcome::Paste(Clipboard::Text(long))
-    );
+    assert_eq!(extension.run(&id, "paste"), Outcome::Paste(Clipboard::Text(long)));
     assert_eq!(
         extension.run(&image, "paste"),
         Outcome::Paste(Clipboard::Image {
@@ -192,11 +182,7 @@ fn the_primary_action_pastes_the_whole_clip() {
 #[test]
 fn an_image_shows_its_thumbnail_in_the_detail_view() {
     let state = tempfile::tempdir().unwrap();
-    let id = copy(
-        state.path(),
-        Copied::read("image/png", png(800, 400)).unwrap(),
-        90,
-    );
+    let id = copy(state.path(), Copied::read("image/png", png(800, 400)).unwrap(), 90);
     let mut extension = Extension::start(state.path(), Table::new());
     let items = extension.added();
     let clip = clips(&items)[0];
@@ -210,10 +196,7 @@ fn an_image_shows_its_thumbnail_in_the_detail_view() {
     let ViewContent::Detail { markdown, metadata } = view.content else {
         panic!("expected a detail View, got {view:?}");
     };
-    assert_eq!(
-        markdown,
-        format!("![Image, 800×400](file://{})", thumbnail.display())
-    );
+    assert_eq!(markdown, format!("![Image, 800×400](file://{})", thumbnail.display()));
     let shown = image::open(&thumbnail).unwrap();
     assert_eq!((shown.width(), shown.height()), (256, 128));
     let metadata: Vec<(&str, &str)> = metadata
@@ -262,11 +245,7 @@ fn deleting_an_entry_removes_it_for_good() {
 fn the_clear_action_empties_the_history_on_disk() {
     let state = tempfile::tempdir().unwrap();
     let first = copy(state.path(), text("one"), 20);
-    let second = copy(
-        state.path(),
-        Copied::read("image/png", png(10, 10)).unwrap(),
-        10,
-    );
+    let second = copy(state.path(), Copied::read("image/png", png(10, 10)).unwrap(), 10);
     let mut extension = Extension::start(state.path(), Table::new());
     extension.added();
 
@@ -350,7 +329,7 @@ fn a_longer_age_in_the_config_keeps_what_the_default_would_expire() {
             assert_eq!(
                 titles(&clips(&items).into_iter().cloned().collect::<Vec<_>>()),
                 ["eight days old"]
-            )
+            );
         }
         other => panic!("expected add_items, got {other:?}"),
     }
@@ -377,11 +356,7 @@ fn copy_to_clipboard_hands_the_clip_to_the_daemon_to_copy() {
     let state = tempfile::tempdir().unwrap();
     let id = copy(state.path(), text("hello"), 10);
     let data = png(64, 32);
-    let image = copy(
-        state.path(),
-        Copied::read("image/png", data.clone()).unwrap(),
-        5,
-    );
+    let image = copy(state.path(), Copied::read("image/png", data.clone()).unwrap(), 5);
     let mut extension = Extension::start(state.path(), Table::new());
     extension.added();
 

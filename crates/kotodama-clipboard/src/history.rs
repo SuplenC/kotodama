@@ -1,9 +1,8 @@
 //! The clipboard history on disk, in `$XDG_STATE_HOME/kotodama/clipboard/`:
 //!
-//! - `index.json`: every entry, oldest first, with a short preview of each
-//!   text and the size of each image;
-//! - `data/<id>`: what was copied, byte for byte, read only to paste or show
-//!   it;
+//! - `index.json`: every entry, oldest first, with a short preview of each text and the size of
+//!   each image;
+//! - `data/<id>`: what was copied, byte for byte, read only to paste or show it;
 //! - `thumbs/<id>.png`: each image's thumbnail, for the detail View.
 //!
 //! Only the index is held in memory, so the history costs the Extension a
@@ -12,13 +11,32 @@
 //!
 //! Times are seconds since the Unix epoch, passed in by the caller, so expiry
 //! runs the same on a made-up clock in tests.
+//!
+//! # Owns
+//!
+//! - The files of the history, their layout and their permissions.
+//! - Noticing the same thing copied again, and expiring entries by [`Limits`].
+//!
+//! # Not here
+//!
+//! - Reading the limits from the config: `items.rs`.
+//! - Deciding what is kept at all: `copied.rs`.
 
-use std::fs::{self, DirBuilder, File, OpenOptions};
-use std::io::{self, Read, Write};
-use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt};
-use std::path::{Path, PathBuf};
+use std::fmt;
+use std::fs;
+use std::fs::DirBuilder;
+use std::fs::File;
+use std::fs::OpenOptions;
+use std::io;
+use std::io::Read;
+use std::io::Write;
+use std::os::unix::fs::DirBuilderExt;
+use std::os::unix::fs::OpenOptionsExt;
+use std::path::Path;
+use std::path::PathBuf;
 
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
+use serde::Serialize;
 
 use crate::copied::Copied;
 
@@ -32,6 +50,13 @@ const INDEX: &str = "index.json";
 const DATA: &str = "data";
 const THUMBS: &str = "thumbs";
 
+/// How many entries the history keeps unless configured. Searching this
+/// many stays well within the keystroke budget (`benches/search.rs`).
+pub const DEFAULT_MAX_ENTRIES: usize = 1000;
+
+/// How long an entry is kept unless configured, in seconds: a week.
+pub const DEFAULT_MAX_AGE_SECS: u64 = 7 * 24 * 60 * 60;
+
 /// How much history to keep, from the config.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Limits {
@@ -44,8 +69,8 @@ pub struct Limits {
 impl Default for Limits {
     fn default() -> Self {
         Limits {
-            max_entries: 1000,
-            max_age_secs: 7 * 24 * 60 * 60,
+            max_entries: DEFAULT_MAX_ENTRIES,
+            max_age_secs: DEFAULT_MAX_AGE_SECS,
         }
     }
 }
@@ -64,9 +89,12 @@ pub struct Entry {
     pub content: Content,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+/// What an entry holds, as much of it as the index keeps. Its `Debug` leaves
+/// out a text's preview, which is what was copied.
+#[derive(Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Content {
+    /// Text, whole in the entry's data file.
     Text {
         /// The first [`PREVIEW_CHARS`] characters, with each run of
         /// whitespace, newlines included, made one space.
@@ -74,17 +102,32 @@ pub enum Content {
         /// How many characters the whole text has.
         chars: u64,
     },
-    Image {
-        mime: String,
-        width: u32,
-        height: u32,
-    },
+    /// An image, with its thumbnail beside the data file.
+    Image { mime: String, width: u32, height: u32 },
+}
+
+impl fmt::Debug for Content {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Content::Text { chars, .. } => f
+                .debug_struct("Text")
+                .field("preview", &format_args!("<redacted>"))
+                .field("chars", chars)
+                .finish(),
+            Content::Image { mime, width, height } => f
+                .debug_struct("Image")
+                .field("mime", mime)
+                .field("width", width)
+                .field("height", height)
+                .finish(),
+        }
+    }
 }
 
 /// What [`History::record`] did.
 #[derive(Debug, PartialEq, Eq)]
 pub struct Recorded {
-    /// The entry now at the top: a new one, or the same thing copied before.
+    /// The entry at the top: a new one, or the same thing copied before.
     pub id: u64,
     /// The entries that expired to make room.
     pub removed: Vec<u64>,
@@ -97,9 +140,21 @@ struct Index {
     entries: Vec<Entry>,
 }
 
+/// The history kept in one directory: its index in memory, what was copied
+/// on disk. Its `Debug` shows the directory and how many entries it holds,
+/// not what they are.
 pub struct History {
     dir: PathBuf,
     index: Index,
+}
+
+impl fmt::Debug for History {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("History")
+            .field("dir", &self.dir)
+            .field("entries", &self.index.entries.len())
+            .finish()
+    }
 }
 
 impl History {
@@ -110,18 +165,12 @@ impl History {
     pub fn open(dir: &Path) -> Self {
         let index = match fs::read(dir.join(INDEX)) {
             Ok(bytes) => serde_json::from_slice(&bytes).unwrap_or_else(|err| {
-                warn(&format!(
-                    "{}: {err}; starting afresh",
-                    dir.join(INDEX).display()
-                ));
+                kotodama_extension::log!("{}: {err}; starting afresh", dir.join(INDEX).display());
                 Index::default()
             }),
             Err(err) if err.kind() == io::ErrorKind::NotFound => Index::default(),
             Err(err) => {
-                warn(&format!(
-                    "{}: {err}; starting afresh",
-                    dir.join(INDEX).display()
-                ));
+                kotodama_extension::log!("{}: {err}; starting afresh", dir.join(INDEX).display());
                 Index::default()
             }
         };
@@ -138,6 +187,7 @@ impl History {
         self.index.entries.iter().rev()
     }
 
+    /// The entry `id`, if the history holds it.
     pub fn get(&self, id: u64) -> Option<&Entry> {
         self.index.entries.iter().find(|entry| entry.id == id)
     }
@@ -150,9 +200,14 @@ impl History {
         self.index.entries.is_empty()
     }
 
-    /// Keeps what was copied `now`, then expires what `limits` no longer
+    /// Keeps what was copied at `now`, then expires what `limits` don't
     /// allow. The same thing copied again keeps its entry, and its id, and
     /// moves it to the top.
+    ///
+    /// # Errors
+    ///
+    /// The error writing a new entry's data or thumbnail, which leaves the
+    /// index as it was. A failure to save the index is only logged.
     pub fn record(&mut self, copied: Copied, now: u64, limits: &Limits) -> io::Result<Recorded> {
         let data = copied.data();
         let hash = fnv1a(data);
@@ -163,51 +218,10 @@ impl History {
                 && same_kind(&entry.content, &copied)
                 && self.read(entry.id).is_ok_and(|kept| kept == data)
         });
-        let id = match same {
-            Some(at) => {
-                let mut entry = self.index.entries.remove(at);
-                entry.copied = now;
-                let id = entry.id;
-                self.index.entries.push(entry);
-                id
-            }
-            None => {
-                let id = self.index.next_id;
-                self.make_dirs()?;
-                write_private(&self.data_path(id), data)?;
-                let content = match copied {
-                    Copied::Text(text) => Content::Text {
-                        preview: preview(&text),
-                        chars: text.chars().count() as u64,
-                    },
-                    Copied::Image {
-                        mime,
-                        width,
-                        height,
-                        thumbnail,
-                        ..
-                    } => {
-                        if let Err(err) = write_private(&self.thumbnail(id), &thumbnail) {
-                            let _ = fs::remove_file(self.data_path(id));
-                            return Err(err);
-                        }
-                        Content::Image {
-                            mime,
-                            width,
-                            height,
-                        }
-                    }
-                };
-                self.index.next_id += 1;
-                self.index.entries.push(Entry {
-                    id,
-                    copied: now,
-                    size,
-                    hash,
-                    content,
-                });
-                id
-            }
+        let id = if let Some(at) = same {
+            self.move_to_top(at, now)
+        } else {
+            self.add(copied, hash, size, now)?
         };
         let removed = self.drop_expired(now, limits);
         // What was copied is kept on disk and in memory either way, so the
@@ -218,7 +232,7 @@ impl History {
         Ok(Recorded { id, removed })
     }
 
-    /// Removes the entries `limits` no longer allow at `now`: those older
+    /// Removes the entries `limits` don't allow at `now`: those older
     /// than the most age, then the oldest past the most entries. Returns
     /// their ids.
     pub fn expire(&mut self, now: u64, limits: &Limits) -> Vec<u64> {
@@ -234,12 +248,7 @@ impl History {
         self.index
             .entries
             .iter()
-            .map(|entry| {
-                entry
-                    .copied
-                    .saturating_add(limits.max_age_secs)
-                    .saturating_add(1)
-            })
+            .map(|entry| entry.copied.saturating_add(limits.max_age_secs).saturating_add(1))
             .min()
     }
 
@@ -265,11 +274,20 @@ impl History {
     }
 
     /// What was copied, byte for byte.
+    ///
+    /// # Errors
+    ///
+    /// The error reading the entry's data file, such as `NotFound` for an
+    /// entry that is gone.
     pub fn read(&self, id: u64) -> io::Result<Vec<u8>> {
         fs::read(self.data_path(id))
     }
 
     /// At most the first `max` bytes of a text entry, cut at a character.
+    ///
+    /// # Errors
+    ///
+    /// The error opening or reading the entry's data file.
     pub fn read_start(&self, id: u64, max: usize) -> io::Result<String> {
         let mut data = Vec::with_capacity(max);
         File::open(self.data_path(id))?
@@ -291,6 +309,52 @@ impl History {
     /// Where an image entry's thumbnail is, a PNG.
     pub fn thumbnail(&self, id: u64) -> PathBuf {
         self.dir.join(THUMBS).join(format!("{id}.png"))
+    }
+
+    /// Moves the entry at `at` to the top, copied again at `now`, and
+    /// returns its id.
+    fn move_to_top(&mut self, at: usize, now: u64) -> u64 {
+        let mut entry = self.index.entries.remove(at);
+        entry.copied = now;
+        let id = entry.id;
+        self.index.entries.push(entry);
+        id
+    }
+
+    /// Writes a new entry's files, then adds it at the top. A failed write
+    /// leaves the index as it was.
+    fn add(&mut self, copied: Copied, hash: u64, size: u64, now: u64) -> io::Result<u64> {
+        let id = self.index.next_id;
+        self.make_dirs()?;
+        write_private(&self.data_path(id), copied.data())?;
+        let content = match copied {
+            Copied::Text(text) => Content::Text {
+                preview: preview(&text),
+                chars: text.chars().count() as u64,
+            },
+            Copied::Image {
+                mime,
+                width,
+                height,
+                thumbnail,
+                ..
+            } => {
+                if let Err(err) = write_private(&self.thumbnail(id), &thumbnail) {
+                    let _ = fs::remove_file(self.data_path(id));
+                    return Err(err);
+                }
+                Content::Image { mime, width, height }
+            }
+        };
+        self.index.next_id += 1;
+        self.index.entries.push(Entry {
+            id,
+            copied: now,
+            size,
+            hash,
+            content,
+        });
+        Ok(id)
     }
 
     fn data_path(&self, id: u64) -> PathBuf {
@@ -348,10 +412,7 @@ impl History {
     /// Writes the index whole, then renames it into place, so a crash leaves
     /// the old one or the new one.
     fn save(&self) -> io::Result<()> {
-        DirBuilder::new()
-            .recursive(true)
-            .mode(0o700)
-            .create(&self.dir)?;
+        DirBuilder::new().recursive(true).mode(0o700).create(&self.dir)?;
         let json = serde_json::to_vec(&self.index).map_err(io::Error::other)?;
         let partial = self.dir.join(format!("{INDEX}.partial"));
         write_private(&partial, &json)?;
@@ -360,10 +421,7 @@ impl History {
 
     fn save_or_warn(&self) {
         if let Err(err) = self.save() {
-            warn(&format!(
-                "couldn't save {}: {err}",
-                self.dir.join(INDEX).display()
-            ));
+            kotodama_extension::log!("couldn't save {}: {err}", self.dir.join(INDEX).display());
         }
     }
 }
@@ -420,8 +478,4 @@ fn fnv1a(data: &[u8]) -> u64 {
         hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
     }
     hash
-}
-
-fn warn(message: &str) {
-    kotodama_extension::log!("{message}");
 }
