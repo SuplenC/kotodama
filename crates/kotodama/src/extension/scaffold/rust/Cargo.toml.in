@@ -1,0 +1,16 @@
+[package]
+name = "kotodama-{{name}}"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+kotodama-extension = { git = "https://github.com/SuplenC/kotodama" }
+kotodama-protocol = { git = "https://github.com/SuplenC/kotodama" }
+
+# An Extension runs as long as the Daemon does, so it is built small.
+[profile.release]
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true

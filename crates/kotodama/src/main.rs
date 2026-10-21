@@ -24,8 +24,11 @@
 //!   `Channel`).
 //! - What the Daemon does with the message: `kotodamad/src/daemon.rs`.
 //! - Showing the menu: the Front end, `kotodama-qml`.
+//! - `kotodama extension`, for whoever writes an Extension: `extension.rs`.
 
 #![forbid(unsafe_code)]
+
+mod extension;
 
 use std::io;
 use std::os::unix::net::UnixStream;
@@ -41,7 +44,8 @@ use kotodama_protocol::WireFormat;
 use kotodama_protocol::socket_path;
 
 const USAGE: &str = "usage: kotodama toggle
-       kotodama open [--view <extension>/<item>] [--app <word>] [--query <text>]";
+       kotodama open [--view <extension>/<item>] [--app <word>] [--query <text>]
+       kotodama extension check <dir> | new <name>";
 
 /// Under socket activation the first keypress also starts the Daemon, so the handshake may wait
 /// for it to come up. The answer waits for it too, and for a menu, when none is connected yet.
@@ -113,6 +117,9 @@ impl SendError {
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
+    if args.first().is_some_and(|command| command == "extension") {
+        return extension::run(&args[1..]);
+    }
     let message = match parse(&args) {
         Ok(message) => message,
         Err(err) => {

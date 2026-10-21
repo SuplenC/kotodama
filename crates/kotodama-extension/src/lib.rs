@@ -34,7 +34,7 @@
 //! use std::process::ExitCode;
 //!
 //! use kotodama_extension::{Connection, Event, SentItems, config};
-//! use kotodama_protocol::{Error, FromExtension, Item, ItemKind, ToExtension};
+//! use kotodama_protocol::{Action, Error, Item, ItemKind, ToExtension};
 //!
 //! fn main() -> ExitCode {
 //!     kotodama_extension::main("kotodama-hello", run)
@@ -64,7 +64,7 @@
 //!                     keywords: Vec::new(),
 //!                     hidden: false,
 //!                     app_only: false,
-//!                     actions: Vec::new(),
+//!                     actions: vec![Action::new("open", "Open")],
 //!                 };
 //!                 sent.publish(&mut writer, [item])?;
 //!             }

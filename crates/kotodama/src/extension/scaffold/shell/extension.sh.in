@@ -1,0 +1,85 @@
+#!/usr/bin/env bash
+# {{name}}: a Kotodama Extension in bash and jq. It offers one Item, which
+# types a greeting, and answers the Live query `{{name}} <text>` with <text>,
+# to copy. docs/extensions.md in the Kotodama repository explains each message.
+#
+# stdin and stdout carry the protocol, so nothing else may write to stdout:
+# log to stderr.
+set -euo pipefail
+
+# Frame lengths count bytes. In the C locale, ${#var} and `read -N` do too.
+export LC_ALL=C
+
+log() {
+    echo "{{name}}: $*" >&2
+}
+
+# Reads one frame into $frame. Fails when the Daemon hangs up.
+read_frame() {
+    local len
+    IFS= read -r len || return 1
+    frame=
+    if [ "$len" -gt 0 ]; then
+        IFS= read -r -N "$len" frame || return 1
+    fi
+}
+
+# Sends its argument, a JSON message, as one frame: its length in bytes, a
+# newline, then the message.
+send() {
+    printf '%d\n%s' "${#1}" "$1"
+}
+
+# The handshake, always in JSON: this script offers JSON alone, for protocol
+# 1.0. A newer Daemon talks to it in 1.0's terms; an older one can't.
+send '{"version":1,"minor":0,"formats":["json"]}'
+read_frame
+if ! jq -e '[.version, (.minor // 0)] >= [1, 0]' <<<"$frame" >/dev/null; then
+    log "the Daemon is older than protocol 1.0: $frame"
+    exit 1
+fi
+
+# Its own kinds are named `{{name}}.<kind>`. The first Action is the primary
+# one, which Enter runs.
+greeting='{
+    "id": "hello",
+    "kind": "{{name}}.greeting",
+    "title": "Say hello",
+    "subtitle": "Types a greeting into the window you came from",
+    "actions": [{"id": "greet", "title": "Type the greeting"}]
+}'
+
+while read_frame; do
+    # A message is {"<name>": {...}}, or just "<name>" when it has no fields.
+    case $(jq -r 'if type == "string" then . else keys[0] end' <<<"$frame") in
+    config)
+        # The [extensions.{{name}}] table, sent after the handshake and again
+        # whenever it changes. Adding an Item again replaces it.
+        send "{\"add_items\":{\"items\":[$greeting]}}"
+        ;;
+    live_query)
+        # The query comes without the prefix. `done` says no more results follow.
+        send "$(jq -c '.live_query | {live_results: {live_query: .id, done: true, results: [
+            select(.query != "") | {score: 1, item: {
+                id: .query, kind: "{{name}}.echo", title: .query, subtitle: "Copy it",
+                actions: [{id: "copy", title: "Copy"}]}}]}}' <<<"$frame")"
+        ;;
+    run_action)
+        # Every run_action is answered with action_done and its invocation.
+        case $(jq -r '.run_action.action' <<<"$frame") in
+        greet) outcome='{"type":{"text":"Hello from {{name}}"}}' ;;
+        copy) outcome=$(jq -c '{copy: {text: .run_action.item.id}}' <<<"$frame") ;;
+        *) outcome=$(jq -c '{failed: {message: "unknown Action \(.run_action.action)"}}' <<<"$frame") ;;
+        esac
+        send "$(jq -c --argjson outcome "$outcome" \
+            '{action_done: {invocation: .run_action.invocation, outcome: $outcome}}' <<<"$frame")"
+        ;;
+    rejected)
+        # The Daemon refused a message this script sent, and says why.
+        log "the Daemon rejected a message: $(jq -r '.rejected.reason' <<<"$frame")"
+        ;;
+    *)
+        # Ignore what this script doesn't handle, so newer Daemons can send more.
+        ;;
+    esac
+done

@@ -1,14 +1,18 @@
 [package]
 name = "kotodama"
 version = "0.1.0"
-description = "The kotodama command: opens or toggles the menu, for a compositor keybind"
+description = "The kotodama command: opens or toggles the menu, for a compositor keybind, and checks or starts an Extension"
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
 
 [dependencies]
 kotodama-protocol = { path = "../kotodama-protocol" }
+regex = "1.13.1"
 thiserror = "2.0.21"
+
+[dev-dependencies]
+tempfile = "3.27.0"
 
 [lints]
 workspace = true

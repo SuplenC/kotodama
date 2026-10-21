@@ -1,0 +1,16 @@
+# The Manifest. The Daemon finds the Extension in a directory of its own under
+# ~/.config/kotodama/extensions/, and starts `command` from that directory.
+# docs/extensions.md in the Kotodama repository explains every key.
+name = "{{name}}"
+description = "Says hello, and echoes what you type"
+{{command}}
+# Its app: typing `{{name}}` finds it in the search, and Tab enters it.
+word = "{{name}}"
+about = "Says hello, and copies what you type."
+examples = [{ query = "{{name}} hi there", result = "hi there, to copy" }]
+
+# A query that starts with `{{name}} ` is sent to the Extension as a Live
+# query, on every keystroke.
+[live_query]
+prefixes = ["{{name}} "]
+debounce_ms = 0

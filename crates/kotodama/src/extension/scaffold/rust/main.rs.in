@@ -1,0 +1,100 @@
+//! {{name}}: a Kotodama Extension in Rust. It offers one Item, which types a
+//! greeting, and answers the Live query `{{name}} <text>` with <text>, to copy.
+//! docs/extensions.md in the Kotodama repository explains each message.
+//!
+//! stdin and stdout carry the protocol, so nothing else may write to stdout:
+//! `kotodama_extension::log!` writes to stderr.
+
+use std::process::ExitCode;
+
+use kotodama_extension::{Connection, Event, SentItems};
+use kotodama_protocol::{
+    Action, Clipboard, Error, Fraction, FromExtension, Item, ItemKind, LiveResult, NamespacedKind,
+    Outcome, ToExtension,
+};
+
+const NAME: &str = "{{name}}";
+
+fn main() -> ExitCode {
+    kotodama_extension::main(NAME, run)
+}
+
+fn run() -> Result<(), Error> {
+    // The handshake, on stdio, offering every Wire format.
+    let Connection {
+        mut writer,
+        received,
+        ..
+    } = kotodama_extension::connect::<()>()?;
+    let mut sent = SentItems::default();
+    for event in received {
+        match event {
+            // The [extensions.{{name}}] table, sent after the handshake and
+            // again whenever it changes.
+            Event::Message(ToExtension::Config(_)) => {
+                let greeting = item("hello", "greeting", "Say hello", Action::new("greet", "Type the greeting"));
+                sent.publish(&mut writer, [greeting])?;
+            }
+            // The query comes without the prefix. `done` says no more results
+            // follow.
+            Event::Message(ToExtension::LiveQuery { id, query, .. }) => {
+                let results = (!query.is_empty())
+                    .then(|| LiveResult {
+                        item: item(&query, "echo", &query, Action::new("copy", "Copy")),
+                        score: Fraction::new(1.0).expect("1 is a fraction"),
+                        answer: false,
+                    })
+                    .into_iter()
+                    .collect();
+                writer.send(&FromExtension::LiveResults {
+                    live_query: id,
+                    results,
+                    done: true,
+                })?;
+            }
+            // Every run_action is answered with action_done and its invocation.
+            Event::Message(ToExtension::RunAction {
+                invocation,
+                action,
+                item,
+                ..
+            }) => {
+                let outcome = match action.as_str() {
+                    "greet" => Outcome::Type {
+                        text: format!("Hello from {NAME}"),
+                    },
+                    "copy" => Outcome::Copy(Clipboard::Text(item.id)),
+                    _ => Outcome::Failed {
+                        message: format!("unknown Action {action}"),
+                    },
+                };
+                writer.send(&FromExtension::ActionDone { invocation, outcome })?;
+            }
+            // `connect` logs why the Daemon rejected a message; anything else
+            // is ignored, so newer Daemons can send more.
+            Event::Message(_) | Event::Own(()) => {}
+            Event::Hangup => break,
+        }
+    }
+    Ok(())
+}
+
+/// An Item of the kind `{{name}}.<kind>`, whose one Action is its primary one,
+/// which Enter runs.
+fn item(id: &str, kind: &str, title: &str, action: Action) -> Item {
+    Item {
+        id: id.into(),
+        kind: ItemKind::Namespaced(
+            NamespacedKind::new(format!("{NAME}.{kind}")).expect("the kind is named after the Extension"),
+        ),
+        identity: None,
+        title: title.into(),
+        subtitle: None,
+        icon: None,
+        keyword: None,
+        keywords: Vec::new(),
+        actions: vec![action],
+        hidden: false,
+        app_only: false,
+    }
+}

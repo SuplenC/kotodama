@@ -832,6 +832,8 @@ name = "kotodama"
 version = "0.1.0"
 dependencies = [
  "kotodama-protocol",
+ "regex",
+ "tempfile",
  "thiserror 2.0.21",
 ]
 
