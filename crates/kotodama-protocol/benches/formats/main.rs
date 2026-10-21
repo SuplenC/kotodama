@@ -2,7 +2,8 @@
 //! batch of 1,000 Items) in every Wire format, and in the binary formats that
 //! were weighed against postcard: prost (protobuf with derive), müsli's `wire`
 //! format and bilrost, on copies of the types their derives want
-//! (`mirror.rs`). The measurements are in the ADR on protocol compatibility.
+//! (`mirror.rs`). Postcard is kept between Rust peers unless one of those
+//! decodes faster.
 
 use std::hint::black_box;
 
