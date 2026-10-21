@@ -271,7 +271,8 @@ fn resident(state: &Path) {
         Duration::from_secs(60),
     );
     extension.send(ToExtension::Config(Table::new()));
-    assert_eq!(extension.added().len(), ENTRIES + 1);
+    // The entries, then the history Item and the pause Item.
+    assert_eq!(extension.added().len(), ENTRIES + 2);
     match vm_rss(extension.child.id()) {
         Some(bytes) => {
             println!(
