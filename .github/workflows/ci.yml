@@ -61,7 +61,7 @@ jobs:
               scripts/qml-module) rust=true e2e=true latency=true ;;
               # Read only by `just check`, which `test` runs.
               .config/rustfmt.toml | clippy.toml | scripts/comments | scripts/fmt | scripts/self-imports | scripts/restyled-crates) rust=true ;;
-              nix/home-manager.nix | nix/tests/*) rust=true e2e=true nix=true ;;
+              nix/home-manager.nix | nix/home-manager-extensions.nix | nix/tests/*) rust=true e2e=true nix=true ;;
               docker/* | .config/nextest.toml | scripts/dev-image | scripts/tests/* | \
                 .github/workflows/release-please.yml | release-please-config.json | \
                 .release-please-manifest.json | .gitignore)
@@ -328,7 +328,31 @@ jobs:
       - uses: ./.github/actions/setup-nix
         with:
           cachix-auth-token: ${{ secrets.CACHIX_AUTH_TOKEN }}
-      - run: nix build -L .#checks.x86_64-linux.nixos-vm .#checks.x86_64-linux.hyprland-vm .#checks.x86_64-linux.qml-module .#checks.x86_64-linux.home-manager-ai .#checks.x86_64-linux.home-manager-options
+      - run: nix build -L .#checks.x86_64-linux.nixos-vm .#checks.x86_64-linux.hyprland-vm .#checks.x86_64-linux.qml-module .#checks.x86_64-linux.home-manager-extensions .#checks.x86_64-linux.home-manager-ai .#checks.x86_64-linux.home-manager-options
+
+  # Builds each package Kotodama is released as on its own, one `nix build`
+  # each: the core, the Front end and every Bundled extension. Each builds
+  # only its own crates, on the dependencies they share (nix/package.nix).
+  packages:
+    needs: changes
+    if: ${{ !cancelled() && (github.event_name == 'push' || needs.changes.outputs.nix == 'true') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup-nix
+        with:
+          cachix-auth-token: ${{ secrets.CACHIX_AUTH_TOKEN }}
+      - run: |
+          packages=$(nix eval --raw .#packages.x86_64-linux --apply '
+            packages: toString (builtins.filter
+              (name: builtins.match "kotodama-.*" name != null && name != "kotodama-full" && name != "kotodama-extensions")
+              (builtins.attrNames packages))')
+          echo "packages: $packages"
+          for package in $packages; do
+            echo "::group::$package"
+            nix build -L --no-link ".#$package"
+            echo "::endgroup::"
+          done
 
   # Counts the instructions the Daemon runs per keystroke
   # (scripts/bench-instructions), for the base commit and this one, and fails
@@ -407,7 +431,7 @@ jobs:
   # The one required check: fails if a job it needs failed or was cancelled, and
   # passes when each succeeded or was skipped as not needed.
   ci:
-    needs: [changes, linear, test, e2e, bench, instructions, nixos-vm]
+    needs: [changes, linear, test, e2e, bench, instructions, nixos-vm, packages]
     if: always()
     runs-on: ubuntu-latest
     steps:
