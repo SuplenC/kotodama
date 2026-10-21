@@ -16,11 +16,20 @@ mod views;
 use std::hint::black_box;
 use std::ops::Range;
 
-use criterion::{Criterion, criterion_group, criterion_main};
-use kotodama_protocol::{Action, Item, ItemKind, ListMatch, View, ViewContent};
-
-use rows::{Model, Rows};
-use views::{Contributed, Open, Views};
+use criterion::Criterion;
+use criterion::criterion_group;
+use criterion::criterion_main;
+use kotodama_protocol::Action;
+use kotodama_protocol::Item;
+use kotodama_protocol::ItemKind;
+use kotodama_protocol::ListMatch;
+use kotodama_protocol::View;
+use kotodama_protocol::ViewContent;
+use rows::Model;
+use rows::Rows;
+use views::Contributed;
+use views::Open;
+use views::Views;
 
 const ITEMS: u32 = 1000;
 

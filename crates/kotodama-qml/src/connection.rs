@@ -7,10 +7,18 @@ use std::net::Shutdown;
 use std::os::unix::net::UnixStream;
 use std::time::Duration;
 
-use kotodama_protocol::{
-    Channel, ChannelWriter, Error, FromFrontEnd, Hello, Job, ListMatch, Scope, ToFrontEnd, View,
-    WireFormat, socket_path,
-};
+use kotodama_protocol::Channel;
+use kotodama_protocol::ChannelWriter;
+use kotodama_protocol::Error;
+use kotodama_protocol::FromFrontEnd;
+use kotodama_protocol::Hello;
+use kotodama_protocol::Job;
+use kotodama_protocol::ListMatch;
+use kotodama_protocol::Scope;
+use kotodama_protocol::ToFrontEnd;
+use kotodama_protocol::View;
+use kotodama_protocol::WireFormat;
+use kotodama_protocol::socket_path;
 
 use crate::rows::Row;
 use crate::views::Contributed;
@@ -94,11 +102,7 @@ impl Update {
     pub fn signals(&self) -> bool {
         matches!(
             self,
-            Update::Close
-                | Update::Open { .. }
-                | Update::Toggle
-                | Update::ActionFailed(_)
-                | Update::SetQuery(_)
+            Update::Close | Update::Open { .. } | Update::Toggle | Update::ActionFailed(_) | Update::SetQuery(_)
         )
     }
 }
@@ -174,19 +178,11 @@ fn connect() -> Result<(Reader, UnixStream, Writer), Error> {
             "XDG_RUNTIME_DIR isn't set",
         ))
     })?;
-    let stream = UnixStream::connect(socket).map_err(Error::Io)?;
-    stream
-        .set_read_timeout(Some(HANDSHAKE_TIMEOUT))
-        .map_err(Error::Io)?;
-    let channel = Channel::handshake(
-        stream.try_clone().map_err(Error::Io)?,
-        stream.try_clone().map_err(Error::Io)?,
-        &Hello::new(&WireFormat::ALL),
-    )?;
-    stream.set_read_timeout(None).map_err(Error::Io)?;
-    stream
-        .set_write_timeout(Some(WRITE_TIMEOUT))
-        .map_err(Error::Io)?;
+    let stream = UnixStream::connect(socket)?;
+    stream.set_read_timeout(Some(HANDSHAKE_TIMEOUT))?;
+    let channel = Channel::handshake(stream.try_clone()?, stream.try_clone()?, &Hello::new(&WireFormat::ALL))?;
+    stream.set_read_timeout(None)?;
+    stream.set_write_timeout(Some(WRITE_TIMEOUT))?;
     let (reader, channel) = channel.split();
     Ok((
         reader,
@@ -200,11 +196,7 @@ fn connect() -> Result<(Reader, UnixStream, Writer), Error> {
 ///
 /// A View the Extension popped waits [`PUSH_AFTER_POP`] for more, as the
 /// Extension may push the next one in the same reply.
-fn read(
-    mut reader: Reader,
-    probe: &UnixStream,
-    deliver: &impl Fn(Vec<Update>) -> bool,
-) -> Result<(), Error> {
+fn read(mut reader: Reader, probe: &UnixStream, deliver: &impl Fn(Vec<Update>) -> bool) -> Result<(), Error> {
     let mut batch = Vec::new();
     loop {
         let message = match reader.recv::<ToFrontEnd>() {
@@ -230,8 +222,7 @@ fn read(
             batch.push(update);
         }
         let popped = matches!(batch.last(), Some(Update::PopView { .. }));
-        let more =
-            reader.has_buffered() || (popped && more_within(&mut reader, probe, PUSH_AFTER_POP));
+        let more = reader.has_buffered() || (popped && more_within(&mut reader, probe, PUSH_AFTER_POP));
         if batch.is_empty() || (more && batch.len() < MAX_BATCH) {
             continue;
         }

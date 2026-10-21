@@ -5,12 +5,20 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use kotodama_protocol::{
-    FormInput, FromFrontEnd, Item, Job, JobState, ListMatch, OfferedAction, Table, Value, View,
-    ViewContent,
-};
+use kotodama_protocol::FormInput;
+use kotodama_protocol::FromFrontEnd;
+use kotodama_protocol::Item;
+use kotodama_protocol::Job;
+use kotodama_protocol::JobState;
+use kotodama_protocol::ListMatch;
+use kotodama_protocol::OfferedAction;
+use kotodama_protocol::Table;
+use kotodama_protocol::Value;
+use kotodama_protocol::View;
+use kotodama_protocol::ViewContent;
 
-use crate::rows::{Fresh, Row};
+use crate::rows::Fresh;
+use crate::rows::Row;
 
 /// The Actions other Extensions contribute to the Items of a list View, by
 /// Item kind, as the Daemon sends them.
@@ -58,9 +66,7 @@ impl Open {
             ViewContent::Form { fields, .. } => fields
                 .iter()
                 .map(|field| match &field.input {
-                    FormInput::Text { default, .. } => {
-                        Value::String(default.clone().unwrap_or_default())
-                    }
+                    FormInput::Text { default, .. } => Value::String(default.clone().unwrap_or_default()),
                     FormInput::Checkbox { default } => Value::Bool(*default),
                     FormInput::Select { options, default } => Value::String(
                         default
@@ -167,10 +173,7 @@ pub struct Listed<'a> {
 
 impl Listed<'_> {
     fn contributed(&self, item: &Item) -> &Arc<[OfferedAction]> {
-        self.open
-            .contributed
-            .get(item.kind.name())
-            .unwrap_or(&self.none)
+        self.open.contributed.get(item.kind.name()).unwrap_or(&self.none)
     }
 }
 
@@ -191,12 +194,7 @@ impl Fresh for Listed<'_> {
 
     fn refresh(&self, n: usize, old: &mut Row) -> bool {
         let (item, highlights) = self.shown[n];
-        old.relist(
-            &self.open.extension,
-            item,
-            self.contributed(item),
-            highlights,
-        )
+        old.relist(&self.open.extension, item, self.contributed(item), highlights)
     }
 }
 
@@ -246,11 +244,7 @@ impl Views {
     /// the new form waits for the Daemon's matches for the filter, so what
     /// shows stays as it is.
     pub fn update(&mut self, extension: String, view: View, contributed: Contributed) -> bool {
-        let Some(open) = self
-            .stack
-            .iter_mut()
-            .find(|open| open.is(&extension, &view.id))
-        else {
+        let Some(open) = self.stack.iter_mut().find(|open| open.is(&extension, &view.id)) else {
             return false;
         };
         let mut new = Open::new(extension, view, contributed);
@@ -300,13 +294,7 @@ impl Views {
 
     /// The Daemon's matches for `text` in a list View, and the form of it
     /// held back for them. Matches for a filter since changed are dropped.
-    pub fn filtered(
-        &mut self,
-        extension: &str,
-        id: &str,
-        text: &str,
-        matches: Vec<ListMatch>,
-    ) -> Shown {
+    pub fn filtered(&mut self, extension: &str, id: &str, text: &str, matches: Vec<ListMatch>) -> Shown {
         let top = self.stack.len().saturating_sub(1);
         let Some((at, open)) = self
             .stack
@@ -423,15 +411,19 @@ impl Views {
     /// Drops finished jobs no progress View follows.
     fn forget_finished(&mut self) {
         let stack = &self.stack;
-        self.jobs.retain(|(by, job)| {
-            job.state == JobState::Running || stack.iter().any(|open| open.follows(by, &job.id))
-        });
+        self.jobs
+            .retain(|(by, job)| job.state == JobState::Running || stack.iter().any(|open| open.follows(by, &job.id)));
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use kotodama_protocol::{Action, FormField, Fraction, Item, ItemKind, SelectOption};
+    use kotodama_protocol::Action;
+    use kotodama_protocol::FormField;
+    use kotodama_protocol::Fraction;
+    use kotodama_protocol::Item;
+    use kotodama_protocol::ItemKind;
+    use kotodama_protocol::SelectOption;
 
     use super::*;
 
@@ -531,10 +523,7 @@ mod tests {
         View {
             id: id.into(),
             title: id.into(),
-            content: ViewContent::List {
-                items,
-                filters_itself,
-            },
+            content: ViewContent::List { items, filters_itself },
         }
     }
 
@@ -565,11 +554,7 @@ mod tests {
     }
 
     fn ids(views: &Views) -> Vec<&str> {
-        views
-            .stack
-            .iter()
-            .map(|open| open.view.id.as_str())
-            .collect()
+        views.stack.iter().map(|open| open.view.id.as_str()).collect()
     }
 
     #[test]
@@ -698,10 +683,7 @@ mod tests {
         let mut views = Views::default();
         views.push(
             "timer".into(),
-            form(vec![
-                field("label", text(None)),
-                field("seconds", text(None)),
-            ]),
+            form(vec![field("label", text(None)), field("seconds", text(None))]),
             none(),
         );
         views.set_value(0, Value::String("Tea".into()));
@@ -709,10 +691,7 @@ mod tests {
 
         assert!(views.update(
             "timer".into(),
-            form(vec![
-                field("seconds", text(None)),
-                field("note", text(Some("hi")))
-            ]),
+            form(vec![field("seconds", text(None)), field("note", text(Some("hi")))]),
             none(),
         ));
         assert_eq!(
@@ -729,10 +708,7 @@ mod tests {
         views.progress("tools".into(), job("b", JobState::Running));
         views.push("tools".into(), progress("p", "b"), none());
         assert_eq!(
-            views
-                .running()
-                .map(|(_, job)| job.id.as_str())
-                .collect::<Vec<_>>(),
+            views.running().map(|(_, job)| job.id.as_str()).collect::<Vec<_>>(),
             ["a", "b"]
         );
 
@@ -790,19 +766,10 @@ mod tests {
         );
         assert_eq!(views.set_filter("a"), filter("bookmarks", "all", "a"));
         assert_eq!(views.set_filter("a"), None, "the same text again");
-        assert_eq!(
-            titles(&views),
-            ["alpha", "beta", "gamma"],
-            "until it answers"
-        );
+        assert_eq!(titles(&views), ["alpha", "beta", "gamma"], "until it answers");
 
         assert_eq!(
-            views.filtered(
-                "bookmarks",
-                "all",
-                "a",
-                vec![found(2, &[1]), found(0, &[0])]
-            ),
+            views.filtered("bookmarks", "all", "a", vec![found(2, &[1]), found(0, &[0])]),
             Shown::Rows
         );
         assert_eq!(titles(&views), ["gamma", "alpha"]);
@@ -840,11 +807,7 @@ mod tests {
             none(),
         );
         assert_eq!(views.set_filter("be"), filter("search", "web", "be"));
-        assert!(views.update(
-            "search".into(),
-            list("web", vec![url("beta")], true),
-            none()
-        ));
+        assert!(views.update("search".into(), list("web", vec![url("beta")], true), none()));
         assert_eq!(titles(&views), ["beta"]);
         assert_eq!(views.top().unwrap().filter, "be", "the filter stays");
     }
@@ -858,12 +821,7 @@ mod tests {
             none(),
         );
         views.set_filter("a");
-        views.filtered(
-            "bookmarks",
-            "all",
-            "a",
-            vec![found(0, &[0]), found(1, &[3])],
-        );
+        views.filtered("bookmarks", "all", "a", vec![found(0, &[0]), found(1, &[3])]);
 
         let updated = list("all", vec![url("delta"), url("alpha"), url("beta")], false);
         assert!(!views.update("bookmarks".into(), updated, none()));
@@ -886,11 +844,7 @@ mod tests {
     #[test]
     fn a_filtered_list_updated_into_another_kind_of_view_shows_it_at_once() {
         let mut views = Views::default();
-        views.push(
-            "bookmarks".into(),
-            list("all", vec![url("alpha")], false),
-            none(),
-        );
+        views.push("bookmarks".into(), list("all", vec![url("alpha")], false), none());
         views.set_filter("a");
         assert!(views.update("bookmarks".into(), detail("all"), none()));
         assert_eq!(views.top().unwrap().rows(), None);
@@ -900,11 +854,7 @@ mod tests {
     #[test]
     fn an_emptied_filter_shows_an_update_held_back_for_matches() {
         let mut views = Views::default();
-        views.push(
-            "bookmarks".into(),
-            list("all", vec![url("alpha")], false),
-            none(),
-        );
+        views.push("bookmarks".into(), list("all", vec![url("alpha")], false), none());
         views.set_filter("a");
         views.update(
             "bookmarks".into(),

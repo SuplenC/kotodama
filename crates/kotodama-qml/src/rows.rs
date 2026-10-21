@@ -7,9 +7,14 @@ use std::fmt::Write;
 use std::ops::Range;
 use std::sync::Arc;
 
-use kotodama_protocol::{
-    APP_ENTRY_KIND, Action, ActionRef, Item, ItemKind, OfferedAction, ResultRef, ShownResult,
-};
+use kotodama_protocol::APP_ENTRY_KIND;
+use kotodama_protocol::Action;
+use kotodama_protocol::ActionRef;
+use kotodama_protocol::Item;
+use kotodama_protocol::ItemKind;
+use kotodama_protocol::OfferedAction;
+use kotodama_protocol::ResultRef;
+use kotodama_protocol::ShownResult;
 
 /// One row of the list model.
 #[derive(Clone, Debug, PartialEq)]
@@ -51,8 +56,7 @@ impl From<ShownResult> for Row {
         let mut highlights = shown.highlights;
         highlights.sort_unstable();
         highlights.dedup();
-        let enters =
-            matches!(&item.kind, ItemKind::Namespaced(kind) if kind.as_str() == APP_ENTRY_KIND);
+        let enters = matches!(&item.kind, ItemKind::Namespaced(kind) if kind.as_str() == APP_ENTRY_KIND);
         Row {
             result: ResultRef {
                 extension: shown.extension,
@@ -74,12 +78,7 @@ impl From<ShownResult> for Row {
 impl Row {
     /// A list View's Item, with the Actions contributed to its kind and the
     /// filter's `highlights`, in order.
-    pub fn listed(
-        extension: &str,
-        item: &Item,
-        contributed: Arc<[OfferedAction]>,
-        highlights: Vec<u32>,
-    ) -> Self {
+    pub fn listed(extension: &str, item: &Item, contributed: Arc<[OfferedAction]>, highlights: Vec<u32>) -> Self {
         Row {
             result: ResultRef {
                 extension: extension.to_owned(),
@@ -137,12 +136,11 @@ impl Row {
             group: Some(offered.extension.as_str()),
             // The Daemon settles clashes among contributors, and with a
             // Result's own Actions, but a View's Items share theirs by kind.
-            shortcut: offered.action.shortcut.as_deref().filter(|shortcut| {
-                !self
-                    .own
-                    .iter()
-                    .any(|own| own.shortcut.as_deref() == Some(*shortcut))
-            }),
+            shortcut: offered
+                .action
+                .shortcut
+                .as_deref()
+                .filter(|shortcut| !self.own.iter().any(|own| own.shortcut.as_deref() == Some(*shortcut))),
         });
         own.chain(contributed)
     }
@@ -183,13 +181,10 @@ impl Row {
                 extension: self.result.extension.clone(),
                 id: own.id.clone(),
             }),
-            None => self
-                .contributed
-                .get(n - self.own.len())
-                .map(|offered| ActionRef {
-                    extension: offered.extension.clone(),
-                    id: offered.action.id.clone(),
-                }),
+            None => self.contributed.get(n - self.own.len()).map(|offered| ActionRef {
+                extension: offered.extension.clone(),
+                id: offered.action.id.clone(),
+            }),
         }
     }
 
@@ -250,10 +245,7 @@ pub struct Rows {
 
 impl From<Vec<Row>> for Rows {
     fn from(head: Vec<Row>) -> Self {
-        Rows {
-            head,
-            tail: Vec::new(),
-        }
+        Rows { head, tail: Vec::new() }
     }
 }
 
@@ -416,10 +408,7 @@ pub fn diff(model: &mut impl Model, new: &impl Fresh) {
             end -= 1;
             continue;
         }
-        let start = kept[..end]
-            .iter()
-            .rposition(|&kept| kept)
-            .map_or(0, |at| at + 1);
+        let start = kept[..end].iter().rposition(|&kept| kept).map_or(0, |at| at + 1);
         remove(model, start..end);
         end = start;
     }
@@ -452,11 +441,7 @@ pub fn diff(model: &mut impl Model, new: &impl Fresh) {
             let before = placed[..placed.binary_search(&n).unwrap_or_default()]
                 .last()
                 .map_or(0, |&previous| {
-                    order
-                        .iter()
-                        .position(|&at| at == previous)
-                        .unwrap_or_default()
-                        + 1
+                    order.iter().position(|&at| at == previous).unwrap_or_default() + 1
                 });
             let from = order.iter().position(|&at| at == n).unwrap_or_default();
             if from == before {
@@ -537,7 +522,9 @@ fn increasing(old_place: &[Option<usize>]) -> Vec<usize> {
 
 #[cfg(test)]
 mod tests {
-    use kotodama_protocol::{Item, ItemKind, OfferedAction};
+    use kotodama_protocol::Item;
+    use kotodama_protocol::ItemKind;
+    use kotodama_protocol::OfferedAction;
 
     use super::*;
 
@@ -629,10 +616,7 @@ mod tests {
                 hidden: false,
                 app_only: false,
                 identity: None,
-                actions: vec![
-                    Action::new("open", "Open"),
-                    Action::new("term", "Open in terminal"),
-                ],
+                actions: vec![Action::new("open", "Open"), Action::new("term", "Open in terminal")],
             },
             contributed: vec![
                 offered("pinner", "pin", "Pin a version here"),
@@ -658,11 +642,7 @@ mod tests {
             [
                 (None, "Open", "projects/open".to_owned()),
                 (None, "Open in terminal", "projects/term".to_owned()),
-                (
-                    Some("pinner"),
-                    "Pin a version here",
-                    "pinner/pin".to_owned()
-                ),
+                (Some("pinner"), "Pin a version here", "pinner/pin".to_owned()),
                 (Some("pinner"), "Unpin", "pinner/unpin".to_owned()),
                 (Some("git"), "Show log", "git/log".to_owned()),
             ]
@@ -731,11 +711,7 @@ mod tests {
             .collect();
         assert_eq!(
             shortcuts,
-            [
-                ("open", Some("ctrl+o")),
-                ("copy", None),
-                ("share", Some("ctrl+s"))
-            ]
+            [("open", Some("ctrl+o")), ("copy", None), ("share", Some("ctrl+s"))]
         );
         assert_eq!(row.result.extension, "bookmarks");
     }
@@ -746,10 +722,7 @@ mod tests {
             row("Firefox", &[0, 1, 4]).markup("red"),
             "<font color=\"red\">Fi</font>re<font color=\"red\">f</font>ox"
         );
-        assert_eq!(
-            row("ab", &[0, 1]).markup("red"),
-            "<font color=\"red\">ab</font>"
-        );
+        assert_eq!(row("ab", &[0, 1]).markup("red"), "<font color=\"red\">ab</font>");
         assert_eq!(row("ab", &[]).markup("red"), "ab");
     }
 
@@ -771,10 +744,7 @@ mod tests {
 
     #[test]
     fn highlights_past_the_title_are_ignored() {
-        assert_eq!(
-            row("ab", &[1, 7]).markup("red"),
-            "a<font color=\"red\">b</font>"
-        );
+        assert_eq!(row("ab", &[1, 7]).markup("red"), "a<font color=\"red\">b</font>");
     }
 
     /// What a view is told.
@@ -797,11 +767,7 @@ mod tests {
     impl Recorder {
         fn new(ids: &[&str]) -> Self {
             Recorder {
-                rows: ids
-                    .iter()
-                    .map(|id| listed(id, &[]))
-                    .collect::<Vec<_>>()
-                    .into(),
+                rows: ids.iter().map(|id| listed(id, &[])).collect::<Vec<_>>().into(),
                 told: Vec::new(),
                 seen: ids.iter().map(|id| id.to_string()).collect(),
             }
@@ -938,11 +904,7 @@ mod tests {
         let model = diffed(&["a", "b", "c", "d", "e", "f"], &to);
         assert_eq!(
             model.told,
-            [
-                Told::Removed(5..6),
-                Told::Removed(2..3),
-                Told::Removed(0..1)
-            ]
+            [Told::Removed(5..6), Told::Removed(2..3), Told::Removed(0..1)]
         );
         assert_eq!(to.made.get(), 0, "no row is made again");
     }
@@ -953,11 +915,7 @@ mod tests {
         let model = diffed(&["b", "e"], &to);
         assert_eq!(
             model.told,
-            [
-                Told::Inserted(0..1),
-                Told::Inserted(2..4),
-                Told::Inserted(5..6)
-            ]
+            [Told::Inserted(0..1), Told::Inserted(2..4), Told::Inserted(5..6)]
         );
         assert_eq!(to.made.get(), 4, "only the new rows are made");
     }
@@ -1008,10 +966,7 @@ mod tests {
         let reversed: Vec<&str> = old.iter().rev().copied().collect();
         let model = diffed(&old, &new(&reversed));
         assert!(
-            model
-                .told
-                .iter()
-                .all(|told| !matches!(told, Told::Moved { .. })),
+            model.told.iter().all(|told| !matches!(told, Told::Moved { .. })),
             "{:?}",
             model.told
         );

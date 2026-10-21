@@ -22,13 +22,30 @@ use std::pin::Pin;
 use std::sync::OnceLock;
 use std::time::Instant;
 
-use cxx_qt::{CxxQtType, Initialize, Threading};
-use cxx_qt_lib::{QByteArray, QHash, QHashPair_i32_QByteArray, QModelIndex, QString, QVariant};
-use kotodama_protocol::{FromFrontEnd, Intro, Problem, ResultRef, Scope, UNDO_SHORTCUT, Value};
-
-use connection::{Update, Writer};
-use rows::{Model, Row, Rows};
-use views::{Open, Shown, Views};
+use connection::Update;
+use connection::Writer;
+use cxx_qt::CxxQtType;
+use cxx_qt::Initialize;
+use cxx_qt::Threading;
+use cxx_qt_lib::QByteArray;
+use cxx_qt_lib::QHash;
+use cxx_qt_lib::QHashPair_i32_QByteArray;
+use cxx_qt_lib::QModelIndex;
+use cxx_qt_lib::QString;
+use cxx_qt_lib::QVariant;
+use kotodama_protocol::FromFrontEnd;
+use kotodama_protocol::Intro;
+use kotodama_protocol::Problem;
+use kotodama_protocol::ResultRef;
+use kotodama_protocol::Scope;
+use kotodama_protocol::UNDO_SHORTCUT;
+use kotodama_protocol::Value;
+use rows::Model;
+use rows::Row;
+use rows::Rows;
+use views::Open;
+use views::Shown;
+use views::Views;
 
 #[cxx_qt::bridge]
 pub mod qobject {
@@ -100,13 +117,7 @@ pub mod qobject {
         /// Enter again, such as `Power Off? ↵ Confirm · Esc Cancel`; empty
         /// when none waits.
         #[qproperty(QString, confirming, READ, NOTIFY)]
-        #[qproperty(
-            QList_QVariant,
-            intro_examples,
-            cxx_name = "introExamples",
-            READ,
-            NOTIFY
-        )]
+        #[qproperty(QList_QVariant, intro_examples, cxx_name = "introExamples", READ, NOTIFY)]
         type KotodamaSearch = super::SearchRust;
 
         fn set_query(self: Pin<&mut KotodamaSearch>, query: QString);
@@ -151,8 +162,7 @@ pub mod qobject {
         /// with `modifiers` held, as a key event gives them. False if none is.
         #[qinvokable]
         #[cxx_name = "runShortcut"]
-        fn run_shortcut(self: Pin<&mut KotodamaSearch>, row: i32, key: i32, modifiers: i32)
-        -> bool;
+        fn run_shortcut(self: Pin<&mut KotodamaSearch>, row: i32, key: i32, modifiers: i32) -> bool;
 
         /// Filters the list View on top by `text`: the Daemon matches it as it
         /// does the search, or the View's Extension does. False if the top
@@ -299,29 +309,18 @@ pub mod qobject {
         );
 
         #[inherit]
-        fn index(self: &KotodamaSearch, row: i32, column: i32, parent: &QModelIndex)
-        -> QModelIndex;
+        fn index(self: &KotodamaSearch, row: i32, column: i32, parent: &QModelIndex) -> QModelIndex;
 
         #[inherit]
         #[cxx_name = "beginInsertRows"]
-        unsafe fn begin_insert_rows(
-            self: Pin<&mut KotodamaSearch>,
-            parent: &QModelIndex,
-            first: i32,
-            last: i32,
-        );
+        unsafe fn begin_insert_rows(self: Pin<&mut KotodamaSearch>, parent: &QModelIndex, first: i32, last: i32);
         #[inherit]
         #[cxx_name = "endInsertRows"]
         unsafe fn end_insert_rows(self: Pin<&mut KotodamaSearch>);
 
         #[inherit]
         #[cxx_name = "beginRemoveRows"]
-        unsafe fn begin_remove_rows(
-            self: Pin<&mut KotodamaSearch>,
-            parent: &QModelIndex,
-            first: i32,
-            last: i32,
-        );
+        unsafe fn begin_remove_rows(self: Pin<&mut KotodamaSearch>, parent: &QModelIndex, first: i32, last: i32);
         #[inherit]
         #[cxx_name = "endRemoveRows"]
         unsafe fn end_remove_rows(self: Pin<&mut KotodamaSearch>);
@@ -355,7 +354,9 @@ pub mod qobject {
     }
 }
 
-use qobject::{KotodamaSearch, QStringList, QVector_i32};
+use qobject::KotodamaSearch;
+use qobject::QStringList;
+use qobject::QVector_i32;
 
 // Roles start at Qt::UserRole.
 const TITLE: i32 = 0x100;
@@ -468,9 +469,7 @@ impl Default for SearchRust {
 impl Initialize for KotodamaSearch {
     fn initialize(self: Pin<&mut Self>) {
         let qt_thread = self.qt_thread();
-        connection::spawn(move |updates| {
-            qt_thread.queue(move |search| search.apply(updates)).is_ok()
-        });
+        connection::spawn(move |updates| qt_thread.queue(move |search| search.apply(updates)).is_ok());
     }
 }
 
@@ -544,9 +543,7 @@ impl KotodamaSearch {
             .as_ref()
             .and_then(|intro| intro.note.as_deref())
             .map(QString::from);
-        let examples = intro
-            .as_ref()
-            .map(|intro| variant::examples(&intro.examples));
+        let examples = intro.as_ref().map(|intro| variant::examples(&intro.examples));
         let mut this = self.as_mut().rust_mut();
         this.intro = intro;
         this.intro_about = about.unwrap_or_default();
@@ -618,9 +615,7 @@ impl KotodamaSearch {
     }
 
     fn hints(&self, row: i32) -> QString {
-        self.row(row)
-            .map(|row| QString::from(&row.hints()))
-            .unwrap_or_default()
+        self.row(row).map(|row| QString::from(&row.hints())).unwrap_or_default()
     }
 
     fn run_action(mut self: Pin<&mut Self>, row: i32, n: i32) -> bool {
@@ -723,10 +718,7 @@ impl KotodamaSearch {
         let Ok(field) = usize::try_from(field) else {
             return false;
         };
-        self.as_mut()
-            .rust_mut()
-            .views
-            .set_value(field, Value::Bool(checked))
+        self.as_mut().rust_mut().views.set_value(field, Value::Bool(checked))
     }
 
     fn submit(mut self: Pin<&mut Self>) -> bool {
@@ -770,10 +762,7 @@ impl KotodamaSearch {
         let Some(change) = self.offered else {
             return false;
         };
-        let sent = self
-            .as_mut()
-            .rust_mut()
-            .send(&FromFrontEnd::Undo { change });
+        let sent = self.as_mut().rust_mut().send(&FromFrontEnd::Undo { change });
         if sent {
             self.as_mut().set_toast(None);
         }
@@ -806,10 +795,7 @@ impl KotodamaSearch {
     }
 
     fn data(&self, index: &QModelIndex, role: i32) -> QVariant {
-        let Some(row) = usize::try_from(index.row())
-            .ok()
-            .and_then(|row| self.rows.get(row))
-        else {
+        let Some(row) = usize::try_from(index.row()).ok().and_then(|row| self.rows.get(row)) else {
             return QVariant::default();
         };
         let text = match role {
@@ -843,11 +829,7 @@ impl KotodamaSearch {
 
     fn row_count(&self, parent: &QModelIndex) -> i32 {
         // A list has rows only at the top.
-        if parent.is_valid() {
-            0
-        } else {
-            self.rows.len() as i32
-        }
+        if parent.is_valid() { 0 } else { self.rows.len() as i32 }
     }
 
     /// Takes what the connection read, on the Qt thread, and shows what it
@@ -858,8 +840,7 @@ impl KotodamaSearch {
             // What QML is asked to do, such as open on the top View, sees
             // what came before it.
             if update.signals() {
-                self.as_mut()
-                    .show(std::mem::replace(&mut shown, Shown::Same));
+                self.as_mut().show(std::mem::replace(&mut shown, Shown::Same));
             }
             shown = shown.max(self.as_mut().apply_one(update));
         }
@@ -962,10 +943,7 @@ impl KotodamaSearch {
                 view,
                 contributed,
             } => {
-                self.as_mut()
-                    .rust_mut()
-                    .views
-                    .push(extension, view, contributed);
+                self.as_mut().rust_mut().views.push(extension, view, contributed);
                 Shown::View
             }
             Update::ViewUpdated {
@@ -973,12 +951,7 @@ impl KotodamaSearch {
                 view,
                 contributed,
             } => {
-                if self
-                    .as_mut()
-                    .rust_mut()
-                    .views
-                    .update(extension, view, contributed)
-                {
+                if self.as_mut().rust_mut().views.update(extension, view, contributed) {
                     Shown::View
                 } else {
                     Shown::Same
@@ -1011,10 +984,7 @@ impl KotodamaSearch {
                 Shown::View
             }
             Update::JobProgress { extension, job } => {
-                let followed = self
-                    .views
-                    .top()
-                    .is_some_and(|open| open.follows(&extension, &job.id));
+                let followed = self.views.top().is_some_and(|open| open.follows(&extension, &job.id));
                 self.as_mut().rust_mut().views.progress(extension, job);
                 if followed {
                     let view = variant::view(&self.views);
@@ -1179,11 +1149,9 @@ impl Model for QtModel<'_> {
         // SAFETY: `rows::diff` and `rows::replace` remove the rows before
         // `end_remove`, as Qt requires.
         unsafe {
-            self.0.as_mut().begin_remove_rows(
-                &QModelIndex::default(),
-                rows.start as i32,
-                rows.end as i32 - 1,
-            );
+            self.0
+                .as_mut()
+                .begin_remove_rows(&QModelIndex::default(), rows.start as i32, rows.end as i32 - 1);
         }
     }
 
@@ -1195,11 +1163,9 @@ impl Model for QtModel<'_> {
     fn begin_insert(&mut self, rows: std::ops::Range<usize>) {
         // SAFETY: the rows are inserted before `end_insert`, as Qt requires.
         unsafe {
-            self.0.as_mut().begin_insert_rows(
-                &QModelIndex::default(),
-                rows.start as i32,
-                rows.end as i32 - 1,
-            );
+            self.0
+                .as_mut()
+                .begin_insert_rows(&QModelIndex::default(), rows.start as i32, rows.end as i32 - 1);
         }
     }
 

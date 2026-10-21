@@ -1,4 +1,6 @@
-use cxx_qt_build::{CxxQtBuilder, PluginType, QmlModule};
+use cxx_qt_build::CxxQtBuilder;
+use cxx_qt_build::PluginType;
+use cxx_qt_build::QmlModule;
 
 fn main() {
     let builder = CxxQtBuilder::new_qml_module(
@@ -14,10 +16,7 @@ fn main() {
     unsafe {
         builder.cc_builder(|cc| {
             cc.define("qt_plugin_instance", "kotodama_qt_plugin_instance");
-            cc.define(
-                "qt_plugin_query_metadata_v2",
-                "kotodama_qt_plugin_query_metadata_v2",
-            );
+            cc.define("qt_plugin_query_metadata_v2", "kotodama_qt_plugin_query_metadata_v2");
         })
     }
     .build();
