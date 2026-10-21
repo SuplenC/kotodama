@@ -1,6 +1,17 @@
 //! The open View, the jobs and a Result's Action panel as the plain maps and
 //! lists QML reads them as. They are small and change only on a View, job or
 //! Ctrl+K, so unlike Results they may pass through JavaScript.
+//!
+//! # Owns
+//!
+//! - The keys of each map QML reads: [`view`], [`jobs`], [`actions`] and [`examples`].
+//!
+//! # Not here
+//!
+//! - The Views and jobs themselves: `views`; the Action panel: `rows`.
+//! - The Results, which reach QML through the model's roles: `model`.
+
+#![forbid(unsafe_code)]
 
 use cxx_qt_lib::QList;
 use cxx_qt_lib::QMap;
@@ -17,7 +28,9 @@ use kotodama_protocol::ViewContent;
 use crate::rows::Row;
 use crate::views::Views;
 
+/// A JavaScript object, as QML reads a `QVariantMap`.
 pub type Map = QMap<QMapPair_QString_QVariant>;
+/// A JavaScript array, as QML reads a `QVariantList`.
 pub type List = QList<QVariant>;
 
 fn text(value: &str) -> QVariant {

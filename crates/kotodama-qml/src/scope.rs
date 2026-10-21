@@ -1,6 +1,17 @@
 //! The search box in an app: once the Daemon says a query is one
 //! Extension's search, the box shows the rest of the query, after a chip for
 //! the app, and the full query sent is the app's word, a space and the box.
+//!
+//! # Owns
+//!
+//! - Reading a query as an app's ([`behind`]) and writing it back ([`full`]).
+//!
+//! # Not here
+//!
+//! - Entering and leaving an app, and the chip: `lib.rs`.
+//! - Which word names which app: the Daemon.
+
+#![forbid(unsafe_code)]
 
 /// What `query` has after `app`, an app's word, as the Daemon reads a query in
 /// an app: the first word, in any case, then one whitespace character. `None`

@@ -8,7 +8,7 @@ fn main() {
             .plugin_type(PluginType::Dynamic)
             .qml_file("qml/KotodamaMenu.qml"),
     )
-    .files(["src/lib.rs"]);
+    .files(["src/bridge.rs"]);
     // Qt loads a plugin through two C functions that moc defines, but a Rust
     // cdylib exports only what Rust defines, and drops the rest as unused.
     // moc's are renamed here, and src/plugin.rs exports the real names.

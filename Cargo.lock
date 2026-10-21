@@ -967,6 +967,7 @@ dependencies = [
  "cxx-qt-build",
  "cxx-qt-lib",
  "kotodama-protocol",
+ "thiserror 2.0.21",
 ]
 
 [[package]]
