@@ -19,14 +19,30 @@
 use std::process::ExitCode;
 use std::sync::mpsc::Sender;
 use std::thread;
-use std::time::{Duration, Instant, SystemTime};
+use std::time::Duration;
+use std::time::Instant;
+use std::time::SystemTime;
 
 use jiff::Zoned;
-use kotodama_calculator::{
-    Answer, COPY, COPY_EXPRESSION, Calculator, DecimalSeparator, Evaluation, Rates, rates,
-};
-use kotodama_extension::{Connection, Event, STACK_SIZE, Writer, config, dirs};
-use kotodama_protocol::{Clipboard, FromExtension, Outcome, Table, ToExtension};
+use kotodama_calculator::Answer;
+use kotodama_calculator::COPY;
+use kotodama_calculator::COPY_EXPRESSION;
+use kotodama_calculator::Calculator;
+use kotodama_calculator::DecimalSeparator;
+use kotodama_calculator::Evaluation;
+use kotodama_calculator::Rates;
+use kotodama_calculator::rates;
+use kotodama_extension::Connection;
+use kotodama_extension::Event;
+use kotodama_extension::STACK_SIZE;
+use kotodama_extension::Writer;
+use kotodama_extension::config;
+use kotodama_extension::dirs;
+use kotodama_protocol::Clipboard;
+use kotodama_protocol::FromExtension;
+use kotodama_protocol::Outcome;
+use kotodama_protocol::Table;
+use kotodama_protocol::ToExtension;
 
 /// The curl the rates are fetched with. A package may build in its path.
 const CURL: &str = match option_env!("KOTODAMA_CURL") {
@@ -167,11 +183,7 @@ impl Extension {
                 self.answer(id, query, prefix.is_some())
             }
             ToExtension::CancelLiveQuery { id } => {
-                if self
-                    .waiting
-                    .as_ref()
-                    .is_some_and(|waiting| waiting.id == id)
-                {
+                if self.waiting.as_ref().is_some_and(|waiting| waiting.id == id) {
                     self.waiting = None;
                 }
                 Ok(())
@@ -186,22 +198,14 @@ impl Extension {
                     Ok(text) => Outcome::Copy(Clipboard::Text(text)),
                     Err(message) => Outcome::Failed { message },
                 };
-                self.writer.send(&FromExtension::ActionDone {
-                    invocation,
-                    outcome,
-                })
+                self.writer.send(&FromExtension::ActionDone { invocation, outcome })
             }
             _ => Ok(()),
         }
     }
 
     /// Answers the Live query `id`, or leaves it waiting for exchange rates.
-    fn answer(
-        &mut self,
-        id: u64,
-        query: String,
-        routed: bool,
-    ) -> Result<(), kotodama_protocol::Error> {
+    fn answer(&mut self, id: u64, query: String, routed: bool) -> Result<(), kotodama_protocol::Error> {
         let asked = self.rates.asked();
         let mut evaluation = self.calculator.evaluate(&query, routed, &Zoned::now());
         if self.rates.asked() != asked {
@@ -244,10 +248,7 @@ impl Extension {
             .exchange
             .fetched
             .is_some_and(|fetched| fetched.elapsed().is_ok_and(|age| age < rates::MAX_AGE));
-        let retry = self
-            .exchange
-            .failed
-            .is_none_or(|failed| failed.elapsed() >= RETRY);
+        let retry = self.exchange.failed.is_none_or(|failed| failed.elapsed() >= RETRY);
         if fresh || !self.settings.network || self.exchange.fetching || !retry {
             return;
         }
@@ -266,10 +267,7 @@ impl Extension {
         }
     }
 
-    fn fetched(
-        &mut self,
-        fetched: Result<rates::Table, String>,
-    ) -> Result<(), kotodama_protocol::Error> {
+    fn fetched(&mut self, fetched: Result<rates::Table, String>) -> Result<(), kotodama_protocol::Error> {
         self.exchange.fetching = false;
         match fetched {
             Ok(rates) => {

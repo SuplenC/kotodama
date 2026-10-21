@@ -7,10 +7,12 @@
 
 use std::fs;
 use std::thread;
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use std::time::Instant;
 
 use kotodama_extension::testing;
-use kotodama_protocol::{FromFrontEnd, ToFrontEnd};
+use kotodama_protocol::FromFrontEnd;
+use kotodama_protocol::ToFrontEnd;
 use kotodamad::paths::Paths;
 
 const QUERIES: usize = 1_000;
@@ -47,17 +49,14 @@ fn main() {
     // Sends `query` and waits for the answer to lead the Results; false if
     // it doesn't within a second.
     let mut answered = |query: &str| -> bool {
-        ui.send(&FromFrontEnd::Query { text: query.into() })
-            .unwrap();
+        ui.send(&FromFrontEnd::Query { text: query.into() }).unwrap();
         let deadline = Instant::now() + Duration::from_secs(1);
         while Instant::now() < deadline {
             let Ok(Some(message)) = ui.recv::<ToFrontEnd>() else {
                 return false;
             };
             if let ToFrontEnd::Results { results, .. } = message
-                && results
-                    .first()
-                    .is_some_and(|row| row.extension == "calculator")
+                && results.first().is_some_and(|row| row.extension == "calculator")
             {
                 return true;
             }
@@ -117,12 +116,7 @@ fn calculator_resident() -> Option<u64> {
     let pid = tasks
         .flatten()
         .filter_map(|task| fs::read_to_string(task.path().join("children")).ok())
-        .flat_map(|children| {
-            children
-                .split_whitespace()
-                .map(str::to_owned)
-                .collect::<Vec<_>>()
-        })
+        .flat_map(|children| children.split_whitespace().map(str::to_owned).collect::<Vec<_>>())
         .find(|pid| {
             fs::read_to_string(format!("/proc/{pid}/comm"))
                 .is_ok_and(|comm| "kotodama-calculator".starts_with(comm.trim()))

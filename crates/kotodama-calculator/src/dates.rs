@@ -3,17 +3,18 @@
 //!
 //! - date arithmetic: `today + 3 weeks`, `dec 25 - 1 month 2 days`;
 //! - counting days: `days until dec 25`, `days since 2026-01-01`;
-//! - a time in another zone: `5pm PT in Warsaw`, `now in Tokyo`,
-//!   `17:00 UTC to Europe/Lisbon`.
+//! - a time in another zone: `5pm PT in Warsaw`, `now in Tokyo`, `17:00 UTC to Europe/Lisbon`.
 //!
 //! A date is `today`, `tomorrow`, `yesterday`, `2026-12-25`, `dec 25` or
 //! `25 december`, with or without a year. A zone is an abbreviation from
 //! [`ABBREVIATIONS`], an IANA name, or the city an IANA name ends in. Zones
 //! come from the system's time zone database.
 
-use jiff::civil::{Date, Time};
+use jiff::Span;
+use jiff::Zoned;
+use jiff::civil::Date;
+use jiff::civil::Time;
 use jiff::tz::TimeZone;
-use jiff::{Span, Zoned};
 
 /// Evaluates `query` as of `now`, if it has one of the forms above.
 pub fn evaluate(query: &str, now: &Zoned) -> Option<String> {

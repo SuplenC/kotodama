@@ -10,8 +10,12 @@ mod math;
 pub mod rates;
 
 pub use jiff::Zoned;
-use kotodama_protocol::{Action, Fraction, Item, ItemKind, LiveResult, NamespacedKind};
-
+use kotodama_protocol::Action;
+use kotodama_protocol::Fraction;
+use kotodama_protocol::Item;
+use kotodama_protocol::ItemKind;
+use kotodama_protocol::LiveResult;
+use kotodama_protocol::NamespacedKind;
 pub use locale::DecimalSeparator;
 pub use rates::Rates;
 
@@ -94,9 +98,7 @@ impl Answer {
         LiveResult {
             item: Item {
                 id: self.expression.clone(),
-                kind: ItemKind::Namespaced(
-                    NamespacedKind::new("calculator.answer").expect("a valid kind"),
-                ),
+                kind: ItemKind::Namespaced(NamespacedKind::new("calculator.answer").expect("a valid kind")),
                 identity: None,
                 title: self.value.clone(),
                 subtitle: Some(self.expression.clone()),

@@ -1,6 +1,7 @@
 //! Arithmetic, units and currency, through fend, and what counts as math.
 
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use std::time::Instant;
 
 use crate::locale::DecimalSeparator;
 use crate::rates::Rates;
@@ -78,11 +79,7 @@ impl Math {
             }
             None => shown.trim(),
         };
-        if shown.is_empty()
-            || shown.len() > MAX_RESULT
-            || shown.contains(char::is_control)
-            || same(shown, query)
-        {
+        if shown.is_empty() || shown.len() > MAX_RESULT || shown.contains(char::is_control) || same(shown, query) {
             return Outcome::Nothing;
         }
         Outcome::Value(shown.to_owned())
@@ -144,14 +141,9 @@ fn grouped_in_thousands(query: &str, separator: DecimalSeparator) -> bool {
         {
             continue;
         }
-        let digits_before = before
-            .iter()
-            .rev()
-            .take_while(|b| b.is_ascii_digit())
-            .count();
+        let digits_before = before.iter().rev().take_while(|b| b.is_ascii_digit()).count();
         let digits_after = after.iter().take_while(|b| b.is_ascii_digit()).count();
-        let in_decimals =
-            before.len() > digits_before && before[before.len() - digits_before - 1] == decimal;
+        let in_decimals = before.len() > digits_before && before[before.len() - digits_before - 1] == decimal;
         if digits_before > 3 || digits_after != 3 || in_decimals {
             return false;
         }
@@ -175,25 +167,10 @@ fn round(approximate: &str, decimal: u8) -> String {
         {
             continue;
         }
-        let start = at
-            - bytes[..at]
-                .iter()
-                .rev()
-                .take_while(|b| b.is_ascii_digit())
-                .count();
-        let end = at
-            + 1
-            + bytes[at + 1..]
-                .iter()
-                .take_while(|b| b.is_ascii_digit())
-                .count();
+        let start = at - bytes[..at].iter().rev().take_while(|b| b.is_ascii_digit()).count();
+        let end = at + 1 + bytes[at + 1..].iter().take_while(|b| b.is_ascii_digit()).count();
         rounded.push_str(&approximate[copied..start]);
-        round_number(
-            &mut rounded,
-            &bytes[start..at],
-            &bytes[at + 1..end],
-            decimal,
-        );
+        round_number(&mut rounded, &bytes[start..at], &bytes[at + 1..end], decimal);
         copied = end;
     }
     rounded.push_str(&approximate[copied..]);
@@ -209,9 +186,7 @@ fn round_number(out: &mut String, whole: &[u8], decimals: &[u8], decimal: u8) {
         out.push('0');
         return;
     };
-    let kept = (first + SIGNIFICANT_DIGITS)
-        .max(whole_len)
-        .min(digits.len());
+    let kept = (first + SIGNIFICANT_DIGITS).max(whole_len).min(digits.len());
     let up = digits.get(kept).is_some_and(|&digit| digit >= b'5');
     digits.truncate(kept);
     if up {
@@ -233,8 +208,7 @@ fn round_number(out: &mut String, whole: &[u8], decimals: &[u8], decimal: u8) {
             .iter()
             .rposition(|&digit| digit != b'0')
             .map_or(0, |at| at + 1);
-    let push =
-        |out: &mut String, digits: &[u8]| out.extend(digits.iter().map(|&digit| char::from(digit)));
+    let push = |out: &mut String, digits: &[u8]| out.extend(digits.iter().map(|&digit| char::from(digit)));
     push(out, &digits[..whole_len]);
     if end > whole_len {
         out.push(char::from(decimal));

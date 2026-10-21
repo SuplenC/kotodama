@@ -5,9 +5,13 @@
 use std::collections::HashMap;
 use std::error::Error;
 use std::path::Path;
-use std::process::{Command, Stdio};
-use std::sync::{Arc, Mutex, PoisonError};
-use std::time::{Duration, SystemTime};
+use std::process::Command;
+use std::process::Stdio;
+use std::sync::Arc;
+use std::sync::Mutex;
+use std::sync::PoisonError;
+use std::time::Duration;
+use std::time::SystemTime;
 
 /// Where the rates come from, unless the config says otherwise.
 pub const DEFAULT_URL: &str = "https://api.frankfurter.app/latest";
@@ -91,9 +95,7 @@ pub fn parse(json: &[u8]) -> Result<Table, String> {
 /// The cached rates, and when they were fetched.
 pub fn load(cache: &Path) -> Option<(Table, SystemTime)> {
     let json = std::fs::read(cache).ok()?;
-    let fetched = std::fs::metadata(cache)
-        .and_then(|meta| meta.modified())
-        .ok()?;
+    let fetched = std::fs::metadata(cache).and_then(|meta| meta.modified()).ok()?;
     Some((parse(&json).ok()?, fetched))
 }
 
@@ -117,10 +119,7 @@ pub fn fetch(curl: &str, url: &str, cache: Option<&Path>) -> Result<Table, Strin
     if let Some(cache) = cache
         && let Err(err) = save(cache, &output.stdout)
     {
-        kotodama_extension::log!(
-            "couldn't cache the exchange rates in {}: {err}",
-            cache.display()
-        );
+        kotodama_extension::log!("couldn't cache the exchange rates in {}: {err}", cache.display());
     }
     Ok(rates)
 }

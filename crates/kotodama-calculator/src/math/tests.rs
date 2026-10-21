@@ -26,10 +26,7 @@ fn rounding_carries_into_the_whole_part() {
 
 #[test]
 fn rounding_reads_every_number_with_the_decimal_separator_given() {
-    assert_eq!(
-        round("0.5000000000 + 0.8660254038i", b'.'),
-        "0.5 + 0.8660254038i"
-    );
+    assert_eq!(round("0.5000000000 + 0.8660254038i", b'.'), "0.5 + 0.8660254038i");
     assert_eq!(round("26,0975900740 mi", b','), "26,097590074 mi");
     assert_eq!(round("26.0975900740 mi", b','), "26.0975900740 mi");
 }
@@ -37,24 +34,10 @@ fn rounding_reads_every_number_with_the_decimal_separator_given() {
 #[test]
 fn thousands_separators_stand_between_groups_of_a_thousand() {
     let dot = DecimalSeparator::Dot;
-    for query in [
-        "1,000",
-        "1,000 + 1",
-        "12,345.5 * 2",
-        "1,000,000 / 3",
-        "2+2",
-        "(1, 2)",
-    ] {
+    for query in ["1,000", "1,000 + 1", "12,345.5 * 2", "1,000,000 / 3", "2+2", "(1, 2)"] {
         assert!(grouped_in_thousands(query, dot), "{query}");
     }
-    for query in [
-        "3,5 * 2",
-        "1,00 + 1",
-        "1000,000",
-        "1,0000",
-        "1.000,5 + 1",
-        "1,2,3",
-    ] {
+    for query in ["3,5 * 2", "1,00 + 1", "1000,000", "1,0000", "1.000,5 + 1", "1,2,3"] {
         assert!(!grouped_in_thousands(query, dot), "{query}");
     }
 }

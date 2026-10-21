@@ -1,10 +1,14 @@
 //! What the calculator answers, and what it leaves alone, for queries as the
 //! Daemon sends them.
 
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use std::time::Instant;
 
 use jiff::Zoned;
-use kotodama_calculator::{Calculator, DecimalSeparator, Evaluation, Rates};
+use kotodama_calculator::Calculator;
+use kotodama_calculator::DecimalSeparator;
+use kotodama_calculator::Evaluation;
+use kotodama_calculator::Rates;
 
 /// Tuesday 20 October 2026, 10:00 in Warsaw.
 fn now() -> Zoned {
@@ -49,16 +53,7 @@ fn simple_arithmetic_is_answered() {
 
 #[test]
 fn input_that_is_not_math_gives_nothing() {
-    for query in [
-        "fi",
-        "firefox",
-        "a",
-        "e",
-        "version",
-        "sin",
-        "hello world",
-        "2 +",
-    ] {
+    for query in ["fi", "firefox", "a", "e", "version", "sin", "hello world", "2 +"] {
         assert_eq!(answer(query), None, "{query}");
     }
 }
@@ -108,27 +103,18 @@ fn currency_waits_for_rates_then_converts_with_them() {
         answer_with(&mut calculator, "100 usd to eur").as_deref(),
         Some("80 EUR")
     );
-    assert_eq!(
-        answer_with(&mut calculator, "10 eur in pln").as_deref(),
-        Some("40 PLN")
-    );
+    assert_eq!(answer_with(&mut calculator, "10 eur in pln").as_deref(), Some("40 PLN"));
     assert_eq!(answer_with(&mut calculator, "100 xyz to eur"), None);
 }
 
 #[test]
 fn dates_take_days_weeks_months_and_years() {
-    assert_eq!(
-        answer("today + 3 weeks").as_deref(),
-        Some("Tuesday, 10 November 2026")
-    );
+    assert_eq!(answer("today + 3 weeks").as_deref(), Some("Tuesday, 10 November 2026"));
     assert_eq!(
         answer("tomorrow - 1 month").as_deref(),
         Some("Monday, 21 September 2026")
     );
-    assert_eq!(
-        answer("dec 25 + 1 week").as_deref(),
-        Some("Friday, 1 January 2027")
-    );
+    assert_eq!(answer("dec 25 + 1 week").as_deref(), Some("Friday, 1 January 2027"));
     assert_eq!(
         answer("2026-12-25 - 3 days").as_deref(),
         Some("Tuesday, 22 December 2026")
@@ -156,10 +142,7 @@ fn times_convert_between_time_zones() {
         answer("5pm PT in Warsaw").as_deref(),
         Some("02:00 CEST, Wednesday 21 October")
     );
-    assert_eq!(
-        answer("now in Tokyo").as_deref(),
-        Some("17:00 JST, Tuesday 20 October")
-    );
+    assert_eq!(answer("now in Tokyo").as_deref(), Some("17:00 JST, Tuesday 20 October"));
     assert_eq!(
         answer("17:00 UTC to Europe/Warsaw").as_deref(),
         Some("19:00 CEST, Tuesday 20 October")
@@ -198,14 +181,8 @@ fn with_a_decimal_comma_answers_read_and_write_one() {
     assert_eq!(with_comma("3,5 * 2").as_deref(), Some("7"));
     assert_eq!(with_comma("1,5 + 1").as_deref(), Some("2,5"));
     assert_eq!(with_comma("1/3").as_deref(), Some("0,3333333333"));
-    assert_eq!(
-        with_comma("42 km in mi").as_deref(),
-        Some("26,097590074 mi")
-    );
-    assert_eq!(
-        with_comma("1,5 kg in lb").as_deref(),
-        Some("3,3069339328 lbs")
-    );
+    assert_eq!(with_comma("42 km in mi").as_deref(), Some("26,097590074 mi"));
+    assert_eq!(with_comma("1,5 kg in lb").as_deref(), Some("3,3069339328 lbs"));
     assert_eq!(with_comma("1.000 + 1").as_deref(), Some("1001"));
     assert_eq!(with_comma("1.000.000,5 * 2").as_deref(), Some("2000001"));
 }
