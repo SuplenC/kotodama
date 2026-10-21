@@ -177,8 +177,8 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
         }
     }
 
-    /// Changes an Extension's Items: here and now, or on the indexing
-    /// thread, whose new version comes back as an [`Event::Indexed`].
+    /// Changes an Extension's Items: here, at once, or on the indexing
+    /// thread, whose new version comes back as an [`Event::Indexed`](super::Event::Indexed).
     pub(super) fn edit_items(&mut self, id: ExtensionId, edit: Edit, now: Instant) {
         if let Some(indexer) = &mut self.indexer {
             indexer.edit(id, edit);
@@ -335,7 +335,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
     }
 
     /// Ranks the Empty query again in every session showing it but `except`,
-    /// for what the History learned or the time of day now: from scratch
+    /// for what the History learned or the current time of day: from scratch
     /// for a menu opening, and otherwise as a late update, which keeps the
     /// rows on screen where they are.
     pub(super) fn refresh_empty(&mut self, update: Update, except: Option<FrontEndId>) {

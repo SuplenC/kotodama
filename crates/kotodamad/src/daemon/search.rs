@@ -430,7 +430,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
     /// then near misses are looked for among the last one's, if it looked for
     /// them and allowed as many typos. The candidates before `indexed` are the
     /// Indexed items, in slot order, and stay so; returns how many there are
-    /// now.
+    /// after.
     pub(super) fn add_near_misses(
         &mut self,
         session: &mut Session,
@@ -532,9 +532,9 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
 
     /// Applies what the Daemon learned from the user, and the user's
     /// keywords, to the candidates. Frecency breaks ties within a tier and,
-    /// from [`Settings::lift_threshold`], lifts a Result a tier. What the query names by an
-    /// Alias goes first, with exact matches the Learned choice wasn't picked
-    /// over, then the Learned choice. The candidates before
+    /// from [`Settings::lift_threshold`](crate::history::Settings::lift_threshold), lifts a Result
+    /// a tier. What the query names by an Alias goes first, with exact matches the Learned
+    /// choice wasn't picked over, then the Learned choice. The candidates before
     /// `indexed` must be the Indexed items, in slot order. Returns the Action
     /// an Alias makes primary, with the Result it is for.
     pub(super) fn learn(
@@ -558,8 +558,8 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
     }
 
     /// Gives each candidate its Frecency, and lifts a Tier those used enough,
-    /// from [`Settings::lift_threshold`]. The candidates before `indexed`
-    /// must be the Indexed items, in slot order.
+    /// from [`Settings::lift_threshold`](crate::history::Settings::lift_threshold). The candidates
+    /// before `indexed` must be the Indexed items, in slot order.
     pub(super) fn add_frecency(&mut self, session: &Session, candidates: &mut [Candidate], indexed: usize, when: When) {
         let settings = *self.history.settings();
         self.cache_frecent();

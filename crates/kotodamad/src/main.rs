@@ -1,3 +1,13 @@
+//! `kotodamad`: the Daemon's command line.
+//!
+//! # Owns
+//!
+//! - Parsing the command line, and logging to stderr.
+//!
+//! # Not here
+//!
+//! - Running the Daemon and printing the config: `lib.rs`.
+
 use std::path::PathBuf;
 use std::process::ExitCode;
 

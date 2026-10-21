@@ -1,5 +1,14 @@
 //! Which kinds of Result come first when two match a query equally well: apps
 //! before projects, projects before bookmarks, and bookmarks before files.
+//!
+//! # Owns
+//!
+//! - [`KindOrder`]: the kind order of the `[ranking]` table.
+//! - [`KindPlaces`]: each Segment's kinds by place, worked out per search.
+//!
+//! # Not here
+//!
+//! - The rest of the Result order: `daemon.rs`, `Candidate::rank`.
 
 use kotodama_protocol::ItemKind;
 use kotodama_protocol::KindName;
@@ -135,7 +144,7 @@ impl KindOrder {
 }
 
 /// The place of each kind every Segment of the Index names, by Segment and
-/// kind (see [`Segment::kinds`](crate::segment::Segment::kinds)). Worked out
+/// kind (see `Segment::kinds`). Worked out
 /// per search from the few kinds there are. Ranking then looks up each
 /// Result's place, and doesn't compare kind names.
 #[derive(Debug, Default)]

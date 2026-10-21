@@ -319,7 +319,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             arguments,
         });
         // An Extension that stopped reading is stopped once this event is
-        // handled, so the Action fails now rather than when its ExtensionDown
+        // handled, so the Action fails at once rather than when its ExtensionDown
         // arrives.
         if !answering {
             return Err(format!("{} stopped answering", ext.name()));
@@ -516,7 +516,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
 
     /// Adds the Actions the Daemon offers on a Result the History keeps
     /// anything for: Forget, and clearing its Extension's History. They go
-    /// with the Item's own Actions on the Daemon's own Results (ADR 0005),
+    /// with the Item's own Actions on the Daemon's own Results,
     /// and after the Contributed actions on the rest. Only Results with
     /// a History get them, so a row costs nothing more until something is
     /// picked through it.

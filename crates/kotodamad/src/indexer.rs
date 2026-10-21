@@ -1,4 +1,4 @@
-//! Indexing off the keystroke path (ADR 0017): Extensions' changes to their
+//! Indexing off the keystroke path: Extensions' changes to their
 //! Items are made on a thread of their own, into a new version of each
 //! changed Segment, which the Daemon puts in whole between two events. A keystroke never waits for
 //! a change, and never sees half of one.
@@ -11,6 +11,15 @@
 //! picks, and those a keyword or an Alias names. Each read goes out with the
 //! version it was read from, so the thread answering keystrokes never reads
 //! a payload for them, nor plans.
+//!
+//! # Owns
+//!
+//! - [`Indexer`]: the `index` thread and the changes it coalesces.
+//! - [`Indexed`], [`Kept`] and [`Plan`]: what it sends back, and the hot Items it plans.
+//!
+//! # Not here
+//!
+//! - Putting a new version in: `daemon/from_extension.rs`. The Segments: `segment.rs`.
 
 use std::collections::HashMap;
 use std::collections::HashSet;
@@ -55,7 +64,7 @@ pub struct Indexed {
     pub(crate) reads: Vec<Read>,
 }
 
-/// Items to keep resident, read off the Segments the Daemon has now.
+/// Items to keep resident, read off the Segments the Daemon has.
 pub struct Kept {
     /// The hot Items, in slot order, when they were planned again.
     pub(crate) hot: Option<Vec<Slot>>,
@@ -113,7 +122,7 @@ pub struct Plan {
 
 impl Plan {
     /// The hot Items, in slot order, and the Empty query's most used Results
-    /// ranked ahead: for now, and for the start of the coming part of the
+    /// ranked ahead: for the current time, and for the start of the coming part of the
     /// day.
     pub fn run(&self) -> (Vec<Slot>, Ahead) {
         let mut habits = Vec::new();
@@ -210,7 +219,7 @@ enum Job {
     Clear(ExtensionId),
     /// Work out the hot Items again.
     Plan(Plan),
-    /// These Items, by Extension and id, are what the Aliases name now.
+    /// These Items, by Extension and id, are what the Aliases name.
     Pin(Vec<(ExtensionId, String)>),
 }
 

@@ -6,6 +6,18 @@
 //! order. Later values win: tables merge key by key, and anything else,
 //! including a list, replaces the earlier value whole. File names carry no
 //! meaning, and subdirectories (such as `extensions/`) are ignored.
+//!
+//! # Owns
+//!
+//! - [`load`] and [`watch`]: reading, merging and watching the config files.
+//! - [`extension_settings`]: an Extension's table, as the Extension gets it.
+//! - [`Error`] and [`ParseError`]: why the config couldn't be loaded.
+//!
+//! # Not here
+//!
+//! - What each setting means: its owner (`engine.rs`, `paths.rs`, `history.rs`, `keywords.rs`,
+//!   `configured.rs`, ...), and every key in `schema.rs`.
+//! - Taking a new config in: `daemon/settings.rs`.
 
 use std::collections::BTreeMap;
 use std::fs;

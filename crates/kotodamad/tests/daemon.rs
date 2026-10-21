@@ -1409,7 +1409,7 @@ fn with_no_menu_a_toggle_waits_a_moment_then_says_it_reached_none() {
     assert_eq!(command.drain(), [ToFrontEnd::Reached { menus: 0 }]);
 }
 
-// Regression: an open sent before the menu connected, as at login, was lost.
+// As at login, when the keypress comes before the menu has connected.
 #[test]
 fn a_toggle_sent_before_the_menu_connects_reaches_it_once_it_searches() {
     let mut h = Harness::new(vec![]);

@@ -22,6 +22,17 @@
 //! and many apps never enable a text input, so it can't replace keys. The
 //! wait is the least bad bound: long enough for a client woken by `enter` to
 //! get the CPU and answer, short enough not to be seen.
+//!
+//! # Owns
+//!
+//! - [`Wayland`]: the thread that types, pastes and copies, and its connection.
+//! - [`Keymap`]: the keymap that lets any character be typed.
+//! - Launching a Quicklink's command.
+//!
+//! # Not here
+//!
+//! - Finding the compositor and data-control: `kotodama_extension::wayland`.
+//! - When output goes out, after the menus close: `daemon/front_ends.rs`.
 
 use std::fmt::Write as _;
 use std::time::Duration;

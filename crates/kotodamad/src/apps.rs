@@ -13,7 +13,8 @@
 //! # Not here
 //!
 //! - Which Segments the search skips: `index.rs`, `Reach`.
-//! - Entering, searching inside and the empty app: `daemon.rs`.
+//! - Entering, searching inside and the empty app: `daemon/front_ends.rs`, `daemon/search.rs`,
+//!   `daemon/empty.rs`.
 
 use std::collections::HashMap;
 

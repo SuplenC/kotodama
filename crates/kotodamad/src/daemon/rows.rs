@@ -152,7 +152,8 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
         Some((extension, &item.id, item.identity.as_deref()))
     }
 
-    /// What the History keeps a Result under, as [`history_key`] gives it.
+    /// What the History keeps a Result under: its Identity under
+    /// [`IDENTITIES`], or else its Extension and id.
     pub(super) fn history_key<'a>(&'a self, session: &'a Session, source: Source) -> Option<(&'a str, &'a str)> {
         let (extension, id, identity) = self.names(session, source)?;
         Some(match identity {

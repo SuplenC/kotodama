@@ -2,6 +2,16 @@
 //! filtering a list View's Items as the user types into it. A list View is
 //! filtered here, with the search's matcher and Tiers, so typing never waits
 //! on the Extension unless it asked to filter the list itself.
+//!
+//! # Owns
+//!
+//! - [`Views`]: the open Views, and filtering a list View.
+//! - [`Open`]: one open View.
+//!
+//! # Not here
+//!
+//! - Showing a View to the menus: `daemon/from_extension.rs`.
+//! - When a query only narrows the last one: `narrowing.rs`.
 
 use kotodama_protocol::Item;
 use kotodama_protocol::ListMatch;

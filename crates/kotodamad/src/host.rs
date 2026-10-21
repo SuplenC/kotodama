@@ -1,6 +1,16 @@
 //! Runs Extension processes. Each gets a thread that reads its stdout and one
 //! that writes its stdin, so the Daemon's state machine only ever touches channels and a stuck or
 //! dead Extension can't stall it.
+//!
+//! # Owns
+//!
+//! - [`Processes`]: starting an Extension's process, the handshake, its threads, and how its run
+//!   ended.
+//!
+//! # Not here
+//!
+//! - When to start or stop one: `daemon/extensions.rs`.
+//! - The connection once the handshake is done: `link.rs`.
 
 use std::collections::HashMap;
 use std::process::Child;

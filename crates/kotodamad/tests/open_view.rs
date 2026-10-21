@@ -1,6 +1,6 @@
 //! `kotodama open --view <extension>/<item>`: the Daemon runs the Item's
 //! primary Action and opens the menus only once the View it pushes is there,
-//! so their first frame shows it (ADR 0014).
+//! so their first frame shows it.
 
 #[path = "support/harness.rs"]
 #[expect(dead_code, reason = "each test uses part of the harness")]

@@ -1,5 +1,14 @@
 //! `kotodama open --view <extension>/<item>`: what it names, and the request
-//! the Daemon holds back from the menus until the View is there (ADR 0014).
+//! the Daemon holds back from the menus until the View is there.
+//!
+//! # Owns
+//!
+//! - [`ViewName`]: the View named on the command line.
+//! - [`Opening`]: the request held back while the View opens.
+//!
+//! # Not here
+//!
+//! - Opening it and holding the menus back: `daemon/openings.rs`.
 
 use std::fmt;
 use std::time::Instant;

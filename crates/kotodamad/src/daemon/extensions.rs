@@ -79,7 +79,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
         ext.send(ToExtension::Config(table.clone()));
         ext.config = Some(table);
 
-        // Whatever is typed already reaches it, as if typed just now.
+        // Whatever is typed already reaches it, as if just typed.
         if let Some(debounce) = ext.debounce() {
             let searched = self.index.searched();
             for session in self.sessions.values_mut() {
@@ -224,7 +224,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             self.stale[id.0] = indexer.clear(id);
         }
         self.live_queries.retain(|_, (_, ext)| *ext != id);
-        // Its running jobs won't finish now.
+        // Its running jobs will never finish.
         let stopped: Vec<String> = self
             .jobs
             .keys()
@@ -277,7 +277,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             }
             *ext != id
         });
-        // A View it was asked to open won't come now.
+        // A View it was asked to open will never come.
         let invocations = &self.invocations;
         let (stopped, waiting) = std::mem::take(&mut self.openings).into_iter().partition(|opening| {
             opening

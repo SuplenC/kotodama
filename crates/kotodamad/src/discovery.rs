@@ -1,5 +1,16 @@
 //! Finding Extensions: every `<dir>/<anything>/manifest.toml` in the Extension
 //! directories.
+//!
+//! # Owns
+//!
+//! - [`discover`] and [`watch`]: the Extensions on disk, and noticing when they change.
+//! - [`Found`]: an Extension found, with its triggers compiled, and [`Error`], why one is refused.
+//! - [`Stamp`]: telling that a program changed.
+//!
+//! # Not here
+//!
+//! - What the config changes of an Extension: `configured.rs`.
+//! - Starting and stopping Extensions: `daemon/extensions.rs`.
 
 use std::collections::BTreeMap;
 use std::fs;
@@ -109,7 +120,7 @@ impl Found {
         self.dir.join(program)
     }
 
-    /// What the program file is like now, to tell when it changes; `None`
+    /// What the program file is like, to tell when it changes; `None`
     /// while it doesn't exist.
     pub fn stamp(&self) -> Option<Stamp> {
         let metadata = fs::metadata(self.program()).ok()?;

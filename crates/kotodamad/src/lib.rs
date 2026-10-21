@@ -1,5 +1,17 @@
 //! The Kotodama Daemon. It owns the index and the ranking, runs the Extensions,
 //! and serves Front ends on a Unix socket.
+//!
+//! # Owns
+//!
+//! - [`start`] and [`run`]: wiring the paths, the config, discovery, the watchers, the socket and
+//!   the main loop.
+//! - [`print_config`]: `kotodamad config`.
+//! - [`Error`]: why the Daemon couldn't start.
+//!
+//! # Not here
+//!
+//! - The state machine the main loop feeds: `daemon.rs`.
+//! - The command line: `main.rs`.
 
 mod apps;
 mod arguments;
@@ -186,7 +198,7 @@ pub fn run(paths: &Paths) -> Result<(), Error> {
     }
     daemon.keep_items_in(&paths.cache);
     daemon.index_in_background(indexed);
-    // What discovery and the config found wrong, now that there is a
+    // What discovery and the config found wrong, once there is a
     // Daemon to tell.
     daemon.handle(Event::Extensions(discovered), Instant::now());
     if let Some(err) = unreadable {

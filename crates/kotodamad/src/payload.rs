@@ -1,10 +1,19 @@
 //! Items' payload: everything a Result shows of an Item but a search never
-//! reads, kept encoded (ADR 0017). A Shelf holds the payloads of one
+//! reads, kept encoded. A Shelf holds the payloads of one
 //! Extension's Items, in a file the kernel pages in when a row is shown, or
 //! in memory when there is no file to use.
 //!
 //! A Shelf is only appended to: the versions of a Segment built one after
 //! another share it, and each reads only what was there when it was built.
+//!
+//! # Owns
+//!
+//! - [`Shelf`]: the append-only store of encoded Items, and [`Place`], where one is.
+//! - [`encode`]: an Item as a Shelf keeps it.
+//!
+//! # Not here
+//!
+//! - Which Items stay resident: `index.rs`.
 
 use std::fs;
 use std::fs::File;

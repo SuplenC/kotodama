@@ -329,14 +329,12 @@ fn with_emoji(apps: &[&str], query: &str) -> Vec<String> {
     titles(&h.query(&ui, query)).into_iter().map(str::to_owned).collect()
 }
 
-// Regression: #121.
 #[test]
 fn the_emoji_named_as_the_query_comes_first_among_emoji() {
     let rows = with_emoji(&[], "fire");
     assert_eq!(rows[0], "🔥 Fire", "{rows:?}");
 }
 
-// Regression: #121.
 #[test]
 fn an_app_named_as_the_query_comes_before_the_emoji_of_that_name() {
     let rows = with_emoji(&["Fire"], "fire");
@@ -881,7 +879,6 @@ fn beside_an_app(titles: &[&str], title: &str, word: &str, query: &str) -> Vec<(
         .collect()
 }
 
-// Regression: #173.
 #[test]
 fn an_application_ranks_above_the_app_whose_word_is_typed() {
     let rows = beside_an_app(&["Calculator"], "Calculator", "calc", "calc");
@@ -894,7 +891,6 @@ fn an_application_ranks_above_the_app_whose_word_is_typed() {
     );
 }
 
-// Regression: #173.
 #[test]
 fn applications_starting_with_an_apps_title_rank_above_it() {
     let rows = beside_an_app(&["System Monitor", "System Settings"], "System", "system", "system");
@@ -1351,7 +1347,6 @@ fn web_search_is_offered_for_a_query_nothing_matches() {
     );
 }
 
-/// V3, ADR 0013
 #[test]
 fn web_search_ranks_below_a_near_miss() {
     let mut w = Searching::new(&["Firefox"]);
@@ -1584,7 +1579,7 @@ const QUERIES: &[&str] = &[
 ];
 
 /// A one-letter query only matches at a word start; the next letter may
-/// match inside a word (#80).
+/// match inside a word.
 #[test]
 fn typing_on_from_one_letter_finds_matches_inside_words() {
     let mut w = World::new(&["Terminal", "Steam"]);

@@ -24,6 +24,15 @@
 //! was written; delete the files to forget it. Clearing the History deletes
 //! both files, and clearing one Extension's History drops the picks of its
 //! Results from them. Undoing either puts back the History, never the log.
+//!
+//! # Owns
+//!
+//! - [`Writer`]: appending to the log and rotating it, off the Daemon's thread.
+//! - [`forget`]: dropping an Extension's picks, or the whole log.
+//!
+//! # Not here
+//!
+//! - The History: `history.rs`.
 
 use std::fs;
 use std::fs::File;
@@ -252,7 +261,7 @@ impl Writer {
         Writer { ops, pending }
     }
 
-    /// Never blocks: an entry that finds [`PENDING`] others waiting is dropped.
+    /// Never blocks: an entry that finds `PENDING` others waiting is dropped.
     pub fn write(&self, entry: Entry) {
         if self.pending.load(Ordering::Relaxed) < PENDING {
             self.pending.fetch_add(1, Ordering::Relaxed);

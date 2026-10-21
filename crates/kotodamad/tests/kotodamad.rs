@@ -540,7 +540,6 @@ fn aliases_and_quicklinks_follow_the_config_directory_without_a_restart() {
 
 #[test]
 fn an_alias_that_cannot_run_reaches_the_front_end_as_a_row_that_decodes() {
-    // Regression: #152.
     let root = Daemon::home();
     fs::write(
         root.path().join("config/kotodama/keywords.toml"),

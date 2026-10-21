@@ -1,12 +1,12 @@
 //! The Empty query's most used Results: ranked from a copy of the picks, so
 //! the ranking runs on the indexing thread ahead of each part of the day, or
-//! on the Daemon's when no ranking made ahead stands for now.
+//! on the Daemon's when no ranking made ahead stands for the current time.
 //!
 //! # Owns
 //!
 //! - [`Picked`]: the picked Indexed items and their picks, as of one Index and History version.
 //! - [`Usage`]: everything the most used Results rank by, and the ranking.
-//! - [`Ahead`]: the rankings made ahead, and when one stands for now.
+//! - [`Ahead`]: the rankings made ahead, and when one stands.
 //!
 //! # Not here
 //!

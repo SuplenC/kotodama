@@ -6,6 +6,24 @@
 //! Starting processes, typing into windows and saving the History are behind
 //! [`Launcher`], [`Desktop`] and [`Store`], so it runs the same in tests as in
 //! `kotodamad`.
+//!
+//! # Owns
+//!
+//! - [`Daemon`]: the state of every Extension, Front end and session, and [`Daemon::handle`], the
+//!   one entry point.
+//! - [`Event`] and [`Output`], and the [`Launcher`] and [`Desktop`] it acts through.
+//! - The order of the Results (`Candidate::rank`), the sessions (`Session`) and the Daemon's own
+//!   Results (`Own`).
+//! - Its methods, by concern, in `daemon/`: each Extension's run (`extensions.rs`), what it sends
+//!   (`from_extension.rs`), the Front ends (`front_ends.rs`), opening on a View (`openings.rs`),
+//!   picks (`picks.rs`) and undoing them (`undo.rs`), the config (`settings.rs`), the search
+//!   (`search.rs`), the Empty query (`empty.rs`), the rows (`rows.rs`) and the hot Items
+//!   (`hot.rs`).
+//!
+//! # Not here
+//!
+//! - The index and the matching: `index.rs`, `segment.rs`, `rank.rs`.
+//! - The processes, the socket and the desktop: `host.rs`, `server.rs`, `desktop.rs`.
 
 use std::cell::Cell;
 use std::collections::BTreeMap;
@@ -191,10 +209,10 @@ pub enum Event {
     /// The config directory changed, but can't be loaded: the last good
     /// config stays.
     ConfigFailed(config::Error),
-    /// The Extension directories changed: these are all the Extensions now.
+    /// The Extension directories changed: these are all the Extensions there are.
     Extensions(Discovered),
     /// A file changed next to the program of an Extension that couldn't
-    /// start, which may start now.
+    /// start, which may start this time.
     ProgramsChanged,
     /// A new version of an Extension's Items, indexed off the keystroke path
     /// (see [`Daemon::index_in_background`]).
@@ -280,7 +298,7 @@ pub const RERANK_FOR: Duration = Duration::from_millis(150);
 /// How long to wait for Front ends to close before typing anyway.
 const CLOSE_TIMEOUT: Duration = Duration::from_millis(500);
 /// How long `kotodama open --view` waits for its View before opening the
-/// menus on the search instead (ADR 0014). It covers starting the Extension,
+/// menus on the search instead. It covers starting the Extension,
 /// as when the keypress also started the Daemon.
 const OPEN_VIEW_TIMEOUT: Duration = Duration::from_secs(1);
 /// How long `kotodama open` or `toggle` waits for a menu to connect when
@@ -299,7 +317,7 @@ pub const MAX_LIVE_RESULTS: usize = 500;
 pub const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// How many Items are hot at most: kept resident, and read when the menu
-/// opens (ADR 0017).
+/// opens.
 pub const HOT_CAPACITY: usize = 256;
 /// How often the hot Items are worked out again, ahead of the time of day.
 const HOT_EVERY: Duration = Duration::from_mins(5);
@@ -551,7 +569,7 @@ enum Standing {
     Answer,
     Match,
     /// A fallback Extension's result, below every real match, near misses
-    /// included (ADR 0016).
+    /// included.
     Fallback,
 }
 
@@ -1342,7 +1360,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
         &self.history
     }
 
-    /// Indexes Extensions' Items on a thread of its own from now on, which
+    /// Indexes Extensions' Items on a thread of its own from here on, which
     /// sends each new version to `events` as an [`Event::Indexed`]. Until
     /// then, and in tests, a change to them is made as its event is handled.
     pub fn index_in_background(&mut self, events: Sender<Event>) {

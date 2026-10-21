@@ -109,7 +109,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
 
     /// The Results most used at `when`, as [`Usage::rank`] ranks them: as
     /// they were ranked ahead, when that ranking stands for `when`, or else
-    /// ranked here and now.
+    /// ranked here, on the spot.
     pub(super) fn most_used(&mut self, when: When) -> Vec<Source> {
         let versions = self.versions();
         if let Some(ahead) = &self.ahead
@@ -125,7 +125,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
         usage.rank(when, &mut self.habits)
     }
 
-    /// What the Empty query's most used Results rank by now: the picked
+    /// What the Empty query's most used Results rank by: the picked
     /// Indexed items the whole search shows, then the Daemon's own Items
     /// and the Results the Aliases name. A Live query result is never among
     /// them: the Empty query asks no Live query.

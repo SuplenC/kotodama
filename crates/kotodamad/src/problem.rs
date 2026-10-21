@@ -14,7 +14,8 @@
 //!
 //! # Not here
 //!
-//! - The problems of Extensions that are down, and when the list is sent: `daemon.rs`.
+//! - The problems of Extensions that are down, and when the list is sent: `daemon.rs`,
+//!   `daemon/settings.rs`.
 //! - Reading the settings that report them: each setting's owner (`engine.rs`, `paths.rs`,
 //!   `history.rs`, `empty_query.rs`, `kind_order.rs`, `keywords.rs`, `configured.rs`, `apps.rs`).
 

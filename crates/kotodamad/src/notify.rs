@@ -4,6 +4,14 @@
 //! The Daemon sends one only when a job finishes, so it connects, calls
 //! `Notify`, waits for the answer and hangs up, over the small D-Bus client
 //! in `kotodama_extension::dbus`.
+//!
+//! # Owns
+//!
+//! - [`send`]: one desktop notification.
+//!
+//! # Not here
+//!
+//! - The D-Bus client: `kotodama_extension::dbus`.
 
 use kotodama_extension::dbus::Bus;
 use kotodama_extension::dbus::Call;

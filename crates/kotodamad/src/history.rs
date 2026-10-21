@@ -4,6 +4,17 @@
 //!
 //! Times are passed in by the caller, as [`When`], so the History is the same
 //! in tests as on a real clock.
+//!
+//! # Owns
+//!
+//! - [`History`]: picks, Learned choices and Frecency, and its [`Settings`].
+//! - [`Change`]: one change to it, and undoing it.
+//! - [`Store`] and [`Disk`]: saving it off the Daemon's thread.
+//!
+//! # Not here
+//!
+//! - The Usage log: `usage.rs`.
+//! - Ranking by what it learned: `daemon/search.rs`, `most_used.rs`.
 
 use std::collections::HashMap;
 use std::fs;
@@ -314,7 +325,7 @@ impl Habit {
         }
     }
 
-    /// Most used near now first, then most used overall.
+    /// Most used near the current time first, then most used overall.
     pub fn rank(&self, other: &Habit) -> std::cmp::Ordering {
         other
             .near_now
@@ -695,7 +706,7 @@ impl History {
         &self.settings
     }
 
-    /// Changes how the History learns and counts from now on. What it kept
+    /// Changes how the History learns and counts from here on. What it kept
     /// stays: picks already made decay at the new half-life, and counts
     /// towards a Learned choice are compared with the new ones at the next
     /// pick.
@@ -824,7 +835,7 @@ impl History {
     /// Undoes a change: puts back what it replaced, except where the History
     /// changed again since. There, a change that records a pick takes that
     /// one pick off, so withdrawing the first of two launches keeps the
-    /// second; any other change leaves the entry as it is now.
+    /// second; any other change leaves the entry as it is.
     pub fn undo(&mut self, change: Change) {
         self.version += 1;
         let half_life = self.settings.half_life_secs;

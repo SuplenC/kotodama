@@ -279,7 +279,7 @@ fn job(state: JobState, progress: f32, message: &str) -> Job {
     }
 }
 
-/// A Front end that connects now, with what the Daemon sent it on connecting
+/// A Front end that connects, with what the Daemon sent it on connecting
 /// still unread.
 fn reopened(h: &mut Harness) -> FrontEnd {
     let id = FrontEndId(1000 + h.next_front_end);

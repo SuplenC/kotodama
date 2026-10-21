@@ -1,4 +1,4 @@
-//! Reads first (ADR 0017): Items are indexed off the keystroke path, and a
+//! Reads first: Items are indexed off the keystroke path, and a
 //! search never sees half of a change. The Items expected at a time of day
 //! are hot ahead of it: read back off their Shelf before they are shown.
 

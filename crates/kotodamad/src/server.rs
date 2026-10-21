@@ -1,4 +1,13 @@
 //! The Unix socket Front ends connect to.
+//!
+//! # Owns
+//!
+//! - [`listen`] and [`serve`]: the socket, and a Front end's handshake.
+//!
+//! # Not here
+//!
+//! - The connection after the handshake: `link.rs`.
+//! - What a Front end sends: `daemon/front_ends.rs`.
 
 use std::io;
 use std::net::Shutdown;

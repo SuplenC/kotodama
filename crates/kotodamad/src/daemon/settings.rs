@@ -158,7 +158,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
 
     /// Reads each installed Extension's app from its Manifest and the
     /// config. Reports the keywords lost, once each time they change. When they changed, the Index
-    /// reads the Segments the search now shows, every session's query is read again, and the
+    /// reads the Segments the search shows, every session's query is read again, and the
     /// entry Items are rebuilt.
     pub(super) fn load_apps(&mut self) {
         let installed = self
@@ -182,7 +182,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
         if apps == self.apps {
             return;
         }
-        // The same app may sit at another place now.
+        // The same app may sit at another place in the new order.
         let entered: Vec<(FrontEndId, Option<usize>)> = self
             .sessions
             .iter()

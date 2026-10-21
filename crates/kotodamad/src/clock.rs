@@ -1,5 +1,14 @@
 //! The wall clock the History's times come from: seconds since the Unix epoch,
 //! and the time of day where the user is, which Frecency learns by.
+//!
+//! # Owns
+//!
+//! - [`Clock`]: the wall clock and the user's time zone, read again once a minute.
+//! - [`When`]: a moment as the History counts it, and [`DAY_SECS`].
+//!
+//! # Not here
+//!
+//! - What the History does with the time of day: `history.rs`, `part_of_day`.
 
 use std::cell::Cell;
 use std::time::Duration;
@@ -21,7 +30,7 @@ pub struct Clock {
     /// the machine spends suspended.
     start: Option<u64>,
     /// How far the user's local time is ahead of UTC at a time, in seconds,
-    /// read from the time zone as it is now.
+    /// read from the current time zone.
     utc_offset: fn(u64) -> i64,
     /// The minute, counted from the epoch, `utc_offset` was last read in,
     /// and what it read.
@@ -90,7 +99,7 @@ pub struct When {
     pub time_of_day: u32,
 }
 
-/// The local time's offset from UTC at `at`, in the time zone as it is now.
+/// The local time's offset from UTC at `at`, in the current time zone.
 /// glibc's `localtime_r` reads the zone once per process, and `tzset` reads
 /// `TZ` and `/etc/localtime` again: a `stat` of the file, which it parses
 /// only when it changed. So a zone the user switches to while the Daemon

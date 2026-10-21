@@ -1,7 +1,7 @@
 //! One Extension's Indexed items, laid out for scanning: what a keystroke
 //! reads is worked out once, when an Item arrives, and kept in dense arrays
 //! and one arena of text, so a search runs down them without following a
-//! pointer per Item (ADR 0017).
+//! pointer per Item.
 //!
 //! A Segment is built off the keystroke path and then only read, so a search
 //! can share it with the thread building the next one. Each Extension has its
@@ -10,6 +10,15 @@
 //! Of the rest of an Item, a Segment keeps in memory only what ranking reads:
 //! its id, Identity, keyword and Actions. The whole Item waits on a
 //! [`Shelf`], off the heap, until a Result shows it.
+//!
+//! # Owns
+//!
+//! - [`Segment`]: one Extension's rows, scanned a block at a time, and [`Edit`], a change to them.
+//! - [`Ranked`]: a row's keys for ranking, its texts read on demand.
+//!
+//! # Not here
+//!
+//! - The Segments together and the search: `index.rs`. The payloads: `payload.rs`.
 
 use std::collections::BTreeSet;
 use std::collections::HashMap;
@@ -222,7 +231,7 @@ impl Segment {
     }
 
     /// Starts the next version of the Segment, which Front ends will see
-    /// whole: the rows emptied in the last one are free from now on.
+    /// whole: the rows emptied in the last one are free from here on.
     pub fn next_version(&mut self) {
         self.free.append(&mut self.freed);
     }

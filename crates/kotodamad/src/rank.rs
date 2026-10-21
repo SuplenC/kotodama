@@ -7,6 +7,17 @@
 //!
 //! Text is folded before it's compared: lowercase, with accents dropped
 //! (`Żółw` is `zolw`), so neither case nor accents in the query matter.
+//!
+//! # Owns
+//!
+//! - [`Tier`] and [`Tiers`]: how well a text matches, typos included.
+//! - [`Query`], [`Filter`] and [`Letters`]: folding the query, and skipping Items that can't match.
+//! - [`Folded`] and [`Haystack`]: the texts as a Segment keeps them.
+//!
+//! # Not here
+//!
+//! - Ranking across sources: `daemon.rs`, `Candidate::rank`.
+//! - Scanning the rows: `segment.rs`.
 
 use std::ops::BitOr;
 use std::ops::BitOrAssign;
@@ -705,7 +716,7 @@ impl Haystack {
 /// Past this many characters, a text is scored by nucleo's greedy match, in
 /// time that grows with the text, rather than its optimal match, in time that
 /// grows with the text times the query: long clipboard entries would
-/// otherwise make every keystroke slower (ADR 0017). Both match the same
+/// otherwise make every keystroke slower. Both match the same
 /// texts; only the score, a late tie-break, may differ.
 pub const OPTIMAL_CHARS: usize = 64;
 

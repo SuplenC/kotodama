@@ -6,7 +6,18 @@
 //!
 //! What a search reads is all in memory. The rest of an Item is read back
 //! off its Shelf when a Result shows it, and stays resident while it is hot
-//! or was shown lately (ADR 0017).
+//! or was shown lately.
+//!
+//! # Owns
+//!
+//! - [`Index`]: every Extension's Segments, the search over them and keeping Items resident.
+//! - [`Slot`], [`Reach`] and [`ItemRef`]: where an Item is, what a search reads, and an Item read
+//!   back.
+//!
+//! # Not here
+//!
+//! - One Extension's rows: `segment.rs`. The payloads: `payload.rs`.
+//! - Building new versions and planning the hot Items: `indexer.rs`, `daemon/hot.rs`.
 
 use std::cell::Cell;
 use std::cell::RefCell;
@@ -162,7 +173,7 @@ impl Read {
     }
 }
 
-/// Where the Item in `row` of `segment` is now: its Shelf's id and its place
+/// Where the Item in `row` of `segment` is: its Shelf's id and its place
 /// there.
 pub fn place_of(segment: &Segment, row: Row) -> Option<(u64, u64)> {
     let (shelf, place) = segment.payload(row)?;
@@ -277,7 +288,7 @@ impl Index {
         }
     }
 
-    /// Keeps the payloads of Items indexed from now on in files in `dir`.
+    /// Keeps the payloads of Items indexed from here on in files in `dir`.
     pub fn keep_payloads_in(&mut self, dir: Arc<Path>) {
         self.dir = Some(dir);
         for segment in &mut self.segments {
@@ -341,7 +352,7 @@ impl Index {
         first
     }
 
-    /// Makes one change to an Extension's Items, here and now.
+    /// Makes one change to an Extension's Items, here, at once.
     pub fn edit(&mut self, extension: ExtensionId, edit: Edit) {
         self.version += 1;
         let at = Self::segments_of(extension).start;
@@ -491,7 +502,7 @@ impl Index {
     }
 
     /// Makes `hot`, in slot order, the Items kept resident whatever is shown,
-    /// and reads them back now. Lets go of the rest but those shown last.
+    /// and reads them back at once. Lets go of the rest but those shown last.
     pub fn set_hot(&mut self, hot: Vec<Slot>) {
         self.hot = hot;
         for n in 0..self.hot.len() {

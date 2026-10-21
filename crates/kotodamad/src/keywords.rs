@@ -31,6 +31,16 @@
 //!
 //! Keywords are matched without regard to case. An entry that doesn't parse is
 //! logged and skipped; the rest still apply.
+//!
+//! # Owns
+//!
+//! - [`Keywords`]: the Aliases and Quicklinks, read from the config, and which keyword wins.
+//! - [`Quicklink`]: its Item, and the command or URL it runs.
+//!
+//! # Not here
+//!
+//! - Keyword conflicts with apps: `conflict.rs`.
+//! - Opening a URL: `kotodama_extension::url`.
 
 use std::collections::HashMap;
 

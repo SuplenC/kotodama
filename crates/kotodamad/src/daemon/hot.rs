@@ -54,7 +54,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
 
     /// Works out the hot Items, up to the hot capacity, and reads their
     /// payloads, so the menu shows them without waiting; and ranks the
-    /// Empty query's most used Results for now and for the coming part of
+    /// Empty query's most used Results for the current and the coming part of
     /// the day, so a menu opening sends them ranked already. All of it
     /// happens on the indexing thread, when there is one.
     pub(super) fn plan_hot(&mut self, now: Instant) {
@@ -127,7 +127,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
 
     /// Keeps resident every Item a keyword or an Alias names, so a keyword
     /// typed never waits for a read. The indexing thread reads them, when
-    /// there is one; otherwise they are read now.
+    /// there is one; otherwise they are read at once.
     pub(super) fn repin(&mut self) {
         let aliases = self.aliased();
         if let Some(indexer) = &mut self.indexer {
