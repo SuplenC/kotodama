@@ -83,7 +83,7 @@
             ln -s ld.lld $out/bin/lld
           '';
         in
-        {
+        rec {
           default = pkgs.mkShell {
             packages = with pkgs; [
               # Rust
@@ -153,6 +153,49 @@
             RUST_SRC_PATH = "${pkgs.rustPlatform.rustLibSrc}";
             TZDIR = "${pkgs.tzdata}/share/zoneinfo";
           };
+
+          # `just demo` (scripts/demo): the dev shell, plus a VNC server to see
+          # the headless desktop from outside, and a few apps to find and
+          # launch. A shell of its own, so CI's shell doesn't carry them.
+          demo = default.overrideAttrs (old: {
+            nativeBuildInputs =
+              old.nativeBuildInputs
+              ++ (with pkgs; [
+                wayvnc
+                # A terminal, a Qt editor, and a `Terminal=true` app that runs in the terminal.
+                foot
+                featherpad
+                htop
+                # What the seeded projects and the folders Extension's Actions
+                # use, and what fills the clipboard history at the start.
+                git
+                tmux
+                lazygit
+                wl-clipboard
+                # The theme the apps' icons are in, which they ship no index for.
+                hicolor-icon-theme
+              ]);
+            # The test font by its generic names, which the menu and foot ask
+            # for, plus color emoji for the emoji Extension's Results.
+            FONTCONFIG_FILE = pkgs.writeText "kotodama-demo-fonts.conf" ''
+              <?xml version="1.0"?>
+              <!DOCTYPE fontconfig SYSTEM "urn:fontconfig:fonts.dtd">
+              <fontconfig>
+                <dir>${pkgs.dejavu_fonts}/share/fonts</dir>
+                <dir>${pkgs.noto-fonts-color-emoji}/share/fonts</dir>
+                <cachedir prefix="xdg">fontconfig</cachedir>
+                <alias><family>sans-serif</family><prefer><family>DejaVu Sans</family><family>Noto Color Emoji</family></prefer></alias>
+                <alias><family>serif</family><prefer><family>DejaVu Serif</family><family>Noto Color Emoji</family></prefer></alias>
+                <alias><family>monospace</family><prefer><family>DejaVu Sans Mono</family><family>Noto Color Emoji</family></prefer></alias>
+                <match target="pattern">
+                  <test qual="all" name="family" compare="not_eq"><string>sans-serif</string></test>
+                  <test qual="all" name="family" compare="not_eq"><string>serif</string></test>
+                  <test qual="all" name="family" compare="not_eq"><string>monospace</string></test>
+                  <edit name="family" mode="append_last"><string>sans-serif</string></edit>
+                </match>
+              </fontconfig>
+            '';
+          });
         }
       );
 

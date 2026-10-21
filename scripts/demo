@@ -1,0 +1,279 @@
+#!/usr/bin/env bash
+# Runs Kotodama on a desktop of its own, to try it by hand: headless sway with
+# the Daemon, the Bundled extensions, the shell example Extension and the
+# shipped menu, served over VNC on localhost:5900. On macOS it runs in the dev
+# container and opens Screen Sharing once the desktop is up.
+# demo/ holds the rest: the config (demo/config.toml), the projects and scripts
+# it seeds (demo/seed.sh), the desktop background that shows what to try
+# (demo/shell.qml), and the guide the `guide` Quicklink opens (demo/GUIDE.md).
+# Usage: scripts/demo [--keep]
+#   --keep  keep the state (History, clipboard, the seeded folders) between
+#           runs, in the cargo target directory; by default every run starts
+#           fresh.
+# ANTHROPIC_API_KEY, if set, turns on the AI Extension; it goes into the
+# container's environment only, never into a file.
+set -euo pipefail
+
+root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+port=5900
+# Screen Sharing on macOS refuses a VNC server without a password. The server
+# listens on localhost only, so a fixed one keeps nothing out but costs nothing.
+user=kotodama
+password=kotodama
+
+keep=0
+for arg in "$@"; do
+    case $arg in
+    --keep) keep=1 ;;
+    *)
+        echo "usage: scripts/demo [--keep]" >&2
+        exit 2
+        ;;
+    esac
+done
+
+# On the host: enter the demo shell (in the dev container, on a machine
+# without Nix), with the VNC port published to localhost only.
+if [ -z "${KOTODAMA_DEMO_SHELL:-}" ]; then
+    cd "$root"
+    opener=
+    if [ "$(uname -s)" = Darwin ]; then
+        # Opens Screen Sharing once the VNC server greets: Docker's port
+        # forward accepts connections before anything listens behind it.
+        (
+            for _ in $(seq 1800); do
+                if [ "$(nc 127.0.0.1 "$port" </dev/null 2>/dev/null | head -c 3)" = RFB ]; then
+                    open "vnc://$user@localhost:$port"
+                    exit 0
+                fi
+                sleep 1
+            done
+        ) &
+        opener=$!
+    fi
+    # Ctrl+C reaches the demo itself, which stops cleanly; here it only
+    # waits for that.
+    trap : INT
+    status=0
+    KOTODAMA_DEV_PORTS="127.0.0.1:$port:$port" KOTODAMA_DEV_ENV=ANTHROPIC_API_KEY \
+        scripts/dev-env nix develop .#demo --command env KOTODAMA_DEMO_SHELL=1 scripts/demo "$@" || status=$?
+    if [ -n "$opener" ]; then
+        kill "$opener" 2>/dev/null || true
+    fi
+    exit "$status"
+fi
+
+echo "demo: building Kotodama (release)..."
+extensions=(ai apps calculator clipboard emoji folders web-search)
+packages=(-p kotodamad -p kotodama)
+for name in "${extensions[@]}"; do
+    packages+=(-p "kotodama-$name")
+done
+cargo build --quiet --release --manifest-path "$root/Cargo.toml" "${packages[@]}"
+imports=$("$root/scripts/qml-module" --release)
+target=$(cargo metadata --format-version 1 --no-deps --manifest-path "$root/Cargo.toml" | jq -r .target_directory)
+bin="$target/release"
+
+if [ "$keep" = 1 ]; then
+    home="$target/demo-home"
+    mkdir -p "$home"
+else
+    # A short path, as the projects and scripts show it below their titles.
+    home=$(mktemp -d /tmp/kotodama-demo.XXXXXX)
+fi
+XDG_RUNTIME_DIR=$(mktemp -d)
+chmod 700 "$XDG_RUNTIME_DIR"
+pids=()
+cleanup() {
+    local pid
+    for pid in "${pids[@]}"; do
+        kill "$pid" 2>/dev/null || true
+    done
+    wait 2>/dev/null || true
+    tmux -L kotodama-demo kill-server 2>/dev/null || true
+    rm -rf "$XDG_RUNTIME_DIR"
+    if [ "$keep" = 0 ]; then
+        rm -rf "$home"
+    fi
+}
+trap cleanup EXIT
+# Ctrl+C is how the demo ends, not a failure.
+trap 'exit 0' INT TERM
+
+# Only the demo shell's apps and icon theme: the rest of the dev shell's data
+# dirs hold build tools, whose apps would crowd the Results.
+data_dirs="$home/share"
+IFS=: read -ra dirs <<<"${XDG_DATA_DIRS:-}"
+for dir in "${dirs[@]}"; do
+    case $dir in
+    # Quickshell's own entry would start a second, empty shell.
+    *-quickshell-*) continue ;;
+    esac
+    if [ -d "$dir/applications" ] || [ -f "$dir/icons/hicolor/index.theme" ]; then
+        data_dirs+=":$dir"
+    fi
+done
+# foot refuses a locale that isn't UTF-8, and the container sets none.
+export LANG=C.UTF-8
+export XDG_RUNTIME_DIR XDG_CONFIG_HOME="$home/config" XDG_CONFIG_DIRS="$home/etc" \
+    XDG_DATA_DIRS="$data_dirs" XDG_STATE_HOME="$home/state" XDG_CACHE_HOME="$home/cache"
+# Beside the build, so they outlive the run (in the container, in its cargo volume).
+logs="$target/demo-logs"
+rm -rf "$logs"
+mkdir -p "$logs"
+
+# The Bundled extensions, laid out as the package installs them: each binary
+# beside its Manifest. Hyprland's is left out: this is sway.
+for name in "${extensions[@]}"; do
+    dir="$home/share/kotodama/extensions/$name"
+    mkdir -p "$dir"
+    cp "$root/crates/kotodama-$name/manifest.toml" "$dir/"
+    ln -sfn "$bin/kotodama-$name" "$dir/kotodama-$name"
+done
+mkdir -p "$XDG_CONFIG_HOME/kotodama/extensions"
+ln -sfn "$root/examples/shell-extension" "$XDG_CONFIG_HOME/kotodama/extensions/shell-example"
+
+# Things for every Extension to find, once per home: `--keep` keeps them.
+fresh=0
+if [ ! -d "$home/Projects" ]; then
+    fresh=1
+    "$root/demo/seed.sh" "$home"
+fi
+
+config="$XDG_CONFIG_HOME/kotodama/config.toml"
+sed -e "s|@home@|$home|g" -e "s|@demo@|$root/demo|g" "$root/demo/config.toml" >"$config"
+if [ -n "${ANTHROPIC_API_KEY:-}" ]; then
+    # The key stays in the environment; the config only names how to print it.
+    cat >>"$config" <<'TOML'
+
+[extensions.ai]
+api_key_command = ["sh", "-c", "printf %s \"$ANTHROPIC_API_KEY\""]
+TOML
+fi
+
+# There is no browser: what would open a page or a folder shows a terminal
+# saying so instead.
+mkdir -p "$home/bin"
+cat >"$home/bin/xdg-open" <<'SH'
+#!/bin/sh
+exec env LC_ALL=C.UTF-8 foot --hold sh -c 'printf "The demo has no browser or file manager.\nKotodama asked to open:\n\n  %s\n" "$1"' xdg-open "$1"
+SH
+chmod +x "$home/bin/xdg-open"
+export PATH="$home/bin:$PATH"
+
+kotodama="$bin/kotodama"
+cat >"$home/sway.conf" <<CONF
+output HEADLESS-1 resolution 1920x1080 position 0 0 scale 1 bg #11111b solid_color
+xwayland disable
+# Super is often taken by macOS before the VNC client sees it, so the menu is
+# on Alt+Space and Ctrl+Space.
+bindsym Mod1+space exec $kotodama toggle
+bindsym Ctrl+space exec $kotodama toggle
+bindsym Mod1+v exec $kotodama open --view clipboard/history
+bindsym Mod1+b exec $kotodama open --view shell-example/bookmarks
+bindsym Mod1+Return exec foot
+bindsym Mod1+Shift+q kill
+CONF
+
+export WLR_BACKENDS=headless WLR_RENDERER=pixman WLR_LIBINPUT_NO_DEVICES=1 WLR_HEADLESS_OUTPUTS=1
+unset WAYLAND_DISPLAY DISPLAY SWAYSOCK
+sway -c "$home/sway.conf" >"$logs/sway.log" 2>&1 &
+sway_pid=$!
+pids+=("$sway_pid")
+for _ in $(seq 100); do
+    WAYLAND_DISPLAY=$(find "$XDG_RUNTIME_DIR" -maxdepth 1 -type s -name 'wayland-*' -printf '%f\n' | head -n1)
+    SWAYSOCK=$(find "$XDG_RUNTIME_DIR" -maxdepth 1 -type s -name 'sway-ipc.*' | head -n1)
+    if [ -n "$WAYLAND_DISPLAY" ] && [ -n "$SWAYSOCK" ]; then
+        break
+    fi
+    sleep 0.1
+done
+if [ -z "$WAYLAND_DISPLAY" ] || [ -z "$SWAYSOCK" ]; then
+    cat "$logs/sway.log" >&2
+    echo "demo: sway did not start" >&2
+    exit 1
+fi
+export WAYLAND_DISPLAY SWAYSOCK
+
+# Headless sway has no keyboard of its own, and windows bind one only while
+# some keyboard exists (see e2e/run). This one stays for a day.
+wtype -s 86400000 &
+pids+=("$!")
+
+# In the container, Docker forwards the published port to the container's own
+# address; the host side is bound to localhost only.
+address=127.0.0.1
+if [ -f /.dockerenv ]; then
+    address=0.0.0.0
+fi
+cat >"$home/wayvnc.conf" <<CONF
+address=$address
+port=$port
+enable_auth=true
+username=$user
+password=$password
+relax_encryption=true
+CONF
+wayvnc --config "$home/wayvnc.conf" --render-cursor >"$logs/wayvnc.log" 2>&1 &
+pids+=("$!")
+
+export QT_QPA_PLATFORM=wayland QT_QUICK_BACKEND=software
+"$bin/kotodamad" >"$logs/kotodamad.log" 2>&1 &
+pids+=("$!")
+QML_IMPORT_PATH=$imports quickshell --path "$root/demo/shell.qml" >"$logs/quickshell.log" 2>&1 &
+pids+=("$!")
+
+# A few clips for the clipboard history, oldest first. The first is copied
+# again until the clipboard Extension has kept it, since nothing says when it
+# starts watching.
+if [ "$fresh" = 1 ]; then
+    clips=(
+        "ssh demo@aurora.local"
+        "SELECT name, email FROM users WHERE active LIMIT 10;"
+        "https://github.com/SuplenC/kotodama"
+        "Standup moved to 10:30, same room"
+    )
+    for _ in $(seq 50); do
+        wl-copy "${clips[0]}"
+        sleep 0.2
+        if [ -n "$(ls -A "$XDG_STATE_HOME/kotodama/clipboard" 2>/dev/null)" ]; then
+            break
+        fi
+    done
+    for clip in "${clips[@]:1}"; do
+        wl-copy "$clip"
+        sleep 0.3
+    done
+fi
+
+# Opens the menu, so the first look shows it. The Daemon drops an open that
+# comes before the Front end connects, and nothing says when that is, so this
+# waits for the background to show, then asks again until the screen changes.
+blank=
+for _ in $(seq 50); do
+    blank=$(grim -t ppm - | cksum)
+    if [ "$(grim -t ppm - | magick - -format %k info:)" != 1 ]; then
+        break
+    fi
+    sleep 0.2
+done
+for _ in $(seq 50); do
+    "$kotodama" open 2>/dev/null || true
+    sleep 0.2
+    if [ "$(grim -t ppm - | cksum)" != "$blank" ]; then
+        break
+    fi
+done
+
+cat <<EOF
+
+Kotodama is running on vnc://localhost:$port (user $user, password $password).
+  Alt+Space or Ctrl+Space  open or close the menu
+  Alt+V                    clipboard history
+  Alt+B                    the shell example's bookmarks
+  Alt+Return               a terminal (foot)
+The desktop shows what to try; type "guide" in the menu for everything.
+Logs: $logs
+Ctrl+C stops it.
+EOF
+wait "$sway_pid"

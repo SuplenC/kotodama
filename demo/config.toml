@@ -1,0 +1,55 @@
+# The demo's config. scripts/demo writes it into the demo's config directory
+# with @home@ and @demo@ replaced by the demo's home and this directory.
+
+# With nothing typed, the menu offers the guide and the clipboard history
+# after the Results used most.
+[empty_query]
+menu = [
+    { extension = "kotodama", item = "quicklink:guide" },
+    { extension = "clipboard", item = "history" },
+    { extension = "kotodama", item = "clear-history" },
+]
+
+[aliases]
+ed = { extension = "apps", item = "featherpad" }
+# An Alias for one of the Item's own Actions makes that Action primary.
+aur = { extension = "folders", item = "@home@/Projects/aurora", action = "shell" }
+
+[quicklinks.guide]
+title = "Kotodama demo guide"
+command = ["featherpad", "@demo@/GUIDE.md"]
+
+[quicklinks.gh]
+title = "GitHub"
+url = "https://github.com"
+
+[quicklinks.yt]
+title = "Search YouTube"
+url = "https://www.youtube.com/results?search_query={query}"
+
+[quicklinks.say]
+title = "Say something in a terminal"
+command = ["foot", "--hold", "echo", "{query}"]
+
+[extensions.apps]
+terminal = ["foot", "-e"]
+
+[extensions.folders]
+folders = [
+    { path = "@home@/Projects", kind = "projects" },
+    { path = "@home@/Scripts", kind = "scripts" },
+]
+terminal = ["foot", "--hold"]
+# A tmux server of the demo's own, which scripts/demo stops at the end.
+open = ["foot", "--working-directory={path}", "tmux", "-L", "kotodama-demo", "new-session", "-A", "-s", "{session}"]
+shell = ["foot", "--working-directory={path}"]
+lazygit = ["foot", "lazygit", "--path", "{path}"]
+file_manager = ["xdg-open", "{path}"]
+
+[extensions.shell-example]
+bookmarks = [
+    { title = "Kotodama", url = "https://github.com/SuplenC/kotodama" },
+    { title = "Wayland", url = "https://wayland.freedesktop.org" },
+    { title = "Quickshell", url = "https://quickshell.org" },
+    { title = "sway", url = "https://swaywm.org" },
+]
