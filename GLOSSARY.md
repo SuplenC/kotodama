@@ -17,7 +17,7 @@ A separately running program that contributes items, Actions and Views; the sour
 _Avoid_: Plugin, module, provider
 
 **Bundled extension**:
-An Extension that ships with Kotodama itself, as opposed to one installed separately.
+An Extension that ships with Kotodama itself, as opposed to one from elsewhere: its code lives in this repository, and it is a package of its own, versioned and released apart from the core, which a user may leave out.
 _Avoid_: Built-in, core extension
 
 **Manifest**:

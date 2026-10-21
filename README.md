@@ -12,15 +12,19 @@ Status: early. The protocol, the Daemon, the Quickshell Front end and the apps, 
 
 ## Installing
 
-The flake builds Kotodama once and splits it into outputs, each also a package of its own:
+Kotodama ships as separate packages, each versioned and released on its own (see [Releases](#releases)); the code of all of them lives in this repository. The flake builds each one alone:
 
-| Package | Output | What's in it |
+| Package | Version of | What's in it |
 | --- | --- | --- |
-| `kotodamad` | `out` | the `kotodama` command, the Daemon, and its systemd user units in `lib/systemd/user/` |
-| `kotodama-qml` | `qml` | the `Kotodama` QML module, in `lib/qt-6/qml/`, and the ready Front end, a Quickshell config that runs the menu, in `share/kotodama/quickshell/` |
-| `kotodama-extensions` | `extensions` | the Bundled extensions, in `share/kotodama/extensions/` |
+| `kotodama-core` | `kotodama` (the `kotodama` and `kotodamad` crates) | the `kotodama` command, the Daemon, and its systemd user units in `lib/systemd/user/`; no Extensions |
+| `kotodama-qml` | `kotodama-qml` | the Front end: the `Kotodama` QML module, in `lib/qt-6/qml/`, and the ready menu, a Quickshell config, in `share/kotodama/quickshell/` |
+| `kotodama-<name>` | `kotodama-<name>` | one Bundled extension, in `share/kotodama/extensions/<name>/`: `apps`, `calculator`, `clipboard`, `emoji`, `web-search`, `ai`, `folders`, `hyprland`, `system` |
 
-`default` installs all three. To try it on a Hyprland desktop step by step, with the checks to run by hand, see [docs/try-it.md](docs/try-it.md). With home-manager:
+`default`, also `kotodama` and `kotodama-full`, puts them all together, as one package with three outputs: `out` (the command, a Daemon that finds the Bundled extensions, its units; also the `kotodamad` package), `qml` (the Front end) and `extensions` (every Bundled extension; also the `kotodama-extensions` package). Its `withExtensions` makes the same with only the Extensions you pick: `kotodama.withExtensions (exts: [ exts.apps exts.calculator ])`. The overlay's `pkgs.kotodamaPackages` holds the separate packages.
+
+The Daemon finds an Extension wherever it is installed on `XDG_DATA_DIRS` (below), so `kotodama-core` with `kotodama-<name>` packages in a profile works too, where the Daemon's environment has that profile: on NixOS, the system's and the home-manager profile are there.
+
+To try it on a Hyprland desktop step by step, with the checks to run by hand, see [docs/try-it.md](docs/try-it.md). With home-manager:
 
 ```nix
 {
@@ -32,6 +36,8 @@ The flake builds Kotodama once and splits it into outputs, each also a package o
     enable = true;
     # Runs the menu in a Quickshell of its own, with the graphical session.
     frontEnd.enable = true;
+    # apps, calculator, clipboard, emoji and web-search are on unless turned off.
+    extensions.hyprland.enable = true;
     # Written to ~/.config/kotodama/home-manager.toml; any other *.toml there still applies.
     settings = {
       extensions.apps.terminal = [ "ghostty" "-e" ];
@@ -40,6 +46,13 @@ The flake builds Kotodama once and splits it into outputs, each also a package o
   };
 }
 ```
+
+`extensions.<name>.enable` picks the Bundled extensions the module installs; one left off is not installed, so the Daemon never starts it, and setting its `[extensions.<name>]` anyway gives a warning:
+
+| Option | Unset |
+| --- | --- |
+| `extensions.{apps, calculator, clipboard, emoji, web-search}.enable` | on |
+| `extensions.{folders, hyprland, ai, system}.enable` | off |
 
 Every config table below also has typed options, so a typo or a value of the wrong type fails the build rather than being logged at runtime. They merge into `settings`, and an option left unset is left out, so the default applies. The Quicklinks and Aliases, keyed by your own names, stay in `settings`.
 
@@ -69,13 +82,16 @@ programs.kotodama = {
     apps.hidden = [ "qt5ct" ];
     calculator.decimalSeparator = "comma";
     emoji.skinTone = "medium";
-    folders.folders = [ { path = "~/Projects"; kind = "projects"; depth = 2; } ];
+    folders = {
+      enable = true;
+      folders = [ { path = "~/Projects"; kind = "projects"; depth = 2; } ];
+    };
     web-search.engines = [ { name = "Kagi"; url = "https://kagi.com/search?q={query}"; } ];
   };
 };
 ```
 
-The module installs the package and enables `kotodamad.socket`. `frontEnd.enable` adds the ready Front end: a systemd user service, `kotodama-menu`, that runs the menu in a Quickshell instance of its own, beside whatever shell the desktop already runs, so a compositor bind running `kotodama toggle` is all that's left to set up.
+The module installs the package, with the enabled Extensions alone (its read-only `finalPackage`), and enables `kotodamad.socket`. `frontEnd.enable` adds the ready Front end: a systemd user service, `kotodama-menu`, that runs the menu in a Quickshell instance of its own, beside whatever shell the desktop already runs, so a compositor bind running `kotodama toggle` is all that's left to set up.
 
 | Option | What it does |
 | --- | --- |
@@ -114,7 +130,7 @@ The Daemon starts the first time something connects to its socket, whether a `ko
 - **Desktop notifications** (a job finishing) go over the session bus at `DBUS_SESSION_BUS_ADDRESS`, or `$XDG_RUNTIME_DIR/bus` when that isn't set. That is where systemd's per-user bus lives, so this works with no setup.
 - **Typing, pasting and copying** need `WAYLAND_DISPLAY`, and the apps it starts need the rest of the graphical session's environment. The compositor must hand these to the user manager before the menu is first used, since the Daemon reads its environment once, when it starts. uwsm does this. In a plain Hyprland session, add `exec-once = dbus-update-activation-environment --systemd --all` (or `systemctl --user import-environment WAYLAND_DISPLAY XDG_CURRENT_DESKTOP`). If the Daemon started before that, run `systemctl --user restart kotodamad`.
 
-The Nix package's `kotodamad` puts its Bundled extensions first on its own `XDG_DATA_DIRS`, followed by the inherited directories (or `/usr/local/share:/usr/share` when it isn't set). The rest of the session's `XDG_DATA_DIRS` is left alone.
+The `kotodamad` of the `default` package (and of `withExtensions`) puts its Bundled extensions first on its own `XDG_DATA_DIRS`, followed by the inherited directories (or `/usr/local/share:/usr/share` when it isn't set). The rest of the session's `XDG_DATA_DIRS` is left alone.
 
 ## The Daemon
 
@@ -592,4 +608,4 @@ extra-trusted-public-keys = kotodama.cachix.org-1:8/a1e4X26O1hz2m5HFJBfKQ+P8m3GL
 
 ### Releases
 
-release-please (`.github/workflows/release-please.yml`) reads the Conventional Commits that reach `main` and keeps a release PR open. For now it only runs when started by hand (Actions → Release → Run workflow), until the setup below is done. The PR bumps the workspace version in `Cargo.toml` and `Cargo.lock` and adds the changelog. Merging it tags the release. Before 1.0, a breaking change bumps the minor version. Two things must be set up first: the repository setting that allows GitHub Actions to create pull requests, and a `RELEASE_PLEASE_TOKEN` secret so that CI runs on the release PR (a PR opened with the default token starts no workflows).
+release-please (`.github/workflows/release-please.yml`) reads the Conventional Commits that reach `main` and keeps a release PR open for each package they touch, chosen by the files a commit changes, not its scope. The packages are the core (`crates/kotodama` and `crates/kotodamad`, always released together at one version), `kotodama-protocol`, `kotodama-extension`, the Front end (`kotodama-qml`) and each Bundled extension. For now it only runs when started by hand (Actions → Release → Run workflow), until the setup below is done. A PR bumps its crate's version in its `Cargo.toml` and in `Cargo.lock` and adds to the crate's `CHANGELOG.md`. Merging it tags the release as `<package>-v<version>`, such as `kotodama-folders-v1.2.0` or `kotodama-v1.0.0`. Before 1.0, a breaking change bumps the minor version. Every package starts at 1.0.0 together: for that first run, add `"release-as": "1.0.0"` at the top of `release-please-config.json`, and take it out once the release PRs are merged. Separate releases are safe because a newer Daemon keeps talking to Extensions built for an older protocol (ADR 0026). Two things must be set up first: the repository setting that allows GitHub Actions to create pull requests, and a `RELEASE_PLEASE_TOKEN` secret so that CI runs on the release PR (a PR opened with the default token starts no workflows).

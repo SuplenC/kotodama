@@ -73,8 +73,15 @@ Add the flake and its home-manager module:
     # Optional: the look, by KotodamaMenu's property names. Unset, its defaults.
     # frontEnd.look = { background = "#1d2021"; accent = "#d79921"; fontFamily = "Inter"; };
 
+    # Apps, calculator, clipboard, emoji and web search are on unless turned
+    # off; the Hyprland and System checks below need these two.
+    extensions.hyprland.enable = true;
+    extensions.system.enable = true;
     # Optional: something to find besides apps.
-    extensions.folders.folders = [ { path = "~/Projects"; kind = "projects"; } ];
+    extensions.folders = {
+      enable = true;
+      folders = [ { path = "~/Projects"; kind = "projects"; } ];
+    };
     settings.quicklinks.gh = { title = "GitHub"; url = "https://github.com"; };
   };
 }
