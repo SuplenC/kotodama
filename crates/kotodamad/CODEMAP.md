@@ -35,7 +35,7 @@ The Daemon. Maintained by hand: fix stale lines when you find them, and update t
 - `config.rs`: `load` (merge every `*.toml` in config dirs), `watch` (a `kotodama_extension::watch::Watcher` on thread `config`), `extension_table` (`[extensions.<name>]`), `extension_settings` (the table as the Extension gets it, without `word`, `prefix` and `in_search`).
 - `discovery.rs`: `discover` (`<dir>/*/manifest.toml`), `watch` for Extension dirs (a `Watcher` on thread `extensions`); `Found`.
 - `host.rs`: `Processes`, spawning Extension processes with reader/writer threads.
-- `link.rs:pump`: post-handshake connection threads (Extension or Front end).
+- `link.rs:pump`: post-handshake connection threads (Extension or Front end); for an Extension, a message that doesn't decode is answered with `ToExtension::Rejected` and its reason, as `daemon.rs:extension_message` does for one it may not send.
 - `server.rs`: `listen`, `serve`, the Front end Unix socket.
 - `desktop.rs`: paste/type worker over Wayland (virtual keyboard, `Keymap`, `Wayland`, `Worker`); `launch` starts a Quicklink's command through `kotodama_extension::launch::launch` on a thread of its own (a scope of its own, `WAYLAND_DISPLAY` passed on, as `host.rs` passes it to Extensions); data-control and finding the compositor are `kotodama_extension::wayland`; keys wait `SETTLE` after the menu closes (`settle_left`).
 - `notify.rs:send`: desktop notifications over D-Bus (`kotodama_extension::dbus`).

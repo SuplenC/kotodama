@@ -1,6 +1,6 @@
 # A Kotodama Extension in bash and jq
 
-`extension.sh` is a complete Extension in a little over 200 lines of bash and jq. Start here if you are writing your own, in any language. It needs bash 4 or later and jq.
+`extension.sh` is a complete Extension in a little over 200 lines of bash and jq. It needs bash 4 or later and jq. [docs/extensions.md](../../docs/extensions.md) is the guide to writing your own, in any language, and `kotodama extension new` writes a small one to start from.
 
 It does five things:
 
@@ -23,7 +23,7 @@ bookmarks = [
 
 ## The protocol in brief
 
-The Daemon starts `command` from `manifest.toml`, in this directory, and talks to it over stdin and stdout. Everything below is in `crates/kotodama-protocol`, whose docs are the full reference.
+The Daemon starts `command` from `manifest.toml`, in this directory, and talks to it over stdin and stdout. Everything below is in `crates/kotodama-protocol`, and [docs/protocol.md](../../docs/protocol.md) shows every message.
 
 **Frames.** Every message is one frame: its length in bytes as decimal digits, a newline, then the message. No newline follows the message.
 

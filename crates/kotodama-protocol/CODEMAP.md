@@ -21,3 +21,5 @@ The shared protocol. Maintained by hand: fix stale lines when you find them, and
 - `../benches/formats.rs`: the Daemon's real messages in every Wire format and in prost, müsli `wire` and bilrost (`tests/support/mirror.rs`: their copies of the types; `tests/support/messages.rs`: the messages; both shared with `tests/protobuf.rs`).
 - `../kotodama.proto`: the protobuf schema for other languages, written by `tests/layout.rs`.
 - `../tests/layout.rs`: pins every message's encodings per version in `tests/layouts/<major>.<minor>.txt` and checks what an older minor version is sent; `tests/support/schema.rs` writes `kotodama.proto`. `../tests/protobuf.rs`: prost reads the protobuf Wire format and back.
+- `../tests/protocol_doc.rs`: writes `docs/protocol.md`, the message-by-message reference, from this version's pinned samples (`describe` holds each sample's words); fails when it is stale, and `KOTODAMA_BLESS_LAYOUT=1` rewrites it.
+- `../tests/{shell,python,typescript}_extension.rs`: drive the example Extensions in `examples/` as the Daemon does (`tests/support/example.rs`: starting one and speaking to it).
