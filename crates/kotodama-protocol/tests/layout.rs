@@ -823,6 +823,10 @@ fn to_front_end() -> Vec<ToFrontEnd> {
         },
         ToFrontEnd::Status {
             down: vec!["shell".into()],
+            problems: vec![Problem {
+                about: "history.half_life_days in ~/.config/kotodama/config.toml".into(),
+                message: "should be a number of days above 0".into(),
+            }],
         },
         ToFrontEnd::Close,
         ToFrontEnd::ActionFailed {

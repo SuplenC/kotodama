@@ -268,13 +268,13 @@ fn a_killed_extension_never_stalls_the_daemon_and_comes_back_on_its_own() {
 
     // The daemon keeps answering while the Extension is down, and says so.
     ui.until(|message| match message {
-        ToFrontEnd::Status { down } if down == ["bookmarks"] => Some(()),
+        ToFrontEnd::Status { down, .. } if down == ["bookmarks"] => Some(()),
         _ => None,
     });
     assert_eq!(ui.titles("thing"), ["Other thing"]);
 
     ui.until(|message| match message {
-        ToFrontEnd::Status { down } if down.is_empty() => Some(()),
+        ToFrontEnd::Status { down, .. } if down.is_empty() => Some(()),
         _ => None,
     });
     ui.wait_for_titles("kotodama", &["Kotodama"]);
@@ -356,7 +356,7 @@ fn an_extension_that_never_says_hello_is_killed_restarted_and_dies_with_the_daem
     let mut ui = daemon.connect();
 
     ui.until(|message| match message {
-        ToFrontEnd::Status { down } if down == ["silent"] => Some(()),
+        ToFrontEnd::Status { down, .. } if down == ["silent"] => Some(()),
         _ => None,
     });
     let starts = || {
@@ -423,6 +423,53 @@ fn an_extension_installed_or_removed_while_the_daemon_runs_is_picked_up() {
 
     fs::remove_dir_all(daemon.extension_dir("bookmarks")).unwrap();
     ui.wait_for_titles("kotodama", &[]);
+}
+
+/// What each problem in a Status is about.
+fn abouts(problems: &[Problem]) -> Vec<&str> {
+    problems
+        .iter()
+        .map(|problem| problem.about.as_str())
+        .collect()
+}
+
+#[test]
+fn front_ends_hear_what_is_wrong_and_an_extension_starts_once_its_missing_program_appears() {
+    let root = Daemon::home();
+    testing::install(
+        &root.path().join(EXTENSIONS),
+        "broken",
+        "name = \"broken\"\n",
+    );
+    install(&root, "late", "", &[item("late", "Late thing")]);
+    let program = extension_dir(&root, "late").join("extension.sh");
+    fs::remove_file(&program).unwrap();
+    fs::write(
+        root.path().join("config/kotodama/a.toml"),
+        "[history]\nhalf_life_days = 0\n",
+    )
+    .unwrap();
+    let daemon = Daemon::start(root);
+    let mut ui = daemon.connect();
+
+    let problems = ui.until(|message| match message {
+        ToFrontEnd::Status { problems, .. } if problems.len() == 3 => Some(problems),
+        _ => None,
+    });
+    let abouts = abouts(&problems);
+    assert!(
+        abouts[0].starts_with("history.half_life_days"),
+        "{abouts:?}"
+    );
+    assert!(abouts[1].ends_with("broken/manifest.toml"), "{abouts:?}");
+    assert_eq!(abouts[2], "extension late");
+
+    fs::copy(fixture(), &program).unwrap();
+    ui.until(|message| match message {
+        ToFrontEnd::Status { problems, .. } if problems.len() == 2 => Some(()),
+        _ => None,
+    });
+    ui.wait_for_titles("thing", &["Late thing"]);
 }
 
 #[test]

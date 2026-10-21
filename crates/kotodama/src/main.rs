@@ -7,6 +7,7 @@
 //! kotodama open --query "fir"
 //! kotodama open --view clipboard/history
 //! kotodama open --app emoji
+//! kotodama check
 //! ```
 //!
 //! `--view <extension>/<item>` opens the menu on the View that Item's primary Action pushes.
@@ -20,6 +21,7 @@
 //!
 //! # Not here
 //!
+//! - `kotodama check`: `check.rs`.
 //! - The socket's path, the handshake and the framing: `kotodama-protocol` (`socket_path`,
 //!   `Channel`).
 //! - What the Daemon does with the message: `kotodamad/src/daemon.rs`.
@@ -28,6 +30,7 @@
 
 #![forbid(unsafe_code)]
 
+mod check;
 mod extension;
 
 use std::io;
@@ -45,7 +48,8 @@ use kotodama_protocol::socket_path;
 
 const USAGE: &str = "usage: kotodama toggle
        kotodama open [--view <extension>/<item>] [--app <word>] [--query <text>]
-       kotodama extension check <dir> | new <name>";
+       kotodama extension check <dir> | new <name>
+       kotodama check";
 
 /// Under socket activation the first keypress also starts the Daemon, so the handshake may wait
 /// for it to come up. The answer waits for it too, and for a menu, when none is connected yet.
@@ -120,6 +124,11 @@ fn main() -> ExitCode {
     if args.first().is_some_and(|command| command == "extension") {
         return extension::run(&args[1..]);
     }
+    if let [command] = args.as_slice()
+        && command == "check"
+    {
+        return check::main();
+    }
     let message = match parse(&args) {
         Ok(message) => message,
         Err(err) => {
@@ -169,15 +178,19 @@ fn parse(args: &[String]) -> Result<FromFrontEnd, ParseError> {
     }
 }
 
-fn send(message: &FromFrontEnd) -> Result<(), SendError> {
+/// Connects to the Daemon as a Front end.
+fn connect() -> Result<Channel<UnixStream, UnixStream>, SendError> {
     let socket = socket_path().ok_or(SendError::NoRuntimeDir)?;
     let stream = UnixStream::connect(&socket).map_err(|reason| SendError::connect(socket, reason))?;
     stream
         .set_read_timeout(Some(HANDSHAKE_TIMEOUT))
         .map_err(SendError::socket)?;
     let reader = stream.try_clone().map_err(SendError::socket)?;
-    let mut channel =
-        Channel::handshake(reader, stream, &Hello::new(&WireFormat::ALL)).map_err(SendError::handshake)?;
+    Channel::handshake(reader, stream, &Hello::new(&WireFormat::ALL)).map_err(SendError::handshake)
+}
+
+fn send(message: &FromFrontEnd) -> Result<(), SendError> {
+    let mut channel = connect()?;
     channel.send(message).map_err(SendError::send)?;
     match answer(&mut channel)? {
         0 => Err(SendError::NoMenu),

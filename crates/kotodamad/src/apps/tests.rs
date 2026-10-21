@@ -11,7 +11,8 @@ fn apps(manifests: &[&str], config: Table) -> Apps {
             .enumerate()
             .map(|(n, manifest)| (ExtensionId(n), manifest)),
         &config,
-        &crate::keywords::from_config(&config),
+        &crate::keywords::from_config(&config, &mut Report::new()),
+        &mut Report::new(),
     )
 }
 
@@ -197,7 +198,7 @@ fn an_app_whose_word_and_name_are_both_held_still_gets_a_word() {
 
 #[test]
 fn an_alias_over_a_quicklink_is_a_conflict() {
-    let keywords = crate::keywords::from_config(&keywords(&["gh"], &["gh"]));
+    let keywords = crate::keywords::from_config(&keywords(&["gh"], &["gh"]), &mut Report::new());
 
     assert_eq!(
         keywords.conflicts(),

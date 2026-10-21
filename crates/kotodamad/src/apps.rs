@@ -28,6 +28,7 @@ use crate::conflict::{Conflict, Holder};
 use crate::daemon::ExtensionId;
 use crate::index::SIDES;
 use crate::keywords::Keywords;
+use crate::problem::Report;
 
 /// One Extension's app.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -54,13 +55,16 @@ fn entry_id(extension: &str) -> String {
 }
 
 /// The word `[extensions.<name>]` sets: `word`, or `prefix`, its old name,
-/// which is still read and warned about.
-fn configured_word<'t>(table: &'t Table, name: &str) -> Option<&'t Value> {
+/// which is still read and reported.
+fn configured_word<'t>(table: &'t Table, name: &str, report: &mut Report) -> Option<&'t Value> {
     if let Some(word) = table.get("word") {
         return Some(word);
     }
     let word = table.get("prefix")?;
-    log::warn!("[extensions.{name}] prefix is deprecated; call it `word`");
+    report.add(
+        format!("extensions.{name}.prefix"),
+        "is the old name of `word`; call it `word`",
+    );
     Some(word)
 }
 
@@ -130,16 +134,18 @@ impl Apps {
     /// `[extensions.<name>]` says otherwise: `word` is the word, and
     /// `in_search` puts every Item in the search, or none. Each keyword
     /// goes to one holder, by the precedence `conflict.rs` describes; an app
-    /// that loses its word goes by another, and every app gets one.
+    /// that loses its word goes by another, and every app gets one. A
+    /// setting that can't be read goes in `report`.
     pub fn new<'a>(
         extensions: impl IntoIterator<Item = (ExtensionId, &'a Manifest)>,
         config: &Table,
         keywords: &Keywords,
+        report: &mut Report,
     ) -> Self {
         let mut asked: Vec<(Asked, &str, App)> = extensions
             .into_iter()
             .map(|(extension, manifest)| {
-                let (from, app) = App::new(extension, manifest, config);
+                let (from, app) = App::new(extension, manifest, config, report);
                 (from, manifest.name.as_str(), app)
             })
             .collect();
@@ -192,13 +198,21 @@ impl Apps {
 impl App {
     /// The app of the Extension of `manifest`, with the word it asks for,
     /// and where that word comes from.
-    fn new(extension: ExtensionId, manifest: &Manifest, config: &Table) -> (Asked, Self) {
+    fn new(
+        extension: ExtensionId,
+        manifest: &Manifest,
+        config: &Table,
+        report: &mut Report,
+    ) -> (Asked, Self) {
         let name = &manifest.name;
         let table = extension_table(config, name);
-        let configured = match configured_word(&table, name) {
+        let configured = match configured_word(&table, name, report) {
             Some(Value::String(word)) if is_valid_word(word) => Some(word.as_str()),
             Some(other) => {
-                log::warn!("[extensions.{name}] word: {other:?} isn't one word; ignoring it");
+                report.add(
+                    format!("extensions.{name}.word"),
+                    format!("{other:?} isn't one word; ignoring it"),
+                );
                 None
             }
             None => None,
@@ -212,7 +226,10 @@ impl App {
         let in_search = match table.get("in_search") {
             Some(Value::Bool(in_search)) => Some(*in_search),
             Some(other) => {
-                log::warn!("[extensions.{name}] in_search: {other:?} isn't true or false");
+                report.add(
+                    format!("extensions.{name}.in_search"),
+                    format!("{other:?} isn't true or false"),
+                );
                 None
             }
             None => None,

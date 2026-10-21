@@ -25,6 +25,8 @@
 
 use std::fmt;
 
+use crate::problem::Report;
+
 /// What holds a keyword.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Holder {
@@ -77,9 +79,22 @@ impl fmt::Display for Conflict {
     }
 }
 
-/// Tells the user about each conflict.
-pub fn report(conflicts: &[Conflict]) {
+impl Conflict {
+    /// The keyword two things ask for.
+    pub fn keyword(&self) -> &str {
+        match self {
+            Conflict::QuicklinkUnderAlias { keyword } => keyword,
+            Conflict::WordTaken { word, .. } => word,
+        }
+    }
+}
+
+/// Tells the user about each conflict, as a problem.
+pub fn report(conflicts: &[Conflict], report: &mut Report) {
     for conflict in conflicts {
-        log::warn!("{conflict}");
+        report.add(
+            format!("keyword `{}`", conflict.keyword()),
+            conflict.to_string(),
+        );
     }
 }

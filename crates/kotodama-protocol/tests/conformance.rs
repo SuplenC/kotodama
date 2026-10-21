@@ -413,6 +413,10 @@ fn to_front_end_messages() -> Vec<ToFrontEnd> {
         },
         ToFrontEnd::Status {
             down: vec!["calculator".into()],
+            problems: vec![Problem {
+                about: "extension calculator".into(),
+                message: "its program doesn't exist".into(),
+            }],
         },
         ToFrontEnd::Close,
         ToFrontEnd::ActionFailed {

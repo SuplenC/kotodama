@@ -4,13 +4,14 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::Sender;
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 
 use kotodama_extension::watch::{RecursiveMode, Watcher, notify};
-use kotodama_protocol::Manifest;
+use kotodama_protocol::{Manifest, Problem};
 use regex::Regex;
 
 use crate::daemon::{Event, OWN};
+use crate::problem::Report;
 
 /// How long the Extension directories must stay still before they are read
 /// again, so a package install that writes many files is read once, whole.
@@ -50,14 +51,50 @@ impl Found {
     pub fn program(&self) -> PathBuf {
         self.dir.join(&self.manifest.command[0])
     }
+
+    /// What the program file is like now, to tell when it changes; `None`
+    /// while it doesn't exist.
+    pub fn stamp(&self) -> Option<Stamp> {
+        let metadata = fs::metadata(self.program()).ok()?;
+        Some(Stamp {
+            modified: metadata.modified().ok(),
+            len: metadata.len(),
+        })
+    }
+}
+
+/// When a file was last written, and how long it is: enough to tell that a
+/// program was installed, rebuilt or replaced.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Stamp {
+    modified: Option<SystemTime>,
+    len: u64,
+}
+
+/// The Extensions found, and what is wrong with the Manifests that were
+/// refused or are out of date.
+#[derive(Clone, Debug, Default)]
+pub struct Discovered {
+    pub found: Vec<Found>,
+    pub problems: Vec<Problem>,
+}
+
+impl From<Vec<Found>> for Discovered {
+    fn from(found: Vec<Found>) -> Self {
+        Discovered {
+            found,
+            problems: Vec::new(),
+        }
+    }
 }
 
 /// Every Extension in `dirs`, least important directory first. An Extension in
 /// a later directory replaces one of the same name in an earlier one, so the
 /// user's own copy wins over the distro's. Sorted by name. Broken Manifests
-/// are logged and skipped.
-pub fn discover(dirs: &[PathBuf]) -> Vec<Found> {
+/// are problems, and skipped.
+pub fn discover(dirs: &[PathBuf]) -> Discovered {
     let mut found: Vec<Found> = Vec::new();
+    let mut report = Report::new();
     for dir in dirs {
         let Ok(entries) = fs::read_dir(dir) else {
             continue;
@@ -72,29 +109,32 @@ pub fn discover(dirs: &[PathBuf]) -> Vec<Found> {
             if !manifest_path.is_file() {
                 continue;
             }
-            match load(&path, &manifest_path) {
+            match load(&path, &manifest_path, &mut report) {
                 Ok(extension) => {
                     found.retain(|other| other.manifest.name != extension.manifest.name);
                     found.push(extension);
                 }
-                Err(err) => log::error!("{}: {err}", manifest_path.display()),
+                Err(err) => report.add(manifest_path.display().to_string(), err),
             }
         }
     }
     found.sort_by(|a, b| a.manifest.name.cmp(&b.manifest.name));
-    found
+    Discovered {
+        found,
+        problems: report.into_problems(),
+    }
 }
 
-fn load(dir: &Path, manifest_path: &Path) -> Result<Found, String> {
+fn load(dir: &Path, manifest_path: &Path, report: &mut Report) -> Result<Found, String> {
     let text = fs::read_to_string(manifest_path).map_err(|err| err.to_string())?;
     let manifest = Manifest::from_toml(&text).map_err(|err| err.to_string())?;
     if text
         .parse::<toml::Table>()
         .is_ok_and(|table| table.contains_key("prefix"))
     {
-        log::warn!(
-            "{}: `prefix` is deprecated; call it `word`",
-            manifest_path.display()
+        report.add(
+            manifest_path.display().to_string(),
+            "`prefix` is the old name of `word`; call it `word`",
         );
     }
     Found::new(manifest, dir.to_owned())

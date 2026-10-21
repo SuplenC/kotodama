@@ -300,6 +300,11 @@ message Outcome {
   }
 }
 
+message Problem {
+  string about = 1;
+  string message = 2;
+}
+
 message ResultRef {
   string extension = 1;
   string id = 2;
@@ -459,6 +464,7 @@ message ToFrontEnd {
 
   message Status {
     repeated string down = 1;
+    repeated Problem problems = 2;
   }
 
   message UpdateView {

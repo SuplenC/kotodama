@@ -16,7 +16,8 @@ use std::time::{Duration, Instant};
 
 use kotodama_protocol::*;
 use kotodamad::clock::{Clock, DAY_SECS};
-use kotodamad::daemon::{Daemon, Desktop, Event, ExtensionId, FrontEndId, Launcher, Output};
+use kotodamad::daemon::{Daemon, Desktop, Ended, Event, ExtensionId, FrontEndId, Launcher, Output};
+
 use kotodamad::discovery::Found;
 use kotodamad::history::{History, Store};
 use kotodamad::usage::Entry;
@@ -256,9 +257,15 @@ impl Harness {
     }
 
     pub fn down(&mut self, ext: &Ext) {
+        self.end(ext, Ended::Stopped("exit status: 1".into()));
+    }
+
+    /// Ends `ext`'s run as `ended` says.
+    pub fn end(&mut self, ext: &Ext, ended: Ended) {
         self.event(Event::ExtensionDown {
             extension: ext.id,
             generation: ext.generation,
+            ended,
         });
     }
 
@@ -268,6 +275,11 @@ impl Harness {
 
     /// A Front end with room for only `room` messages it hasn't read.
     pub fn front_end_with_room(&mut self, room: usize) -> FrontEnd {
+        self.greeted_front_end(room).0
+    }
+
+    /// A Front end, and what the Daemon sent it as it connected.
+    pub fn greeted_front_end(&mut self, room: usize) -> (FrontEnd, Vec<ToFrontEnd>) {
         let id = FrontEndId(self.next_front_end);
         self.next_front_end += 1;
         let (tx, rx) = mpsc::sync_channel(room);
@@ -284,8 +296,8 @@ impl Harness {
             closed,
             shown: Cell::new(0),
         };
-        front_end.drain();
-        front_end
+        let greeting = front_end.drain();
+        (front_end, greeting)
     }
 
     pub fn front_end_sends(&mut self, front_end: &FrontEnd, message: FromFrontEnd) {

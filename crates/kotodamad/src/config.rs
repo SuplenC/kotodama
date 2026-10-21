@@ -58,8 +58,9 @@ pub fn load(dirs: &[PathBuf]) -> Result<Table, Error> {
 }
 
 /// Watches `dirs` and sends [`Event::Config`] with the reloaded config after
-/// each change. A load that fails is logged and sends nothing, so the Daemon
-/// keeps the last good config. Watching stops when the watcher is dropped.
+/// each change, or [`Event::ConfigFailed`] when it can't be loaded, and the
+/// Daemon keeps the last good config. Watching stops when the watcher is
+/// dropped.
 pub fn watch(dirs: Vec<PathBuf>, events: Sender<Event>) -> notify::Result<Watcher> {
     let filter = dirs.clone();
     let watcher = Watcher::start(
@@ -73,7 +74,9 @@ pub fn watch(dirs: Vec<PathBuf>, events: Sender<Event>) -> notify::Result<Watche
                 Ok(config) => {
                     let _ = events.send(Event::Config(config));
                 }
-                Err(err) => log::error!("keeping the last good config: {err}"),
+                Err(err) => {
+                    let _ = events.send(Event::ConfigFailed(err));
+                }
             }
         },
     )?;

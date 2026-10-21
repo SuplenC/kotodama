@@ -9,14 +9,14 @@
 
 use std::cell::Cell;
 use std::collections::{BTreeMap, HashMap, HashSet};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::mpsc::{Sender, SyncSender, TrySendError};
 use std::time::{Duration, Instant};
 
 use kotodama_protocol::{
     Action, ActionRef, CatalogEntry, Clipboard, FORGET_SHORTCUT, FromExtension, FromFrontEnd, Item,
-    ItemKind, Job, JobState, KindName, LiveResult, NamespacedKind, OfferedAction, Outcome,
+    ItemKind, Job, JobState, KindName, LiveResult, NamespacedKind, OfferedAction, Outcome, Problem,
     ResultRef, Scope, ShownResult, Table, ToExtension, ToFrontEnd, View, ViewContent,
 };
 use nucleo_matcher::pattern::{CaseMatching, Normalization, Pattern};
@@ -25,9 +25,9 @@ use nucleo_matcher::{Config, Matcher};
 use crate::apps::Apps;
 use crate::arguments;
 use crate::clock::{Clock, When};
-use crate::config::extension_settings;
+use crate::config::{self, extension_settings};
 use crate::conflict::{self, Conflict};
-use crate::discovery::Found;
+use crate::discovery::{Discovered, Found, Stamp};
 use crate::empty_query::EmptyQuery;
 use crate::history::{
     self, Change, Frecent, Habit, History, IDENTITIES, Picks, ResultKey, Settings, Store, query_key,
@@ -40,6 +40,7 @@ use crate::most_used::{Ahead, Counts, Other, Picked, Usage, Versions};
 use crate::narrowing::Narrowing;
 use crate::open_view::{Opening, ViewName};
 use crate::pick::{self, PICK, Pick};
+use crate::problem::{self, Problems, Report};
 use crate::rank::{self, Haystack, Matched, Text, Tier, Tiers};
 use crate::reserved;
 use crate::segment::Edit;
@@ -115,6 +116,7 @@ pub enum Event {
     ExtensionDown {
         extension: ExtensionId,
         generation: u64,
+        ended: Ended,
     },
     FrontEndUp {
         front_end: FrontEndId,
@@ -132,14 +134,32 @@ pub enum Event {
     },
     /// The config directory was reloaded.
     Config(Table),
+    /// The config directory changed, but can't be loaded: the last good
+    /// config stays.
+    ConfigFailed(config::Error),
     /// The Extension directories changed: these are all the Extensions now.
-    Extensions(Vec<Found>),
+    Extensions(Discovered),
+    /// A file changed next to the program of an Extension that couldn't
+    /// start, which may start now.
+    ProgramsChanged,
     /// A new version of an Extension's Items, indexed off the keystroke path
     /// (see [`Daemon::index_in_background`]).
     Indexed(Indexed),
     /// Items to keep resident, read on the indexing thread: the hot ones,
     /// planned there, and those a keyword or an Alias names.
     Kept(Kept),
+}
+
+/// How a run of an Extension ended, as [`Event::ExtensionDown`] tells.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Ended {
+    /// It ran, then stopped: how, as its exit status or what broke the
+    /// connection. It is restarted after a while.
+    Stopped(String),
+    /// Its program couldn't be started, as when it doesn't exist: why.
+    CantStart(String),
+    /// It speaks a protocol this Daemon doesn't, as the handshake found.
+    Refused(String),
 }
 
 /// How many Results a Front end gets for one query.
@@ -192,6 +212,13 @@ enum State {
     Down {
         retry_at: Instant,
     },
+    /// Can't start, or speaks a protocol the Daemon doesn't, for `reason`:
+    /// starting it again would fail the same way, so it waits for its
+    /// program, as `stamp` was then, or its Manifest to change.
+    Failed {
+        reason: String,
+        stamp: Option<Stamp>,
+    },
     /// Uninstalled. The slot stays so ExtensionIds keep their meaning, and is
     /// reused if an Extension of the same name comes back.
     Removed,
@@ -219,6 +246,8 @@ struct Extension {
     status: Option<Status>,
     /// Whether Items of this run have reached the search, or are hidden.
     has_items: bool,
+    /// How its last run stopped, while it is down.
+    ended: Option<String>,
 }
 
 /// What an Extension said of itself in its last `FromExtension::Status`.
@@ -251,7 +280,23 @@ impl Extension {
             stopping: false,
             status: None,
             has_items: false,
+            ended: None,
         }
+    }
+
+    /// What the user should know while it can't run.
+    fn problem(&self) -> Option<Problem> {
+        let message = match &self.state {
+            State::Failed { reason, .. } => {
+                format!("{reason}; it starts again once its program or Manifest changes")
+            }
+            _ if self.is_down() => format!("{}; restarting", self.ended.as_deref()?),
+            _ => return None,
+        };
+        Some(Problem {
+            about: format!("extension {}", self.name()),
+            message,
+        })
     }
 
     /// Whether the search shows its app's entry Item: as it last said, else
@@ -296,7 +341,7 @@ impl Extension {
     /// Stopped, or restarting after it stopped: its Results are gone.
     fn is_down(&self) -> bool {
         match self.state {
-            State::Down { .. } => true,
+            State::Down { .. } | State::Failed { .. } => true,
             State::Starting { .. } => self.generation > 1,
             State::Up { .. } | State::Removed => false,
         }
@@ -716,6 +761,8 @@ enum OwnAction {
     ClearHistory,
     /// Undoes the latest change to the History.
     Undo,
+    /// Opens the list of problems.
+    Problems,
 }
 
 impl Own {
@@ -1045,6 +1092,13 @@ pub struct Daemon<L, D, S> {
     apps: Apps,
     /// The keywords two things asked for, as last told to the user.
     conflicts: Vec<Conflict>,
+    problems: Problems,
+    /// The Front ends showing the list of problems, which is kept up to
+    /// date there.
+    problems_open: HashSet<FrontEndId>,
+    /// Which Extensions can't start changed since
+    /// [`failed_programs`](Self::failed_programs) last said.
+    failed_changed: bool,
     /// One per Quicklink, then one per app (its entry Item), then the
     /// clear-history Item, then the Undo Item while there is something to
     /// undo.
@@ -1104,7 +1158,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             picks: HashMap::new(),
             pick_lists: Views::default(),
             next_id: 1,
-            config,
+            config: Table::new(),
             contributed: HashMap::new(),
             catalog: None,
             catalog_dirty: false,
@@ -1130,6 +1184,9 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             kind_places: KindPlaces::default(),
             apps: Apps::default(),
             conflicts: Vec::new(),
+            problems: Problems::default(),
+            problems_open: HashSet::new(),
+            failed_changed: false,
             own: Vec::new(),
             undos: Vec::new(),
             frecent: Arc::default(),
@@ -1140,11 +1197,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             tiers: Tiers::default(),
             highlights: Vec::new(),
         };
-        daemon.load_keywords();
-        daemon.load_apps();
-        daemon.load_settings();
-        daemon.empty_query = EmptyQuery::from_config(&daemon.config);
-        daemon.kinds = KindOrder::from_config(&daemon.config);
+        daemon.set_config(config);
         for id in 0..daemon.extensions.len() {
             daemon.start(ExtensionId(id), now);
         }
@@ -1384,9 +1437,10 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             Event::ExtensionDown {
                 extension,
                 generation,
+                ended,
             } => {
                 if self.extensions[extension.0].generation == generation {
-                    self.extension_down(extension, now);
+                    self.extension_down(extension, ended, now);
                 }
             }
             Event::FrontEndUp {
@@ -1399,7 +1453,12 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             }
             Event::FrontEndDown { front_end } => self.front_end_down(front_end),
             Event::Config(config) => self.set_config(config),
-            Event::Extensions(found) => self.set_extensions(found, now),
+            Event::ConfigFailed(err) => self.config_failed(err),
+            Event::Extensions(Discovered { found, problems }) => {
+                self.problems.dirty |= problem::replace(&mut self.problems.manifests, problems);
+                self.set_extensions(found, now);
+            }
+            Event::ProgramsChanged => self.programs_changed(now),
             Event::Indexed(indexed) => self.indexed(indexed, now),
             Event::Kept(Kept { hot, ahead, reads }) => {
                 self.index.keep(reads);
@@ -1487,6 +1546,10 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
 
     fn start(&mut self, id: ExtensionId, now: Instant) {
         let ext = &mut self.extensions[id.0];
+        if matches!(ext.state, State::Failed { .. }) {
+            self.failed_changed = true;
+            self.problems.dirty = true;
+        }
         ext.generation += 1;
         ext.state = State::Starting {
             deadline: now + HANDSHAKE_TIMEOUT,
@@ -1514,6 +1577,8 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
         }
         let table = extension_settings(&self.config, ext.name());
         ext.state = State::Up { sender, since: now };
+        ext.ended = None;
+        self.problems.dirty = true;
         ext.send(ToExtension::Config(table.clone()));
         ext.config = Some(table);
 
@@ -1529,8 +1594,29 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
         self.extensions_changed();
     }
 
-    fn extension_down(&mut self, id: ExtensionId, now: Instant) {
+    fn extension_down(&mut self, id: ExtensionId, ended: Ended, now: Instant) {
         let ext = &mut self.extensions[id.0];
+        self.problems.dirty = true;
+        let how = match ended {
+            Ended::CantStart(reason) | Ended::Refused(reason) => {
+                log::warn!(
+                    "extension {}: {reason}; it starts again once its program or Manifest changes",
+                    ext.name()
+                );
+                ext.state = State::Failed {
+                    stamp: ext.found.stamp(),
+                    reason,
+                };
+                ext.ended = None;
+                self.failed_changed = true;
+                self.forget_run(id);
+                return;
+            }
+            // Stopped for not answering, its exit status is the Daemon's
+            // doing.
+            Ended::Stopped(_) if ext.hung.get() => "stopped answering".to_owned(),
+            Ended::Stopped(how) => format!("stopped ({how})"),
+        };
         if let State::Up { since, .. } = ext.state
             && now.duration_since(since) >= STABLE
         {
@@ -1543,8 +1629,40 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
         ext.state = State::Down {
             retry_at: now + delay,
         };
-        log::warn!("extension {} stopped; restarting in {delay:?}", ext.name());
+        log::warn!("extension {} {how}; restarting in {delay:?}", ext.name());
+        ext.ended = Some(how);
         self.forget_run(id);
+    }
+
+    /// Starts each Extension that couldn't start whose program changed
+    /// since.
+    fn programs_changed(&mut self, now: Instant) {
+        for id in 0..self.extensions.len() {
+            let ext = &mut self.extensions[id];
+            if let State::Failed { stamp, .. } = &ext.state
+                && *stamp != ext.found.stamp()
+            {
+                log::info!("extension {}'s program changed; starting it", ext.name());
+                ext.failures = 0;
+                self.start(ExtensionId(id), now);
+            }
+        }
+    }
+
+    /// The directories of the programs of the Extensions that can't start,
+    /// to watch for a change that may let them, when that changed since it
+    /// last said.
+    pub fn failed_programs(&mut self) -> Option<Vec<PathBuf>> {
+        if !std::mem::take(&mut self.failed_changed) {
+            return None;
+        }
+        let mut dirs: Vec<PathBuf> = (self.extensions.iter())
+            .filter(|ext| matches!(ext.state, State::Failed { .. }))
+            .filter_map(|ext| ext.found.program().parent().map(Path::to_owned))
+            .collect();
+        dirs.sort();
+        dirs.dedup();
+        Some(dirs)
     }
 
     /// Drops everything one run of an Extension left behind: its Items, Live
@@ -2401,8 +2519,14 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             empty_ranked_in: None,
             filters: Vec::new(),
         };
+        // `kotodama check` reads the first Status alone, so it must be up to
+        // date.
+        if self.problems.dirty {
+            self.update_problems();
+        }
         session.send(ToFrontEnd::Status {
             down: self.down.clone(),
+            problems: self.problems.sent.clone(),
         });
         if let Some(offer) = self.latest_undo().and_then(Undoable::offer) {
             session.send(offer);
@@ -2442,6 +2566,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             }
         }
         self.argument_forms.retain(|_, form| form.front_end != id);
+        self.problems_open.remove(&id);
         // The command waits connected for its answer: one that left has
         // given up, and its menu would open for nobody.
         self.awaiting_menu.retain(|&(from, ..)| from != id);
@@ -2506,6 +2631,9 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             }
             FromFrontEnd::ViewPopped { extension, view } => {
                 if extension == OWN {
+                    if view == problem::PROBLEMS {
+                        self.problems_open.remove(&id);
+                    }
                     self.take_argument_form(id, &view);
                     self.pick_popped(id, &view);
                 } else if let Some(ext) = self.extension_named(&extension) {
@@ -2924,9 +3052,13 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
     /// from the old run, its ExtensionDown included, is heard any more.
     fn retire(&mut self, id: ExtensionId) {
         let ext = &mut self.extensions[id.0];
-        if matches!(ext.state, State::Starting { .. } | State::Up { .. }) {
-            self.launcher.stop(id, ext.generation);
+        match ext.state {
+            State::Starting { .. } | State::Up { .. } => self.launcher.stop(id, ext.generation),
+            State::Failed { .. } => self.failed_changed = true,
+            State::Down { .. } | State::Removed => {}
         }
+        ext.ended = None;
+        self.problems.dirty = true;
         ext.generation += 1;
         ext.state = State::Removed;
         self.forget_run(id);
@@ -3130,6 +3262,14 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
                 self.store.forget_usage(None);
                 let done = Done::new("Cleared history", "Undo clearing history");
                 self.changed(done, change, now);
+            }
+            OwnAction::Problems => {
+                session.send(ToFrontEnd::PushView {
+                    extension: OWN.to_owned(),
+                    view: problem::view(&self.problems.sent),
+                    contributed: BTreeMap::new(),
+                });
+                self.problems_open.insert(front_end);
             }
             OwnAction::Undo => {
                 if let Some(latest) = self.latest_undo().map(|undo| undo.id) {
@@ -3491,19 +3631,22 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
 
     fn set_config(&mut self, config: Table) {
         self.config = config;
-        self.load_keywords();
-        self.load_apps();
-        self.load_settings();
-        let empty_query = EmptyQuery::from_config(&self.config);
+        self.problems.dirty |= self.problems.unreadable.take().is_some();
+        let mut report = Report::new();
+        self.load_keywords(&mut report);
+        self.load_settings(&mut report);
+        let empty_query = EmptyQuery::from_config(&self.config, &mut report);
         if empty_query != self.empty_query {
             self.empty_query = empty_query;
             self.mark_late();
         }
-        let kinds = KindOrder::from_config(&self.config);
+        let kinds = KindOrder::from_config(&self.config, &mut report);
         if kinds != self.kinds {
             self.kinds = kinds;
             self.mark_late();
         }
+        self.problems.dirty |= problem::replace(&mut self.problems.config, report.into_problems());
+        self.load_apps();
         for ext in &mut self.extensions {
             if ext.sender().is_none() {
                 continue;
@@ -3516,10 +3659,22 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
         }
     }
 
+    /// The config can't be loaded, as `err` says: the last good one stays,
+    /// and the user hears why until it loads again.
+    fn config_failed(&mut self, err: config::Error) {
+        let problem = Problem {
+            about: err.path.display().to_string(),
+            message: format!("{}; keeping the last good config", err.reason),
+        };
+        log::warn!("{}: {}", problem.about, problem.message);
+        self.problems.unreadable = Some(problem);
+        self.problems.dirty = true;
+    }
+
     /// Reads the History's settings from the config. Open sessions are ranked
     /// again if one that ranks changed.
-    fn load_settings(&mut self) {
-        let settings = Settings::from_config(&self.config);
+    fn load_settings(&mut self, report: &mut Report) {
+        let settings = Settings::from_config(&self.config, report);
         let old = *self.history.settings();
         if settings != old {
             self.history.set_settings(settings);
@@ -3536,8 +3691,8 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
 
     /// Reads the Aliases and Quicklinks from the config, and rebuilds the
     /// Daemon's own Items from them.
-    fn load_keywords(&mut self) {
-        let keywords = keywords::from_config(&self.config);
+    fn load_keywords(&mut self, report: &mut Report) {
+        let keywords = keywords::from_config(&self.config, report);
         if keywords == self.keywords && !self.own.is_empty() {
             return;
         }
@@ -3563,12 +3718,17 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             .enumerate()
             .filter(|(_, ext)| !matches!(ext.state, State::Removed))
             .map(|(n, ext)| (ExtensionId(n), &ext.found.manifest));
-        let apps = Apps::new(installed, &self.config, &self.keywords);
+        let mut report = Report::new();
+        let apps = Apps::new(installed, &self.config, &self.keywords, &mut report);
+        self.problems.dirty |= problem::replace(&mut self.problems.apps, report.into_problems());
         let conflicts: Vec<Conflict> = (self.keywords.conflicts().into_iter())
             .chain(apps.conflicts().iter().cloned())
             .collect();
         if conflicts != self.conflicts {
-            conflict::report(&conflicts);
+            let mut report = Report::new();
+            conflict::report(&conflicts, &mut report);
+            self.problems.dirty |=
+                problem::replace(&mut self.problems.conflicts, report.into_problems());
             self.conflicts = conflicts;
         }
         if apps == self.apps {
@@ -3605,10 +3765,13 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
                 let name = extensions[app.extension.0].name();
                 Own::new(app.entry(name), OwnAction::App(n))
             });
+        let problems = (!self.problems.sent.is_empty())
+            .then(|| Own::new(problem::item(self.problems.sent.len()), OwnAction::Problems));
         self.own = quicklinks
             .map(|(n, quicklink)| Own::new(quicklink.item(), OwnAction::Quicklink(n)))
             .chain(entries)
             .chain([Own::new(clear_history(), OwnAction::ClearHistory)])
+            .chain(problems)
             .collect();
         self.load_undo_item();
         // The own Items' positions changed, so rows showing them can't be
@@ -3621,10 +3784,42 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
         self.mark_late();
     }
 
+    /// Puts the list of problems together again, and if it changed, updates
+    /// the lists open and the own Item that opens it, and has
+    /// [`flush`](Self::flush) send it to every Front end.
+    fn update_problems(&mut self) {
+        self.problems.dirty = false;
+        let list = self
+            .problems
+            .list(self.extensions.iter().filter_map(Extension::problem));
+        if list == self.problems.sent {
+            return;
+        }
+        let count = self.problems.sent.len();
+        self.problems.sent = list;
+        self.problems.unsent = true;
+        for id in &self.problems_open {
+            if let Some(session) = self.sessions.get(id) {
+                session.send(ToFrontEnd::UpdateView {
+                    extension: OWN.to_owned(),
+                    view: problem::view(&self.problems.sent),
+                    contributed: BTreeMap::new(),
+                });
+            }
+        }
+        if self.problems.sent.len() != count {
+            self.build_own();
+        }
+    }
+
     /// Sends what the last event changed: due Live queries, Results, the Action
     /// catalog and the status.
     fn flush(&mut self, now: Instant) {
         self.send_due_live_queries(now);
+        // First, as the own Item that opens the list may change the Results.
+        if self.problems.dirty {
+            self.update_problems();
+        }
 
         let ids: Vec<FrontEndId> = self
             .sessions
@@ -3705,10 +3900,12 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             .filter(|ext| ext.is_down())
             .map(|ext| ext.name().to_owned())
             .collect();
-        if down != self.down {
+        let problems = std::mem::take(&mut self.problems.unsent);
+        if down != self.down || problems {
             self.down = down;
             self.broadcast(|| ToFrontEnd::Status {
                 down: self.down.clone(),
+                problems: self.problems.sent.clone(),
             });
         }
     }

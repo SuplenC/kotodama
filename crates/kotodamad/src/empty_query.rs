@@ -5,6 +5,7 @@ use kotodama_protocol::{Table, Value};
 
 use crate::history::ResultKey;
 use crate::keywords::string;
+use crate::problem::Report;
 
 /// What the Empty query shows, from the config's `[empty_query]` table:
 ///
@@ -19,8 +20,8 @@ use crate::keywords::string;
 /// ]
 /// ```
 ///
-/// A setting that doesn't parse is logged and keeps its default; an Item of
-/// the Fixed menu that doesn't is logged and left out.
+/// A setting that doesn't parse is a problem, and keeps its default; an Item
+/// of the Fixed menu that doesn't is a problem, and left out.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct EmptyQuery {
     /// How many of the Results most used at this time of day come first.
@@ -42,12 +43,12 @@ impl Default for EmptyQuery {
 
 impl EmptyQuery {
     /// The `[empty_query]` table of the merged config.
-    pub fn from_config(config: &Table) -> Self {
+    pub fn from_config(config: &Table, report: &mut Report) -> Self {
         let mut empty = EmptyQuery::default();
         let table = match config.get("empty_query") {
             Some(Value::Table(table)) => table,
             Some(_) => {
-                log::error!("`empty_query` should be a table");
+                report.add("empty_query", "should be a table");
                 return empty;
             }
             None => return empty,
@@ -67,7 +68,7 @@ impl EmptyQuery {
                         for (n, item) in items.iter().enumerate() {
                             match menu_item(item) {
                                 Ok(item) => menu.push(item),
-                                Err(err) => log::error!("empty_query.menu[{n}]: {err}"),
+                                Err(err) => report.add(format!("empty_query.menu[{n}]"), err),
                             }
                         }
                         Ok(())
@@ -77,7 +78,7 @@ impl EmptyQuery {
                 _ => Err("isn't a setting".to_owned()),
             };
             if let Err(err) = set {
-                log::error!("empty_query.{key}: {err}");
+                report.add(format!("empty_query.{key}"), err);
             }
         }
         empty

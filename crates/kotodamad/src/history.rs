@@ -16,6 +16,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::clock::{DAY_SECS, When};
 use crate::host::spawn;
+use crate::problem::Report;
 use crate::usage::{self, Entry};
 
 const DAY: f64 = DAY_SECS as f64;
@@ -42,7 +43,7 @@ const MAX_QUERIES: usize = 1000;
 /// usage_log = false       # log queries and picks, to tune ranking from real use
 /// ```
 ///
-/// A setting that doesn't parse is logged and keeps its default.
+/// A setting that doesn't parse is a problem, and keeps its default.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Settings {
     /// How many picks of one Result for one query make it that query's
@@ -81,13 +82,14 @@ impl Default for Settings {
 }
 
 impl Settings {
-    /// The `[history]` table of the merged config.
-    pub fn from_config(config: &Table) -> Self {
+    /// The `[history]` table of the merged config. A setting that can't be
+    /// read goes in `report`.
+    pub fn from_config(config: &Table, report: &mut Report) -> Self {
         let mut settings = Settings::default();
         let table = match config.get("history") {
             Some(Value::Table(table)) => table,
             Some(_) => {
-                log::error!("`history` should be a table");
+                report.add("history", "should be a table");
                 return settings;
             }
             None => return settings,
@@ -118,7 +120,7 @@ impl Settings {
                 _ => Err("isn't a setting"),
             };
             if let Err(err) = set {
-                log::error!("history.{key}: {err}");
+                report.add(format!("history.{key}"), err);
             }
         }
         settings

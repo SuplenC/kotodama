@@ -24,6 +24,7 @@ mod open_view;
 pub mod paths;
 mod payload;
 mod pick;
+pub mod problem;
 pub mod rank;
 mod reserved;
 mod segment;
@@ -31,11 +32,17 @@ mod server;
 pub mod usage;
 mod views;
 
-use std::sync::mpsc::{self, RecvTimeoutError};
-use std::time::Instant;
+use std::sync::mpsc::{self, RecvTimeoutError, Sender};
+use std::time::{Duration, Instant};
 
-use daemon::Daemon;
+use daemon::{Daemon, Event};
+use kotodama_extension::watch::{RecursiveMode, Watcher};
 use paths::Paths;
+
+/// How long the directories of programs that couldn't start must stay still
+/// before they are tried again, so a build or an install that writes many
+/// files is tried once, whole.
+const PROGRAMS_SETTLE: Duration = Duration::from_millis(500);
 
 /// Runs the Daemon until it fails to start.
 pub fn run(paths: &Paths) -> Result<(), String> {
@@ -49,11 +56,9 @@ pub fn run(paths: &Paths) -> Result<(), String> {
             log::warn!("{}: {err}", dir.display());
         }
     }
-    let config = config::load(&paths.config_dirs).unwrap_or_else(|err| {
-        log::error!("starting with an empty config: {err}");
-        Default::default()
-    });
-    let found = discovery::discover(&paths.extension_dirs);
+    let config = config::load(&paths.config_dirs);
+    let discovered = discovery::discover(&paths.extension_dirs);
+    let found = discovered.found.clone();
     log::info!(
         "found {} extension(s): {}",
         found.len(),
@@ -73,9 +78,16 @@ pub fn run(paths: &Paths) -> Result<(), String> {
     let _extension_watcher = discovery::watch(paths.extension_dirs.clone(), events_tx.clone())
         .map_err(|err| log::error!("not watching the Extension directories: {err}"))
         .ok();
+    let programs_watcher = watch_programs(events_tx.clone())
+        .map_err(|err| log::error!("not watching for programs that couldn't start: {err}"))
+        .ok();
     server::serve(listener, events_tx.clone());
     let indexed = events_tx.clone();
 
+    let (config, unreadable) = match config {
+        Ok(config) => (config, None),
+        Err(err) => (Default::default(), Some(err)),
+    };
     let mut daemon = Daemon::new(
         found,
         config,
@@ -87,6 +99,12 @@ pub fn run(paths: &Paths) -> Result<(), String> {
     );
     daemon.keep_items_in(&paths.cache);
     daemon.index_in_background(indexed);
+    // What discovery and the config found wrong, now that there is a
+    // Daemon to tell.
+    daemon.handle(Event::Extensions(discovered), Instant::now());
+    if let Some(err) = unreadable {
+        daemon.handle(Event::ConfigFailed(err), Instant::now());
+    }
     loop {
         let event = match daemon.next_wake() {
             Some(deadline) => {
@@ -108,5 +126,24 @@ pub fn run(paths: &Paths) -> Result<(), String> {
         if daemon.next_wake().is_some_and(|deadline| deadline <= now) {
             daemon.tick(now);
         }
+        if let (Some(watcher), Some(dirs)) = (&programs_watcher, daemon.failed_programs()) {
+            watcher.watch(dirs);
+        }
     }
+}
+
+/// A watcher, watching nothing until told, that sends
+/// [`Event::ProgramsChanged`] when a file changes in a directory it watches:
+/// those of the programs of Extensions that couldn't start, so one starts
+/// once it is installed or rebuilt.
+fn watch_programs(events: Sender<Event>) -> kotodama_extension::watch::notify::Result<Watcher> {
+    Watcher::start(
+        "programs",
+        RecursiveMode::NonRecursive,
+        PROGRAMS_SETTLE,
+        |event, _| !event.kind.is_access(),
+        move |_| {
+            let _ = events.send(Event::ProgramsChanged);
+        },
+    )
 }

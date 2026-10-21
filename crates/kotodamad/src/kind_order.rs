@@ -3,6 +3,8 @@
 
 use kotodama_protocol::{ItemKind, KindName, SHARED_KINDS, Table, Value};
 
+use crate::problem::Report;
+
 /// Stands for every kind the order doesn't name.
 const OTHERS: &str = "*";
 
@@ -15,8 +17,8 @@ const OTHERS: &str = "*";
 /// kinds = ["app", "project", "url", "*", "file"]
 /// ```
 ///
-/// A setting that doesn't parse is logged and keeps its default; a kind in the
-/// list that isn't one is logged and left out.
+/// A setting that doesn't parse is a problem, and keeps its default; a kind
+/// in the list that isn't one is a problem, and left out.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct KindOrder {
     /// The place of each shared kind, in [`SHARED_KINDS`] order, lowest first.
@@ -35,16 +37,10 @@ impl Default for KindOrder {
 
 impl KindOrder {
     /// The order of `kinds`, each a kind's name or [`OTHERS`]. A kind named
-    /// twice keeps its first place.
+    /// twice keeps its first place. Places are counted in a byte, so kinds
+    /// past the 255th are left out.
     fn new(kinds: &[&str]) -> Self {
-        let kept = kinds.len().min(usize::from(u8::MAX));
-        if kept < kinds.len() {
-            log::error!(
-                "ranking.kinds: names {} kinds, more than {kept}; the rest are left out",
-                kinds.len()
-            );
-        }
-        let kinds = &kinds[..kept];
+        let kinds = &kinds[..kinds.len().min(usize::from(u8::MAX))];
         let others = kinds
             .iter()
             .position(|&kind| kind == OTHERS)
@@ -69,12 +65,12 @@ impl KindOrder {
     }
 
     /// The `[ranking]` table of the merged config.
-    pub fn from_config(config: &Table) -> Self {
+    pub fn from_config(config: &Table, report: &mut Report) -> Self {
         let mut order = KindOrder::default();
         let table = match config.get("ranking") {
             Some(Value::Table(table)) => table,
             Some(_) => {
-                log::error!("`ranking` should be a table");
+                report.add("ranking", "should be a table");
                 return order;
             }
             None => return order,
@@ -87,8 +83,18 @@ impl KindOrder {
                         for (n, kind) in kinds.iter().enumerate() {
                             match kind_name(kind) {
                                 Ok(name) => names.push(name),
-                                Err(err) => log::error!("ranking.kinds[{n}]: {err}"),
+                                Err(err) => report.add(format!("ranking.kinds[{n}]"), err),
                             }
+                        }
+                        let kept = usize::from(u8::MAX);
+                        if names.len() > kept {
+                            report.add(
+                                "ranking.kinds",
+                                format!(
+                                    "names {} kinds, more than {kept}; the rest are left out",
+                                    names.len()
+                                ),
+                            );
                         }
                         order = KindOrder::new(&names);
                         Ok(())
@@ -98,7 +104,7 @@ impl KindOrder {
                 _ => Err("isn't a setting".to_owned()),
             };
             if let Err(err) = set {
-                log::error!("ranking.{key}: {err}");
+                report.add(format!("ranking.{key}"), err);
             }
         }
         order
