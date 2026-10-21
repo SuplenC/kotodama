@@ -20,10 +20,12 @@
 //! copy_path = ["wl-copy", "{path}"]
 //! ```
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
+use std::path::PathBuf;
 
 use kotodama_extension::config;
-use kotodama_protocol::{Table, Value};
+use kotodama_protocol::Table;
+use kotodama_protocol::Value;
 
 use crate::projects::ProjectFolder;
 use crate::scan::Folders;
@@ -189,18 +191,9 @@ mod tests {
                     ("kind", string("projects")),
                     ("depth", Value::Integer(1)),
                 ])),
-                Value::Table(table(&[
-                    ("path", string("/srv/code")),
-                    ("kind", string("projects")),
-                ])),
-                Value::Table(table(&[
-                    ("path", string("~/Scripts")),
-                    ("kind", string("scripts")),
-                ])),
-                Value::Table(table(&[
-                    ("path", string("relative")),
-                    ("kind", string("scripts")),
-                ])),
+                Value::Table(table(&[("path", string("/srv/code")), ("kind", string("projects"))])),
+                Value::Table(table(&[("path", string("~/Scripts")), ("kind", string("scripts"))])),
+                Value::Table(table(&[("path", string("relative")), ("kind", string("scripts"))])),
                 Value::Table(table(&[("path", string("/x")), ("kind", string("music"))])),
             ]),
         )]);
@@ -218,10 +211,7 @@ mod tests {
                 },
             ]
         );
-        assert_eq!(
-            settings.folders.scripts,
-            [PathBuf::from("/home/me/Scripts")]
-        );
+        assert_eq!(settings.folders.scripts, [PathBuf::from("/home/me/Scripts")]);
     }
 
     #[test]

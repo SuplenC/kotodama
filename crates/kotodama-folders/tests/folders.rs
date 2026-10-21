@@ -5,12 +5,15 @@
 
 use std::collections::BTreeMap;
 use std::fs;
-use std::ops::{Deref, DerefMut};
+use std::ops::Deref;
+use std::ops::DerefMut;
 use std::os::unix::fs::PermissionsExt;
-use std::path::{Path, PathBuf};
+use std::path::Path;
+use std::path::PathBuf;
 use std::process::Command;
 use std::thread;
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use std::time::Instant;
 
 use kotodama_extension::testing::Spawned;
 use kotodama_protocol::*;
@@ -83,9 +86,7 @@ impl Folders {
             .map(|(name, value)| ((*name).into(), (*value).into()))
             .collect();
         self.start_run(7, action, item.to_ref(), arguments);
-        self.outcome(7, |message| {
-            matches!(message, FromExtension::JobProgress(_))
-        })
+        self.outcome(7, |message| matches!(message, FromExtension::JobProgress(_)))
     }
 
     fn run(&mut self, item: &Item, action: &str) -> Outcome {
@@ -101,10 +102,7 @@ impl Folders {
 }
 
 fn table_from(table: toml::Table) -> Table {
-    table
-        .into_iter()
-        .map(|(key, value)| (key, value_from(value)))
-        .collect()
+    table.into_iter().map(|(key, value)| (key, value_from(value))).collect()
 }
 
 fn value_from(value: toml::Value) -> Value {
@@ -178,10 +176,7 @@ fn recorded(out: &Path) -> Vec<String> {
 }
 
 fn action_ids(item: &Item) -> Vec<&str> {
-    item.actions
-        .iter()
-        .map(|action| action.id.as_str())
-        .collect()
+    item.actions.iter().map(|action| action.id.as_str()).collect()
 }
 
 #[test]
@@ -246,10 +241,7 @@ fn each_project_action_runs_its_own_command() {
     repo(&home.path().join("Projects/app"));
     let mut config = String::from(r#"folders = [{ path = "~/Projects", kind = "projects" }]"#);
     for key in ["shell", "lazygit", "file_manager", "copy_path"] {
-        let recorder = recorder(
-            &home.path().join(key),
-            &home.path().join(format!("{key}.out")),
-        );
+        let recorder = recorder(&home.path().join(key), &home.path().join(format!("{key}.out")));
         config.push_str(&format!(
             "\n{key} = [\"{}\", \"{key}\", \"{{path}}\"]",
             recorder.display()
@@ -307,20 +299,11 @@ fn executable_files_are_scripts_titled_by_their_subfolders() {
     );
     executable(&scripts.join("app.desktop"), "[Desktop Entry]\n");
 
-    let folders = Folders::configured(
-        home,
-        r#"folders = [{ path = "~/Scripts", kind = "scripts" }]"#,
-    );
+    let folders = Folders::configured(home, r#"folders = [{ path = "~/Scripts", kind = "scripts" }]"#);
     let items = folders.added();
     assert_eq!(
         items.keys().collect::<Vec<_>>(),
-        [
-            "Deploy staging",
-            "app",
-            "backup",
-            "work › db › vacuum",
-            "work › deploy"
-        ]
+        ["Deploy staging", "app", "backup", "work › db › vacuum", "work › deploy"]
     );
     let backup = &items["backup"];
     let path = folders.path().join("Scripts/backup.sh");
@@ -337,13 +320,7 @@ fn executable_files_are_scripts_titled_by_their_subfolders() {
     // A desktop entry is a file like any other, not the apps Extension's app.
     assert_eq!(
         items["app"].identity.as_deref(),
-        Some(
-            format!(
-                "file:{}",
-                folders.path().join("Scripts/app.desktop").display()
-            )
-            .as_str()
-        )
+        Some(format!("file:{}", folders.path().join("Scripts/app.desktop").display()).as_str())
     );
 }
 
@@ -400,10 +377,7 @@ fn a_script_that_asks_for_arguments_gets_them_split_as_a_shell_would() {
     let item = folders.added()["greet"].clone();
     let run = &item.actions[0];
     assert_eq!(run.arguments.len(), 1);
-    assert!(
-        !run.arguments[0].optional,
-        "a required Argument opens a form"
-    );
+    assert!(!run.arguments[0].optional, "a required Argument opens a form");
 
     let argument = run.arguments[0].name.clone();
     assert_eq!(
@@ -446,10 +420,7 @@ fn a_background_script_is_a_job_that_ends_with_its_last_line() {
         arguments: BTreeMap::new(),
     });
     let started = folders.job();
-    assert_eq!(
-        (started.title.as_str(), started.state),
-        ("Sync", JobState::Running)
-    );
+    assert_eq!((started.title.as_str(), started.state), ("Sync", JobState::Running));
     assert!(matches!(
         folders.recv(),
         FromExtension::ActionDone {
@@ -465,10 +436,7 @@ fn a_background_script_is_a_job_that_ends_with_its_last_line() {
     assert_eq!(folders.run(&items["fail"], "run"), Outcome::Close);
     let failed = folders.job();
     assert_eq!(failed.state, JobState::Failed);
-    assert_eq!(
-        failed.message.as_deref(),
-        Some("Exited with status 3: oops")
-    );
+    assert_eq!(failed.message.as_deref(), Some("Exited with status 3: oops"));
 }
 
 #[test]
@@ -491,24 +459,15 @@ fn new_projects_and_scripts_appear_and_removed_ones_go_without_a_restart() {
     repo(&folders.path().join("Projects/work/api"));
     assert_eq!(folders.added().keys().collect::<Vec<_>>(), ["api"]);
 
-    executable(
-        &folders.path().join("Scripts/tools/backup.sh"),
-        "#!/bin/sh\n",
-    );
-    assert_eq!(
-        folders.added().keys().collect::<Vec<_>>(),
-        ["tools › backup"]
-    );
+    executable(&folders.path().join("Scripts/tools/backup.sh"), "#!/bin/sh\n");
+    assert_eq!(folders.added().keys().collect::<Vec<_>>(), ["tools › backup"]);
 
     // A header edit renames it.
     executable(
         &folders.path().join("Scripts/tools/backup.sh"),
         "#!/bin/sh\n# kotodama: name=Back up\n",
     );
-    assert_eq!(
-        folders.added().keys().collect::<Vec<_>>(),
-        ["tools › Back up"]
-    );
+    assert_eq!(folders.added().keys().collect::<Vec<_>>(), ["tools › Back up"]);
 
     // A folder that didn't exist yet.
     executable(&folders.path().join("Later/hello"), "#!/bin/sh\n");
@@ -525,10 +484,7 @@ fn new_projects_and_scripts_appear_and_removed_ones_go_without_a_restart() {
 fn a_config_without_folders_takes_every_item_away() {
     let home = home();
     repo(&home.path().join("Projects/app"));
-    let mut folders = Folders::configured(
-        home,
-        r#"folders = [{ path = "~/Projects", kind = "projects" }]"#,
-    );
+    let mut folders = Folders::configured(home, r#"folders = [{ path = "~/Projects", kind = "projects" }]"#);
     assert_eq!(folders.added().len(), 1);
 
     folders.configure("");

@@ -6,18 +6,31 @@
 //! there are, and neither is anything below the depth.
 
 use std::io;
-use std::path::{Path, PathBuf};
-use std::sync::mpsc::{self, RecvTimeoutError, Sender};
-use std::sync::{Arc, Mutex};
+use std::path::Path;
+use std::path::PathBuf;
+use std::sync::Arc;
+use std::sync::Mutex;
+use std::sync::mpsc;
+use std::sync::mpsc::RecvTimeoutError;
+use std::sync::mpsc::Sender;
 use std::thread;
 use std::time::Duration;
 
 use kotodama_extension::STACK_SIZE;
-use kotodama_extension::watch::notify::event::{CreateKind, EventKind, ModifyKind, RemoveKind};
-use kotodama_extension::watch::{Event, RecursiveMode, Watched, Watcher};
+use kotodama_extension::watch::Event;
+use kotodama_extension::watch::RecursiveMode;
+use kotodama_extension::watch::Watched;
+use kotodama_extension::watch::Watcher;
+use kotodama_extension::watch::notify::event::CreateKind;
+use kotodama_extension::watch::notify::event::EventKind;
+use kotodama_extension::watch::notify::event::ModifyKind;
+use kotodama_extension::watch::notify::event::RemoveKind;
 
-use crate::projects::{self, Project, ProjectFolder};
-use crate::scripts::{self, Script};
+use crate::projects;
+use crate::projects::Project;
+use crate::projects::ProjectFolder;
+use crate::scripts;
+use crate::scripts::Script;
 
 /// How long the folders must stay still before they are searched again, so a
 /// `git clone` or a copy of many scripts is searched once, whole.
@@ -77,9 +90,7 @@ impl Scanner {
         let watcher = Watcher::new(
             RecursiveMode::NonRecursive,
             move |event, watched| {
-                let folders = filtering
-                    .lock()
-                    .unwrap_or_else(|poison| poison.into_inner());
+                let folders = filtering.lock().unwrap_or_else(|poison| poison.into_inner());
                 matters(&folders, watched, event)
             },
             move || {
@@ -120,9 +131,7 @@ impl Scanner {
                     if let Some(watcher) = &watcher {
                         watcher.watch(dirs);
                     }
-                    folders.clone_into(
-                        &mut searched.lock().unwrap_or_else(|poison| poison.into_inner()),
-                    );
+                    folders.clone_into(&mut searched.lock().unwrap_or_else(|poison| poison.into_inner()));
                     scanned(scan);
                 }
             })?;
@@ -145,18 +154,10 @@ fn matters(folders: &Folders, watched: &Watched, event: &Event) -> bool {
         return false;
     }
     event.paths.iter().any(|path| {
-        if folders
-            .scripts
-            .iter()
-            .any(|folder| path.starts_with(folder))
-        {
+        if folders.scripts.iter().any(|folder| path.starts_with(folder)) {
             return true;
         }
-        if !folders
-            .projects
-            .iter()
-            .any(|folder| path.starts_with(&folder.path))
-        {
+        if !folders.projects.iter().any(|folder| path.starts_with(&folder.path)) {
             return false;
         }
         let telling = path
@@ -166,13 +167,9 @@ fn matters(folders: &Folders, watched: &Watched, event: &Event) -> bool {
         let folder = || watched.contains(path) || Path::is_dir(path);
         telling
             || match event.kind {
-                EventKind::Create(CreateKind::Folder) | EventKind::Remove(RemoveKind::Folder) => {
-                    true
-                }
+                EventKind::Create(CreateKind::Folder) | EventKind::Remove(RemoveKind::Folder) => true,
                 EventKind::Create(CreateKind::File) | EventKind::Remove(RemoveKind::File) => false,
-                EventKind::Create(_)
-                | EventKind::Remove(_)
-                | EventKind::Modify(ModifyKind::Name(_)) => folder(),
+                EventKind::Create(_) | EventKind::Remove(_) | EventKind::Modify(ModifyKind::Name(_)) => folder(),
                 EventKind::Modify(_) => false,
                 _ => true,
             }

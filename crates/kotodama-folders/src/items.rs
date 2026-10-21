@@ -2,7 +2,10 @@
 
 use std::path::Path;
 
-use kotodama_protocol::{Action, Argument, Item, ItemKind};
+use kotodama_protocol::Action;
+use kotodama_protocol::Argument;
+use kotodama_protocol::Item;
+use kotodama_protocol::ItemKind;
 
 use crate::projects::Project;
 use crate::scripts::Script;

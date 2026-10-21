@@ -5,21 +5,25 @@
 //! `tms`'s rules, from its `repos.rs` and `session.rs`, with `list_worktrees`
 //! and `search_submodules` on:
 //!
-//! - A folder is searched breadth first, down to its depth. A repository
-//!   stops the search: nothing inside it is searched.
-//! - A repository is a folder with a `.git` entry, or a bare one: a `HEAD`
-//!   file and `objects` and `refs` folders.
-//! - A linked worktree found by the search is left out; it shows under its
-//!   repository instead, as `<repository>#<worktree id>`.
-//! - A repository is named after its folder. Names found more than once take
-//!   as many parent folders as tell them apart (`to/proj2/test`).
+//! - A folder is searched breadth first, down to its depth. A repository stops the search: nothing
+//!   inside it is searched.
+//! - A repository is a folder with a `.git` entry, or a bare one: a `HEAD` file and `objects` and
+//!   `refs` folders.
+//! - A linked worktree found by the search is left out; it shows under its repository instead, as
+//!   `<repository>#<worktree id>`.
+//! - A repository is named after its folder. Names found more than once take as many parent folders
+//!   as tell them apart (`to/proj2/test`).
 //! - A checked-out submodule is `<repository>>`, then its folder's name.
 //! - The tmux session is the name with every `.` made `_`.
 
-use std::collections::{BTreeMap, HashSet, VecDeque};
+use std::collections::BTreeMap;
+use std::collections::HashSet;
+use std::collections::VecDeque;
 use std::ffi::OsString;
 use std::fs;
-use std::path::{Component, Path, PathBuf};
+use std::path::Component;
+use std::path::Path;
+use std::path::PathBuf;
 
 /// A folder to find projects in.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -94,10 +98,7 @@ pub fn find(folders: &[ProjectFolder]) -> Found {
             let name = name.to_string_lossy().into_owned();
             for (id, worktree) in worktrees(&git_dir) {
                 found.dirs.push(worktree.clone());
-                by_name
-                    .entry(format!("{name}#{id}"))
-                    .or_default()
-                    .push(worktree);
+                by_name.entry(format!("{name}#{id}")).or_default().push(worktree);
             }
             by_name.entry(name).or_default().push(path);
             continue;
@@ -148,8 +149,7 @@ fn git_dir(path: &Path, names: &[(OsString, Kind)]) -> Option<PathBuf> {
         return Some(dot_git(path));
     }
     let has = |want: &str, kind: Kind| names.iter().any(|(name, k)| name == want && *k == kind);
-    (has("HEAD", Kind::File) && has("objects", Kind::Dir) && has("refs", Kind::Dir))
-        .then(|| path.to_owned())
+    (has("HEAD", Kind::File) && has("objects", Kind::Dir) && has("refs", Kind::Dir)).then(|| path.to_owned())
 }
 
 /// The git dir a repository's `.git` names: the folder itself, or the one a
@@ -157,11 +157,7 @@ fn git_dir(path: &Path, names: &[(OsString, Kind)]) -> Option<PathBuf> {
 fn dot_git(path: &Path) -> PathBuf {
     let dot_git = path.join(".git");
     match fs::read_to_string(&dot_git) {
-        Ok(text) => match text
-            .lines()
-            .next()
-            .and_then(|line| line.strip_prefix("gitdir:"))
-        {
+        Ok(text) => match text.lines().next().and_then(|line| line.strip_prefix("gitdir:")) {
             Some(target) => normalize(&path.join(target.trim())),
             None => dot_git,
         },

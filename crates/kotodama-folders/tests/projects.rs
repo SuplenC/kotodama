@@ -5,10 +5,13 @@
 //! `git`, which the dev environment provides.
 
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::Path;
+use std::path::PathBuf;
 use std::process::Command;
 
-use kotodama_folders::projects::{self, Project, ProjectFolder};
+use kotodama_folders::projects;
+use kotodama_folders::projects::Project;
+use kotodama_folders::projects::ProjectFolder;
 
 fn git(dir: &Path, args: &[&str]) {
     let status = Command::new("git")
@@ -140,10 +143,7 @@ fn worktrees_of_a_bare_repository_are_named_after_it() {
     git(&project, &["worktree", "add", "-q", "test"]);
 
     let found = find(&search, 2);
-    assert_eq!(
-        names(&found),
-        ["my-project", "my-project#main", "my-project#test"]
-    );
+    assert_eq!(names(&found), ["my-project", "my-project#main", "my-project#test"]);
     assert_eq!(named(&found, "my-project#main").path, project.join("main"));
 }
 
@@ -166,17 +166,11 @@ fn a_linked_worktree_shows_only_under_its_repository() {
     let (_dir, search) = search();
     let main = search.join("main-repo");
     repo(&main);
-    git(
-        &main,
-        &["worktree", "add", "-q", "-b", "linked", "../linked"],
-    );
+    git(&main, &["worktree", "add", "-q", "-b", "linked", "../linked"]);
 
     let found = find(&search, 2);
     assert_eq!(names(&found), ["main-repo", "main-repo#linked"]);
-    assert_eq!(
-        named(&found, "main-repo#linked").path,
-        search.join("linked")
-    );
+    assert_eq!(named(&found, "main-repo#linked").path, search.join("linked"));
 }
 
 #[test]
@@ -199,10 +193,7 @@ fn the_same_name_twice_takes_as_many_parent_folders_as_tell_them_apart() {
     repo(&search.join("other/path/to/projects/proj2/test"));
 
     let found = find(&search, 6);
-    assert_eq!(
-        names(&found),
-        ["projects/proj2/test", "to/proj1/test", "to/proj2/test"]
-    );
+    assert_eq!(names(&found), ["projects/proj2/test", "to/proj1/test", "to/proj2/test"]);
     assert_eq!(
         named(&found, "to/proj1/test").path,
         search.join("search/path/to/proj1/test")

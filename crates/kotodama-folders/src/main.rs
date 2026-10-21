@@ -7,20 +7,36 @@
 #![forbid(unsafe_code)]
 
 use std::collections::BTreeMap;
-use std::path::{Path, PathBuf};
+use std::path::Path;
+use std::path::PathBuf;
 use std::process::ExitCode;
 use std::sync::mpsc::Sender;
 
-use kotodama_extension::launch::{self, Ended};
-use kotodama_extension::{Connection, Event, SentItems, Writer};
-use kotodama_folders::items::{
-    self, ARGUMENTS, COPY_PATH, FILE_MANAGER, LAZYGIT, OPEN, RUN, SHELL,
-};
+use kotodama_extension::Connection;
+use kotodama_extension::Event;
+use kotodama_extension::SentItems;
+use kotodama_extension::Writer;
+use kotodama_extension::launch;
+use kotodama_extension::launch::Ended;
+use kotodama_folders::items;
+use kotodama_folders::items::ARGUMENTS;
+use kotodama_folders::items::COPY_PATH;
+use kotodama_folders::items::FILE_MANAGER;
+use kotodama_folders::items::LAZYGIT;
+use kotodama_folders::items::OPEN;
+use kotodama_folders::items::RUN;
+use kotodama_folders::items::SHELL;
 use kotodama_folders::projects::Project;
-use kotodama_folders::scan::{Scan, Scanner};
+use kotodama_folders::scan::Scan;
+use kotodama_folders::scan::Scanner;
 use kotodama_folders::scripts::Script;
-use kotodama_folders::settings::{Settings, fill};
-use kotodama_protocol::{FromExtension, Job, JobState, Outcome, ToExtension};
+use kotodama_folders::settings::Settings;
+use kotodama_folders::settings::fill;
+use kotodama_protocol::FromExtension;
+use kotodama_protocol::Job;
+use kotodama_protocol::JobState;
+use kotodama_protocol::Outcome;
+use kotodama_protocol::ToExtension;
 
 enum Own {
     Scanned(Scan),
@@ -103,10 +119,7 @@ impl Extension {
                     Ok(()) => Outcome::Close,
                     Err(message) => Outcome::Failed { message },
                 };
-                self.send(&FromExtension::ActionDone {
-                    invocation,
-                    outcome,
-                })
+                self.send(&FromExtension::ActionDone { invocation, outcome })
             }
             _ => Ok(()),
         }
@@ -132,20 +145,11 @@ impl Extension {
             .projects
             .values()
             .map(|project| items::project(project, home))
-            .chain(
-                self.scripts
-                    .values()
-                    .map(|script| items::script(script, home)),
-            );
+            .chain(self.scripts.values().map(|script| items::script(script, home)));
         self.sent.publish(&mut self.writer, all)
     }
 
-    fn run(
-        &mut self,
-        id: &str,
-        action: &str,
-        arguments: &BTreeMap<String, String>,
-    ) -> Result<(), String> {
+    fn run(&mut self, id: &str, action: &str, arguments: &BTreeMap<String, String>) -> Result<(), String> {
         if let Some(project) = self.projects.get(id) {
             let command = match action {
                 OPEN => &self.settings.open,
@@ -158,10 +162,7 @@ impl Extension {
             let argv = fill(command, &project.path, Some(&project.session()));
             return launch::launch(&argv, Some(&project.path)).map_err(|err| err.to_string());
         }
-        let script = self
-            .scripts
-            .get(id)
-            .ok_or_else(|| format!("{id} is no longer there"))?;
+        let script = self.scripts.get(id).ok_or_else(|| format!("{id} is no longer there"))?;
         let dir = script.path.parent().unwrap_or(Path::new("/"));
         match action {
             RUN => {}
@@ -204,12 +205,7 @@ impl Extension {
     }
 
     /// Reports a background script's end; the Daemon notifies the desktop.
-    fn ended(
-        &mut self,
-        job: String,
-        title: String,
-        ended: Ended,
-    ) -> Result<(), kotodama_protocol::Error> {
+    fn ended(&mut self, job: String, title: String, ended: Ended) -> Result<(), kotodama_protocol::Error> {
         let succeeded = ended.status.is_some_and(|status| status.success());
         let message = if succeeded {
             ended.last_line

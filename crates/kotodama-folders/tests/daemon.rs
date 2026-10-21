@@ -7,10 +7,12 @@
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::os::unix::net::UnixStream;
-use std::path::{Path, PathBuf};
+use std::path::Path;
+use std::path::PathBuf;
 use std::process::Command;
 use std::thread;
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use std::time::Instant;
 
 use kotodama_extension::testing;
 use kotodama_protocol::*;
@@ -61,12 +63,10 @@ fn start(root: &Path) -> Client {
     for file in ["extension.sh", "manifest.toml"] {
         fs::copy(example_dir().join(file), shell.join(file)).unwrap();
     }
-    let manifest = fs::read_to_string(shell.join("manifest.toml"))
-        .unwrap()
-        .replace(
-            r#"command = ["./extension.sh"]"#,
-            r#"command = ["/bin/sh", "-c", "tee -a received | ./extension.sh"]"#,
-        );
+    let manifest = fs::read_to_string(shell.join("manifest.toml")).unwrap().replace(
+        r#"command = ["./extension.sh"]"#,
+        r#"command = ["/bin/sh", "-c", "tee -a received | ./extension.sh"]"#,
+    );
     fs::write(shell.join("manifest.toml"), manifest).unwrap();
 
     let config = root.join("config");
@@ -130,10 +130,7 @@ impl Client {
         loop {
             self.send(FromFrontEnd::Query { text: query.into() });
             let results = loop {
-                if let ToFrontEnd::Results {
-                    version, results, ..
-                } = self.recv()
-                {
+                if let ToFrontEnd::Results { version, results, .. } = self.recv() {
                     self.shown = version;
                     break results;
                 }
@@ -211,9 +208,11 @@ fn the_shell_examples_contributed_action_shows_on_a_project_and_gets_its_path() 
     let start = Instant::now();
     let result = loop {
         let result = ui.projects("kotodama", 1).remove(0);
-        if result.contributed.iter().any(|offered| {
-            offered.extension == "shell-example" && offered.action.id == "paste-path"
-        }) {
+        if result
+            .contributed
+            .iter()
+            .any(|offered| offered.extension == "shell-example" && offered.action.id == "paste-path")
+        {
             break result;
         }
         assert!(start.elapsed() < TIMEOUT, "{:?}", result.contributed);
@@ -222,16 +221,12 @@ fn the_shell_examples_contributed_action_shows_on_a_project_and_gets_its_path() 
     assert_eq!(result.item.title, "kotodama");
 
     ui.run(&result.item.id, "shell-example", "paste-path");
-    let received =
-        fs::read_to_string(root.path().join("extensions/shell-example/received")).unwrap();
+    let received = fs::read_to_string(root.path().join("extensions/shell-example/received")).unwrap();
     let run = received
         .lines()
         .find(|line| line.contains("\"run_action\""))
         .expect("the shell example got no run_action");
-    assert!(
-        run.contains(&format!("\"path\":\"{}\"", project.display())),
-        "{run}"
-    );
+    assert!(run.contains(&format!("\"path\":\"{}\"", project.display())), "{run}");
 }
 
 #[test]
