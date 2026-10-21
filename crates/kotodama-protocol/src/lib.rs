@@ -53,7 +53,7 @@ pub use item::{
     is_valid_name,
 };
 pub use launch::{LAUNCH_PREFIX, LAUNCH_SCOPED, SCOPE_PREFIX, launch_command, launch_prefix};
-pub use manifest::{ContributedAction, LiveQueries, Manifest, is_valid_prefix};
+pub use manifest::{ContributedAction, LiveQueries, Manifest, is_valid_word};
 pub use message::{CatalogEntry, Clipboard, FromExtension, LiveResult, Outcome, ToExtension};
 pub use shortcut::{FORGET_SHORTCUT, RESERVED_SHORTCUTS, UNDO_SHORTCUT, is_reserved_shortcut};
 pub use value::{Bytes, Fraction, Table, Value};

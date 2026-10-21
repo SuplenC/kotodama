@@ -37,14 +37,18 @@ fn the_time_of_day_follows_a_change_of_time_zone() {
         pick(&mut h, &ui, "music", "music");
     }
     h.advance_to(8);
-    assert_eq!(titles(&h.query(&ui, "")), ["Mail", "Music"], "08:00 in UTC");
+    assert_eq!(
+        titles(&h.query(&ui, "")),
+        ["Mail", "Music", "apps"],
+        "08:00 in UTC"
+    );
 
     set_zone("NZST-12");
     h.advance(Duration::from_secs(60));
 
     assert_eq!(
         titles(&h.query(&ui, "")),
-        ["Music", "Mail"],
+        ["Music", "Mail", "apps"],
         "20:01 twelve hours east"
     );
 }

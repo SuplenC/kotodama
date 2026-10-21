@@ -879,6 +879,58 @@ fn frecency_applies_to_quicklinks() {
     assert_eq!(w.first("you"), "Search YouTube");
 }
 
+// Apps' entry Items.
+
+/// The rows for `query`, as Extension and title, of a desktop with the
+/// applications `titles` and an Extension whose app is titled `title` and
+/// named by `word`.
+fn beside_an_app(titles: &[&str], title: &str, word: &str, query: &str) -> Vec<(String, String)> {
+    let other = manifest(&format!(
+        "name = \"other\"\ncommand = [\"x\"]\nword = \"{word}\"\ntitle = \"{title}\""
+    ));
+    let mut h = Harness::with_config(vec![plain("apps"), other], config(""));
+    let apps = h.up(0);
+    h.up(1);
+    h.add(&apps, titles.iter().map(|title| app(title)).collect());
+    let ui = h.front_end();
+    h.query(&ui, query)
+        .into_iter()
+        .map(|row| (row.extension, row.item.title))
+        .collect()
+}
+
+// Regression: #173.
+#[test]
+fn an_application_ranks_above_the_app_whose_word_is_typed() {
+    let rows = beside_an_app(&["Calculator"], "Calculator", "calc", "calc");
+    assert_eq!(
+        rows,
+        [
+            ("apps".to_owned(), "Calculator".to_owned()),
+            ("kotodama".to_owned(), "Calculator".to_owned()),
+        ]
+    );
+}
+
+// Regression: #173.
+#[test]
+fn applications_starting_with_an_apps_title_rank_above_it() {
+    let rows = beside_an_app(
+        &["System Monitor", "System Settings"],
+        "System",
+        "system",
+        "system",
+    );
+    let titles: Vec<&str> = rows.iter().map(|(_, title)| title.as_str()).collect();
+    assert_eq!(titles, ["System Monitor", "System Settings", "System"]);
+}
+
+#[test]
+fn the_apps_entry_item_is_still_first_when_nothing_else_matches() {
+    let rows = beside_an_app(&["Firefox"], "Calculator", "calc", "calc");
+    assert_eq!(rows[0], ("kotodama".to_owned(), "Calculator".to_owned()));
+}
+
 // What counts as a pick.
 
 /// P1
@@ -949,7 +1001,7 @@ fn showing_the_menu_in_another_part_of_the_day_ranks_the_empty_query_again() {
     let mut w = World::new(HABITS);
     habits(&mut w);
     w.at(8);
-    assert_eq!(rows(&mut w, ""), ["Mail", "News", "Calendar"]);
+    assert_eq!(rows(&mut w, ""), ["Mail", "News", "Calendar", "apps"]);
 
     w.later(Duration::from_secs(30 * 60));
     w.h.front_end_sends(&w.ui, FromFrontEnd::Shown);
@@ -962,7 +1014,7 @@ fn showing_the_menu_in_another_part_of_the_day_ranks_the_empty_query_again() {
     assert!(w.ui.results().is_none(), "nothing is ranked while hidden");
     w.h.front_end_sends(&w.ui, FromFrontEnd::Shown);
     let evening = w.ui.results().expect("shown in the evening");
-    assert_eq!(titles(&evening), ["Music", "Editor", "Games"]);
+    assert_eq!(titles(&evening), ["Music", "Editor", "Games", "apps"]);
 
     w.later(Duration::from_secs(50 * 60));
     w.h.front_end_sends(&w.ui, FromFrontEnd::Shown);
@@ -995,7 +1047,7 @@ fn at_a_time_of_day_nothing_is_used_at_the_empty_query_shows_the_most_used() {
     let mut w = World::new(HABITS);
     habits(&mut w);
     w.at(14);
-    assert_eq!(rows(&mut w, ""), ["Music", "Mail", "Editor"]);
+    assert_eq!(rows(&mut w, ""), ["Music", "Mail", "Editor", "apps"]);
 }
 
 /// Z1
@@ -1004,7 +1056,7 @@ fn with_nothing_picked_the_empty_query_shows_the_menu() {
     let mut w = World::with(HABITS.iter().map(|title| app(title)).collect(), MENU);
     assert_eq!(rows(&mut w, ""), ["Files", "Clear history", "Mail"]);
     let mut w = World::new(HABITS);
-    assert_eq!(rows(&mut w, ""), Vec::<String>::new(), "and no menu");
+    assert_eq!(rows(&mut w, ""), ["apps"], "and without one, the apps");
 }
 
 /// Z1
@@ -1016,7 +1068,7 @@ fn how_many_of_the_most_used_come_first_is_a_setting() {
     );
     habits(&mut w);
     w.at(8);
-    assert_eq!(rows(&mut w, ""), ["Mail"]);
+    assert_eq!(rows(&mut w, ""), ["Mail", "apps"]);
 }
 
 /// Z1: an Alias's picks count for the Result it names.
@@ -1028,7 +1080,7 @@ fn picks_through_an_alias_count_towards_the_most_used() {
     );
     w.picks(2, "fish", "Fish");
     w.picks(3, "web", "Firefox");
-    assert_eq!(rows(&mut w, ""), ["Firefox", "Fish"]);
+    assert_eq!(rows(&mut w, ""), ["Firefox", "Fish", "apps"]);
 }
 
 /// Z2
@@ -1055,10 +1107,10 @@ fn the_same_history_gives_the_same_rows() {
 fn a_pick_from_the_empty_query_counts_at_once() {
     let mut w = World::new(HABITS);
     w.pick("term", "Terminal");
-    assert_eq!(rows(&mut w, ""), ["Terminal"]);
+    assert_eq!(rows(&mut w, ""), ["Terminal", "apps"]);
     w.pick("files", "Files");
     w.pick("", "Files");
-    assert_eq!(rows(&mut w, ""), ["Files", "Terminal"]);
+    assert_eq!(rows(&mut w, ""), ["Files", "Terminal", "apps"]);
 }
 
 // The History's settings, from the `[history]` table of the config.

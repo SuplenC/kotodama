@@ -91,7 +91,7 @@ let
         };
         emoji = {
           skinTone = "medium-dark";
-          prefix = "e";
+          word = "e";
         };
         folders = {
           folders = [
@@ -120,6 +120,7 @@ let
         ];
         ai.url = "http://localhost:11434/v1/messages";
         system.inSearch = false;
+        # `prefix`, the old name of `word`, is still read.
         hyprland.prefix = "hypr";
       };
     }).xdg.configFile."kotodama/home-manager.toml".source;
@@ -131,11 +132,21 @@ let
   # Nothing set: no config file at all, so every default applies.
   nothing = (home { }).xdg.configFile;
 
-  # The ready Front end, off unless enabled.
-  noMenu = (home { }).systemd.user.services;
-  # Enabled with the module's look: the package's own shell.qml, run by the
-  # package's Quickshell, with the module on its import path only.
-  menu = (home { frontEnd.enable = true; }).systemd.user.services.kotodama-menu;
+  # The ready Front end, on by default with the module's look: the package's
+  # own shell.qml, run by the package's Quickshell, with the module on its
+  # import path only.
+  menu = (home { }).systemd.user.services.kotodama-menu;
+  # Off when turned off.
+  noMenu = (home { frontEnd.enable = false; }).systemd.user.services;
+  # Off by default beside a Quickshell of the user's that home-manager runs,
+  # where the user places the menu.
+  ownQuickshellServices =
+    (homeWith {
+      programs.quickshell = {
+        enable = true;
+        systemd.enable = true;
+      };
+    } { }).systemd.user.services;
   importPath = "QML_IMPORT_PATH=${kotodama.qml}/lib/qt-6/qml";
   # With a look, and a stand-in Quickshell, so the check builds neither the
   # package nor Quickshell: ExecStart names the shell.qml written for it.
@@ -155,16 +166,11 @@ let
       };
     }).systemd.user.services.kotodama-menu;
   # home-manager's own Quickshell service finds the module too.
-  userQuickshell =
-    (homeWith {
-      programs.quickshell = {
-        enable = true;
-        systemd.enable = true;
-      };
-    } { }).systemd.user.services.quickshell;
+  userQuickshell = ownQuickshellServices.quickshell;
 in
 assert !(nothing ? "kotodama/home-manager.toml");
 assert !(noMenu ? kotodama-menu);
+assert !(ownQuickshellServices ? kotodama-menu);
 assert
   menu.Service.ExecStart
   == [ "${lib.getExe kotodama.quickshell} --path ${kotodama.qml}/share/kotodama/quickshell" ];
@@ -229,7 +235,7 @@ pkgs.runCommand "kotodama-home-manager-options-test"
         "decimal_separator": "comma",
     })
     expect("clipboard", extensions["clipboard"], {"max_entries": 50, "max_age_days": 0.5, "in_search": True})
-    expect("emoji", extensions["emoji"], {"skin_tone": "medium-dark", "prefix": "e"})
+    expect("emoji", extensions["emoji"], {"skin_tone": "medium-dark", "word": "e"})
     expect("folders", extensions["folders"], {
         "folders": [
             {"path": "~/Projects", "kind": "projects", "depth": 2},
@@ -243,7 +249,7 @@ pkgs.runCommand "kotodama-home-manager-options-test"
         "copy_path": ["wl-copy"],
     })
     expect("system", extensions["system"], {"in_search": False})
-    expect("hyprland", extensions["hyprland"], {"prefix": "hypr"})
+    expect("hyprland", extensions["hyprland"], {"word": "hypr"})
     expect("web-search", extensions["web-search"], {
         "engines": [{"name": "Kagi", "url": "https://kagi.com/search?q={query}"}],
     })

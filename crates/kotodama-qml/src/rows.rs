@@ -147,6 +147,20 @@ impl Row {
         own.chain(contributed)
     }
 
+    /// The keys the row takes, for a footer that teaches them: what Enter
+    /// runs, Tab on an entry Item, and Ctrl+K. Empty when nothing runs.
+    pub fn hints(&self) -> String {
+        let Some(primary) = self.own.first().filter(|_| self.unavailable.is_none()) else {
+            return String::new();
+        };
+        let mut hints = format!("↵ {}", primary.title);
+        if self.enters {
+            hints.push_str(" · Tab Enter app");
+        }
+        hints.push_str(" · ⌃K Actions");
+        hints
+    }
+
     /// What runs the `n`th entry of the Action panel. Nothing runs on an
     /// unavailable row.
     pub fn action(&self, n: usize) -> Option<ActionRef> {
@@ -532,6 +546,28 @@ mod tests {
             unavailable: None,
             enters: false,
         }
+    }
+
+    #[test]
+    fn the_hints_name_the_primary_action_and_the_keys_the_row_takes() {
+        let mut entry = row("Emoji", &[]);
+        entry.own = vec![Action::new("open", "Open")];
+        entry.enters = true;
+        let mut project = row("kotodama", &[]);
+        project.own = vec![Action::new("open-editor", "Open in Editor")];
+
+        assert_eq!(entry.hints(), "↵ Open · Tab Enter app · ⌃K Actions");
+        assert_eq!(project.hints(), "↵ Open in Editor · ⌃K Actions");
+    }
+
+    #[test]
+    fn a_row_that_runs_nothing_hints_nothing() {
+        let mut unavailable = row("Firefox", &[]);
+        unavailable.own = vec![Action::new("open", "Open")];
+        unavailable.unavailable = Some("apps isn't running".into());
+
+        assert_eq!(unavailable.hints(), "");
+        assert_eq!(row("Nothing to do", &[]).hints(), "");
     }
 
     fn offered(extension: &str, id: &str, title: &str) -> OfferedAction {

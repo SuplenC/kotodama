@@ -6,7 +6,7 @@ name = "web-search"
 description = "Searches the web for what nothing else matches, and opens what looks like an address"
 command = ["./kotodama-web-search"]
 # Its app sends every query to the engines, matches or not.
-prefix = "web"
+word = "web"
 title = "Web Search"
 icon = "web-browser"
 about = "Searches the web with each engine in the config, or opens what looks like an address."

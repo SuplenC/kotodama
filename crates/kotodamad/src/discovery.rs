@@ -88,6 +88,15 @@ pub fn discover(dirs: &[PathBuf]) -> Vec<Found> {
 fn load(dir: &Path, manifest_path: &Path) -> Result<Found, String> {
     let text = fs::read_to_string(manifest_path).map_err(|err| err.to_string())?;
     let manifest = Manifest::from_toml(&text).map_err(|err| err.to_string())?;
+    if text
+        .parse::<toml::Table>()
+        .is_ok_and(|table| table.contains_key("prefix"))
+    {
+        log::warn!(
+            "{}: `prefix` is deprecated; call it `word`",
+            manifest_path.display()
+        );
+    }
     Found::new(manifest, dir.to_owned())
 }
 

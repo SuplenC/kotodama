@@ -93,7 +93,7 @@ pub mod prost {
     #[derive(Clone, PartialEq, ::prost::Message)]
     pub struct Scope {
         #[prost(string, tag = "1")]
-        pub prefix: String,
+        pub word: String,
         #[prost(string, tag = "2")]
         pub title: String,
         #[prost(string, optional, tag = "3")]
@@ -238,7 +238,7 @@ pub mod prost {
                     })
                     .collect(),
                 scope: scope.as_ref().map(|scope| Scope {
-                    prefix: scope.prefix.clone(),
+                    word: scope.word.clone(),
                     title: scope.title.clone(),
                     icon: scope.icon.clone(),
                 }),
@@ -326,7 +326,7 @@ pub mod musli {
 
     #[derive(Clone, Debug, PartialEq, Encode, Decode, Serialize, Deserialize)]
     pub struct Scope {
-        pub prefix: String,
+        pub word: String,
         pub title: String,
         pub icon: Option<String>,
     }
@@ -418,7 +418,7 @@ pub mod musli {
                 })
                 .collect(),
             scope: scope.as_ref().map(|scope| Scope {
-                prefix: scope.prefix.clone(),
+                word: scope.word.clone(),
                 title: scope.title.clone(),
                 icon: scope.icon.clone(),
             }),
@@ -499,7 +499,7 @@ pub mod bilrost {
 
     #[derive(Clone, Debug, PartialEq, ::bilrost::Message)]
     pub struct Scope {
-        pub prefix: String,
+        pub word: String,
         pub title: String,
         pub icon: Option<String>,
     }
@@ -626,7 +626,7 @@ pub mod bilrost {
                     })
                     .collect(),
                 scope: scope.as_ref().map(|scope| Scope {
-                    prefix: scope.prefix.clone(),
+                    word: scope.word.clone(),
                     title: scope.title.clone(),
                     icon: scope.icon.clone(),
                 }),

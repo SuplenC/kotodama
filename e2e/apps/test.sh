@@ -93,8 +93,17 @@ mark=$(log_lines quickshell.log)
 press -k Return "scope: [Projects]"
 wait_for_log quickshell.log "query: []" "$mark"
 
-# Esc goes back to the whole search, with the menu open: the Empty query,
-# whose most used is the Projects app just entered. The next Esc closes it.
+# Esc clears what is typed first, and stays in the app.
+press "alp" "query: [alp]"
+mark=$(log_lines quickshell.log)
+press -k Escape "query: []"
+if grep -F "scope: []" <(tail -n +"$((mark + 1))" "$E2E_OUT/quickshell.log"); then
+    echo "Esc with text typed left the app" >&2
+    exit 1
+fi
+
+# With nothing typed, Esc goes back to the whole search, with the menu open:
+# the Empty query, whose most used is the Projects app just entered.
 mark=$(log_lines quickshell.log)
 press -k Escape "scope: []"
 wait_for_log quickshell.log "top: Projects" "$mark"
@@ -102,12 +111,21 @@ if grep -F "focused: false" <(tail -n +"$((mark + 1))" "$E2E_OUT/quickshell.log"
     echo "Esc in the app closed the menu" >&2
     exit 1
 fi
+
+# In the search too, Esc clears the text before it closes the menu.
+press "alp" "query: [alp]"
+mark=$(log_lines quickshell.log)
+press -k Escape "query: []"
+if grep -F "focused: false" <(tail -n +"$((mark + 1))" "$E2E_OUT/quickshell.log"); then
+    echo "Esc with text typed closed the menu" >&2
+    exit 1
+fi
 press -k Escape "focused: false"
 
-# The emoji are in their app, which `kotodama open --prefix` opens on, and not
+# The emoji are in their app, which `kotodama open --app` opens on, and not
 # in the search.
 mark=$(log_lines quickshell.log)
-open --prefix emoji --query fire
+open --app emoji --query fire
 wait_for_log quickshell.log "scope: [Emoji]" "$mark"
 wait_for_log quickshell.log "rows: [emoji" "$mark"
 close

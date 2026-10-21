@@ -11,7 +11,7 @@ use kotodamad::discovery::Found;
 /// The emoji Extension as its Manifest declares it: every Item app only.
 fn emoji() -> Found {
     manifest(
-        "name = \"emoji\"\ncommand = [\"x\"]\nprefix = \"emoji\"\ntitle = \"Emoji\"\nicon = \"face-smile\"\nabout = \"Emoji, typed where you were.\"\nexamples = [{ query = \"fire\", result = \"🔥 Fire\" }]\nin_search = false",
+        "name = \"emoji\"\ncommand = [\"x\"]\nword = \"emoji\"\ntitle = \"Emoji\"\nicon = \"face-smile\"\nabout = \"Emoji, typed where you were.\"\nexamples = [{ query = \"fire\", result = \"🔥 Fire\" }]\nin_search = false",
     )
 }
 
@@ -112,7 +112,7 @@ fn last_results(sent: Vec<ToFrontEnd>) -> (Vec<(String, String)>, Option<Scope>)
 
 fn emoji_scope(intro: bool) -> Option<Scope> {
     Some(Scope {
-        prefix: "emoji".into(),
+        word: "emoji".into(),
         title: "Emoji".into(),
         icon: Some("face-smile".into()),
         intro: intro.then(|| Intro {
@@ -134,14 +134,51 @@ fn the_search_leaves_out_an_app_only_extensions_items() {
 }
 
 #[test]
-fn the_word_typed_alone_ranks_its_entry_item_first() {
+fn the_word_typed_alone_finds_its_entry_item_as_a_word_start() {
     let mut desk = Desk::new("");
 
     let (rows, scope) = desk.search("emoji");
 
-    assert_eq!(rows[0], ("kotodama".to_owned(), "Emoji".to_owned()));
+    assert_eq!(
+        rows[..2],
+        [
+            ("apps".to_owned(), "Emoji Keyboard".to_owned()),
+            ("kotodama".to_owned(), "Emoji".to_owned()),
+        ]
+    );
     assert!(rows.iter().all(|(extension, _)| extension != "emoji"));
     assert_eq!(scope, None);
+}
+
+#[test]
+fn the_entry_item_found_by_the_word_says_what_follows_it() {
+    let mut desk = Desk::new("");
+
+    let (rows, scope) = desk.search("emoji fire");
+
+    assert_eq!(
+        rows[0],
+        ("kotodama".to_owned(), "Search Emoji for “fire”".to_owned())
+    );
+    assert_eq!(scope, None);
+}
+
+#[test]
+fn entering_the_app_keeps_what_follows_the_word() {
+    let mut desk = Desk::new("");
+
+    desk.pick("emoji fire", "Search Emoji for “fire”");
+
+    let sent = desk.ui.drain();
+    assert!(
+        sent.contains(&ToFrontEnd::SetQuery {
+            text: "emoji fire".into(),
+        }),
+        "{sent:?}"
+    );
+    let (rows, scope) = last_results(sent);
+    assert_eq!(rows[0].1, "🔥 Fire");
+    assert_eq!(scope, emoji_scope(false));
 }
 
 #[test]
@@ -259,6 +296,36 @@ fn the_empty_query_shows_the_entry_item_picked_but_not_what_was_picked_in_the_ap
 }
 
 #[test]
+fn without_a_menu_the_empty_query_lists_the_apps() {
+    let mut desk = Desk::new("");
+
+    assert_eq!(desk.titles(""), ["apps", "Emoji"]);
+}
+
+#[test]
+fn the_apps_follow_the_most_used_on_the_empty_query() {
+    let mut desk = Desk::new("");
+    desk.pick("edit", "Editor");
+
+    assert_eq!(desk.titles(""), ["Editor", "apps", "Emoji"]);
+}
+
+#[test]
+fn a_menu_in_the_config_replaces_the_apps_on_the_empty_query() {
+    for (toml, titles) in [
+        ("[empty_query]\nmenu = []", &[][..]),
+        (
+            "[empty_query]\nmenu = [{ extension = \"apps\", item = \"firefox\" }]",
+            &["Firefox"][..],
+        ),
+    ] {
+        let mut desk = Desk::new(toml);
+
+        assert_eq!(desk.titles(""), titles, "{toml}");
+    }
+}
+
+#[test]
 fn a_near_miss_is_never_an_app_only_item() {
     let mut desk = Desk::new("");
 
@@ -361,7 +428,7 @@ fn in_search_false_in_the_config_puts_the_whole_extension_behind_its_app() {
 
 #[test]
 fn the_config_gives_an_extension_a_word_of_its_own() {
-    let mut desk = Desk::with(plain("emoji"), "[extensions.emoji]\nprefix = \"em\"");
+    let mut desk = Desk::with(plain("emoji"), "[extensions.emoji]\nword = \"em\"");
 
     assert_eq!(desk.titles("fire")[0], "🔥 Fire");
     desk.enter("em", "emoji");
@@ -370,7 +437,7 @@ fn the_config_gives_an_extension_a_word_of_its_own() {
     assert_eq!(
         scope,
         Some(Scope {
-            prefix: "em".into(),
+            word: "em".into(),
             title: "emoji".into(),
             icon: None,
             intro: None,
@@ -380,7 +447,7 @@ fn the_config_gives_an_extension_a_word_of_its_own() {
 
 #[test]
 fn the_config_overrides_the_manifests_word() {
-    let mut desk = Desk::new("[extensions.emoji]\nprefix = \"e\"");
+    let mut desk = Desk::new("[extensions.emoji]\nword = \"e\"");
 
     desk.enter("emoji", "Emoji");
 

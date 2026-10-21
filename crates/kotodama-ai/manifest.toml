@@ -7,7 +7,7 @@ command = ["./kotodama-ai"]
 # The catalog is all it knows of what can be done: it never sees Items.
 action_catalog = true
 # Its app asks about whatever is typed in it, `?` or not.
-prefix = "ai"
+word = "ai"
 title = "Ask AI"
 icon = "dialog-question"
 about = "Say what to do; the model proposes Actions other Extensions offer, and each one waits for you to confirm it."

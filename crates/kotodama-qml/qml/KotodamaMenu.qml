@@ -28,6 +28,9 @@ PanelWindow {
     property int maxRows: 8
     property real top: screen ? screen.height / 5 : 120
     property string placeholder: "Search"
+    // Whether the footer names the keys the selected row takes, such as
+    // "↵ Open · Tab Enter app · ⌃K Actions", when it has nothing else to say.
+    property bool showHints: true
 
     readonly property KotodamaSearch search: search
     // Whether keys reach the menu: the compositor has given the window
@@ -42,6 +45,17 @@ PanelWindow {
     // `{title, group, shortcut}`, as `KotodamaSearch.actions` gives them.
     property var actions: []
     readonly property bool actionsOpen: actions.length > 0
+    // The keys the selected row takes, built for that row alone. Reading the
+    // row's markup and unavailable makes the hints follow a new Result in
+    // the same place, not only a move of the selection.
+    readonly property string hints: {
+        const row = list.currentItem;
+        if (!menu.showHints || !row || (menu.kind !== "" && menu.kind !== "list"))
+            return "";
+        row.markup;
+        row.unavailable;
+        return search.hints(list.currentIndex);
+    }
 
     function show(query) {
         menu.failure = "";
@@ -114,10 +128,14 @@ PanelWindow {
         if (menu.undoKey(event))
             return true;
         if (event.key === Qt.Key_Escape) {
-            // Esc clears a list's filter first, then pops the View, then
-            // leaves the app for the whole search, then closes the menu.
+            // One rule everywhere, so Esc never throws away more than the
+            // user can see: it clears the text if there is any, else pops
+            // the View, else leaves the app for the whole search, else
+            // closes the menu.
             if (menu.kind === "list" && filter.text !== "")
                 filter.text = "";
+            else if (menu.kind === "" && input.text !== "")
+                input.text = "";
             else if (search.depth > 0)
                 search.popView();
             else if (search.leaveApp())
@@ -866,7 +884,7 @@ PanelWindow {
             color: menu.failure !== "" ? menu.error : menu.dimmed
             font.family: menu.fontFamily
             font.pixelSize: menu.fontSize - 3
-            text: menu.failure !== "" ? menu.failure : search.down.length > 0 ? "Unavailable: " + search.down.join(", ") : ""
+            text: menu.failure !== "" ? menu.failure : search.down.length > 0 ? "Unavailable: " + search.down.join(", ") : menu.hints
         }
 
         // The Toast: what Forget or "Clear history" just did, and the key that

@@ -217,8 +217,8 @@ fn read(
                 return Err(err);
             }
         };
-        if let Some(message) = message {
-            batch.push(update(message));
+        if let Some(update) = message.and_then(update) {
+            batch.push(update);
         }
         let popped = matches!(batch.last(), Some(Update::PopView { .. }));
         let more =
@@ -232,8 +232,10 @@ fn read(
     }
 }
 
-fn update(message: ToFrontEnd) -> Update {
-    match message {
+/// What `message` changes; nothing for the answer to a request for a menu,
+/// which the menu never makes.
+fn update(message: ToFrontEnd) -> Option<Update> {
+    Some(match message {
         ToFrontEnd::Results {
             version,
             results,
@@ -289,7 +291,8 @@ fn update(message: ToFrontEnd) -> Update {
         ToFrontEnd::OfferUndo { change, title } => Update::OfferUndo { change, title },
         ToFrontEnd::WithdrawUndo { change } => Update::WithdrawUndo { change },
         ToFrontEnd::SetQuery { text } => Update::SetQuery(text),
-    }
+        ToFrontEnd::Reached { .. } => return None,
+    })
 }
 
 /// Whether the Daemon sends something within `wait`, or hangs up. The

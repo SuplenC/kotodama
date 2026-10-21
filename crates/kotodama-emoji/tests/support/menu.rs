@@ -36,7 +36,7 @@ impl Menu {
 
     /// As [`Menu::start`], knowing the emoji are indexed once `ready` finds
     /// any: a config that puts them in the search needs another query. The
-    /// menu opens in the emoji app, as `kotodama open --prefix emoji` does,
+    /// menu opens in the emoji app, as `kotodama open --app emoji` does,
     /// so a query that starts with `emoji ` searches them alone.
     pub fn start_with(config: &str, ready: &str) -> Self {
         let dir = tempfile::tempdir().expect("make the Daemon's dir");

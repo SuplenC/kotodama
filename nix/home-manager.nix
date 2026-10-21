@@ -1,9 +1,10 @@
 # The home-manager module: `programs.kotodama`. It installs Kotodama with the
 # enabled Bundled extensions, writes the user's settings into
 # ~/.config/kotodama/, and enables the Daemon's socket, so the first
-# `kotodama toggle` starts the Daemon. With `frontEnd.enable`, a
-# systemd user service runs the ready Front end, the menu in a Quickshell of its
-# own, with the graphical session.
+# `kotodama toggle` starts the Daemon. With `frontEnd.enable`, on unless
+# home-manager runs a Quickshell of the user's, a systemd user service runs
+# the ready Front end, the menu in a Quickshell of its own, with the graphical
+# session.
 self:
 {
   config,
@@ -44,15 +45,16 @@ let
       default = null;
       inherit description;
     };
-  # `prefix` and `in_search`, the Daemon's own keys in every
-  # `[extensions.<name>]`. `word` and `searched` say what the Extension's
+  # `word` and `in_search`, the Daemon's own keys in every
+  # `[extensions.<name>]`. `default` and `searched` say what the Extension's
   # Manifest gives.
-  app = word: searched: {
-    prefix = optional (lib.types.strMatching "[^[:space:]]+") ''
-      `prefix`: the word that names the Extension's app. Typing it shows the
+  app = default: searched: {
+    word = optional (lib.types.strMatching "[^[:space:]]+") ''
+      `word`: the word that names the Extension's app. Typing it shows the
       app's entry Item, and Tab or Enter on it enters the app, where the query
-      searches the Extension's Items alone. A word another app has already
-      leaves the app on the Extension's name. Unset, ${word}.
+      searches the Extension's Items alone. A word an Alias, a Quicklink or
+      another app has already leaves the app on the Extension's name. Unset,
+      ${default}.
     '';
     inSearch = optional lib.types.bool ''
       `in_search`: whether the search shows all the Extension's Items too,
@@ -62,7 +64,7 @@ let
   };
   # The `[extensions.<name>]` keys of `app`, as set.
   appSettings = options: {
-    inherit (options) prefix;
+    inherit (options) word;
     in_search = options.inSearch;
   };
   webSearch = app "`web`" "true";
@@ -169,8 +171,29 @@ let
     config.programs.quickshell.enable or false && config.programs.quickshell.systemd.enable;
 in
 {
-  # `extensions.<name>.enable` and `finalPackage`.
-  imports = [ ./home-manager-extensions.nix ];
+  # `extensions.<name>.enable` and `finalPackage`. `prefix` is the old name of
+  # each Bundled extension's `word`, still read, with a warning.
+  imports = [
+    ./home-manager-extensions.nix
+  ]
+  ++ map (
+    name:
+    lib.mkRenamedOptionModule
+      [
+        "programs"
+        "kotodama"
+        "extensions"
+        name
+        "prefix"
+      ]
+      [
+        "programs"
+        "kotodama"
+        "extensions"
+        name
+        "word"
+      ]
+  ) (lib.attrNames (import ./extensions.nix));
 
   options.programs.kotodama = {
     enable = lib.mkEnableOption "Kotodama, a command menu for Wayland";
@@ -257,7 +280,7 @@ in
               };
             }
           ))
-          "`menu`: the Fixed menu, the Items shown after the most used, in this order, each unless it is shown already.";
+          "`menu`: the Fixed menu, the Items shown after the most used, in this order, each unless it is shown already. Unset, the apps' entry Items; `[ ]` shows nothing more.";
     };
 
     ranking.kinds = optional (lib.types.listOf lib.types.str) ''
@@ -404,7 +427,7 @@ in
           }
         ))
         "`engines`: searched in this order; an empty list leaves only addresses. Unset, DuckDuckGo, Google and Wikipedia.";
-    extensions.web-search.prefix = webSearch.prefix;
+    extensions.web-search.word = webSearch.word;
     extensions.web-search.inSearch = webSearch.inSearch;
     extensions.system = app "`system`" "true";
     extensions.hyprland = app "`hyprland`" "true, but for the binds, which only its app shows";
@@ -473,10 +496,20 @@ in
 
     # The ready Front end: the menu as a Quickshell instance of its own.
     frontEnd = {
-      enable = lib.mkEnableOption ''
-        the ready Front end: a systemd user service, `kotodama-menu`, that runs
-        the menu in a Quickshell instance of its own, beside whatever shell the
-        desktop already runs, with the graphical session'';
+      enable = lib.mkOption {
+        type = lib.types.bool;
+        default = !(config.programs.quickshell.enable or false);
+        defaultText = lib.literalExpression "!config.programs.quickshell.enable";
+        example = false;
+        description = ''
+          Whether to run the ready Front end: a systemd user service,
+          `kotodama-menu`, that runs the menu in a Quickshell instance of its
+          own, beside whatever shell the desktop already runs, with the
+          graphical session. On unless home-manager runs a Quickshell of the
+          user's, which is where a user who has one places `KotodamaMenu`.
+          Without a menu, `kotodama toggle` fails and says so.
+        '';
+      };
 
       quickshellPackage = lib.mkOption {
         type = lib.types.package;
@@ -519,6 +552,7 @@ in
         maxRows = optional lib.types.ints.positive "How many rows show at most. Unset, 8.";
         top = optional lib.types.number "The menu's distance from the top of the screen, in pixels. Unset, a fifth of the screen's height.";
         placeholder = optional lib.types.str "What the empty search box says. Unset, `Search`.";
+        showHints = optional lib.types.bool "Whether the footer names the keys the selected row takes, such as `↵ Open · Tab Enter app · ⌃K Actions`. Unset, true.";
       };
     };
   };

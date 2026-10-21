@@ -79,6 +79,8 @@ pkgs.testers.runNixOSTest {
       home.stateVersion = "25.11";
       programs.kotodama = {
         enable = true;
+        # No compositor runs here, so no menu either: `kotodama toggle` says so.
+        frontEnd.enable = false;
         # Off by default, unlike apps, calculator, clipboard, emoji and
         # web-search. hyprland, system and ai stay off.
         extensions.folders.enable = true;
@@ -133,6 +135,12 @@ pkgs.testers.runNixOSTest {
     def user(command):
         return machine.succeed(as_alice(command))
 
+    def toggle_without_a_menu():
+        # No menu runs here: the command still starts the Daemon, waits a
+        # moment for a menu, then fails and says how to start one.
+        out = machine.fail(as_alice("kotodama toggle 2>&1"))
+        assert "no menu is running" in out, out
+
     def is_active(unit):
         return machine.execute(as_alice(f"systemctl --user is-active {unit}"))[0] == 0
 
@@ -153,7 +161,7 @@ pkgs.testers.runNixOSTest {
 
     with subtest("the first kotodama toggle starts the Daemon through the socket"):
         assert not is_active("kotodamad.service"), "the Daemon started before anything connected"
-        user("kotodama toggle")
+        toggle_without_a_menu()
         machine.wait_for_unit("kotodamad.service", "alice")
 
     with subtest("a setting written through the home-manager module reaches the Daemon"):
@@ -172,7 +180,7 @@ pkgs.testers.runNixOSTest {
             as_alice(f"{front_end} dozer") + " | grep -P '^apps\tdozer\tDozer$'"
         )
         machine.wait_until_succeeds(
-            as_alice(f"{front_end} clipboard") + " | grep -P '^kotodama\tprefix:clipboard\tClipboard$'"
+            as_alice(f"{front_end} clipboard") + " | grep -P '^kotodama\tapp:clipboard\tClipboard$'"
         )
         # What was copied is in the clipboard's app alone, the History first.
         machine.wait_until_succeeds(
@@ -223,7 +231,7 @@ pkgs.testers.runNixOSTest {
         assert is_active("kotodamad.socket")
         for program in ["sleep 1001", "sleep 1002"]:
             machine.succeed(pgrep(program))
-        user("kotodama toggle")
+        toggle_without_a_menu()
         machine.wait_for_unit("kotodamad.service", "alice")
         user(f"{front_end} nap")
 

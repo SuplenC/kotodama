@@ -176,7 +176,7 @@ fn a_manifest_describes_its_app() {
         r#"
         name = "emoji"
         command = ["kotodama-emoji"]
-        prefix = "emoji"
+        word = "emoji"
         title = "Emoji"
         icon = "face-smile"
         about = "Emoji and symbols, typed into the window you came from."
@@ -190,7 +190,7 @@ fn a_manifest_describes_its_app() {
     )
     .unwrap();
 
-    assert_eq!(manifest.prefix.as_deref(), Some("emoji"));
+    assert_eq!(manifest.word.as_deref(), Some("emoji"));
     assert_eq!(manifest.title.as_deref(), Some("Emoji"));
     assert_eq!(manifest.icon.as_deref(), Some("face-smile"));
     assert_eq!(
@@ -218,7 +218,7 @@ fn a_manifest_describes_its_app() {
 fn an_extension_without_app_keys_keeps_its_items_in_the_search() {
     let manifest = parse("name = \"apps\"\ncommand = [\"x\"]").unwrap();
 
-    assert_eq!(manifest.prefix, None);
+    assert_eq!(manifest.word, None);
     assert_eq!(manifest.title, None);
     assert_eq!(manifest.icon, None);
     assert_eq!(manifest.about, None);
@@ -228,12 +228,27 @@ fn an_extension_without_app_keys_keeps_its_items_in_the_search() {
 }
 
 #[test]
-fn a_prefix_is_one_word() {
-    for prefix in ["", "two words", "tab\tbed", " emoji"] {
-        let toml = format!("name = \"emoji\"\ncommand = [\"x\"]\nprefix = {prefix:?}");
+fn a_word_is_one_word() {
+    for word in ["", "two words", "tab\tbed", " emoji"] {
+        let toml = format!("name = \"emoji\"\ncommand = [\"x\"]\nword = {word:?}");
 
         let err = parse(&toml).unwrap_err();
 
-        assert!(err.contains("prefix"), "{prefix:?}: {err}");
+        assert!(err.contains("word"), "{word:?}: {err}");
     }
+}
+
+#[test]
+fn prefix_is_still_read_as_the_word() {
+    let manifest = parse("name = \"emoji\"\ncommand = [\"x\"]\nprefix = \"emo\"").unwrap();
+
+    assert_eq!(manifest.word.as_deref(), Some("emo"));
+}
+
+#[test]
+fn a_manifest_with_both_word_and_prefix_is_refused() {
+    let err =
+        parse("name = \"emoji\"\ncommand = [\"x\"]\nword = \"emo\"\nprefix = \"em\"").unwrap_err();
+
+    assert!(err.contains("word"), "{err}");
 }

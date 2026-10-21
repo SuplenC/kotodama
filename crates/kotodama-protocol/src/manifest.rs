@@ -10,8 +10,9 @@ use crate::{Action, Argument, Error, Example, KindName, is_valid_name};
 /// name = "kubaos"
 /// command = ["bin/kubaos-kotodama"]
 /// action_catalog = true
-/// # Its app: entered by `suite`, where `suite go` searches its Items alone.
-/// prefix = "suite"
+/// # Its app, whose entry Item `suite` finds; inside it, `go` searches its
+/// # Items alone.
+/// word = "suite"
 /// title = "KubaOS suites"
 /// about = "Switches the Go, Rust and Node versions of a project."
 /// examples = [{ query = "go 1.23", result = "Go 1.23 in this project" }]
@@ -43,10 +44,11 @@ pub struct Manifest {
     pub contributed_actions: Vec<ContributedAction>,
     /// Whether the Extension may read the Action catalog.
     pub action_catalog: bool,
-    /// The word that enters its app, unless the user's config says
-    /// otherwise: one word, such as `emoji`. `emoji fire` searches its Items
-    /// alone. The `name` stands in without one.
-    pub prefix: Option<String>,
+    /// The word that names its app, unless the user's config says otherwise:
+    /// one word, such as `emoji`. Typing it finds the app's entry Item, and
+    /// Tab on that enters the app. The `name` stands in without one. Read
+    /// from `word`, or from `prefix`, its old name.
+    pub word: Option<String>,
     /// The Extension's name as the user reads it, such as `Emoji`: the title
     /// of its app's entry Item and of the chip that shows the search is in
     /// its app. The `name` stands in without one.
@@ -74,10 +76,10 @@ impl Manifest {
     }
 }
 
-/// Whether `prefix` can be an app's word: one word, with no whitespace in it or
+/// Whether `word` can be an app's word: one word, with no whitespace in it or
 /// around it.
-pub fn is_valid_prefix(prefix: &str) -> bool {
-    !prefix.is_empty() && !prefix.contains(char::is_whitespace)
+pub fn is_valid_word(word: &str) -> bool {
+    !word.is_empty() && !word.contains(char::is_whitespace)
 }
 
 /// Which queries are sent to the Extension as Live queries.
@@ -128,8 +130,8 @@ struct ManifestToml {
     contributed_actions: Vec<ContributedAction>,
     #[serde(default)]
     action_catalog: bool,
-    #[serde(default)]
-    prefix: Option<String>,
+    #[serde(default, alias = "prefix")]
+    word: Option<String>,
     #[serde(default)]
     title: Option<String>,
     #[serde(default)]
@@ -162,11 +164,11 @@ impl TryFrom<ManifestToml> for Manifest {
         if toml.command.is_empty() {
             return Err("`command` is empty; it needs at least the program to run".into());
         }
-        if let Some(prefix) = &toml.prefix
-            && !is_valid_prefix(prefix)
+        if let Some(word) = &toml.word
+            && !is_valid_word(word)
         {
             return Err(format!(
-                "`prefix = {prefix:?}` isn't one word; leave `prefix` out for the Extension's name"
+                "`word = {word:?}` isn't one word; leave `word` out for the Extension's name"
             ));
         }
         Ok(Manifest {
@@ -176,7 +178,7 @@ impl TryFrom<ManifestToml> for Manifest {
             live_query: toml.live_query,
             contributed_actions: toml.contributed_actions,
             action_catalog: toml.action_catalog,
-            prefix: toml.prefix,
+            word: toml.word,
             title: toml.title,
             icon: toml.icon,
             about: toml.about,

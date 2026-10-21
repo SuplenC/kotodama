@@ -67,7 +67,7 @@ pub fn results() -> ToFrontEnd {
             })
             .collect(),
         scope: Some(Scope {
-            prefix: "apps".into(),
+            word: "apps".into(),
             title: "Apps".into(),
             icon: None,
             intro: None,

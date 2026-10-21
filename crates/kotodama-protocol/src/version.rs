@@ -101,7 +101,8 @@ impl Since for ToFrontEnd {
             | ToFrontEnd::Toggle
             | ToFrontEnd::OfferUndo { .. }
             | ToFrontEnd::WithdrawUndo { .. }
-            | ToFrontEnd::SetQuery { .. } => 0,
+            | ToFrontEnd::SetQuery { .. }
+            | ToFrontEnd::Reached { .. } => 0,
         }
     }
 }

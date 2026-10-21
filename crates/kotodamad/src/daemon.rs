@@ -26,6 +26,7 @@ use crate::apps::Apps;
 use crate::arguments;
 use crate::clock::{Clock, When};
 use crate::config::extension_settings;
+use crate::conflict::{self, Conflict};
 use crate::discovery::Found;
 use crate::empty_query::EmptyQuery;
 use crate::history::{
@@ -155,6 +156,10 @@ const CLOSE_TIMEOUT: Duration = Duration::from_millis(500);
 /// menus on the search instead (ADR 0014). It covers starting the Extension,
 /// as when the keypress also started the Daemon.
 const OPEN_VIEW_TIMEOUT: Duration = Duration::from_secs(1);
+/// How long `kotodama open` or `toggle` waits for a menu to connect when
+/// none is, as at login, when the keypress can come before the menu has
+/// started, before it answers that it reached none.
+const MENU_WAIT: Duration = Duration::from_secs(2);
 /// The first restart delay after a crash; each crash in a row doubles it.
 const FIRST_RETRY: Duration = Duration::from_millis(100);
 const MAX_RETRY: Duration = Duration::from_secs(30);
@@ -498,6 +503,9 @@ struct Session {
     /// Whether it has sent a query. A Front end that only passes on commands
     /// never does, and gets no Results.
     searched: bool,
+    /// Whether it has asked for a menu, as `kotodama` does: a Front end
+    /// that asks is no menu itself.
+    asked_for_menu: bool,
     update: Update,
     /// The part of the day the Empty query was last ranked in, as
     /// [`history::part_of_day`] names it.
@@ -689,6 +697,17 @@ impl Own {
             does,
         }
     }
+
+    /// The best it may match by. An app's entry Item matches at most as a
+    /// word start, its title or word typed whole included, so that
+    /// GNOME Calculator ranks above the Calculator app for `calc`. A few
+    /// picks of the entry Item make it the Learned choice for the word.
+    fn tier_cap(&self) -> Tier {
+        match self.does {
+            OwnAction::App(_) => Tier::WordStart,
+            _ => Tier::Exact,
+        }
+    }
 }
 
 /// The clear-history Item.
@@ -819,6 +838,8 @@ struct Keyword {
     alias: bool,
     /// The Alias's own Frecency, which ranks it instead of its Result's.
     frecency: Option<f64>,
+    /// How well the keyword makes it match: exact, but for an app's word.
+    tier: Tier,
 }
 
 /// The id an Alias's picks are kept under, for the Extension [`OWN`].
@@ -967,6 +988,12 @@ pub struct Daemon<L, D, S> {
     /// What other Front ends asked the menus while an Opening was awaited,
     /// passed on once none is, so the search never shows before its View.
     held: Vec<(FrontEndId, ToFrontEnd)>,
+    /// `kotodama open` and `toggle` asked while no menu was connected,
+    /// each until it gives up on one: passed on to the first menu that
+    /// searches.
+    awaiting_menu: Vec<(FrontEndId, FromFrontEnd, Instant)>,
+    /// The menu last shown, which `kotodama open` and `toggle` go to.
+    shown_last: Option<FrontEndId>,
     launcher: L,
     desktop: D,
     store: S,
@@ -985,6 +1012,8 @@ pub struct Daemon<L, D, S> {
     kind_places: KindPlaces,
     /// Each Extension's app.
     apps: Apps,
+    /// The keywords two things asked for, as last told to the user.
+    conflicts: Vec<Conflict>,
     /// One per Quicklink, then one per app (its entry Item), then the
     /// clear-history Item, then the Undo Item while there is something to
     /// undo.
@@ -1055,6 +1084,8 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             pending_output: None,
             openings: Vec::new(),
             held: Vec::new(),
+            awaiting_menu: Vec::new(),
+            shown_last: None,
             launcher,
             desktop,
             store,
@@ -1067,6 +1098,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             kinds: KindOrder::default(),
             kind_places: KindPlaces::default(),
             apps: Apps::default(),
+            conflicts: Vec::new(),
             own: Vec::new(),
             undos: Vec::new(),
             frecent: Arc::default(),
@@ -1382,6 +1414,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
         self.expire_undos(now);
         self.open_overdue(now);
         self.release_held();
+        self.settle_awaiting_menu(now);
         self.flush(now);
     }
 
@@ -1403,11 +1436,13 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             .iter()
             .filter(|opening| opening.awaited())
             .map(|opening| opening.deadline);
+        let menu = self.awaiting_menu.iter().map(|&(_, _, until)| until);
         restarts
             .chain(live)
             .chain(output)
             .chain(undo)
             .chain(opening)
+            .chain(menu)
             .min()
     }
 
@@ -2241,10 +2276,10 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
         }
     }
 
-    /// Sends to every Front end but the one that asked.
-    fn broadcast_from(&self, from: FrontEndId, message: impl Fn() -> ToFrontEnd) {
-        for (_, session) in self.sessions.iter().filter(|&(&id, _)| id != from) {
-            session.send(message());
+    /// Sends to the menu `kotodama open` and `toggle` from `from` go to.
+    fn to_menu(&self, from: FrontEndId, message: ToFrontEnd) {
+        if let Some(session) = self.menu(from).and_then(|id| self.sessions.get(&id)) {
+            session.send(message);
         }
     }
 
@@ -2277,6 +2312,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             risen: Vec::new(),
             via_alias: None,
             searched: false,
+            asked_for_menu: false,
             update: Update::None,
             empty_ranked_in: None,
             filters: Vec::new(),
@@ -2322,6 +2358,9 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             }
         }
         self.argument_forms.retain(|_, form| form.front_end != id);
+        // The command waits connected for its answer: one that left has
+        // given up, and its menu would open for nobody.
+        self.awaiting_menu.retain(|&(from, ..)| from != id);
         if let Some(pick) = self.picks.remove(&id) {
             self.pick_lists.pop(pick.target, &pick.view);
         }
@@ -2404,28 +2443,97 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             FromFrontEnd::Closed => self.closed(Some(id)),
             // The menu may open on the Empty query, which may have been
             // ranked hours ago.
-            FromFrontEnd::Open { query, view } => {
-                // `kotodama open --prefix <word>` opens on the app: the
-                // query the menus send back starts with its word.
-                if let Some((n, _)) = self.apps.scope_of(&query) {
-                    for session in self.sessions.values_mut() {
-                        session.entered = Some(n);
-                    }
+            FromFrontEnd::Open { .. } | FromFrontEnd::Toggle => {
+                if let Some(session) = self.sessions.get_mut(&id) {
+                    session.asked_for_menu = true;
                 }
-                self.warm = true;
-                self.refresh_empty(Update::Fresh, Some(id));
-                match view {
-                    Some(text) => self.open_on_view(id, query, &text, now),
-                    None => self.ask_menus(id, ToFrontEnd::Open { query, view: None }),
+                if let FromFrontEnd::Open { query, .. } = &message {
+                    self.enter_on_open(query);
                 }
-            }
-            FromFrontEnd::Toggle => {
-                self.warm = true;
-                self.refresh_empty(Update::Fresh, Some(id));
-                self.ask_menus(id, ToFrontEnd::Toggle);
+                if self.menu(id).is_some() {
+                    self.ask_menu(id, message, now);
+                } else {
+                    self.awaiting_menu.push((id, message, now + MENU_WAIT));
+                }
             }
             FromFrontEnd::Undo { change } => self.undo(change),
-            FromFrontEnd::Shown => self.shown(id, now),
+            FromFrontEnd::Shown => {
+                self.shown_last = Some(id);
+                self.shown(id, now);
+            }
+        }
+    }
+
+    /// The menu `kotodama open` and `toggle` from `from` go to: of the Front
+    /// ends that never asked for a menu themselves, the one shown last, else
+    /// the one that connected last. One menu, not every one: a menu per
+    /// screen, or two shells that each place one, would all open at once and
+    /// fight over the keyboard, and the Daemon can't tell which screen has
+    /// the focus without knowing the compositor.
+    fn menu(&self, from: FrontEndId) -> Option<FrontEndId> {
+        let is_menu = |id: &FrontEndId| {
+            *id != from
+                && self
+                    .sessions
+                    .get(id)
+                    .is_some_and(|session| !session.asked_for_menu)
+        };
+        self.shown_last
+            .filter(is_menu)
+            .or_else(|| self.sessions.keys().copied().filter(is_menu).max())
+    }
+
+    /// Passes `kotodama open` or `toggle` on to the menu, and tells the Front
+    /// end that asked how many menus it reached: one, or none.
+    fn ask_menu(&mut self, from: FrontEndId, message: FromFrontEnd, now: Instant) {
+        let menus = u32::from(self.menu(from).is_some());
+        self.warm = true;
+        self.refresh_empty(Update::Fresh, Some(from));
+        match message {
+            FromFrontEnd::Open { query, view } => {
+                // Again, for a menu that connected since.
+                self.enter_on_open(&query);
+                match view {
+                    Some(text) => self.open_on_view(from, query, &text, now),
+                    None => self.ask_menus(from, ToFrontEnd::Open { query, view: None }),
+                }
+            }
+            FromFrontEnd::Toggle => self.ask_menus(from, ToFrontEnd::Toggle),
+            _ => return,
+        }
+        if let Some(session) = self.sessions.get(&from) {
+            session.send(ToFrontEnd::Reached { menus });
+        }
+    }
+
+    /// `kotodama open --app <word>` opens on the app: the query the menus
+    /// send back starts with its word. A Front end that sends it for itself
+    /// is in the app at once, whether a menu is there or not.
+    fn enter_on_open(&mut self, query: &str) {
+        if let Some((n, _)) = self.apps.scope_of(query) {
+            for session in self.sessions.values_mut() {
+                session.entered = Some(n);
+            }
+        }
+    }
+
+    /// Passes on what waited for a menu, once one is there, and answers what
+    /// waited too long that it reached none.
+    fn settle_awaiting_menu(&mut self, now: Instant) {
+        if self.awaiting_menu.is_empty() {
+            return;
+        }
+        for (from, message, until) in std::mem::take(&mut self.awaiting_menu) {
+            let searched = |id: FrontEndId| self.sessions.get(&id).is_some_and(|s| s.searched);
+            if self.menu(from).is_some_and(searched) {
+                self.ask_menu(from, message, now);
+            } else if until <= now {
+                if let Some(session) = self.sessions.get(&from) {
+                    session.send(ToFrontEnd::Reached { menus: 0 });
+                }
+            } else {
+                self.awaiting_menu.push((from, message, until));
+            }
         }
     }
 
@@ -2507,13 +2615,13 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
         }
     }
 
-    /// Passes `message` on to every menu but `from`'s, or holds it back
-    /// while the menus wait on a View.
+    /// Passes `message` on to the menu `from` asks, or holds it back while
+    /// the menus wait on a View.
     fn ask_menus(&mut self, from: FrontEndId, message: ToFrontEnd) {
         if self.openings.iter().any(Opening::awaited) {
             self.held.push((from, message));
         } else {
-            self.broadcast_from(from, || message.clone());
+            self.to_menu(from, message);
         }
     }
 
@@ -2523,7 +2631,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             return;
         }
         for (from, message) in std::mem::take(&mut self.held) {
-            self.broadcast_from(from, || message.clone());
+            self.to_menu(from, message);
         }
     }
 
@@ -2531,13 +2639,14 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
     fn open_on_view(&mut self, from: FrontEndId, query: String, text: &str, now: Instant) {
         let Some(view) = ViewName::parse(text) else {
             let failure = format!("No View `{text}`; name one as <extension>/<item>");
-            self.broadcast_from(from, || ToFrontEnd::Open {
-                query: query.clone(),
-                view: Some(text.to_owned()),
-            });
-            self.broadcast_from(from, || ToFrontEnd::ActionFailed {
-                message: failure.clone(),
-            });
+            self.to_menu(
+                from,
+                ToFrontEnd::Open {
+                    query,
+                    view: Some(text.to_owned()),
+                },
+            );
+            self.to_menu(from, ToFrontEnd::ActionFailed { message: failure });
             return;
         };
         self.openings.push(Opening {
@@ -2626,15 +2735,16 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
     /// ran late, and shows `failure` if there is one.
     fn open_menus(&self, opening: &Opening, failure: Option<String>) {
         if !opening.opened {
-            self.broadcast_from(opening.from, || ToFrontEnd::Open {
-                query: opening.query.clone(),
-                view: Some(opening.view.to_string()),
-            });
+            self.to_menu(
+                opening.from,
+                ToFrontEnd::Open {
+                    query: opening.query.clone(),
+                    view: Some(opening.view.to_string()),
+                },
+            );
         }
         if let Some(message) = failure {
-            self.broadcast_from(opening.from, || ToFrontEnd::ActionFailed {
-                message: message.clone(),
-            });
+            self.to_menu(opening.from, ToFrontEnd::ActionFailed { message });
         }
     }
 
@@ -2657,6 +2767,12 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
                 self.open_menus(&opening, Some(failure));
             }
         }
+    }
+
+    /// What the session's query has after the `n`th app's word, if it starts
+    /// with it: what entering the app keeps typed.
+    fn after_word<'q>(&self, session: &'q Session, n: usize) -> Option<&'q str> {
+        after_keyword(&session.query, &self.apps.get(n)?.word)
     }
 
     fn extension_named(&self, name: &str) -> Option<ExtensionId> {
@@ -2767,6 +2883,9 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
                 used: Used::Query { query },
             });
         }
+        // A menu that just connected searches first; what waited for one
+        // goes to it.
+        self.settle_awaiting_menu(now);
     }
 
     fn run_action(
@@ -2908,7 +3027,9 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
                 self.picked(front_end, result, action, now);
             }
             OwnAction::App(n) => {
-                let text = format!("{} ", self.apps.get(n).ok_or_else(gone)?.word);
+                let word = &self.apps.get(n).ok_or_else(gone)?.word;
+                let rest = self.after_word(session, n).unwrap_or_default();
+                let text = format!("{word} {rest}");
                 // The Front end takes the query from here, so the app, its
                 // intro card included, is in the Results that follow, with
                 // no query back first.
@@ -3340,7 +3461,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
     }
 
     /// Reads each installed Extension's app from its Manifest and the
-    /// config. When they changed, the Index reads the Segments the search
+    /// config. Reports the keywords lost, once each time they change. When they changed, the Index reads the Segments the search
     /// now shows, every session's query is read again, and the entry Items
     /// are rebuilt.
     fn load_apps(&mut self) {
@@ -3350,7 +3471,14 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             .enumerate()
             .filter(|(_, ext)| !matches!(ext.state, State::Removed))
             .map(|(n, ext)| (ExtensionId(n), &ext.found.manifest));
-        let apps = Apps::new(installed, &self.config);
+        let apps = Apps::new(installed, &self.config, &self.keywords);
+        let conflicts: Vec<Conflict> = (self.keywords.conflicts().into_iter())
+            .chain(apps.conflicts().iter().cloned())
+            .collect();
+        if conflicts != self.conflicts {
+            conflict::report(&conflicts);
+            self.conflicts = conflicts;
+        }
         if apps == self.apps {
             return;
         }
@@ -3666,7 +3794,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
                 let kind = self.kinds.place(&own.item.kind);
                 candidates.push(Candidate::new(
                     Source::Own(n as u32),
-                    tier,
+                    tier.min(own.tier_cap()),
                     kind,
                     score,
                     len,
@@ -3940,10 +4068,11 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
         }
 
         // What the query names: an Alias, typed alone or before an Argument,
-        // goes first. A Quicklink's keyword, an app's word typed alone or an
-        // Item's own keyword counts as an exact match, which a Learned choice
-        // can beat. In an app, only its Extension's Items' keywords count,
-        // typed first past its word.
+        // goes first. A Quicklink's keyword or an Item's own keyword counts as
+        // an exact match, which a Learned choice can beat. An app's word
+        // counts as a word start, so an application named like the app ranks
+        // above its entry Item. In an app, only its Extension's Items'
+        // keywords count, typed first past its word.
         let root = session.reach == Reach::Root;
         let mut words = session.key.split(' ');
         let first = if root { words.next() } else { words.nth(1) };
@@ -3963,6 +4092,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
                 source,
                 alias: true,
                 frecency: Some(self.history.frecency(OWN, &alias_id(keyword), when)),
+                tier: Tier::Exact,
             });
             if source != Source::Unavailable {
                 primary = alias.action.clone().map(|action| (source, action));
@@ -3979,6 +4109,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
                 source: Source::Own(n as u32),
                 alias: false,
                 frecency: None,
+                tier: self.own[n].tier_cap(),
             });
         }
         for slot in self.index.keyed(first, session.reach) {
@@ -3986,12 +4117,14 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
                 source: Source::Indexed(slot),
                 alias: false,
                 frecency: None,
+                tier: Tier::Exact,
             });
         }
         for Keyword {
             source,
             alias,
             frecency,
+            tier,
         } in named
         {
             let at_n = match candidates.iter().position(|c| c.source == source) {
@@ -4006,7 +4139,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
                     };
                     let mut candidate = Candidate::new(
                         source,
-                        Tier::Exact,
+                        tier,
                         self.kinds.place(&item.kind),
                         session.max_score,
                         item.title.chars().count() as u32,
@@ -4021,8 +4154,8 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
                 candidate.class = Class::Named;
                 candidate.by_alias = true;
             }
-            candidate.tier = Tier::Exact.coarse();
-            candidate.fine = Tier::Exact;
+            candidate.tier = candidate.tier.max(tier.coarse());
+            candidate.fine = candidate.fine.max(tier);
             if let Some(frecency) = frecency {
                 candidate.frecency = frecency;
             }
@@ -4077,17 +4210,25 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
     }
 
     /// What the Empty query shows: the Results most used at this time of day,
-    /// then the Fixed menu, each thing once.
+    /// then the Fixed menu, or without one the apps' entry Items, each thing
+    /// once.
     fn empty_query(&mut self, session: &Session, when: When) -> Vec<Source> {
         let mut shown = self.most_used(when);
         let identity = |source: Source| self.identity(session, source);
-        for (extension, id) in &self.empty_query.menu {
+        let menu: Vec<Source> = match &self.empty_query.menu {
+            Some(menu) => menu
+                .iter()
+                .filter_map(|(extension, id)| self.source_of(session, extension, id))
+                .collect(),
+            None => (self.own.iter().enumerate())
+                .filter(|(_, own)| matches!(own.does, OwnAction::App(_)))
+                .map(|(n, _)| Source::Own(n as u32))
+                .collect(),
+        };
+        for source in menu {
             if shown.len() >= MAX_RESULTS {
                 break;
             }
-            let Some(source) = self.source_of(session, extension, id) else {
-                continue;
-            };
             let same = |&shown: &Source| {
                 shown == source || identity(shown).is_some_and(|id| identity(source) == Some(id))
             };
@@ -4484,16 +4625,25 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             }
         }
         let mut item = item.clone();
-        if let Source::Own(n) = source
-            && let Some(OwnAction::Quicklink(quicklink)) =
-                self.own.get(n as usize).map(|own| own.does)
-        {
-            let quicklink = &self.keywords.quicklinks[quicklink];
-            if quicklink.takes_query()
-                && let Some(query) = after_keyword(&session.query, &quicklink.keyword)
-                && !query.is_empty()
-            {
-                item.title = format!("{} for “{query}”", item.title);
+        if let Source::Own(n) = source {
+            match self.own.get(n as usize).map(|own| own.does) {
+                Some(OwnAction::Quicklink(quicklink)) => {
+                    let quicklink = &self.keywords.quicklinks[quicklink];
+                    if quicklink.takes_query()
+                        && let Some(query) = after_keyword(&session.query, &quicklink.keyword)
+                        && !query.is_empty()
+                    {
+                        item.title = format!("{} for “{query}”", item.title);
+                    }
+                }
+                Some(OwnAction::App(app)) => {
+                    if let Some(query) = self.after_word(session, app)
+                        && !query.is_empty()
+                    {
+                        item.title = format!("Search {} for “{query}”", item.title);
+                    }
+                }
+                _ => {}
             }
         }
         if let Some(at) = primary.and_then(|id| item.actions.iter().position(|a| a.id == id)) {

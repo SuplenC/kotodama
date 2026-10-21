@@ -7,7 +7,7 @@ description = "Everything copied, kept for a week, to paste again; never what a 
 command = ["./kotodama-clipboard"]
 # What was copied stays out of the search, in its app, which lists the
 # History first.
-prefix = "clipboard"
+word = "clipboard"
 title = "Clipboard"
 icon = "edit-paste"
 about = "Everything copied this week. Type to find a clip; Enter pastes it into the window you came from."

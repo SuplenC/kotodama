@@ -8,7 +8,7 @@ Kotodama is a command menu for Wayland desktops. You type, and it finds and does
 - **A Quickshell QML module** written in Rust (cxx-qt) gives QML a native result model. QML only draws the results.
 - **Extensions** are separate processes in any language. They speak a protocol whose wire format is negotiated (JSON, MessagePack, Protocol Buffers or postcard), so a crashing Extension never takes down the menu. From protocol 1.0 on, a newer Daemon keeps talking to an Extension built for an older version.
 
-Status: early. The protocol, the Daemon, the Quickshell Front end and the apps, clipboard history, calculator, emoji, folders, Hyprland, system, web search and AI Bundled extensions work; Views, the Action panel and the other Bundled extensions are next. See `docs/adr/0001-architecture.md` and the issues.
+Status: early, before v1. The protocol, the Daemon, the Quickshell Front end with its Views and Action panel, and the apps, clipboard history, calculator, emoji, folders, Hyprland, system, web search and AI Bundled extensions work. See `docs/adr/0001-architecture.md` and the issues.
 
 ## Installing
 
@@ -34,8 +34,8 @@ Which compositors it works on is in [Compositor support](docs/try-it.md#composit
   imports = [ inputs.kotodama.homeModules.default ];
   programs.kotodama = {
     enable = true;
-    # Runs the menu in a Quickshell of its own, with the graphical session.
-    frontEnd.enable = true;
+    # The menu runs in a Quickshell of its own, with the graphical session
+    # (`frontEnd.enable`, on unless home-manager runs a Quickshell of yours).
     # apps, calculator, clipboard, emoji and web-search are on unless turned off.
     extensions.hyprland.enable = true;
     # Written to ~/.config/kotodama/home-manager.toml; any other *.toml there still applies.
@@ -62,7 +62,7 @@ Every config table below also has typed options, so a typo or a value of the wro
 | `emptyQuery.{mostUsed, menu}` | `[empty_query]` |
 | `ranking.kinds` | `[ranking]` |
 | `quicklinkDefaults.opener` | `[quicklink_defaults]` |
-| `extensions.<name>.{prefix, inSearch}`, for every Extension above and below, and `system` and `hyprland` | `prefix` and `in_search` in `[extensions.<name>]` (see [Apps](#apps)) |
+| `extensions.<name>.{word, inSearch}`, for every Extension above and below, and `system` and `hyprland` (`prefix` is the old name of `word`, still read) | `word` and `in_search` in `[extensions.<name>]` (see [Apps](#apps)) |
 | `extensions.apps.{terminal, hidden, names, withdrawWithin}` | `[extensions.apps]` |
 | `extensions.clipboard.{maxEntries, maxAgeDays}` | `[extensions.clipboard]` |
 | `extensions.calculator.{network, ratesUrl, decimalSeparator}` | `[extensions.calculator]` |
@@ -71,7 +71,7 @@ Every config table below also has typed options, so a typo or a value of the wro
 | `extensions.ai.{apiKeyCommand, apiKeyFile, url, model, effort, debounceMs}` | `[extensions.ai]` (see [AI](#ai)) |
 | `extensions.folders.{folders, terminal, open, shell, lazygit, fileManager, copyPath}` | `[extensions.folders]` |
 
-Each option is the key in camelCase. `decimalSeparator`, `skinTone` and a folder's `kind` take only the values their Extension knows, a `prefix` only one word, and numbers are checked against the ranges the tables below give. The Hyprland and system Extensions have no settings of their own.
+Each option is the key in camelCase. `decimalSeparator`, `skinTone` and a folder's `kind` take only the values their Extension knows, a `word` only one word, and numbers are checked against the ranges the tables below give. The Hyprland and system Extensions have no settings of their own.
 
 ```nix
 programs.kotodama = {
@@ -91,15 +91,15 @@ programs.kotodama = {
 };
 ```
 
-The module installs the package, with the enabled Extensions alone (its read-only `finalPackage`), and enables `kotodamad.socket`. `frontEnd.enable` adds the ready Front end: a systemd user service, `kotodama-menu`, that runs the menu in a Quickshell instance of its own, beside whatever shell the desktop already runs, so a compositor bind running `kotodama toggle` is all that's left to set up.
+The module installs the package, with the enabled Extensions alone (its read-only `finalPackage`), and enables `kotodamad.socket`. `frontEnd.enable` adds the ready Front end: a systemd user service, `kotodama-menu`, that runs the menu in a Quickshell instance of its own, beside whatever shell the desktop already runs, so a compositor bind running `kotodama toggle` is all that's left to set up. It is on unless home-manager runs a Quickshell of your own (`programs.quickshell.enable`), where you place `KotodamaMenu` yourself.
 
 | Option | What it does |
 | --- | --- |
-| `frontEnd.enable` | Runs the `kotodama-menu` service. Off by default. |
+| `frontEnd.enable` | Runs the `kotodama-menu` service. On unless `programs.quickshell.enable`. |
 | `frontEnd.quickshellPackage` | The Quickshell that runs it. Unset, the one from the same nixpkgs as `package` (its `quickshell` attribute), which shares the QML module's Qt. |
 | `frontEnd.target` | The systemd user target that starts and stops it. Unset, `wayland.systemd.target`, which is `graphical-session.target` unless set. |
 | `frontEnd.look.{background, foreground, dimmed, accent, selection, border, error}` | `KotodamaMenu`'s colors, as QML takes them (`"#1e1e2e"`, `"red"`). |
-| `frontEnd.look.{fontFamily, fontSize, radius, menuWidth, rowHeight, maxRows, top, placeholder}` | The rest of its look, in pixels where it's a size. |
+| `frontEnd.look.{fontFamily, fontSize, radius, menuWidth, rowHeight, maxRows, top, placeholder, showHints}` | The rest of its look, in pixels where it's a size. |
 | `qmlImportPath` (read-only) | The QML import path that holds the `Kotodama` module, for a Quickshell config of your own (see [The Quickshell Front end](#the-quickshell-front-end)). |
 
 A look property left unset keeps `KotodamaMenu`'s default. The service starts with the target, which needs something to start it once the compositor has handed `WAYLAND_DISPLAY` to the user manager: uwsm does, and so does home-manager's `wayland.windowManager.hyprland` with its systemd integration (on by default). Without either, start it from the compositor: `exec-once = systemctl --user start kotodama-menu`, after the environment import below. Its only extra environment is `QML_IMPORT_PATH`, for this Quickshell alone.
@@ -169,12 +169,13 @@ A setting that doesn't parse is logged and keeps its default. With `usage_log = 
 
 `at` is seconds since the Unix epoch; a pick's `extension` and `id` name the Result, `action` the Action run, and `row` where the Result was in the list (from 0), or `null` if it wasn't in it. Emptying the search box isn't logged as a query, but a pick made from the Empty query is, with `"query":""`. When the file would pass 4 MiB it becomes `usage.jsonl.1`, replacing the older one, so the log never takes more than 8 MiB. Turning it off keeps what was written; delete the files to forget it. "Clear history" deletes both files, and clearing one Extension's History drops the picks of its Results from them. Forgetting one Result leaves the log as it is, and Undo puts back the History, never the log.
 
-With nothing typed, the menu shows the Empty query: the 3 Results most used at this time of day, by their picks within a few hours of now, then by all their picks. An Alias's picks count for the Result it names, and a thing that several Extensions offer shows once, as the Result picked through most. The Fixed menu follows them, set in the config:
+With nothing typed, the menu shows the Empty query: the 3 Results most used at this time of day, by their picks within a few hours of now, then by all their picks. An Alias's picks count for the Result it names, and a thing that several Extensions offer shows once, as the Result picked through most. The Fixed menu follows them, set in the config. Without one, the apps' entry Items follow instead, so a first run, with nothing picked yet, shows what there is to enter; `menu = []` shows nothing after the most used:
 
 ```toml
 [empty_query]
 most_used = 3  # how many of the most used come first; 0 to 50
 # Then these, in this order, each unless it is shown already.
+# Unset, the apps' entry Items.
 menu = [
     { extension = "apps", item = "firefox" },
     { extension = "kotodama", item = "clear-history" },
@@ -227,14 +228,14 @@ Typing a Quicklink's keyword ranks it as an exact match, with Frecency deciding 
 
 ### Apps
 
-Every Extension is an app: the search over its Items alone. The search shows one entry Item for it, such as "Emoji" or "Projects", found by the app's title and its word (`emoji`, `projects`, `calc`) and ranked like any other Result; typing the word exactly puts it first. Tab or Enter on the entry Item enters the app, so `projects` and Tab is enough. The menu shows a chip naming the app in front of the search box, and, until something is typed, an intro card from the Manifest: what the app does, and a few queries to try with what they give. Under it are the app's commands, then its most picked Items, then the rest. Typing searches that Extension's Items alone, and an Extension with Live queries gets every query typed in its app, whether its triggers match or not: the calculator answers anything typed in it. Esc, or Backspace on the empty box, goes back to the whole search. `kotodama open --prefix emoji` (or `--query "emoji "`) opens the menu in the app. Learned choices in an app are kept apart from the same words in the search.
+Every Extension is an app: the search over its Items alone. The search shows one entry Item for it, such as "Emoji" or "Projects", found by the app's title and its word (`emoji`, `projects`, `calc`) and ranked like any other Result, though never above a word start: an application such as GNOME Calculator ranks above the Calculator app for `calc` until the entry Item is picked a few times. Tab or Enter on the entry Item enters the app, so `projects` and Tab is enough; with more typed after the word, as in `emoji fire`, the row reads "Search Emoji for “fire”" and entering keeps `fire` typed. The menu shows a chip naming the app in front of the search box, and, until something is typed, an intro card from the Manifest: what the app does, and a few queries to try with what they give. Under it are the app's commands, then its most picked Items, then the rest. Typing searches that Extension's Items alone, and an Extension with Live queries gets every query typed in its app, whether its triggers match or not: the calculator answers anything typed in it. Esc clears what is typed; with nothing typed, it goes back to the whole search. Backspace on the empty box goes back too, with the app's word typed. `kotodama open --app emoji` opens the menu in the app. Learned choices in an app are kept apart from the same words in the search.
 
 Each Item is in the search, or in its app only: an Item with `app_only = true` only its app shows. The search reads one Segment of each Extension's Items and the app reads two, so the choice costs nothing per row on a keystroke. An Extension's Live queries and Fallbacks are asked in its app, and in the search unless it has every Item in the app only (`in_search = false`).
 
 An Extension's Manifest names its app and says what goes in it:
 
 ```toml
-prefix = "calc"                  # the app's word; unset, the Extension's name
+word = "calc"                    # the app's word; unset, the Extension's name
 title = "Calculator"             # the entry Item's title; unset, the name
 icon = "accessories-calculator"
 about = "Arithmetic, units, currency, dates and time zones. Enter copies the answer."
@@ -249,14 +250,14 @@ The config overrides the word and the visibility, for any Extension:
 
 ```toml
 [extensions.emoji]
-prefix = "e"        # one word: `e`, then Tab, searches the emoji
+word = "e"          # one word: `e`, then Tab, searches the emoji
 in_search = true    # the emoji in the search too
 
 [extensions.folders]
 in_search = false   # projects and scripts only in their app
 ```
 
-`in_search = true` shows every Item of the Extension in the search, `false` none of them; unset, the Manifest's `in_search` or, without one, each Item says. When two apps have the same word, the first one found keeps it and the other falls back to its Extension's name. `docs/adr/0027-every-extension-is-an-app-with-items-in-the-search-or-in-the-app-alone.md` explains the design, and how an app differs from a Hidden item and a View.
+`in_search = true` shows every Item of the Extension in the search, `false` none of them; unset, the Manifest's `in_search` or, without one, each Item says. A keyword has one holder, in this order: an Alias, a Quicklink, a word set in `[extensions.<name>]`, a word set in a Manifest, an Extension's name; between two apps, the Extension whose name sorts first. An app that loses its word goes by its Extension's name, or the name and `-2`, `-3`, so it stays reachable, and the Daemon logs a warning for every keyword lost. `docs/adr/0028-one-keyword-table-with-a-fixed-precedence.md` gives the reasons. `docs/adr/0027-every-extension-is-an-app-with-items-in-the-search-or-in-the-app-alone.md` explains the design, and how an app differs from a Hidden item and a View.
 
 ### Trying it
 
@@ -377,7 +378,7 @@ decimal_separator = "comma"
 # or dark. Unset, emoji are their default yellow.
 skin_tone = "medium"
 # The word that names the Emoji app. Unset, emoji.
-prefix = "emoji"
+word = "emoji"
 # Whether the search shows the emoji too. Unset, false: only the app does.
 in_search = false
 ```
@@ -536,8 +537,8 @@ Its `manifest.toml` runs `./kotodama-system`, so a package installs the binary n
 
 The `Kotodama` QML module is a Rust plugin (`crates/kotodama-qml`) that Quickshell imports. It connects to the Daemon, reconnects whenever the Daemon restarts, and gives QML two types:
 
-- **`KotodamaMenu`**, the menu itself: a layer-shell window with a search box over the Results. Up and Down (or Ctrl+N and Ctrl+P) move the selection, Enter runs the selected Result's primary Action, and Esc closes it, or in an app goes back to the whole search. Ctrl+K opens the Action panel: the Item's own Actions, then other Extensions' Contributed actions under each Extension's name. An Action's own key binding, such as Ctrl+L, runs it directly; Ctrl+Shift+Backspace runs Forget. After Forget or "Clear history", a Toast under the Results says what was forgotten, and Ctrl+Z undoes it while it shows; it never takes the keys or moves the selection. The Views Extensions push (lists, forms, details and progress) stack on top of the search, and Esc pops one at a time. Typing into a list filters it, matched as the search matches, and Esc clears the filter before it pops the list. Closing the menu keeps them: it opens again where it was. In a form, Tab moves between fields, Space ticks a checkbox, Left and Right choose an option, and Enter submits. Running jobs are listed under the search box. Tab, or Enter, on an app's entry Item enters the app: a chip names it in front of the search box, and its intro card shows over the rows until something is typed. Esc, or Backspace on the empty box, goes back to the whole search.
-- **`KotodamaSearch`**, a list model of the Results, for a shell that draws its own window. Setting `query` searches; each row has the roles `title`, `subtitle`, `icon`, `extension` and `markup` (the title as StyledText, with its matched characters in `highlightColor`). While a list View is on top, the rows are its Items instead, and `filter(text)` filters them; the View's `filter` is what was typed. `run(row)` runs a Result. `actions(row)`, `runAction(row, n)` and `runShortcut(row, key, modifiers)` give the Action panel. `toast` is what the Toast says, empty when there is none; `isUndoKey(key, modifiers)` tells its key, and `undo()` undoes what it offers to. `view`, `depth` and `jobs` describe the top View and the running jobs, and `popView()`, `setText(field, text)`, `setChecked(field, checked)` and `submit()` work them. The signals `openRequested`, `toggleRequested` and `closeRequested` carry the `kotodama` command and the Daemon's requests. When it gets `closeRequested`, a window must hide and then call `closed()`, so the Daemon types or pastes into the window underneath and not into the menu. Whenever its window becomes visible, however it opened, a window calls `shown()`, so the Daemon ranks the Empty query again when the time of day has moved on.
+- **`KotodamaMenu`**, the menu itself: a layer-shell window with a search box over the Results. Up and Down (or Ctrl+N and Ctrl+P) move the selection, and Enter runs the selected Result's primary Action. Esc follows one rule everywhere: it clears the text if there is any, else pops the View, else leaves the app, else closes the menu. Ctrl+K opens the Action panel: the Item's own Actions, then other Extensions' Contributed actions under each Extension's name. An Action's own key binding, such as Ctrl+L, runs it directly; Ctrl+Shift+Backspace runs Forget. After Forget or "Clear history", a Toast under the Results says what was forgotten, and Ctrl+Z undoes it while it shows; it never takes the keys or moves the selection. The Views Extensions push (lists, forms, details and progress) stack on top of the search, and Esc pops one at a time. Typing into a list filters it, matched as the search matches. Closing the menu keeps them: it opens again where it was. In a form, Tab moves between fields, Space ticks a checkbox, Left and Right choose an option, and Enter submits. Running jobs are listed under the search box. Tab, or Enter, on an app's entry Item enters the app: a chip names it in front of the search box, and its intro card shows over the rows until something is typed. Backspace on the empty box goes back to the whole search, with the app's word typed.
+- **`KotodamaSearch`**, a list model of the Results, for a shell that draws its own window. Setting `query` searches; each row has the roles `title`, `subtitle`, `icon`, `extension` and `markup` (the title as StyledText, with its matched characters in `highlightColor`). While a list View is on top, the rows are its Items instead, and `filter(text)` filters them; the View's `filter` is what was typed. `run(row)` runs a Result. `actions(row)`, `runAction(row, n)` and `runShortcut(row, key, modifiers)` give the Action panel, and `hints(row)` the keys a row takes, such as "↵ Open · Tab Enter app · ⌃K Actions". `toast` is what the Toast says, empty when there is none; `isUndoKey(key, modifiers)` tells its key, and `undo()` undoes what it offers to. `view`, `depth` and `jobs` describe the top View and the running jobs, and `popView()`, `setText(field, text)`, `setChecked(field, checked)` and `submit()` work them. The signals `openRequested`, `toggleRequested` and `closeRequested` carry the `kotodama` command and the Daemon's requests. When it gets `closeRequested`, a window must hide and then call `closed()`, so the Daemon types or pastes into the window underneath and not into the menu. Whenever its window becomes visible, however it opened, a window calls `shown()`, so the Daemon ranks the Empty query again when the time of day has moved on.
 
 ```qml
 import Quickshell
@@ -554,11 +555,11 @@ ShellRoot {
 }
 ```
 
-The other look properties are `dimmed`, `selection`, `border`, `error`, `fontSize`, `radius`, `menuWidth`, `rowHeight`, `maxRows`, `top` and `placeholder`.
+The other look properties are `dimmed`, `selection`, `border`, `error`, `fontSize`, `radius`, `menuWidth`, `rowHeight`, `maxRows`, `top` and `placeholder`. `showHints: false` turns off the footer that names the keys the selected row takes, such as "↵ Open · Tab Enter app · ⌃K Actions"; a failure or an Extension that is down still shows there.
 
 The home-manager module's `frontEnd.enable` runs such a config, the package's `share/kotodama/quickshell/shell.qml`, as a Quickshell of its own. To put the menu in your own Quickshell config instead, that Quickshell needs the module's directory as `QML_IMPORT_PATH`: `programs.kotodama.qmlImportPath` in home-manager, which home-manager's `programs.quickshell` service (`systemd.enable`) gets on its own. A Quickshell started some other way, such as `exec-once = quickshell` in Hyprland's config, needs it in its environment, for example `exec-once = env QML_IMPORT_PATH=${config.programs.kotodama.qmlImportPath} quickshell` written from Nix, or `$HOME/.nix-profile/lib/qt-6/qml` (`/etc/profiles/per-user/$USER/lib/qt-6/qml` with home-manager's `useUserPackages`), where the profile links the module. Set it on that Quickshell only: the module holds one Qt version's plugin, which nothing else in the session needs. That Quickshell must come from the same nixpkgs as Kotodama, or Kotodama built with its nixpkgs (see [Installing](#installing)).
 
-A compositor keybind opens it through the `kotodama` command, which asks the Daemon to pass the request on to every Front end:
+A compositor keybind opens it through the `kotodama` command, which asks the Daemon to pass the request on to one menu: the one shown last, else the one that connected last. With no menu connected, the Daemon waits two seconds for one, as at login, when the keypress can come before the menu has started; if none comes, `kotodama` exits with 1 and says how to start one. `docs/adr/0029-kotodama-open-and-toggle-reach-one-menu-and-say-so.md` gives the reasons:
 
 ```
 # Hyprland
@@ -566,7 +567,7 @@ bind = SUPER, Space, exec, kotodama toggle
 bind = SUPER, V, exec, kotodama open --view clipboard/history
 ```
 
-`kotodama open [--view <extension>/<item>] [--prefix <prefix>] [--query <text>]` opens it with text already typed. `--prefix emoji` opens it in the Emoji app, searching only the emoji. `--view` opens it on a View: it names an Item by its Extension and id, and the Daemon runs that Item's primary Action, such as "Show Clipboard History" on the clipboard's `history` Item, and opens the menu once the View it pushes is there, so the menu never shows the search first. Esc pops the View to the search. The Item may be hidden, so the search never shows it (ADR 0015). If the name matches no Item, or the Action fails, the menu opens on the search and says why. If the View hasn't arrived within a second (an Extension that is slow to start, say), the menu opens on the search, and the View still goes on top when it arrives. To try it, build the module and point Quickshell at it:
+`kotodama open [--view <extension>/<item>] [--app <word>] [--query <text>]` opens it with text already typed. `--app emoji` opens it in the Emoji app, searching only the emoji (`--prefix` is its old name, still read). `--view` opens it on a View: it names an Item by its Extension and id, and the Daemon runs that Item's primary Action, such as "Show Clipboard History" on the clipboard's `history` Item, and opens the menu once the View it pushes is there, so the menu never shows the search first. Esc pops the View to the search. The Item may be hidden, so the search never shows it (ADR 0015). If the name matches no Item, or the Action fails, the menu opens on the search and says why. If the View hasn't arrived within a second (an Extension that is slow to start, say), the menu opens on the search, and the View still goes on top when it arrives. To try it, build the module and point Quickshell at it:
 
 ```sh
 QML_IMPORT_PATH=$(scripts/qml-module --release) quickshell --path shell.qml

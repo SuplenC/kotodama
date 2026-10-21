@@ -7,7 +7,7 @@ description = "Arithmetic, units, currency, dates and time zones, answered as yo
 command = ["./kotodama-calculator"]
 # Its app answers every query, math-looking or not; the search only those
 # the triggers below pick.
-prefix = "calc"
+word = "calc"
 title = "Calculator"
 icon = "accessories-calculator"
 about = "Arithmetic, units, currency, dates and time zones. Enter copies the answer."

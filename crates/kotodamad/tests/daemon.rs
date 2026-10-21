@@ -1354,11 +1354,11 @@ fn a_config_change_reaches_only_the_extensions_whose_table_changed() {
 }
 
 #[test]
-fn the_prefix_in_an_extensions_table_is_the_daemons_and_never_reaches_it() {
+fn the_word_in_an_extensions_table_is_the_daemons_and_never_reaches_it() {
     let dir = tempfile::tempdir().unwrap();
     std::fs::write(
         dir.path().join("a.toml"),
-        "[extensions.apps]\nterminal = \"foot\"\nprefix = \"app\"",
+        "[extensions.apps]\nterminal = \"foot\"\nword = \"app\"\nprefix = \"ap\"",
     )
     .unwrap();
     let config = kotodamad::config::load(&[dir.path().to_owned()]).unwrap();
@@ -1422,13 +1422,13 @@ fn typing_waits_until_every_front_end_has_closed() {
 }
 
 #[test]
-fn open_and_toggle_go_to_every_front_end_but_the_one_that_asked() {
+fn open_and_toggle_go_to_one_menu_and_say_so_to_the_one_that_asked() {
     let mut h = Harness::new(vec![]);
+    let first = h.front_end();
     let menu = h.front_end();
-    let other = h.front_end();
     let command = h.front_end();
+    first.drain();
     menu.drain();
-    other.drain();
 
     h.front_end_sends(
         &command,
@@ -1438,6 +1438,8 @@ fn open_and_toggle_go_to_every_front_end_but_the_one_that_asked() {
         },
     );
     h.front_end_sends(&command, FromFrontEnd::Toggle);
+
+    // With none shown yet, the menu that connected last.
     let expected = [
         ToFrontEnd::Open {
             query: "fir".into(),
@@ -1446,8 +1448,104 @@ fn open_and_toggle_go_to_every_front_end_but_the_one_that_asked() {
         ToFrontEnd::Toggle,
     ];
     assert_eq!(menu.drain(), expected);
-    assert_eq!(other.drain(), expected);
-    assert_eq!(command.drain(), []);
+    assert_eq!(first.drain(), []);
+    assert_eq!(
+        command.drain(),
+        [
+            ToFrontEnd::Reached { menus: 1 },
+            ToFrontEnd::Reached { menus: 1 }
+        ]
+    );
+}
+
+#[test]
+fn open_and_toggle_go_to_the_menu_shown_last() {
+    let mut h = Harness::new(vec![]);
+    let shown = h.front_end();
+    let other = h.front_end();
+    let command = h.front_end();
+    h.front_end_sends(&shown, FromFrontEnd::Shown);
+    shown.drain();
+    other.drain();
+
+    h.front_end_sends(&command, FromFrontEnd::Toggle);
+
+    assert_eq!(shown.drain(), [ToFrontEnd::Toggle]);
+    assert_eq!(other.drain(), []);
+}
+
+#[test]
+fn a_front_end_that_asked_for_a_menu_is_no_menu() {
+    let mut h = Harness::new(vec![]);
+    let menu = h.front_end();
+    let command = h.front_end();
+    let later = h.front_end();
+    h.front_end_sends(&later, FromFrontEnd::Toggle);
+    menu.drain();
+    later.drain();
+
+    h.front_end_sends(&command, FromFrontEnd::Toggle);
+
+    assert_eq!(menu.drain(), [ToFrontEnd::Toggle]);
+    assert_eq!(later.drain(), []);
+}
+
+#[test]
+fn with_no_menu_a_toggle_waits_a_moment_then_says_it_reached_none() {
+    let mut h = Harness::new(vec![]);
+    let command = h.front_end();
+    command.drain();
+
+    h.front_end_sends(&command, FromFrontEnd::Toggle);
+    assert_eq!(command.drain(), [], "it waits for a menu");
+
+    h.advance(Duration::from_secs(2));
+    assert_eq!(command.drain(), [ToFrontEnd::Reached { menus: 0 }]);
+}
+
+// Regression: an open sent before the menu connected, as at login, was lost.
+#[test]
+fn a_toggle_sent_before_the_menu_connects_reaches_it_once_it_searches() {
+    let mut h = Harness::new(vec![]);
+    let command = h.front_end();
+    h.front_end_sends(&command, FromFrontEnd::Toggle);
+    h.advance(Duration::from_secs(1));
+
+    let menu = h.front_end();
+    assert_eq!(
+        command.drain(),
+        [],
+        "a Front end is a menu once it searches"
+    );
+    h.front_end_sends(
+        &menu,
+        FromFrontEnd::Query {
+            text: String::new(),
+        },
+    );
+
+    assert!(menu.drain().contains(&ToFrontEnd::Toggle));
+    assert_eq!(command.drain(), [ToFrontEnd::Reached { menus: 1 }]);
+}
+
+#[test]
+fn a_request_from_a_front_end_that_left_reaches_no_menu() {
+    let mut h = Harness::new(vec![]);
+    let command = h.front_end();
+    h.front_end_sends(&command, FromFrontEnd::Toggle);
+    h.event(Event::FrontEndDown {
+        front_end: command.id,
+    });
+
+    let menu = h.front_end();
+    h.front_end_sends(
+        &menu,
+        FromFrontEnd::Query {
+            text: String::new(),
+        },
+    );
+
+    assert!(!menu.drain().contains(&ToFrontEnd::Toggle));
 }
 
 #[test]
@@ -2034,7 +2132,10 @@ fn the_empty_query_shows_the_same_thing_once_by_the_result_picked_through_most()
     pick(&mut h, &ui, "hub", "visited", "1");
     pick(&mut h, &ui, "hub", "visited", "1");
     pick(&mut h, &ui, "lab", "visited", "2");
-    assert_eq!(titles(&h.query(&ui, "")), ["github.com", "GitLab"]);
+    assert_eq!(
+        titles(&h.query(&ui, "")),
+        ["github.com", "GitLab", "apps", "bookmarks", "visited"]
+    );
 }
 
 #[test]
@@ -2051,12 +2152,16 @@ fn the_empty_query_is_ranked_again_when_the_menu_opens() {
         pick(&mut h, &menu, "music", "apps", "music");
     }
     h.advance_to(8);
-    assert_eq!(titles(&h.query(&menu, "")), ["Mail", "Music"]);
+    assert_eq!(titles(&h.query(&menu, "")), ["Mail", "Music", "apps"]);
 
     h.advance_to(20);
     h.front_end_sends(&command, FromFrontEnd::Toggle);
-    assert_eq!(titles(&menu.results().unwrap()), ["Music", "Mail"]);
-    assert_eq!(command.drain(), [], "it never searched");
+    assert_eq!(titles(&menu.results().unwrap()), ["Music", "Mail", "apps"]);
+    assert_eq!(
+        command.drain(),
+        [ToFrontEnd::Reached { menus: 1 }],
+        "it never searched"
+    );
 }
 
 #[test]

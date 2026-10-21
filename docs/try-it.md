@@ -68,8 +68,8 @@ Add the flake and its home-manager module:
 
   programs.kotodama = {
     enable = true;
-    # The menu, in a Quickshell of its own, started with the graphical session.
-    frontEnd.enable = true;
+    # The menu runs in a Quickshell of its own, started with the graphical
+    # session: `frontEnd.enable`, on unless home-manager runs a Quickshell of yours.
     # Optional: the look, by KotodamaMenu's property names. Unset, its defaults.
     # frontEnd.look = { background = "#1d2021"; accent = "#d79921"; fontFamily = "Inter"; };
 
@@ -174,12 +174,12 @@ Kotodama needs a few Wayland protocols, and each compositor has its own set:
 
 ## Several menus at once
 
-`kotodama toggle` and `kotodama open` go to every connected Front end. Each one that gets it opens its menu, and each menu takes the keyboard. Two setups open several menus:
+`kotodama toggle` and `kotodama open` go to one menu: the one shown last, else the one that connected last. Two setups run several menus:
 
-- A Quickshell config that puts `KotodamaMenu {}` inside a `Variants` over `Quickshell.screens`, one per screen. Every screen shows a menu.
-- The `kotodama-menu` service (home-manager's `frontEnd.enable`) next to a shell of your own that places `KotodamaMenu` too. Both show a menu.
+- A Quickshell config that puts `KotodamaMenu {}` inside a `Variants` over `Quickshell.screens`, one per screen. The keybind opens the menu on the screen it was last shown on, not the focused one: the Daemon doesn't know which screen has the focus.
+- The `kotodama-menu` service (home-manager's `frontEnd.enable`) next to a shell of your own that places `KotodamaMenu` too. The keybind opens one of them, and the other costs memory for nothing. `frontEnd.enable` is off by default when home-manager runs your Quickshell (`programs.quickshell.enable`); started some other way, turn it off yourself.
 
-To have one menu, run one Front end: place `KotodamaMenu` once in your shell, outside any `Variants`, or turn `frontEnd.enable` off when your own shell has the menu. To pick the screen, set the `screen` of that one `KotodamaMenu` (it is a Quickshell `PanelWindow`).
+To have the menu where you want it, run one Front end: place `KotodamaMenu` once in your shell, outside any `Variants`, or turn `frontEnd.enable` off when your own shell has the menu. To pick the screen, set the `screen` of that one `KotodamaMenu` (it is a Quickshell `PanelWindow`).
 
 ## Manual checks
 
@@ -190,6 +190,7 @@ Some need extras: the shell example Extension for the Views checks (link `exampl
 ### Setup and session
 
 - [ ] Quickshell loads the QML module from the Nix output (`kotodama-menu` is running and `kotodama toggle` shows the menu).
+- [ ] With `kotodama-menu` stopped, `kotodama toggle` waits two seconds, exits with 1 and says no menu is running; started within those two seconds, the menu opens.
 - [ ] `WAYLAND_DISPLAY` and `DBUS_SESSION_BUS_ADDRESS` reach the systemd user manager.
 - [ ] #59: under socket activation, start the Daemon before Hyprland; the clipboard records copies and paste works.
 - [ ] #59: apps launched from the menu start while the Daemon has no `WAYLAND_DISPLAY`.
@@ -228,7 +229,7 @@ Some need extras: the shell example Extension for the Views checks (link `exampl
 
 - [ ] `projects`, then Tab: the chip and the intro card show in the same frame as the projects, with no flicker of the whole search's rows.
 - [ ] In the Hyprland app, `screenshot` finds the bind; in the search it finds no bind, only windows.
-- [ ] Esc in an app goes back to the search and keeps the menu open; a second Esc closes it.
+- [ ] Esc in an app with text typed clears it and stays in the app; the next Esc goes back to the search and keeps the menu open; with text typed there, Esc clears it, and the next closes the menu.
 - [ ] `[extensions.clipboard] in_search = true` puts the clips back in the search after a config reload.
 
 ### Views

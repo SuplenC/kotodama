@@ -37,6 +37,8 @@ use std::collections::HashMap;
 use kotodama_extension::url::{self, PLACEHOLDER};
 use kotodama_protocol::{Action, Argument, Item, ItemKind, NamespacedKind, Table, Value};
 
+use crate::conflict::{Conflict, Holder};
+
 /// A keyword that stands for an Item, or for one of its own Actions.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Alias {
@@ -142,6 +144,31 @@ pub struct Keywords {
     pub aliases: HashMap<String, Alias>,
     /// In keyword order.
     pub quicklinks: Vec<Quicklink>,
+}
+
+impl Keywords {
+    /// What holds `keyword`, lowercase, of the Aliases and the Quicklinks:
+    /// an Alias before a Quicklink.
+    pub fn holder(&self, keyword: &str) -> Option<Holder> {
+        if self.aliases.contains_key(keyword) {
+            Some(Holder::Alias)
+        } else if self.quicklinks.iter().any(|q| q.keyword == keyword) {
+            Some(Holder::Quicklink)
+        } else {
+            None
+        }
+    }
+
+    /// Each Quicklink whose keyword an Alias holds, in keyword order.
+    pub fn conflicts(&self) -> Vec<Conflict> {
+        self.quicklinks
+            .iter()
+            .filter(|quicklink| self.aliases.contains_key(&quicklink.keyword))
+            .map(|quicklink| Conflict::QuicklinkUnderAlias {
+                keyword: quicklink.keyword.clone(),
+            })
+            .collect()
+    }
 }
 
 /// The `[aliases]`, `[quicklinks]` and `[quicklink_defaults]` tables of the

@@ -6,7 +6,7 @@
 //! # Owns
 //!
 //! - [`Apps`]: each Extension's app, from its Manifest and the user's
-//!   `[extensions.<name>]` `prefix` and `in_search`, and the app a query is
+//!   `[extensions.<name>]` `word` and `in_search`, and the app a query is
 //!   in.
 //! - [`App::entry`]: the entry Item. [`App::scope`]: what a Front end shows
 //!   inside, the intro card included.
@@ -18,12 +18,16 @@
 
 use kotodama_protocol::{
     APP_ENTRY_KIND, Action, Intro, Item, ItemKind, Manifest, NamespacedKind, Scope, Table, Value,
-    is_valid_prefix,
+    is_valid_word,
 };
 
+use std::collections::HashMap;
+
 use crate::config::extension_table;
+use crate::conflict::{Conflict, Holder};
 use crate::daemon::ExtensionId;
 use crate::index::SIDES;
+use crate::keywords::Keywords;
 
 /// One Extension's app.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -46,7 +50,18 @@ pub struct App {
 /// The id of an Extension's entry Item, among the Daemon's own Items: by the
 /// Extension's name, so its History outlives a change of word.
 fn entry_id(extension: &str) -> String {
-    format!("prefix:{extension}")
+    format!("app:{extension}")
+}
+
+/// The word `[extensions.<name>]` sets: `word`, or `prefix`, its old name,
+/// which is still read and warned about.
+fn configured_word<'t>(table: &'t Table, name: &str) -> Option<&'t Value> {
+    if let Some(word) = table.get("word") {
+        return Some(word);
+    }
+    let word = table.get("prefix")?;
+    log::warn!("[extensions.{name}] prefix is deprecated; call it `word`");
+    Some(word)
 }
 
 impl App {
@@ -76,7 +91,7 @@ impl App {
     /// later keystrokes nothing.
     pub fn scope(&self, typed: bool) -> Scope {
         Scope {
-            prefix: self.word.clone(),
+            word: self.word.clone(),
             title: self.title.clone(),
             icon: self.icon.clone(),
             intro: (!typed).then(|| self.intro.clone()),
@@ -84,80 +99,150 @@ impl App {
     }
 }
 
-/// Every Extension's app, in Extension order. Two apps never share a word.
+/// Where an app's word comes from, first the one that wins a word two apps
+/// ask for.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+enum Asked {
+    /// The user's `[extensions.<name>] word`.
+    Config,
+    /// The Manifest's `word`.
+    Manifest,
+    /// The Extension's name, without a word.
+    Name,
+}
+
+/// Every Extension's app, by the Extension's name. Two apps never share a
+/// word, and no app has an Alias's or a Quicklink's keyword.
 #[derive(Debug, Default, PartialEq, Eq)]
 pub struct Apps {
     apps: Vec<App>,
+    /// The words apps asked for and didn't get, by the order they were
+    /// given out in.
+    conflicts: Vec<Conflict>,
 }
 
 impl Apps {
     /// The apps of `extensions`, by their Manifests, unless the config's
-    /// `[extensions.<name>]` says otherwise: `prefix` is the word, and
-    /// `in_search` puts every Item in the search, or none.
+    /// `[extensions.<name>]` says otherwise: `word` is the word, and
+    /// `in_search` puts every Item in the search, or none. Each keyword
+    /// goes to one holder, by the precedence `conflict.rs` describes; an app
+    /// that loses its word goes by another, and every app gets one.
     pub fn new<'a>(
         extensions: impl IntoIterator<Item = (ExtensionId, &'a Manifest)>,
         config: &Table,
+        keywords: &Keywords,
     ) -> Self {
-        let mut apps: Vec<App> = Vec::new();
-        for (extension, manifest) in extensions {
-            let name = &manifest.name;
-            let table = extension_table(config, name);
-            let chosen = match table.get("prefix") {
-                Some(Value::String(word)) if is_valid_prefix(word) => Some(word.as_str()),
-                Some(other) => {
-                    log::warn!("[extensions.{name}] prefix: {other:?} isn't one word; ignoring it");
-                    manifest.prefix.as_deref()
+        let mut asked: Vec<(Asked, &str, App)> = extensions
+            .into_iter()
+            .map(|(extension, manifest)| {
+                let (from, app) = App::new(extension, manifest, config);
+                (from, manifest.name.as_str(), app)
+            })
+            .collect();
+        asked.sort_by_key(|&(from, name, _)| (from, name));
+        let mut held: HashMap<String, Holder> = HashMap::new();
+        let holder_of = |held: &HashMap<String, Holder>, word: &str| {
+            keywords.holder(word).or_else(|| held.get(word).cloned())
+        };
+        let mut lost = Vec::new();
+        for (n, (_, name, app)) in asked.iter().enumerate() {
+            match holder_of(&held, &app.word) {
+                Some(holder) => lost.push((n, holder)),
+                None => {
+                    held.insert(app.word.clone(), Holder::App((*name).to_owned()));
                 }
-                None => manifest.prefix.as_deref(),
-            };
-            let taken = |word: &str| apps.iter().any(|app| app.word == word);
-            let chosen = chosen.unwrap_or(name).to_lowercase();
-            let word = if !taken(&chosen) {
-                chosen
-            } else if !taken(name) {
-                log::warn!("{name}: another app has the word `{chosen}`; using `{name}`");
-                name.clone()
-            } else {
-                log::warn!("{name}: another app has the word `{chosen}`, and `{name}`; no app");
-                continue;
-            };
-            let in_search = match table.get("in_search") {
-                Some(Value::Bool(in_search)) => Some(*in_search),
-                Some(other) => {
-                    log::warn!("[extensions.{name}] in_search: {other:?} isn't true or false");
-                    None
-                }
-                None => None,
-            };
-            let searched = match in_search {
-                Some(true) => [true, true],
-                Some(false) => [false, false],
-                None if manifest.in_search => [true, false],
-                None => [false, false],
-            };
-            let title = manifest.title.clone().unwrap_or_else(|| name.clone());
-            let about = manifest
-                .about
-                .clone()
-                .or_else(|| manifest.description.clone())
-                .unwrap_or_else(|| format!("Search {title}"));
-            apps.push(App {
-                word,
-                extension,
-                title,
-                icon: manifest.icon.clone(),
-                description: manifest.description.clone(),
-                intro: Intro {
-                    about,
-                    examples: manifest.examples.clone(),
-                },
-                commands: manifest.commands.clone(),
-                searched,
+            }
+        }
+        lost.sort_by_key(|&(n, _)| asked[n].1);
+        let mut conflicts = Vec::new();
+        for (n, holder) in lost {
+            let (_, name, app) = &mut asked[n];
+            let instead = (1..)
+                .map(|n| match n {
+                    1 => (*name).to_owned(),
+                    n => format!("{name}-{n}"),
+                })
+                .find(|word| holder_of(&held, word).is_none())
+                .expect("a free word among endless ones");
+            held.insert(instead.clone(), Holder::App((*name).to_owned()));
+            conflicts.push(Conflict::WordTaken {
+                extension: (*name).to_owned(),
+                word: std::mem::replace(&mut app.word, instead.clone()),
+                holder,
+                instead,
             });
         }
-        Apps { apps }
+        asked.sort_by_key(|&(_, name, _)| name);
+        Apps {
+            apps: asked.into_iter().map(|(_, _, app)| app).collect(),
+            conflicts,
+        }
     }
 
+    /// The words apps asked for and didn't get.
+    pub fn conflicts(&self) -> &[Conflict] {
+        &self.conflicts
+    }
+}
+
+impl App {
+    /// The app of the Extension of `manifest`, with the word it asks for,
+    /// and where that word comes from.
+    fn new(extension: ExtensionId, manifest: &Manifest, config: &Table) -> (Asked, Self) {
+        let name = &manifest.name;
+        let table = extension_table(config, name);
+        let configured = match configured_word(&table, name) {
+            Some(Value::String(word)) if is_valid_word(word) => Some(word.as_str()),
+            Some(other) => {
+                log::warn!("[extensions.{name}] word: {other:?} isn't one word; ignoring it");
+                None
+            }
+            None => None,
+        };
+        let (from, word) = match (configured, &manifest.word) {
+            (Some(word), _) => (Asked::Config, word),
+            (None, Some(word)) => (Asked::Manifest, word.as_str()),
+            (None, None) => (Asked::Name, name.as_str()),
+        };
+        let word = word.to_lowercase();
+        let in_search = match table.get("in_search") {
+            Some(Value::Bool(in_search)) => Some(*in_search),
+            Some(other) => {
+                log::warn!("[extensions.{name}] in_search: {other:?} isn't true or false");
+                None
+            }
+            None => None,
+        };
+        let searched = match in_search {
+            Some(true) => [true, true],
+            Some(false) => [false, false],
+            None if manifest.in_search => [true, false],
+            None => [false, false],
+        };
+        let title = manifest.title.clone().unwrap_or_else(|| name.clone());
+        let about = manifest
+            .about
+            .clone()
+            .or_else(|| manifest.description.clone())
+            .unwrap_or_else(|| format!("Search {title}"));
+        let app = App {
+            word,
+            extension,
+            title,
+            icon: manifest.icon.clone(),
+            description: manifest.description.clone(),
+            intro: Intro {
+                about,
+                examples: manifest.examples.clone(),
+            },
+            commands: manifest.commands.clone(),
+            searched,
+        };
+        (from, app)
+    }
+}
+
+impl Apps {
     pub fn iter(&self) -> impl Iterator<Item = &App> {
         self.apps.iter()
     }

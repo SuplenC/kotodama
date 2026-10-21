@@ -4,7 +4,7 @@
     front-end.py --run QUERY    also runs the top Result's primary Action
     front-end.py --wait QUERY   waits for Results that aren't empty, as a Live query's
     front-end.py --app QUERY    first enters the app QUERY's first word names, as
-                                `kotodama open --prefix` does; it goes before --run or --wait
+                                `kotodama open --app` does; it goes before --run or --wait
     front-end.py --listen       prints `ready`, then, for each View pushed, `view<TAB>extension<TAB>id`
                                 and its Items, one `title<TAB>subtitle` per line, and `open<TAB>view`
                                 for each request to open, as `kotodama open` sends
