@@ -24,7 +24,7 @@ Kotodama ships as separate packages, each versioned and released on its own (see
 
 The Daemon finds an Extension wherever it is installed on `XDG_DATA_DIRS` (below), so `kotodama-core` with `kotodama-<name>` packages in a profile works too, where the Daemon's environment has that profile: on NixOS, the system's and the home-manager profile are there.
 
-To try it on a Hyprland desktop step by step, with the checks to run by hand, see [docs/try-it.md](docs/try-it.md). With home-manager:
+Which compositors it works on is in [Compositor support](docs/try-it.md#compositor-support). To package it without Nix, see [docs/packaging.md](docs/packaging.md). To try it on a Hyprland desktop step by step, with the checks to run by hand, see [docs/try-it.md](docs/try-it.md). With home-manager:
 
 ```nix
 {

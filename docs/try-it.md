@@ -1,6 +1,6 @@
 # Trying Kotodama on Hyprland
 
-How to run Kotodama on your own Hyprland desktop with home-manager, and what to check by hand once it runs. To look at it first without a Wayland desktop, on a Mac say, see [Try it on macOS](#try-it-on-macos). The checks are the ones CI can't cover, from #1.
+How to run Kotodama on your own Hyprland desktop with home-manager, and what to check by hand once it runs. To look at it first without a Wayland desktop, on a Mac say, see [Try it on macOS](#try-it-on-macos). For other compositors, see [Compositor support](#compositor-support); to install without Nix, [packaging.md](packaging.md). The checks are the ones CI can't cover, from #1.
 
 ## Try it on macOS
 
@@ -149,6 +149,37 @@ systemctl --user restart kotodamad kotodama-menu
 ```
 
 The restart makes sure both run the new build.
+
+## Compositor support
+
+Kotodama needs a few Wayland protocols, and each compositor has its own set:
+
+- **Menu**: the shipped Front end is a layer-shell surface (wlr-layer-shell, through Quickshell). Without it there is no menu.
+- **Typing and paste**: the Daemon types through virtual-keyboard (`zwp_virtual_keyboard_v1`) and sets the clipboard through ext-data-control, or wlr-data-control where that is all there is. The clipboard Extension reads copies the same way.
+- **Windows**: the system Extension lists windows through wlr-foreign-toplevel-management, and steps aside on Hyprland, where the Hyprland Extension lists them from Hyprland's IPC.
+- **Keyboard shortcuts**: the Hyprland Extension's Shortcuts View reads Hyprland's binds, so Hyprland only.
+
+| Compositor | Menu | Typing and paste | Windows | Shortcuts | Notes |
+| --- | --- | --- | --- | --- | --- |
+| Hyprland | yes, tested | yes | yes (Hyprland IPC), tested | yes, tested | Tested in CI's Hyprland VM (`nix/tests/hyprland.nix`). |
+| sway | yes, tested | yes, tested | yes, tested | no | Tested in CI: the e2e tests run on headless sway. |
+| river | expected | expected | unverified | no | river has no wlr-foreign-toplevel-management as far as we know. |
+| niri | expected | expected | expected | no | Unverified on real hardware. |
+| labwc | expected | expected | expected | no | Unverified on real hardware. |
+| Wayfire | expected | expected | expected | no | Unverified on real hardware. |
+| KDE Plasma | expected | unverified | no | no | KWin has layer-shell; its virtual-keyboard and data-control support is unverified. No wlr-foreign-toplevel-management, so no windows. |
+| GNOME | no | no | no | no | Mutter has no layer-shell, so no menu. |
+
+"Tested" means CI runs it. "Expected" means the compositor implements the protocol, but nobody has tried Kotodama on it yet. Reports are welcome, either way.
+
+## Several menus at once
+
+`kotodama toggle` and `kotodama open` go to every connected Front end. Each one that gets it opens its menu, and each menu takes the keyboard. Two setups open several menus:
+
+- A Quickshell config that puts `KotodamaMenu {}` inside a `Variants` over `Quickshell.screens`, one per screen. Every screen shows a menu.
+- The `kotodama-menu` service (home-manager's `frontEnd.enable`) next to a shell of your own that places `KotodamaMenu` too. Both show a menu.
+
+To have one menu, run one Front end: place `KotodamaMenu` once in your shell, outside any `Variants`, or turn `frontEnd.enable` off when your own shell has the menu. To pick the screen, set the `screen` of that one `KotodamaMenu` (it is a Quickshell `PanelWindow`).
 
 ## Manual checks
 
