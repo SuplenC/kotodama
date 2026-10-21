@@ -27,17 +27,15 @@ pub enum DecimalSeparator {
 /// search. [`DOT_TERRITORIES`] and [`COMMA_TERRITORIES`] name the exceptions.
 /// From glibc's `LC_NUMERIC` data.
 const COMMA_LANGUAGES: &[&str] = &[
-    "af", "an", "ast", "az", "be", "bg", "br", "bs", "ca", "ce", "crh", "cs", "csb", "cv", "da",
-    "de", "el", "eo", "es", "et", "eu", "fi", "fo", "fr", "fur", "fy", "gl", "hr", "hsb", "hu",
-    "hy", "id", "is", "it", "ka", "kk", "ky", "lb", "li", "lij", "lt", "lv", "mk", "mn", "nb",
-    "nds", "nl", "nn", "no", "oc", "os", "pl", "pt", "ro", "ru", "sc", "se", "sk", "sl", "sq",
-    "sr", "sv", "tr", "uk", "uz", "vi",
+    "af", "an", "ast", "az", "be", "bg", "br", "bs", "ca", "ce", "crh", "cs", "csb", "cv", "da", "de", "el", "eo",
+    "es", "et", "eu", "fi", "fo", "fr", "fur", "fy", "gl", "hr", "hsb", "hu", "hy", "id", "is", "it", "ka", "kk", "ky",
+    "lb", "li", "lij", "lt", "lv", "mk", "mn", "nb", "nds", "nl", "nn", "no", "oc", "os", "pl", "pt", "ro", "ru", "sc",
+    "se", "sk", "sl", "sq", "sr", "sv", "tr", "uk", "uz", "vi",
 ];
 
 /// Locales of a [`COMMA_LANGUAGES`] language that write decimals with a dot.
 const DOT_TERRITORIES: &[&str] = &[
-    "de_CH", "de_LI", "es_DO", "es_GT", "es_HN", "es_MX", "es_NI", "es_PA", "es_PR", "es_SV",
-    "es_US", "it_CH",
+    "de_CH", "de_LI", "es_DO", "es_GT", "es_HN", "es_MX", "es_NI", "es_PA", "es_PR", "es_SV", "es_US", "it_CH",
 ];
 
 /// Locales of another language that write decimals with a comma.
@@ -52,8 +50,7 @@ impl DecimalSeparator {
         let name = locale.split(['.', '@']).next().unwrap_or_default();
         let language = name.split('_').next().unwrap_or_default();
         let comma = COMMA_TERRITORIES.contains(&name)
-            || (COMMA_LANGUAGES.binary_search(&language).is_ok()
-                && !DOT_TERRITORIES.contains(&name));
+            || (COMMA_LANGUAGES.binary_search(&language).is_ok() && !DOT_TERRITORIES.contains(&name));
         if comma {
             DecimalSeparator::Comma
         } else {

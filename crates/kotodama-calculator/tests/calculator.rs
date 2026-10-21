@@ -4,13 +4,17 @@
 
 use std::collections::BTreeMap;
 use std::fs;
-use std::io::{BufRead, BufReader, Write};
+use std::io::BufRead;
+use std::io::BufReader;
+use std::io::Write;
 use std::net::TcpListener;
 use std::path::PathBuf;
 use std::process::Command;
-use std::sync::mpsc::{self, Receiver};
+use std::sync::mpsc;
+use std::sync::mpsc::Receiver;
 use std::thread;
-use std::time::{Duration, SystemTime};
+use std::time::Duration;
+use std::time::SystemTime;
 
 use kotodama_extension::testing::Spawned;
 use kotodama_protocol::*;
@@ -19,8 +23,7 @@ use tempfile::TempDir;
 /// Long enough for the Extension to answer, or to fetch rates.
 const WAIT: Duration = Duration::from_secs(10);
 
-const RATES: &str =
-    r#"{"amount":1.0,"base":"EUR","date":"2026-10-19","rates":{"PLN":4.0,"USD":1.25}}"#;
+const RATES: &str = r#"{"amount":1.0,"base":"EUR","date":"2026-10-19","rates":{"PLN":4.0,"USD":1.25}}"#;
 
 struct Calculator {
     extension: Spawned,
@@ -202,11 +205,7 @@ fn the_config_overrides_the_locales_decimal_separator() {
     assert_eq!(calc.answer("1,000 * 2").as_deref(), Some("2000"));
 
     calc.send(ToExtension::Config(Table::new()));
-    assert_eq!(
-        calc.answer("10 / 4").as_deref(),
-        Some("2.5"),
-        "the locale's again"
-    );
+    assert_eq!(calc.answer("10 / 4").as_deref(), Some("2.5"), "the locale's again");
 }
 
 #[test]
@@ -224,10 +223,7 @@ fn math_is_answered_with_an_answer_that_copies() {
     assert_eq!(actions, ["copy", "copy-expression"]);
 
     let item = result.item.id.clone();
-    assert_eq!(
-        calc.run(&item, "copy"),
-        Outcome::Copy(Clipboard::Text("84".into()))
-    );
+    assert_eq!(calc.run(&item, "copy"), Outcome::Copy(Clipboard::Text("84".into())));
     assert_eq!(
         calc.run(&item, "copy-expression"),
         Outcome::Copy(Clipboard::Text("42*2 = 84".into()))
@@ -254,10 +250,7 @@ fn the_prefix_answers_what_evaluates_without_looking_like_math() {
 fn dates_and_times_are_answered() {
     let mut calc = Calculator::start(tempfile::tempdir().unwrap(), Table::new());
     assert_eq!(calc.answer("days until tomorrow").as_deref(), Some("1 day"));
-    assert!(
-        calc.answer("now in Tokyo")
-            .is_some_and(|time| time.contains("JST"))
-    );
+    assert!(calc.answer("now in Tokyo").is_some_and(|time| time.contains("JST")));
 }
 
 #[test]
@@ -267,10 +260,7 @@ fn rates_are_fetched_only_once_currency_is_asked_for_and_then_cached() {
     let file = rates_file(&cache);
     let mut calc = Calculator::start(cache, online(&endpoint));
     assert_eq!(calc.answer("1+1").as_deref(), Some("2"));
-    assert_eq!(
-        calc.answer("5 km in mi").as_deref(),
-        Some("3.1068559612 mi")
-    );
+    assert_eq!(calc.answer("5 km in mi").as_deref(), Some("3.1068559612 mi"));
     endpoint.quiet();
 
     assert_eq!(calc.answer("100 usd to eur").as_deref(), Some("80 EUR"));
@@ -294,7 +284,7 @@ fn a_query_given_up_while_rates_are_fetched_gets_no_results() {
 #[test]
 fn rates_cached_today_are_used_without_fetching() {
     let endpoint = Endpoint::start();
-    let mut calc = Calculator::start(cached(Duration::from_secs(60 * 60)), online(&endpoint));
+    let mut calc = Calculator::start(cached(Duration::from_hours(1)), online(&endpoint));
     assert_eq!(calc.answer("100 usd to eur").as_deref(), Some("80 EUR"));
     endpoint.quiet();
 }
@@ -302,7 +292,7 @@ fn rates_cached_today_are_used_without_fetching() {
 #[test]
 fn rates_older_than_a_day_are_used_and_fetched_again() {
     let endpoint = Endpoint::start();
-    let mut calc = Calculator::start(cached(Duration::from_secs(25 * 60 * 60)), online(&endpoint));
+    let mut calc = Calculator::start(cached(Duration::from_hours(25)), online(&endpoint));
     assert_eq!(calc.answer("100 usd to eur").as_deref(), Some("80 EUR"));
     assert!(endpoint.requested());
 }
@@ -310,10 +300,7 @@ fn rates_older_than_a_day_are_used_and_fetched_again() {
 #[test]
 fn with_the_network_off_cached_rates_still_answer() {
     let endpoint = Endpoint::start();
-    let mut calc = Calculator::start(
-        cached(Duration::from_secs(30 * 24 * 60 * 60)),
-        offline(&endpoint),
-    );
+    let mut calc = Calculator::start(cached(Duration::from_hours(30 * 24)), offline(&endpoint));
     assert_eq!(calc.answer("100 usd to eur").as_deref(), Some("80 EUR"));
     endpoint.quiet();
 }

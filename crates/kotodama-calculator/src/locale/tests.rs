@@ -15,11 +15,7 @@ fn a_locale_writes_decimals_as_its_language_does() {
         "ru_RU.KOI8-R",
         "nl_NL@euro",
     ] {
-        assert_eq!(
-            DecimalSeparator::of_locale(locale),
-            DecimalSeparator::Comma,
-            "{locale}"
-        );
+        assert_eq!(DecimalSeparator::of_locale(locale), DecimalSeparator::Comma, "{locale}");
     }
     for locale in [
         "en_US.UTF-8",
@@ -31,40 +27,21 @@ fn a_locale_writes_decimals_as_its_language_does() {
         "C.UTF-8",
         "",
     ] {
-        assert_eq!(
-            DecimalSeparator::of_locale(locale),
-            DecimalSeparator::Dot,
-            "{locale}"
-        );
+        assert_eq!(DecimalSeparator::of_locale(locale), DecimalSeparator::Dot, "{locale}");
     }
 }
 
 #[test]
 fn a_territory_may_write_decimals_unlike_its_language() {
-    assert_eq!(
-        DecimalSeparator::of_locale("de_CH.UTF-8"),
-        DecimalSeparator::Dot
-    );
-    assert_eq!(
-        DecimalSeparator::of_locale("es_MX.UTF-8"),
-        DecimalSeparator::Dot
-    );
-    assert_eq!(
-        DecimalSeparator::of_locale("es_ES.UTF-8"),
-        DecimalSeparator::Comma
-    );
-    assert_eq!(
-        DecimalSeparator::of_locale("en_DK.UTF-8"),
-        DecimalSeparator::Comma
-    );
+    assert_eq!(DecimalSeparator::of_locale("de_CH.UTF-8"), DecimalSeparator::Dot);
+    assert_eq!(DecimalSeparator::of_locale("es_MX.UTF-8"), DecimalSeparator::Dot);
+    assert_eq!(DecimalSeparator::of_locale("es_ES.UTF-8"), DecimalSeparator::Comma);
+    assert_eq!(DecimalSeparator::of_locale("en_DK.UTF-8"), DecimalSeparator::Comma);
 }
 
 #[test]
 fn the_setting_names_either_separator() {
     assert_eq!(DecimalSeparator::named("dot"), Some(DecimalSeparator::Dot));
-    assert_eq!(
-        DecimalSeparator::named("comma"),
-        Some(DecimalSeparator::Comma)
-    );
+    assert_eq!(DecimalSeparator::named("comma"), Some(DecimalSeparator::Comma));
     assert_eq!(DecimalSeparator::named(","), None);
 }

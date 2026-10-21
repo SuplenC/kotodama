@@ -13,20 +13,51 @@
 //! # thousands. Unset, the locale's (`LC_ALL`, `LC_NUMERIC` or `LANG`).
 //! decimal_separator = "comma"
 //! ```
+//!
+//! # Owns
+//!
+//! - The protocol loop: Live queries, their cancelling, and Actions.
+//! - The settings above.
+//! - When the cached rates are read and when they are fetched, on a thread of their own, and the
+//!   Live query left waiting for them.
+//!
+//! # Not here
+//!
+//! - What a query comes to: [`Calculator`], in `lib.rs`.
+//! - Fetching, reading and caching the rates: `rates.rs`.
 
 #![forbid(unsafe_code)]
 
+use std::error::Error;
+use std::fmt;
 use std::process::ExitCode;
 use std::sync::mpsc::Sender;
 use std::thread;
-use std::time::{Duration, Instant, SystemTime};
+use std::time::Duration;
+use std::time::Instant;
+use std::time::SystemTime;
 
 use jiff::Zoned;
-use kotodama_calculator::{
-    Answer, COPY, COPY_EXPRESSION, Calculator, DecimalSeparator, Evaluation, Rates, rates,
-};
-use kotodama_extension::{Connection, Event, STACK_SIZE, Writer, config, dirs};
-use kotodama_protocol::{Clipboard, FromExtension, Outcome, Table, ToExtension};
+use kotodama_calculator::Answer;
+use kotodama_calculator::COPY;
+use kotodama_calculator::COPY_EXPRESSION;
+use kotodama_calculator::Calculator;
+use kotodama_calculator::DecimalSeparator;
+use kotodama_calculator::Evaluation;
+use kotodama_calculator::Rates;
+use kotodama_calculator::rates;
+use kotodama_calculator::rates::FetchError;
+use kotodama_extension::Connection;
+use kotodama_extension::Event;
+use kotodama_extension::STACK_SIZE;
+use kotodama_extension::Writer;
+use kotodama_extension::config;
+use kotodama_extension::dirs;
+use kotodama_protocol::Clipboard;
+use kotodama_protocol::FromExtension;
+use kotodama_protocol::Outcome;
+use kotodama_protocol::Table;
+use kotodama_protocol::ToExtension;
 
 /// The curl the rates are fetched with. A package may build in its path.
 const CURL: &str = match option_env!("KOTODAMA_CURL") {
@@ -35,10 +66,45 @@ const CURL: &str = match option_env!("KOTODAMA_CURL") {
 };
 
 /// How long after a failed fetch the next currency query tries again.
-const RETRY: Duration = Duration::from_secs(10 * 60);
+const RETRY: Duration = Duration::from_mins(10);
 
 /// A fetch of the exchange rates finished.
-struct Fetched(Result<rates::Table, String>);
+struct Fetched(Result<rates::Table, FetchError>);
+
+/// Why an Action on an answer failed. Its message is the failed Outcome's.
+#[derive(Debug, thiserror::Error)]
+enum RunError {
+    /// The Item's expression evaluates to nothing.
+    #[error("“{0}” no longer has an answer")]
+    Gone(String),
+    #[error("the calculator has no Action `{0}`")]
+    NoAction(String),
+}
+
+impl RunError {
+    fn gone(id: &str) -> Self {
+        RunError::Gone(id.to_owned())
+    }
+
+    fn no_action(action: &str) -> Self {
+        RunError::NoAction(action.to_owned())
+    }
+}
+
+/// An error and each of its sources, joined by `: `, for the log.
+struct Chain<'a>(&'a dyn Error);
+
+impl fmt::Display for Chain<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)?;
+        let mut source = self.0.source();
+        while let Some(cause) = source {
+            write!(f, ": {cause}")?;
+            source = cause.source();
+        }
+        Ok(())
+    }
+}
 
 fn main() -> ExitCode {
     kotodama_extension::main("kotodama-calculator", run)
@@ -76,6 +142,7 @@ fn run() -> Result<(), kotodama_protocol::Error> {
     Ok(())
 }
 
+/// The `[extensions.calculator]` table, as documented above.
 struct Settings {
     network: bool,
     rates_url: String,
@@ -124,12 +191,12 @@ struct Exchange {
     read_cache: bool,
     /// When the rates in use were fetched.
     fetched: Option<SystemTime>,
+    /// Whether a fetch is running.
     fetching: bool,
     /// When the last fetch failed.
     failed: Option<Instant>,
 }
 
-/// `$XDG_CACHE_HOME/kotodama/calculator/rates.json`.
 /// A Live query waiting for exchange rates.
 struct Waiting {
     id: u64,
@@ -137,6 +204,7 @@ struct Waiting {
     routed: bool,
 }
 
+/// The running Extension: the calculator, and the state around it.
 struct Extension {
     writer: Writer,
     calculator: Calculator,
@@ -146,6 +214,7 @@ struct Extension {
     settings: Settings,
     events: Sender<Event<Fetched>>,
     exchange: Exchange,
+    /// The Live query waiting for rates. Any newer Live query sets it aside.
     waiting: Option<Waiting>,
     /// The last answer sent, which an Action most likely runs on.
     last: Option<Answer>,
@@ -167,11 +236,7 @@ impl Extension {
                 self.answer(id, query, prefix.is_some())
             }
             ToExtension::CancelLiveQuery { id } => {
-                if self
-                    .waiting
-                    .as_ref()
-                    .is_some_and(|waiting| waiting.id == id)
-                {
+                if self.waiting.as_ref().is_some_and(|waiting| waiting.id == id) {
                     self.waiting = None;
                 }
                 Ok(())
@@ -184,24 +249,18 @@ impl Extension {
             } => {
                 let outcome = match self.run(&item.id, &action) {
                     Ok(text) => Outcome::Copy(Clipboard::Text(text)),
-                    Err(message) => Outcome::Failed { message },
+                    Err(err) => Outcome::Failed {
+                        message: err.to_string(),
+                    },
                 };
-                self.writer.send(&FromExtension::ActionDone {
-                    invocation,
-                    outcome,
-                })
+                self.writer.send(&FromExtension::ActionDone { invocation, outcome })
             }
             _ => Ok(()),
         }
     }
 
     /// Answers the Live query `id`, or leaves it waiting for exchange rates.
-    fn answer(
-        &mut self,
-        id: u64,
-        query: String,
-        routed: bool,
-    ) -> Result<(), kotodama_protocol::Error> {
+    fn answer(&mut self, id: u64, query: String, routed: bool) -> Result<(), kotodama_protocol::Error> {
         let asked = self.rates.asked();
         let mut evaluation = self.calculator.evaluate(&query, routed, &Zoned::now());
         if self.rates.asked() != asked {
@@ -230,7 +289,8 @@ impl Extension {
     }
 
     /// A query converted currency: loads the cached rates the first time, and
-    /// fetches them if they are missing or more than a day old.
+    /// fetches them if they are missing or more than a day old. The cache is
+    /// `$XDG_CACHE_HOME/kotodama/calculator/rates.json`.
     fn want_rates(&mut self) {
         let cache = dirs::cache("calculator").map(|dir| dir.join("rates.json"));
         if !self.exchange.read_cache {
@@ -244,10 +304,7 @@ impl Extension {
             .exchange
             .fetched
             .is_some_and(|fetched| fetched.elapsed().is_ok_and(|age| age < rates::MAX_AGE));
-        let retry = self
-            .exchange
-            .failed
-            .is_none_or(|failed| failed.elapsed() >= RETRY);
+        let retry = self.exchange.failed.is_none_or(|failed| failed.elapsed() >= RETRY);
         if fresh || !self.settings.network || self.exchange.fetching || !retry {
             return;
         }
@@ -266,10 +323,9 @@ impl Extension {
         }
     }
 
-    fn fetched(
-        &mut self,
-        fetched: Result<rates::Table, String>,
-    ) -> Result<(), kotodama_protocol::Error> {
+    /// A fetch finished: converts with its rates, or waits [`RETRY`] before
+    /// the next, and answers the Live query left waiting.
+    fn fetched(&mut self, fetched: Result<rates::Table, FetchError>) -> Result<(), kotodama_protocol::Error> {
         self.exchange.fetching = false;
         match fetched {
             Ok(rates) => {
@@ -278,7 +334,7 @@ impl Extension {
                 self.exchange.failed = None;
             }
             Err(err) => {
-                kotodama_extension::log!("{err}");
+                kotodama_extension::log!("{}", Chain(&err));
                 self.exchange.failed = Some(Instant::now());
             }
         }
@@ -290,18 +346,18 @@ impl Extension {
 
     /// What an Action on the answer `id` copies. An answer's id is its
     /// expression, so one older than the last is worked out again.
-    fn run(&mut self, id: &str, action: &str) -> Result<String, String> {
+    fn run(&mut self, id: &str, action: &str) -> Result<String, RunError> {
         let answer = match &self.last {
             Some(last) if last.expression == id => last.clone(),
             _ => match self.calculator.evaluate(id, true, &Zoned::now()) {
                 Evaluation::Answer(answer) => answer,
-                _ => return Err(format!("“{id}” no longer has an answer")),
+                _ => return Err(RunError::gone(id)),
             },
         };
         match action {
             COPY => Ok(answer.value),
             COPY_EXPRESSION => Ok(format!("{} = {}", answer.expression, answer.value)),
-            _ => Err(format!("the calculator has no Action `{action}`")),
+            _ => Err(RunError::no_action(action)),
         }
     }
 }
