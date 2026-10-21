@@ -69,7 +69,7 @@ Hot loops are written so the compiler can turn them into SIMD on its own: SSE2 o
 - **`Display` is this layer's message only; the cause is `source()`.** Write `#[error("reading the History")] Read(#[source] io::Error)`, never `#[error("reading the History: {0}")]` on a variant whose `source()` returns the same error. A reporter that walks the chain prints each cause once. Source: `std::error::Error` docs.
 - **`thiserror` writes `Display` and `Error`.** Source: kotodama.
 - **Convert at the call site with an explicit, named constructor** (`.map_err(Error::read)?`), not a blanket `From`: the call site is where the meaning of the failure is known. Source: kotodama.
-- **`#[non_exhaustive]` case by case.** A public enum or public-field struct is `#[non_exhaustive]` when it will grow and no caller must react to a new case; it stays exhaustive when a new case must break the caller's `match`, so the compiler finds every site. Protocol types follow ADR 0012's version rule first. Source: C-STRUCT-PRIVATE.
+- **`#[non_exhaustive]` case by case.** A public enum or public-field struct is `#[non_exhaustive]` when it will grow and no caller must react to a new case; it stays exhaustive when a new case must break the caller's `match`, so the compiler finds every site. Protocol types follow ADR 0026's version rule first. Source: C-STRUCT-PRIVATE.
 
 ## Panics
 

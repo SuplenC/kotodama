@@ -1,6 +1,6 @@
 # kotodama-protocol code map
 
-The shared protocol. Maintained by hand: fix stale lines when you find them, and update this map in the PR that adds, moves or renames a module here. Paths are relative to `src/`. Layout changes follow ADR 0012: see `tests/layout.rs`. See also the [root map](../../CODEMAP.md) and [GLOSSARY.md](../../GLOSSARY.md).
+The shared protocol. Maintained by hand: fix stale lines when you find them, and update this map in the PR that adds, moves or renames a module here. Paths are relative to `src/`. Layout changes follow ADR 0026: see `tests/layout.rs`. See also the [root map](../../CODEMAP.md) and [GLOSSARY.md](../../GLOSSARY.md).
 
 - `lib.rs`: re-exports; `Error`.
 - `message.rs`: Daemon and Extension messages, `ToExtension`, `FromExtension`, `LiveResult`, `Outcome` (with `RunCatalogAction`, a confirmed Proposal the Daemon runs), `Clipboard`, `CatalogEntry`.
@@ -10,9 +10,14 @@ The shared protocol. Maintained by hand: fix stale lines when you find them, and
 - `view.rs`: `View`, `ViewContent` (a list's `filters_itself`), forms (`FormField`, `FormInput`), `Job`, `JobState`.
 - `value.rs`: `Value`, `Table`, `Bytes`, `Fraction`.
 - `manifest.rs`: `Manifest::from_toml`, `LiveQueries` (`fallback`), `ContributedAction` (ADR 0002); `prefix`, `title` and `icon` (ADR 0024), `is_valid_prefix`.
-- `handshake.rs`: `PROTOCOL_VERSION`, `Hello::negotiate` (ADR 0012).
+- `version.rs`: `Version`, `PROTOCOL_VERSION`, `FIRST_VERSION`, `Since` (the minor version a message needs), `unread` (a field left out for an older minor version) (ADR 0026).
+- `handshake.rs`: `Hello` with `minor`, `accept_peer` (the Daemon's side: a newer peer is refused), `accept_daemon` (a peer's side), `negotiate` (postcard only on the same version).
 - `frame.rs`: length-prefixed frames, `MAX_FRAME_LEN` (ADR 0004).
-- `wire.rs`: `WireFormat` (postcard, JSON, MessagePack) `encode`/`decode`.
-- `channel.rs`: `Channel::handshake`, `send`, `recv`, `split`; `ChannelReader::has_buffered` (what came with the last message).
+- `wire.rs`: `WireFormat` (postcard, protobuf, MessagePack, JSON) `encode`/`decode`; `encode_for` (for a peer on an older minor version).
+- `protobuf.rs`: the protobuf Wire format straight from the serde types (`protobuf/ser.rs`, `protobuf/de.rs`); the mapping is in its module docs.
+- `channel.rs`: `Channel::handshake` (a peer's side), `Channel::accept` (the Daemon's), `send` (for the peer's version), `reads` (whether the peer's version reads a message), `recv`, `split`; `ChannelReader::has_buffered` (what came with the last message).
 - `launch.rs:launch_command`: detached program start, `KOTODAMA_LAUNCH_PREFIX`; `launch_prefix` (none when `KOTODAMA_LAUNCH_SCOPED` marks it as `SCOPE_PREFIX`, which only makes a scope).
 - `../benches/batch.rs`: encoding and decoding 10k Indexed items in each Wire format.
+- `../benches/formats/`: the Daemon's real messages in every Wire format and in prost, müsli `wire` and bilrost (`mirror.rs`: their copies of the types; `messages.rs`: the messages, shared with `tests/protobuf.rs`).
+- `../kotodama.proto`: the protobuf schema for other languages, written by `tests/layout.rs`.
+- `../tests/layout.rs`: pins every message's encodings per version in `tests/layouts/<major>.<minor>.txt` and checks what an older minor version is sent; `tests/layout/schema.rs` writes `kotodama.proto`. `../tests/protobuf.rs`: prost reads the protobuf Wire format and back.

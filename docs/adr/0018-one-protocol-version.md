@@ -1,6 +1,6 @@
 # 18. One protocol version covers every Wire format
 
-Status: accepted (2026-10-20)
+Status: accepted (2026-10-20), amended by ADR 0026 (2026-10-21): one version still covers every Wire format, but it is now `major.minor`, and postcard alone needs the same version on both sides
 
 This amends ADR 0012. Every layout change bumps `PROTOCOL_VERSION`, including one that only postcard sees, such as a reordered field. A third-party JSON Extension whose messages read the same is still turned away until it updates its hello. #79 asked whether postcard should get its own layout version, with a fallback to MessagePack or JSON when that version differs.
 

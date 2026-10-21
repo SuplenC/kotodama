@@ -161,5 +161,9 @@ A Bundled extension configured with a folder whose contents become Items, such a
 _Avoid_: Directory scanner, path provider
 
 **Wire format**:
-The encoding the Daemon and one Extension or Front end agree on at the handshake: JSON, MessagePack or postcard.
+The encoding the Daemon and one Extension or Front end agree on at the handshake: postcard (Rust peers on the same Protocol version), protobuf, MessagePack or JSON.
 _Avoid_: Codec, serialization, protocol (for the encoding alone)
+
+**Protocol version**:
+The version of the messages a peer was built for, `major.minor`, named in its hello. A minor version only adds; the Daemon speaks every version from 1.0 on and sends a peer nothing its version lacks.
+_Avoid_: API version, layout version
