@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # Formats the crates scripts/restyled-crates lists, with the nightly rustfmt
 # and .config/rustfmt.toml. It never touches the other crates.
+# rustfmt writes `use foo::{self};` where it splits an import; scripts/self-imports
+# turns that into `use foo;`, and rustfmt then runs again to sort it.
 # With --check, rewrites nothing: it checks the restyled crates the same way,
 # and the other crates against stable rustfmt's defaults, as they are written
 # until their restyle (#108).
@@ -35,4 +37,14 @@ if [ ${#restyled[@]} -eq 0 ]; then
 fi
 nightly=$(nix build --no-link --print-out-paths "$root#rustfmt-nightly")
 nightly=${nightly%%$'\n'*}
-RUSTFMT=$nightly/bin/rustfmt cargo fmt ${check[@]+"${check[@]}"} "${restyled[@]}" -- --config-path .config/rustfmt.toml
+format_restyled() {
+    RUSTFMT=$nightly/bin/rustfmt cargo fmt ${check[@]+"${check[@]}"} "${restyled[@]}" -- --config-path .config/rustfmt.toml
+}
+mapfile -t dirs < <(scripts/restyled-crates | sed 's|^|crates/|')
+format_restyled
+if [ ${#check[@]} -gt 0 ]; then
+    scripts/self-imports --check "${dirs[@]}"
+elif ! scripts/self-imports --check "${dirs[@]}" >/dev/null; then
+    scripts/self-imports "${dirs[@]}"
+    format_restyled
+fi

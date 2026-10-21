@@ -30,8 +30,8 @@ cast_possible_wrap = "allow"
 cast_precision_loss = "allow"
 cast_sign_loss = "allow"
 # The guide's rules clippy checks, beyond pedantic (`manual_let_else` and
-# `return_self_not_must_use` are pedantic, named so they stay on). Tests may
-# unwrap (clippy.toml).
+# `return_self_not_must_use` are pedantic, named so they stay on). Tests and
+# benches may unwrap: `just check` lints them with `unwrap_used` off.
 allow_attributes = "warn"
 clone_on_ref_ptr = "warn"
 dbg_macro = "warn"

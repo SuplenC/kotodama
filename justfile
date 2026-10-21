@@ -57,7 +57,13 @@ _check:
     if scripts/has-crates; then scripts/fmt --check; fi
     just _comments
     # The restyled crates opt into [workspace.lints], so this lints them harder.
-    if scripts/has-crates; then cargo clippy --workspace --all-targets -- -D warnings; fi
+    # Two passes, as tests and benches may unwrap: clippy's `allow-unwrap-in-tests`
+    # spares only `#[test]` functions and `#[cfg(test)]` modules, not an
+    # integration test's helpers or a benchmark, and a target cannot carry lints
+    # of its own. The second pass rechecks the libraries the tests build on, which
+    # the first has already linted.
+    if scripts/has-crates; then cargo clippy --workspace --lib --bins --examples -- -D warnings; fi
+    if scripts/has-crates; then cargo clippy --workspace --tests --benches -- -D warnings -A clippy::unwrap_used; fi
 
 [private]
 _fmt:
