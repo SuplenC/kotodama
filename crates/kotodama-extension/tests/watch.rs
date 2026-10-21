@@ -162,7 +162,7 @@ fn the_filter_sees_which_directories_are_watched() {
 fn without_a_thread_of_its_own_each_change_is_passed_on_as_it_happens() {
     let root = TempDir::new().unwrap();
     let dir = root.path().join("scripts");
-    let (touched, touches) = mpsc::channel();
+    let (touched, changes) = mpsc::channel();
     let watcher = Watcher::new(
         RecursiveMode::NonRecursive,
         |_, _| true,
@@ -173,12 +173,12 @@ fn without_a_thread_of_its_own_each_change_is_passed_on_as_it_happens() {
     .unwrap();
     watcher.watch(vec![dir.clone()]);
     fs::create_dir(&dir).unwrap();
-    assert!(noticed(&touches));
-    // Watching the directory itself, now it's there, is the caller's call.
+    assert!(noticed(&changes));
+    // Watching the directory itself, once it's there, is the caller's call.
     watcher.watch(vec![dir.clone()]);
-    while touches.recv_timeout(QUIET).is_ok() {}
+    while changes.recv_timeout(QUIET).is_ok() {}
     fs::write(dir.join("script"), "x").unwrap();
-    assert!(noticed(&touches));
+    assert!(noticed(&changes));
 }
 
 /// Points the symlink `link` at `target` as `ln -sfn` and Nix do: a new link
@@ -219,7 +219,7 @@ fn a_profile_link_switched_to_a_new_generation_is_watched_there() {
     assert!(noticed(&changes));
     assert!(quiet(&changes));
 
-    // The old generation is no longer watched, the new one is.
+    // The old generation isn't watched any more, the new one is.
     fs::write(one.join("share/applications/old.desktop"), "x").unwrap();
     assert!(quiet(&changes));
     fs::write(two.join("share/applications/later.desktop"), "x").unwrap();

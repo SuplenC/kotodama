@@ -1,4 +1,14 @@
 //! Where an Extension keeps its files, by the XDG Base Directory spec.
+//!
+//! # Owns
+//!
+//! The state and cache directories of an Extension, from the XDG variables
+//! or `$HOME`.
+//!
+//! # Not here
+//!
+//! Making the directories or anything in them, which the Extension does;
+//! `$XDG_RUNTIME_DIR` (`crate::runtime`).
 
 use std::env;
 use std::ffi::OsString;
@@ -30,34 +40,4 @@ fn base(var: Option<OsString>, home: Option<OsString>, fallback: &str) -> Option
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn os(value: &str) -> Option<OsString> {
-        Some(value.into())
-    }
-
-    #[test]
-    fn the_variable_is_used_when_it_names_a_directory() {
-        assert_eq!(
-            base(os("/x/state"), os("/home/me"), ".local/state"),
-            Some(PathBuf::from("/x/state"))
-        );
-    }
-
-    #[test]
-    fn home_is_used_when_the_variable_is_unset_empty_or_relative() {
-        for var in [None, os(""), os("relative/state")] {
-            assert_eq!(
-                base(var, os("/home/me"), ".local/state"),
-                Some(PathBuf::from("/home/me/.local/state"))
-            );
-        }
-    }
-
-    #[test]
-    fn neither_set_is_none() {
-        assert_eq!(base(None, None, ".cache"), None);
-        assert_eq!(base(os(""), os(""), ".cache"), None);
-    }
-}
+mod tests;

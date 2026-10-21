@@ -1,4 +1,12 @@
-//! Telling the Daemon whether the Extension can do anything now.
+//! Telling the Daemon whether the Extension can do anything at the moment.
+//!
+//! # Owns
+//!
+//! What the Daemon was last told, and the `status` message for each change.
+//!
+//! # Not here
+//!
+//! What the search does with it, which the Daemon decides.
 
 use std::io::Write;
 
@@ -51,7 +59,7 @@ impl SentStatus {
         self.send(writer, true, Some(note.as_ref()))
     }
 
-    /// Says the Extension can't do anything now, and why, such as `Hyprland
+    /// Says the Extension can't do anything at the moment, and why, such as `Hyprland
     /// isn't running`: the search leaves its app out until it says it can.
     ///
     /// # Errors
@@ -85,33 +93,4 @@ impl SentStatus {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn each_change_is_sent_once() {
-        let mut status = SentStatus::default();
-
-        let first = status.update(false, Some("Hyprland isn't running"));
-        let again = status.update(false, Some("Hyprland isn't running"));
-        let up = status.update(true, None);
-        let noted = status.update(true, Some("Paused"));
-
-        assert_eq!(
-            first,
-            Some(FromExtension::Status {
-                usable: false,
-                note: Some("Hyprland isn't running".into()),
-            })
-        );
-        assert_eq!(again, None);
-        assert_eq!(
-            up,
-            Some(FromExtension::Status {
-                usable: true,
-                note: None,
-            })
-        );
-        assert!(noted.is_some());
-    }
-}
+mod tests;

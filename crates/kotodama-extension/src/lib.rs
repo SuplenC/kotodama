@@ -10,8 +10,8 @@
 //!   is shared.
 //! - [`SentItems`] sends Indexed items as changes: only the Items added or changed since the last
 //!   time, and the ids of the ones gone.
-//! - [`SentStatus`] tells the Daemon whether the Extension can do anything now, as when it needs a
-//!   setting the user hasn't made, so the search leaves its app out until it can.
+//! - [`SentStatus`] tells the Daemon whether the Extension can do anything at the moment, as when
+//!   it needs a setting the user hasn't made, so the search leaves its app out until it can.
 //! - [`config`] reads settings from the Extension's config table, logging the ones of the wrong
 //!   shape.
 //! - [`dirs`] finds where the Extension keeps its state and cache.
@@ -25,6 +25,16 @@
 //! holding its `manifest.toml` and, by the Bundled extensions' convention,
 //! its binary beside it, which the Manifest runs as
 //! `command = ["./<binary>"]`.
+//!
+//! # Owns
+//!
+//! Running an Extension's process and its connection to the Daemon, and the
+//! pieces every Extension shares, each in its module.
+//!
+//! # Not here
+//!
+//! The protocol itself, its messages and Wire formats
+//! (`kotodama_protocol`); what any one Extension does.
 //!
 //! A whole Extension, which offers one Item titled by its config:
 //!
@@ -113,7 +123,7 @@ use kotodama_protocol::WireFormat;
 pub use status::SentStatus;
 
 /// Small, as the threads here only wait, and enough for decoding the deepest
-/// message serde_json allows.
+/// message `serde_json` allows.
 pub const STACK_SIZE: usize = 256 * 1024;
 
 /// What sends messages to the Daemon.
@@ -133,11 +143,21 @@ pub enum Event<T> {
 
 /// The connection to the Daemon, once the handshake is done.
 pub struct Connection<T> {
+    /// Sends the Extension's messages to the Daemon.
     pub writer: Writer,
     /// Sends to `received`, for the Extension's own threads. The Daemon's
     /// messages arrive there already.
     pub events: Sender<Event<T>>,
+    /// Every event, in the order it happened, for the Extension to handle.
     pub received: Receiver<Event<T>>,
+}
+
+impl<T> std::fmt::Debug for Connection<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Connection")
+            .field("writer", &self.writer)
+            .finish_non_exhaustive()
+    }
 }
 
 /// Runs an Extension: keeps its resident memory down, names it `name` in what
@@ -164,6 +184,10 @@ pub fn main<E: Display>(name: &'static str, run: impl FnOnce() -> Result<(), E>)
 /// Extension sent ([`ToExtension::Rejected`]), its reason is logged, and the
 /// message still arrives as an [`Event::Message`] for an Extension that
 /// does more with it.
+///
+/// # Errors
+///
+/// When the handshake fails, or the reading thread can't start.
 pub fn connect<T: Send + 'static>() -> Result<Connection<T>, Error> {
     let channel = Channel::handshake(io::stdin(), io::stdout(), &Hello::new(&WireFormat::ALL))?;
     let (mut reader, writer) = channel.split();

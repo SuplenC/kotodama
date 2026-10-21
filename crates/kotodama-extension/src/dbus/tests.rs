@@ -202,7 +202,7 @@ fn a_call_read_by_a_service_is_answered_to_its_serial() {
     assert_eq!(read.u32(), Some(7));
     let mut answer = Marshal::default();
     answer.string("done");
-    service.reply(&received, "s", answer).unwrap();
+    service.reply(&received, "s", &answer).unwrap();
 
     let returned = caller.read().unwrap();
     assert_eq!(returned.reply_serial, Some(serial));

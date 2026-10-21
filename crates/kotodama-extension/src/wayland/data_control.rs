@@ -7,6 +7,16 @@
 //! [`OfferMimes`], what a source serves in [`SourceData`]. So the state an
 //! event queue dispatches to only implements [`DataControlHandler`] and
 //! names itself in [`delegate_data_control!`](crate::delegate_data_control).
+//!
+//! # Owns
+//!
+//! Binding either protocol, setting the selection and serving pastes from
+//! it, and turning the events into [`DataControlHandler`] calls.
+//!
+//! # Not here
+//!
+//! The connection and its event queue (`super::display`, the caller); what
+//! a selection is kept or used for.
 
 use std::fs::File;
 use std::io::Write;
@@ -44,24 +54,31 @@ const STACK: usize = 64 * 1024;
 
 /// What an event queue's state does with the clipboard's events.
 pub trait DataControlHandler: Sized + 'static {
-    /// The clipboard now holds `offer`, offered as `mimes`. The offer is
+    /// The clipboard changed to `offer`, offered as `mimes`. The offer is
     /// destroyed once this returns; read it with [`Offer::receive`] before.
     fn selected(&mut self, _offer: &Offer, _mimes: Vec<String>) {}
 
-    /// The compositor took the data device away: the clipboard can no longer
-    /// be watched or set on this connection.
+    /// The compositor took the data device away: the clipboard can't be
+    /// watched or set on this connection any more.
     fn finished(&mut self) {}
 }
 
 /// The bound data-control manager and the seat's data device.
+#[derive(Debug)]
 pub enum DataControl {
+    /// ext-data-control, the standard protocol.
     Ext(ExtDataControlManagerV1, ExtDataControlDeviceV1),
+    /// wlr-data-control, on a compositor without ext-data-control.
     Wlr(ZwlrDataControlManagerV1, ZwlrDataControlDeviceV1),
 }
 
 impl DataControl {
     /// Binds ext-data-control, or wlr-data-control if the compositor has
     /// only that, for `seat`.
+    ///
+    /// # Errors
+    ///
+    /// When the compositor has neither, with a message for the log.
     pub fn bind<S>(globals: &GlobalList, seat: &WlSeat, qh: &QueueHandle<S>) -> Result<Self, String>
     where
         S: DataControlHandler
@@ -117,8 +134,11 @@ impl DataControl {
 }
 
 /// Something on the clipboard, offered by another client.
+#[derive(Debug)]
 pub enum Offer {
+    /// Offered over ext-data-control.
     Ext(ExtDataControlOfferV1),
+    /// Offered over wlr-data-control.
     Wlr(ZwlrDataControlOfferV1),
 }
 
@@ -142,16 +162,19 @@ impl Offer {
 /// The MIME types an offer has announced so far. Public only for
 /// [`delegate_data_control!`](crate::delegate_data_control).
 #[doc(hidden)]
-#[derive(Default)]
+#[derive(Debug, Default)]
 pub struct OfferMimes(Mutex<Vec<String>>);
 
 impl OfferMimes {
     fn add(&self, mime: String) {
-        self.0.lock().unwrap_or_else(|poison| poison.into_inner()).push(mime);
+        self.0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .push(mime);
     }
 
     fn take(&self) -> Vec<String> {
-        std::mem::take(&mut *self.0.lock().unwrap_or_else(|poison| poison.into_inner()))
+        std::mem::take(&mut *self.0.lock().unwrap_or_else(std::sync::PoisonError::into_inner))
     }
 }
 
@@ -159,6 +182,12 @@ impl OfferMimes {
 /// [`delegate_data_control!`](crate::delegate_data_control).
 #[doc(hidden)]
 pub struct SourceData(Arc<Vec<u8>>);
+
+impl std::fmt::Debug for SourceData {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SourceData").field("len", &self.0.len()).finish()
+    }
+}
 
 impl SourceData {
     /// Writes it to a paste, on a thread of its own: a slow reader mustn't

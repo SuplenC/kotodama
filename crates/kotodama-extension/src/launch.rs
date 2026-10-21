@@ -7,6 +7,17 @@
 //! one ([`crate::scope`]); with no stdio of its starter's, which in an
 //! Extension carries the protocol; and in a process group of its own, so a
 //! signal to its starter's group doesn't reach it.
+//!
+//! # Owns
+//!
+//! Building and spawning the command, detaching it, and for a program in
+//! the background, its last line of output and how it ended.
+//!
+//! # Not here
+//!
+//! The scope (`crate::scope`); telling whether a launch closed soon after
+//! (`crate::closing`); the launch prefix's format
+//! (`kotodama_protocol::launch_command`).
 
 use std::io;
 use std::io::Read;
@@ -157,6 +168,10 @@ pub struct Ended {
 /// Starts `argv`, in `dir` if given, with its output read, and calls `ended`
 /// once it exits. Only its last line is kept, so a chatty program costs no
 /// memory.
+///
+/// # Errors
+///
+/// When the pipe, the program or a thread to wait for it can't be made.
 pub fn background(argv: &[String], dir: Option<&Path>, ended: impl FnOnce(Ended) + Send + 'static) -> io::Result<()> {
     let (reader, writer) = io::pipe()?;
     let mut command = command(argv, dir)?;
@@ -181,7 +196,7 @@ pub fn background(argv: &[String], dir: Option<&Path>, ended: impl FnOnce(Ended)
         .spawn(move || {
             let status = child.wait().ok();
             // Something the program started may keep its output open; what it
-            // wrote itself is read by now, or soon.
+            // wrote itself has been read already, or soon will be.
             let last_line = last_line.recv_timeout(OUTPUT_GRACE).ok().flatten();
             ended(Ended { status, last_line });
         })?;
@@ -222,15 +237,4 @@ fn last_line_of(mut output: impl Read) -> Option<String> {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn the_last_line_that_isnt_blank_is_kept_and_cut() {
-        assert_eq!(last_line_of(&b"one\ntwo\n\n  \n"[..]), Some("two".into()));
-        assert_eq!(last_line_of(&b"no end"[..]), Some("no end".into()));
-        assert_eq!(last_line_of(&b""[..]), None);
-        let long = "x".repeat(10_000);
-        assert_eq!(last_line_of(long.as_bytes()).map(|line| line.len()), Some(LAST_LINE));
-    }
-}
+mod tests;

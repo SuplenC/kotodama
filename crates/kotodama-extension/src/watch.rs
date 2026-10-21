@@ -13,8 +13,18 @@
 //! `/etc/profiles/per-user/<user>`, `~/.nix-profile` and the generation
 //! links behind them) with one to a new generation. So the directory each
 //! symlink on the way sits in is watched too, and a symlink replaced there
-//! counts as a change: the directories behind it are watched again where it
-//! leads now.
+//! counts as a change: the directories behind it are watched again where the
+//! new link leads.
+//!
+//! # Owns
+//!
+//! Which directories are watched and why, following them through missing
+//! parents and replaced symlinks, and the settling wait.
+//!
+//! # Not here
+//!
+//! What a change means to the Extension (its `matters` and `settled`); the
+//! platform's watch, which is `notify`'s.
 
 use std::collections::HashMap;
 use std::fs;
@@ -41,6 +51,14 @@ use crate::STACK_SIZE;
 
 /// Watches directories until it is dropped.
 pub struct Watcher(Arc<Inner>);
+
+impl std::fmt::Debug for Watcher {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Watcher")
+            .field("mode", &self.0.mode)
+            .finish_non_exhaustive()
+    }
+}
 
 struct Inner {
     /// Held across every call into `notify`, which runs on a thread of its
@@ -90,10 +108,10 @@ impl Watched {
     }
 
     /// Forgets the watched directories `event` removes or renames, so the
-    /// next [`Watcher::watch`] watches what is there now. Returns whether it
+    /// next [`Watcher::watch`] watches what is there then. Returns whether it
     /// forgot any.
     fn forget_gone(&mut self, event: &Event) -> bool {
-        if !removes_or_renames(&event.kind) {
+        if !removes_or_renames(event.kind) {
             return false;
         }
         let mut forgot = false;
@@ -108,9 +126,9 @@ impl Watched {
 
     /// Forgets the watched directories behind each symlink `event` makes,
     /// removes or renames, so the next [`Watcher::watch`] watches them where
-    /// the links lead now. Returns whether it touched any link.
+    /// the new links lead. Returns whether it touched any link.
     fn forget_relinked(&mut self, event: &Event) -> bool {
-        if !(matches!(event.kind, EventKind::Create(_)) || removes_or_renames(&event.kind)) {
+        if !(matches!(event.kind, EventKind::Create(_)) || removes_or_renames(event.kind)) {
             return false;
         }
         let mut relinked = false;
@@ -130,7 +148,7 @@ impl Watched {
     }
 }
 
-fn removes_or_renames(kind: &EventKind) -> bool {
+fn removes_or_renames(kind: EventKind) -> bool {
     matches!(
         kind,
         EventKind::Remove(_) | EventKind::Modify(notify::event::ModifyKind::Name(_))
@@ -215,7 +233,7 @@ fn read_only_mount(_: &Path) -> bool {
 }
 
 fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
-    mutex.lock().unwrap_or_else(|poison| poison.into_inner())
+    mutex.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
 impl Watcher {
@@ -225,6 +243,10 @@ impl Watcher {
     /// the directories asked for are watched again and `settled` runs, on a
     /// thread of the watcher's own called `name`. `matters` runs for every
     /// change, on `notify`'s thread, so it should be quick.
+    ///
+    /// # Errors
+    ///
+    /// When `notify` can't watch anything, or the thread can't start.
     pub fn start(
         name: &str,
         mode: RecursiveMode,
@@ -232,7 +254,7 @@ impl Watcher {
         matters: impl Fn(&Event, &Watched) -> bool + Send + 'static,
         mut settled: impl FnMut(&Watcher) + Send + 'static,
     ) -> notify::Result<Self> {
-        let (touched, touches) = mpsc::channel::<()>();
+        let (touched, changes) = mpsc::channel::<()>();
         let watcher = Watcher::new(mode, matters, move || {
             let _ = touched.send(());
         })?;
@@ -243,10 +265,10 @@ impl Watcher {
             .name(name.into())
             .stack_size(STACK_SIZE)
             .spawn(move || {
-                while touches.recv().is_ok() {
+                while changes.recv().is_ok() {
                     loop {
-                        match touches.recv_timeout(settle) {
-                            Ok(()) => continue,
+                        match changes.recv_timeout(settle) {
+                            Ok(()) => {}
                             Err(RecvTimeoutError::Timeout) => break,
                             Err(RecvTimeoutError::Disconnected) => return,
                         }
@@ -268,6 +290,10 @@ impl Watcher {
     /// `notify`'s thread, for each change `matters` approves and each
     /// directory asked for appearing, and the Extension calls
     /// [`Watcher::watch`] again once they settle, to watch what appeared.
+    ///
+    /// # Errors
+    ///
+    /// When `notify` can't watch anything.
     pub fn new(
         mode: RecursiveMode,
         matters: impl Fn(&Event, &Watched) -> bool + Send + 'static,
@@ -325,7 +351,7 @@ impl Watcher {
             let _ = notify.unwatch(dir);
         }
         let mut dirs_now: HashMap<PathBuf, RecursiveMode> = HashMap::with_capacity(dirs.len());
-        // The links first: one replaced from now on is noticed, and one
+        // The links first: one replaced after this is noticed, and one
         // replaced before is followed by the watches made below.
         let routes: Vec<Vec<PathBuf>> = dirs.iter().map(|dir| links_to(dir)).collect();
         for parent in routes.iter().flatten().filter_map(|link| link.parent()) {
@@ -348,7 +374,7 @@ impl Watcher {
                 watch_beside(notify, &old, &mut dirs_now, there);
             }
         }
-        // Now with what is watched for a missing directory too.
+        // Again, with what is watched for a missing directory too.
         let links = links_behind(&dirs, &routes, |dir| {
             dir.ancestors()
                 .find(|there| dirs_now.contains_key(*there))
@@ -408,52 +434,4 @@ fn watch_beside(
 }
 
 #[cfg(test)]
-mod tests {
-    use std::fs;
-    use std::os::unix::fs::PermissionsExt;
-    use std::os::unix::fs::symlink;
-
-    use super::links_to;
-
-    #[test]
-    fn the_links_on_the_way_are_found_where_they_can_be_replaced() {
-        let root = tempfile::tempdir().unwrap();
-        let root = root.path();
-        // ~/.nix-profile -> profiles/profile -> profile-2-link -> the
-        // generation, whose `share` links into a store that never changes.
-        let generation = root.join("store/generation");
-        let package = root.join("store/package");
-        fs::create_dir_all(&generation).unwrap();
-        fs::create_dir_all(package.join("share/applications")).unwrap();
-        symlink(package.join("share"), generation.join("share")).unwrap();
-        fs::create_dir(root.join("profiles")).unwrap();
-        symlink(&generation, root.join("profiles/profile-2-link")).unwrap();
-        symlink("profile-2-link", root.join("profiles/profile")).unwrap();
-        symlink("profiles/profile", root.join("nix-profile")).unwrap();
-        fs::set_permissions(&generation, fs::Permissions::from_mode(0o555)).unwrap();
-
-        let links = links_to(&root.join("nix-profile/share/applications"));
-
-        fs::set_permissions(&generation, fs::Permissions::from_mode(0o755)).unwrap();
-        assert_eq!(
-            links,
-            [
-                root.join("nix-profile"),
-                root.join("profiles/profile"),
-                root.join("profiles/profile-2-link"),
-            ]
-        );
-        // As far as the path exists.
-        assert_eq!(links_to(&root.join("nix-profile/missing/deeper")).len(), 3);
-        assert!(links_to(&root.join("store/package/share")).is_empty());
-    }
-
-    #[test]
-    fn a_loop_of_links_ends() {
-        let root = tempfile::tempdir().unwrap();
-        let root = root.path();
-        symlink("two", root.join("one")).unwrap();
-        symlink("one", root.join("two")).unwrap();
-        assert_eq!(links_to(&root.join("one/dir")).len(), 40);
-    }
-}
+mod tests;
