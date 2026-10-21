@@ -8,6 +8,7 @@
 //! kotodama open --view clipboard/history
 //! kotodama open --app emoji
 //! kotodama check
+//! kotodama config
 //! ```
 //!
 //! `--view <extension>/<item>` opens the menu on the View that Item's primary Action pushes.
@@ -21,7 +22,7 @@
 //!
 //! # Not here
 //!
-//! - `kotodama check`: `check.rs`.
+//! - `kotodama check`: `check.rs`. `kotodama config`: `config.rs`.
 //! - The socket's path, the handshake and the framing: `kotodama-protocol` (`socket_path`,
 //!   `Channel`).
 //! - What the Daemon does with the message: `kotodamad/src/daemon.rs`.
@@ -31,6 +32,7 @@
 #![forbid(unsafe_code)]
 
 mod check;
+mod config;
 mod extension;
 
 use std::io;
@@ -49,7 +51,8 @@ use kotodama_protocol::socket_path;
 const USAGE: &str = "usage: kotodama toggle
        kotodama open [--view <extension>/<item>] [--app <word>] [--query <text>]
        kotodama extension check <dir> | new <name>
-       kotodama check";
+       kotodama check
+       kotodama config [--schema]";
 
 /// Under socket activation the first keypress also starts the Daemon, so the handshake may wait
 /// for it to come up. The answer waits for it too, and for a menu, when none is connected yet.
@@ -128,6 +131,11 @@ fn main() -> ExitCode {
         && command == "check"
     {
         return check::main();
+    }
+    if let [command, rest @ ..] = args.as_slice()
+        && command == "config"
+    {
+        return config::main(rest);
     }
     let message = match parse(&args) {
         Ok(message) => message,

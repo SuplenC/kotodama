@@ -1,6 +1,7 @@
 //! Finding Extensions: every `<dir>/<anything>/manifest.toml` in the Extension
 //! directories.
 
+use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::Sender;
@@ -17,13 +18,20 @@ use crate::problem::Report;
 /// again, so a package install that writes many files is read once, whole.
 const SETTLE: Duration = Duration::from_millis(200);
 
-/// An Extension found on disk, with its Live query triggers compiled.
+/// An Extension found on disk or defined in the config, with its Live query
+/// triggers compiled.
 #[derive(Clone, Debug)]
 pub struct Found {
     pub manifest: Manifest,
     /// The directory holding `manifest.toml`; the command runs from here.
+    /// Empty for an Extension defined in the config, which runs from the
+    /// Daemon's directory.
     pub dir: PathBuf,
     pub triggers: Vec<Regex>,
+    /// Set in its process's environment, from `[extensions.<name>] env`.
+    pub env: BTreeMap<String, String>,
+    /// Defined in the config rather than by a `manifest.toml`.
+    pub inline: bool,
 }
 
 impl Found {
@@ -43,13 +51,22 @@ impl Found {
             manifest,
             dir,
             triggers,
+            env: BTreeMap::new(),
+            inline: false,
         })
     }
 
-    /// The program to run and its arguments. A relative program path is
-    /// resolved against the Extension's directory.
+    /// The program to run. A relative path is resolved against the
+    /// Extension's directory; a bare name not there is looked for on `PATH`,
+    /// so a packaged program needs no path.
     pub fn program(&self) -> PathBuf {
-        self.dir.join(&self.manifest.command[0])
+        let program = Path::new(&self.manifest.command[0]);
+        let bare = program.components().count() == 1 && !program.is_absolute();
+        let here = self.dir.join(program);
+        if !bare || (!self.dir.as_os_str().is_empty() && here.exists()) {
+            return here;
+        }
+        on_path(program).unwrap_or(here)
     }
 
     /// What the program file is like now, to tell when it changes; `None`
@@ -61,6 +78,14 @@ impl Found {
             len: metadata.len(),
         })
     }
+}
+
+/// The first file named `program` in a `PATH` directory.
+fn on_path(program: &Path) -> Option<PathBuf> {
+    let path = std::env::var_os("PATH")?;
+    std::env::split_paths(&path)
+        .map(|dir| dir.join(program))
+        .find(|candidate| candidate.is_file())
 }
 
 /// When a file was last written, and how long it is: enough to tell that a

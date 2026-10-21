@@ -55,10 +55,13 @@ impl Launcher for Processes {
         let mut command = Command::new(found.program());
         command
             .args(&found.manifest.command[1..])
-            .current_dir(&found.dir)
+            .envs(&found.env)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::inherit());
+        if !found.dir.as_os_str().is_empty() {
+            command.current_dir(&found.dir);
+        }
         // An Extension started once the compositor is there finds it, even
         // when the Daemon started before.
         #[cfg(target_os = "linux")]
@@ -70,8 +73,11 @@ impl Launcher for Processes {
             Err(err) => {
                 let program = found.program();
                 let reason = match err.kind() {
-                    std::io::ErrorKind::NotFound => {
+                    std::io::ErrorKind::NotFound if program.is_absolute() => {
                         format!("its program {} doesn't exist", program.display())
+                    }
+                    std::io::ErrorKind::NotFound => {
+                        format!("its program `{}` isn't on PATH", program.display())
                     }
                     _ => format!("couldn't start {}: {err}", program.display()),
                 };

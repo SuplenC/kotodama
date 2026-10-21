@@ -26,9 +26,14 @@ const DAY: f64 = DAY_SECS as f64;
 const PASSED_OVER: usize = 8;
 /// How many Results per query are counted towards becoming its Learned choice.
 const CONTENDERS: usize = 4;
-/// The most Results and queries kept; past these the least recent go.
-const MAX_RESULTS: usize = 2000;
-const MAX_QUERIES: usize = 1000;
+/// The most Results and queries kept unless the config says otherwise; past
+/// these the least recent go. 2,000 Results is years of picks for most users
+/// and keeps the History file small enough to read at start in a millisecond.
+pub const DEFAULT_MAX_RESULTS: usize = 2000;
+pub const DEFAULT_MAX_QUERIES: usize = 1000;
+/// How long after a change to the History it can be undone, unless the config
+/// says otherwise: long enough to notice what Forget took.
+pub const DEFAULT_UNDO_SECS: u64 = 60;
 
 /// How the History learns and how much it counts, from the config's
 /// `[history]` table:
@@ -41,6 +46,9 @@ const MAX_QUERIES: usize = 1000;
 /// lift_threshold = 5.0    # the Frecency that lifts a Result one Tier: about a week of daily use
 /// time_of_day = 0.5       # how much less a pick counts at a time of day it is seldom made: 0 to 1
 /// usage_log = false       # log queries and picks, to tune ranking from real use
+/// undo_seconds = 60       # how long Forget and Clear history can be undone
+/// max_results = 2000      # the most Results kept; past it the least used go
+/// max_queries = 1000      # the most queries whose Learned choice is kept
 /// ```
 ///
 /// A setting that doesn't parse is a problem, and keeps its default.
@@ -66,6 +74,13 @@ pub struct Settings {
     pub time_of_day: f64,
     /// Whether queries and picks go in the Usage log (see [`crate::usage`]).
     pub usage_log: bool,
+    /// How long after a change to the History it can be undone.
+    pub undo_secs: u64,
+    /// The most Results kept; past it the least used go.
+    pub max_results: usize,
+    /// The most queries whose Learned choice is kept; past it the least
+    /// recent go.
+    pub max_queries: usize,
 }
 
 impl Default for Settings {
@@ -77,11 +92,19 @@ impl Default for Settings {
             lift_threshold: 5.0,
             time_of_day: 0.5,
             usage_log: false,
+            undo_secs: DEFAULT_UNDO_SECS,
+            max_results: DEFAULT_MAX_RESULTS,
+            max_queries: DEFAULT_MAX_QUERIES,
         }
     }
 }
 
 impl Settings {
+    /// How long after a change to the History it can be undone.
+    pub fn undo_for(&self) -> std::time::Duration {
+        std::time::Duration::from_secs(self.undo_secs)
+    }
+
     /// The `[history]` table of the merged config. A setting that can't be
     /// read goes in `report`.
     pub fn from_config(config: &Table, report: &mut Report) -> Self {
@@ -117,6 +140,15 @@ impl Settings {
                     }
                     _ => Err("should be true or false"),
                 },
+                "undo_seconds" => count(value, 0, 24 * 60 * 60)
+                    .ok_or("should be a number of seconds from 0 to 86400")
+                    .map(|secs| settings.undo_secs = secs),
+                "max_results" => count(value, 1, 1_000_000)
+                    .ok_or("should be a number of Results from 1 to 1000000")
+                    .map(|n| settings.max_results = n as usize),
+                "max_queries" => count(value, 1, 1_000_000)
+                    .ok_or("should be a number of queries from 1 to 1000000")
+                    .map(|n| settings.max_queries = n as usize),
                 _ => Err("isn't a setting"),
             };
             if let Err(err) = set {
@@ -124,6 +156,14 @@ impl Settings {
             }
         }
         settings
+    }
+}
+
+/// A whole number from `min` to `max`.
+fn count(value: &Value, min: u64, max: u64) -> Option<u64> {
+    match value {
+        Value::Integer(n) => u64::try_from(*n).ok().filter(|n| (min..=max).contains(n)),
+        _ => None,
     }
 }
 
@@ -947,14 +987,15 @@ impl History {
     /// into `change`.
     fn trim(&mut self, change: &mut Change) {
         let results: usize = self.picks.values().map(ByName::len).sum();
-        if results > MAX_RESULTS {
+        let (max_results, max_queries) = (self.settings.max_results, self.settings.max_queries);
+        if results > max_results {
             let at = self.picked().map(|(.., p)| p.at).max().unwrap_or(0);
             let half_life = self.settings.half_life_secs;
             let mut scores: Vec<f64> = self
                 .picked()
                 .map(|(.., p)| p.count(at, half_life))
                 .collect();
-            let cut = results - MAX_RESULTS;
+            let cut = results - max_results;
             scores.select_nth_unstable_by(cut, f64::total_cmp);
             let floor = scores[cut];
             for (extension, ids) in &mut self.picks {
@@ -969,9 +1010,9 @@ impl History {
             }
             self.picks.retain(|_, ids| !ids.is_empty());
         }
-        if self.learned.len() > MAX_QUERIES {
+        if self.learned.len() > max_queries {
             let mut times: Vec<u64> = self.learned.values().map(|l| l.at).collect();
-            let cut = self.learned.len() - MAX_QUERIES;
+            let cut = self.learned.len() - max_queries;
             times.select_nth_unstable(cut);
             let floor = times[cut];
             self.learned.retain(|query, learned| {
@@ -1431,13 +1472,13 @@ mod tests {
     #[test]
     fn undoing_a_pick_puts_back_what_the_caps_trimmed_for_it() {
         let mut history = History::default();
-        for n in 0..MAX_RESULTS {
+        for n in 0..DEFAULT_MAX_RESULTS {
             // A second apart, so one is the weakest.
             history.touch("apps", &n.to_string(), when(0, n as u32));
         }
         let before = kept(&history);
         let change = history.touch("apps", "new", when(1, 9 * HOUR));
-        assert_eq!(history.picked().count(), MAX_RESULTS);
+        assert_eq!(history.picked().count(), DEFAULT_MAX_RESULTS);
         history.undo(change);
         assert_eq!(kept(&history), before);
     }

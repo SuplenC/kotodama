@@ -21,7 +21,7 @@ An Extension that ships with Kotodama itself, as opposed to one from elsewhere: 
 _Avoid_: Built-in, core extension
 
 **Manifest**:
-The file that declares an Extension: what it is, how to start it, and what it contributes.
+The file that declares an Extension: what it is, how to start it, and what it contributes. An `[extensions.<name>]` table with a `command`, for an Extension that has no Manifest file, holds the same keys.
 _Avoid_: Config, descriptor
 
 **Item**:

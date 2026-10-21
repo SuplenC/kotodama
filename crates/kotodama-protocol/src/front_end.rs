@@ -361,10 +361,13 @@ pub struct ActionRef {
     pub id: String,
 }
 
-/// Where the Daemon serves Front ends: `$XDG_RUNTIME_DIR/kotodama.sock`, or
-/// `None` when `XDG_RUNTIME_DIR` isn't set.
+/// Where the Daemon serves Front ends: `$KOTODAMA_SOCKET`, else
+/// `$XDG_RUNTIME_DIR/kotodama.sock`, or `None` when neither is set. A
+/// Daemon whose config moves its socket needs its Front ends pointed there
+/// with `KOTODAMA_SOCKET`.
 pub fn socket_path() -> Option<PathBuf> {
-    std::env::var_os("XDG_RUNTIME_DIR")
-        .filter(|dir| !dir.is_empty())
-        .map(|dir| PathBuf::from(dir).join("kotodama.sock"))
+    let set = |var| std::env::var_os(var).filter(|value: &std::ffi::OsString| !value.is_empty());
+    set("KOTODAMA_SOCKET")
+        .map(PathBuf::from)
+        .or_else(|| set("XDG_RUNTIME_DIR").map(|dir| PathBuf::from(dir).join("kotodama.sock")))
 }

@@ -229,6 +229,20 @@ fn undo_is_there_only_for_a_short_while() {
 }
 
 #[test]
+fn undo_seconds_sets_how_long_undo_is_there() {
+    let mut h = Harness::with_config(vec![plain("apps")], config("[history]\nundo_seconds = 5"));
+    let ext = h.up(0);
+    h.add(&ext, apps());
+    let ui = h.front_end();
+    pick(&mut h, &ui, "fi", "apps", "firefox");
+    run_daemon_action(&mut h, &ui, "apps", "firefox", FORGET);
+    h.advance(Duration::from_secs(4));
+    assert!(undo_row(&mut h, &ui).is_some());
+    h.advance(Duration::from_secs(1));
+    assert!(undo_row(&mut h, &ui).is_none());
+}
+
+#[test]
 fn clearing_the_history_empties_the_usage_log_and_can_be_undone() {
     let mut h = Harness::with_config(vec![plain("apps")], config("[history]\nusage_log = true"));
     let ext = h.up(0);

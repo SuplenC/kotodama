@@ -26,9 +26,11 @@ use crate::apps::Apps;
 use crate::arguments;
 use crate::clock::{Clock, When};
 use crate::config::{self, extension_settings};
+use crate::configured;
 use crate::conflict::{self, Conflict};
 use crate::discovery::{Discovered, Found, Stamp};
 use crate::empty_query::EmptyQuery;
+use crate::engine::{self, DesktopSettings, Engine};
 use crate::history::{
     self, Change, Frecent, Habit, History, IDENTITIES, Picks, ResultKey, Settings, Store, query_key,
 };
@@ -39,6 +41,7 @@ use crate::kind_order::{KindOrder, KindPlaces};
 use crate::most_used::{Ahead, Counts, Other, Picked, Usage, Versions};
 use crate::narrowing::Narrowing;
 use crate::open_view::{Opening, ViewName};
+use crate::paths::Overrides;
 use crate::pick::{self, PICK, Pick};
 use crate::problem::{self, Problems, Report};
 use crate::rank::{self, Haystack, Matched, Text, Tier, Tiers};
@@ -61,8 +64,9 @@ pub const CLEAR_EXTENSION_HISTORY: &str = "clear-extension-history";
 /// The id of the Daemon's own Item that undoes the latest change to the
 /// History, while there is one to undo.
 pub const UNDO: &str = "undo";
-/// How long after a change to the History it can be undone.
-pub const UNDO_FOR: Duration = Duration::from_secs(60);
+/// How long after a change to the History it can be undone, unless
+/// `[history] undo_seconds` says otherwise.
+pub const UNDO_FOR: Duration = Duration::from_secs(history::DEFAULT_UNDO_SECS);
 
 /// An Extension, by its position in the list the Daemon was started with.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -84,6 +88,8 @@ pub trait Launcher {
 /// Types or pastes into the focused window, copies, starts programs for the
 /// user, and shows desktop notifications.
 pub trait Desktop {
+    /// How text goes into windows, as the config says, whenever a config load changes it.
+    fn configure(&mut self, _settings: DesktopSettings) {}
     fn output(&mut self, output: Output);
     /// Starts a program and its arguments, detached from the Daemon, as a
     /// Quicklink asks.
@@ -164,8 +170,6 @@ pub enum Ended {
 
 /// How many Results a Front end gets for one query.
 pub const MAX_RESULTS: usize = 50;
-/// How many rows a Front end shows until it says otherwise.
-const DEFAULT_ROWS: usize = 10;
 /// How long after a keystroke Late Results may still rerank the rows on
 /// screen, unless the selection moves first. Most Live queries answer
 /// within it, and the eye has barely found the top row by then.
@@ -180,9 +184,9 @@ const OPEN_VIEW_TIMEOUT: Duration = Duration::from_secs(1);
 /// none is, as at login, when the keypress can come before the menu has
 /// started, before it answers that it reached none.
 const MENU_WAIT: Duration = Duration::from_secs(2);
-/// The first restart delay after a crash; each crash in a row doubles it.
+/// The first restart delay after a crash; each crash in a row doubles it, up
+/// to `[extensions] retry_max_seconds`.
 const FIRST_RETRY: Duration = Duration::from_millis(100);
-const MAX_RETRY: Duration = Duration::from_secs(30);
 /// An Extension that ran this long before it stopped starts its backoff over.
 const STABLE: Duration = Duration::from_secs(10);
 /// How many results one Live query may contribute; the rest are dropped.
@@ -1049,6 +1053,12 @@ pub struct Daemon<L, D, S> {
     pick_lists: Views,
     next_id: u64,
     config: Table,
+    /// The Extensions in the Extension directories, before the config
+    /// switches any off, changes or adds to them.
+    installed: Vec<Found>,
+    engine: Engine,
+    /// The config's `[paths]`, for `kotodamad` to follow.
+    paths: Overrides,
     /// Running Extensions' Contributed actions by Item kind, in Extension order.
     contributed: HashMap<String, Vec<(ExtensionId, Action)>>,
     /// The Action catalog last sent, if any Extension reads it.
@@ -1133,9 +1143,9 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
         now: Instant,
     ) -> Self {
         let mut daemon = Daemon {
-            index: Index::new(found.len()),
+            index: Index::new(0),
             indexer: None,
-            stale: vec![0; found.len()],
+            stale: Vec::new(),
             hot_capacity: HOT_CAPACITY,
             hot_due: now,
             hot_versions: (0, 0, 0),
@@ -1146,10 +1156,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             learned_versions: None,
             warm: false,
             warmed: 0,
-            extensions: found
-                .into_iter()
-                .map(|found| Extension::new(found, now))
-                .collect(),
+            extensions: Vec::new(),
             matcher: Matcher::new(Config::DEFAULT),
             sessions: BTreeMap::new(),
             live_queries: HashMap::new(),
@@ -1159,6 +1166,9 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             pick_lists: Views::default(),
             next_id: 1,
             config: Table::new(),
+            installed: found,
+            engine: Engine::default(),
+            paths: Overrides::default(),
             contributed: HashMap::new(),
             catalog: None,
             catalog_dirty: false,
@@ -1197,16 +1207,23 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             tiers: Tiers::default(),
             highlights: Vec::new(),
         };
-        daemon.set_config(config);
-        for id in 0..daemon.extensions.len() {
-            daemon.start(ExtensionId(id), now);
-        }
+        daemon.set_config(config, now);
         daemon
     }
 
     /// The merged config.
     pub fn config(&self) -> &Table {
         &self.config
+    }
+
+    /// The engine's settings, as of the last config.
+    pub fn engine(&self) -> &Engine {
+        &self.engine
+    }
+
+    /// The config's `[paths]`, as of the last config.
+    pub fn paths(&self) -> &Overrides {
+        &self.paths
     }
 
     pub fn history(&self) -> &History {
@@ -1452,11 +1469,12 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
                 self.front_end_message(front_end, message, now)
             }
             Event::FrontEndDown { front_end } => self.front_end_down(front_end),
-            Event::Config(config) => self.set_config(config),
+            Event::Config(config) => self.set_config(config, now),
             Event::ConfigFailed(err) => self.config_failed(err),
             Event::Extensions(Discovered { found, problems }) => {
                 self.problems.dirty |= problem::replace(&mut self.problems.manifests, problems);
-                self.set_extensions(found, now);
+                self.installed = found;
+                self.configure_extensions(now);
             }
             Event::ProgramsChanged => self.programs_changed(now),
             Event::Indexed(indexed) => self.indexed(indexed, now),
@@ -1575,7 +1593,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
         {
             return;
         }
-        let table = extension_settings(&self.config, ext.name());
+        let table = extension_settings(&self.config, ext.name(), ext.found.inline);
         ext.state = State::Up { sender, since: now };
         ext.ended = None;
         self.problems.dirty = true;
@@ -1624,8 +1642,24 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
         }
         let delay = FIRST_RETRY
             .saturating_mul(1 << ext.failures.min(16))
-            .min(MAX_RETRY);
+            .min(self.engine.retry_max);
         ext.failures = ext.failures.saturating_add(1);
+        let give_up_after = self.engine.give_up_after;
+        if give_up_after > 0 && ext.failures >= give_up_after {
+            let reason = format!("{how}, {} times in a row", ext.failures);
+            log::warn!(
+                "extension {}: {reason}; it starts again once its program or Manifest changes",
+                ext.name()
+            );
+            ext.state = State::Failed {
+                stamp: ext.found.stamp(),
+                reason,
+            };
+            ext.ended = None;
+            self.failed_changed = true;
+            self.forget_run(id);
+            return;
+        }
         ext.state = State::Down {
             retry_at: now + delay,
         };
@@ -1659,6 +1693,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
         let mut dirs: Vec<PathBuf> = (self.extensions.iter())
             .filter(|ext| matches!(ext.state, State::Failed { .. }))
             .filter_map(|ext| ext.found.program().parent().map(Path::to_owned))
+            .filter(|dir| dir.is_absolute())
             .collect();
         dirs.sort();
         dirs.dedup();
@@ -2504,7 +2539,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             folded: rank::Query::default(),
             pattern: Pattern::default(),
             max_score: 0,
-            rows: DEFAULT_ROWS,
+            rows: self.engine.rows,
             typed: self.started,
             selection_moved: false,
             last_search: LastSearch::default(),
@@ -3003,7 +3038,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             if !matches!(ext.state, State::Removed)
                 && !found.iter().any(|f| f.manifest.name == ext.name())
             {
-                log::info!("extension {} was removed", ext.name());
+                log::info!("extension {} was removed or switched off", ext.name());
                 self.retire(ExtensionId(id));
             }
         }
@@ -3019,6 +3054,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
                     if !removed
                         && ext.found.manifest == found.manifest
                         && ext.found.dir == found.dir
+                        && ext.found.env == found.env
                     {
                         continue;
                     }
@@ -3205,7 +3241,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
                 id: invocation,
                 by: UndoneBy::Extension(target),
                 change,
-                until: now + UNDO_FOR,
+                until: now + self.history.settings().undo_for(),
             });
         }
         Ok(())
@@ -3393,7 +3429,8 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
         keys
     }
 
-    /// Saves a change to the History, which can be undone for [`UNDO_FOR`],
+    /// Saves a change to the History, which can be undone for `[history]
+    /// undo_seconds`,
     /// offers every Front end to undo it, and ranks every session again. A
     /// change of nothing is let go.
     fn changed(&mut self, done: Done, change: Change, now: Instant) {
@@ -3407,7 +3444,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             id,
             by: UndoneBy::User(done),
             change,
-            until: now + UNDO_FOR,
+            until: now + self.history.settings().undo_for(),
         };
         if let Some(offer) = undoable.offer() {
             self.broadcast(|| offer.clone());
@@ -3629,10 +3666,13 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
         change
     }
 
-    fn set_config(&mut self, config: Table) {
+    fn set_config(&mut self, config: Table, now: Instant) {
         self.config = config;
         self.problems.dirty |= self.problems.unreadable.take().is_some();
         let mut report = Report::new();
+        engine::check_tables(&self.config, &mut report);
+        self.paths = Overrides::from_config(&self.config, &mut report);
+        self.load_engine(&mut report);
         self.load_keywords(&mut report);
         self.load_settings(&mut report);
         let empty_query = EmptyQuery::from_config(&self.config, &mut report);
@@ -3646,12 +3686,13 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             self.mark_late();
         }
         self.problems.dirty |= problem::replace(&mut self.problems.config, report.into_problems());
+        self.configure_extensions(now);
         self.load_apps();
         for ext in &mut self.extensions {
             if ext.sender().is_none() {
                 continue;
             }
-            let table = extension_settings(&self.config, ext.name());
+            let table = extension_settings(&self.config, ext.name(), ext.found.inline);
             if ext.config.as_ref() != Some(&table) {
                 ext.send(ToExtension::Config(table.clone()));
                 ext.config = Some(table);
@@ -3671,6 +3712,31 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
         self.problems.dirty = true;
     }
 
+    /// Reads the engine's settings from the config. The desktop hears of its
+    /// own; the rest is read where it is used.
+    fn load_engine(&mut self, report: &mut Report) {
+        let engine = Engine::from_config(&self.config, report);
+        if engine.desktop != self.engine.desktop {
+            self.desktop.configure(engine.desktop);
+        }
+        if (engine.near_misses, engine.fallbacks)
+            != (self.engine.near_misses, self.engine.fallbacks)
+        {
+            self.mark_late();
+        }
+        self.engine = engine;
+    }
+
+    /// Brings the running Extensions in line with those installed, as the
+    /// config switches them off, changes them or adds to them.
+    fn configure_extensions(&mut self, now: Instant) {
+        let mut report = Report::new();
+        let found = configured::configure(&self.installed, &self.config, &mut report);
+        self.problems.dirty |=
+            problem::replace(&mut self.problems.extensions, report.into_problems());
+        self.set_extensions(found, now);
+    }
+
     /// Reads the History's settings from the config. Open sessions are ranked
     /// again if one that ranks changed.
     fn load_settings(&mut self, report: &mut Report) {
@@ -3678,12 +3744,14 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
         let old = *self.history.settings();
         if settings != old {
             self.history.set_settings(settings);
-            let usage_log = old.usage_log;
-            if (Settings {
-                usage_log,
+            let unranked = Settings {
+                usage_log: old.usage_log,
+                undo_secs: old.undo_secs,
+                max_results: old.max_results,
+                max_queries: old.max_queries,
                 ..settings
-            }) != old
-            {
+            };
+            if unranked != old {
                 self.mark_late();
             }
         }
@@ -4168,7 +4236,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
         let searched = self.index.searched();
         for (n, ext) in self.extensions.iter().enumerate() {
             let live = &session.live[n];
-            if live.asked || !ext.fallback() || ext.sender().is_none() {
+            if !self.engine.fallbacks || live.asked || !ext.fallback() || ext.sender().is_none() {
                 continue;
             }
             if !session.asks(ExtensionId(n), searched) {
@@ -4211,7 +4279,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
         let narrow =
             narrowed && last.is_some_and(|last| last.narrows_near_misses_of(&session.folded));
         let typos = session.folded.tolerates_typos();
-        let look = typos && candidates.len() < session.rows;
+        let look = self.engine.near_misses && typos && candidates.len() < session.rows;
         let mut nearly = std::mem::take(&mut session.last_search.nearly);
 
         let Daemon {

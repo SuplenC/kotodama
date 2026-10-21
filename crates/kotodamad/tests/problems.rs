@@ -62,6 +62,25 @@ fn a_front_end_hears_of_every_problem_as_it_connects() {
 }
 
 #[test]
+fn a_misspelt_table_or_key_is_a_problem() {
+    let mut h = Harness::with_config(
+        vec![plain("apps")],
+        config("[serach]\nrows = 5\n[search]\nrowz = 5\n[extensions.apps]\nenable = \"no\"\n"),
+    );
+
+    let (_ui, greeting) = h.greeted_front_end(OUTBOX);
+
+    assert_eq!(
+        last_problems(&greeting),
+        Some(vec![
+            "serach".to_owned(),
+            "search.rowz".to_owned(),
+            "extensions.apps.enable".to_owned()
+        ])
+    );
+}
+
+#[test]
 fn fixing_the_config_clears_its_problems_and_every_front_end_hears_of_it() {
     let mut h = Harness::with_config(vec![], config("[history]\npicks_to_learn = 0\n"));
     let ui = h.front_end();

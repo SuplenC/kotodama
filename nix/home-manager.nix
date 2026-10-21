@@ -83,60 +83,84 @@ let
       lift_threshold = cfg.history.liftThreshold;
       time_of_day = cfg.history.timeOfDay;
       usage_log = cfg.history.usageLog;
+      undo_seconds = cfg.history.undoSeconds;
+      max_results = cfg.history.maxResults;
+      max_queries = cfg.history.maxQueries;
     };
+    paths = set {
+      extension_dirs = cfg.paths.extensionDirs;
+      default_extension_dirs = cfg.paths.defaultExtensionDirs;
+      state_dir = cfg.paths.stateDir;
+      cache_dir = cfg.paths.cacheDir;
+      inherit (cfg.paths) socket;
+    };
+    search = set {
+      inherit (cfg.search) rows fallbacks;
+      near_misses = cfg.search.nearMisses;
+    };
+    desktop = set {
+      settle_ms = cfg.desktop.settleMs;
+      inherit (cfg.desktop) paste;
+    };
+    log = set { inherit (cfg.log) level; };
     empty_query = set {
       most_used = cfg.emptyQuery.mostUsed;
       inherit (cfg.emptyQuery) menu;
     };
     ranking = set { inherit (cfg.ranking) kinds; };
     quicklink_defaults = set { inherit (cfg.quicklinkDefaults) opener; };
-    extensions = nonEmpty {
-      ai = aiSettings;
-      apps = set (
-        {
-          inherit (ext.apps)
-            terminal
-            hidden
-            names
-            ;
-          withdraw_within = ext.apps.withdrawWithin;
-        }
-        // appSettings ext.apps
-      );
-      calculator = set (
-        {
-          inherit (ext.calculator) network;
-          rates_url = ext.calculator.ratesUrl;
-          decimal_separator = ext.calculator.decimalSeparator;
-        }
-        // appSettings ext.calculator
-      );
-      clipboard = set (
-        {
-          max_entries = ext.clipboard.maxEntries;
-          max_age_days = ext.clipboard.maxAgeDays;
-        }
-        // appSettings ext.clipboard
-      );
-      emoji = set ({ skin_tone = ext.emoji.skinTone; } // appSettings ext.emoji);
-      folders = set (
-        {
-          folders = tables ext.folders.folders;
-          inherit (ext.folders)
-            terminal
-            open
-            shell
-            lazygit
-            ;
-          file_manager = ext.folders.fileManager;
-          copy_path = ext.folders.copyPath;
-        }
-        // appSettings ext.folders
-      );
-      web-search = set ({ inherit (ext.web-search) engines; } // appSettings ext.web-search);
-      system = set (appSettings ext.system);
-      hyprland = set (appSettings ext.hyprland);
-    };
+    extensions =
+      set {
+        retry_max_seconds = ext.retryMaxSeconds;
+        give_up_after = ext.giveUpAfter;
+      }
+      // nonEmpty {
+        ai = aiSettings;
+        apps = set (
+          {
+            inherit (ext.apps)
+              terminal
+              hidden
+              names
+              ;
+            withdraw_within = ext.apps.withdrawWithin;
+          }
+          // appSettings ext.apps
+        );
+        calculator = set (
+          {
+            inherit (ext.calculator) network;
+            rates_url = ext.calculator.ratesUrl;
+            decimal_separator = ext.calculator.decimalSeparator;
+          }
+          // appSettings ext.calculator
+        );
+        clipboard = set (
+          {
+            max_entries = ext.clipboard.maxEntries;
+            max_age_days = ext.clipboard.maxAgeDays;
+          }
+          // appSettings ext.clipboard
+        );
+        emoji = set ({ skin_tone = ext.emoji.skinTone; } // appSettings ext.emoji);
+        folders = set (
+          {
+            folders = tables ext.folders.folders;
+            inherit (ext.folders)
+              terminal
+              open
+              shell
+              lazygit
+              ;
+            file_manager = ext.folders.fileManager;
+            copy_path = ext.folders.copyPath;
+          }
+          // appSettings ext.folders
+        );
+        web-search = set ({ inherit (ext.web-search) engines; } // appSettings ext.web-search);
+        system = set (appSettings ext.system);
+        hyprland = set (appSettings ext.hyprland);
+      };
   };
   # Without its empty tables, so options left unset write nothing.
   nonEmpty = lib.filterAttrs (_: table: table != { });
@@ -257,7 +281,105 @@ in
         {file}`$XDG_STATE_HOME/kotodama/usage.jsonl`, to tune ranking from
         real use. Unset, false.
       '';
+      undoSeconds = optional (lib.types.ints.between 0 86400) ''
+        `undo_seconds`: how long Forget and Clear history can be undone.
+        Unset, 60.
+      '';
+      maxResults = optional (lib.types.ints.between 1 1000000) ''
+        `max_results`: the most Results the History keeps; past it the least
+        used go. Unset, 2000.
+      '';
+      maxQueries = optional (lib.types.ints.between 1 1000000) ''
+        `max_queries`: the most queries whose Learned choice is kept; past it
+        the least recent go. Unset, 1000.
+      '';
     };
+
+    paths = {
+      extensionDirs = optional (lib.types.listOf lib.types.str) ''
+        `extension_dirs`: more Extension directories, read after the default
+        ones, so an Extension in one replaces one of the same name before it.
+        Absolute paths, or starting with `~/`. Unset, none.
+      '';
+      defaultExtensionDirs = optional lib.types.bool ''
+        `default_extension_dirs`: whether
+        {file}`$XDG_DATA_DIRS/kotodama/extensions` and {file}`extensions/` in
+        the config directory are read; `false` reads only `extensionDirs`.
+        Unset, true.
+      '';
+      stateDir = optional lib.types.str ''
+        `state_dir`: where the History and the Usage log are kept. Read when
+        the Daemon starts. Unset, {file}`$XDG_STATE_HOME/kotodama`.
+      '';
+      cacheDir = optional lib.types.str ''
+        `cache_dir`: where the Items wait that aren't shown. Read when the
+        Daemon starts. Unset, {file}`$XDG_CACHE_HOME/kotodama`.
+      '';
+      socket = optional lib.types.str ''
+        `socket`: where Front ends connect. Read when the Daemon starts.
+        `KOTODAMA_SOCKET` wins, and is how Front ends find a socket moved
+        here. Unset, {file}`$XDG_RUNTIME_DIR/kotodama.sock`.
+      '';
+    };
+
+    search = {
+      rows = optional (lib.types.ints.between 1 50) ''
+        `rows`: the rows a search fills until the Front end says how many it
+        shows. Unset, 10.
+      '';
+      nearMisses = optional lib.types.bool ''
+        `near_misses`: whether a search adds Results a typo away when real
+        matches leave rows empty. Unset, true.
+      '';
+      fallbacks = optional lib.types.bool ''
+        `fallbacks`: whether a search asks fallbacks, such as web search, for
+        what real matches leave rows empty. A fallback's trigger still routes
+        queries to it. Unset, true.
+      '';
+    };
+
+    desktop = {
+      settleMs = optional (lib.types.ints.between 0 5000) ''
+        `settle_ms`: how long keys wait after the menu closes, so the window
+        that gets the keyboard back takes them. Slow apps may need more.
+        Unset, 50.
+      '';
+      paste =
+        optional
+          (lib.types.enum [
+            "ctrl+v"
+            "ctrl+shift+v"
+            "type"
+          ])
+          ''
+            `paste`: how a paste reaches the window: `ctrl+v`, `ctrl+shift+v`,
+            which terminals take, or `type`, which types the text instead.
+            Unset, `ctrl+v`.
+          '';
+    };
+
+    log.level =
+      optional
+        (lib.types.enum [
+          "error"
+          "warn"
+          "info"
+          "debug"
+        ])
+        ''
+          `level` of `[log]`: how much the Daemon logs. `KOTODAMA_LOG` wins.
+          Unset, `info`.
+        '';
+
+    extensions.retryMaxSeconds = optional (lib.types.ints.between 1 86400) ''
+      `retry_max_seconds` of `[extensions]`: the longest wait before a crashed
+      Extension restarts; waits double from 100 ms. Unset, 30.
+    '';
+    extensions.giveUpAfter = optional lib.types.ints.unsigned ''
+      `give_up_after` of `[extensions]`: the crashes in a row after which an
+      Extension stays down until its program or Manifest changes; 0 never
+      gives up. Unset, 0.
+    '';
 
     emptyQuery = {
       mostUsed = optional (lib.types.ints.between 0 50) ''

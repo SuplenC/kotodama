@@ -18,8 +18,8 @@
 //! - The problems of Extensions that are down, and when the list is sent:
 //!   `daemon.rs`.
 //! - Reading the settings that report them: each setting's owner
-//!   (`history.rs`, `empty_query.rs`, `kind_order.rs`, `keywords.rs`,
-//!   `apps.rs`, `settings.rs`).
+//!   (`engine.rs`, `paths.rs`, `history.rs`, `empty_query.rs`,
+//!   `kind_order.rs`, `keywords.rs`, `configured.rs`, `apps.rs`).
 
 use kotodama_protocol::{Action, Item, ItemKind, NamespacedKind, Problem, View, ViewContent};
 
@@ -34,11 +34,22 @@ pub const SHOW: &str = "show";
 #[derive(Debug, Default)]
 pub struct Report {
     problems: Vec<Problem>,
+    /// Logs nothing: what it finds is reported again where it is told.
+    silent: bool,
 }
 
 impl Report {
     pub fn new() -> Self {
         Report::default()
+    }
+
+    /// A report that logs nothing, for reading settings before the Daemon
+    /// that reports them is there.
+    pub fn silent() -> Self {
+        Report {
+            silent: true,
+            ..Report::default()
+        }
     }
 
     /// Notes that something is wrong with `about`, such as a config key.
@@ -47,7 +58,9 @@ impl Report {
             about: about.into(),
             message: message.into(),
         };
-        log::warn!("{}: {}", problem.about, problem.message);
+        if !self.silent {
+            log::warn!("{}: {}", problem.about, problem.message);
+        }
         self.problems.push(problem);
     }
 
@@ -67,6 +80,9 @@ pub struct Problems {
     pub config: Vec<Problem>,
     /// The Manifests refused or out of date.
     pub manifests: Vec<Problem>,
+    /// The Extensions' tables in the config: what they switch off, change
+    /// or define.
+    pub extensions: Vec<Problem>,
     /// The apps' settings, read from the config and the Manifests.
     pub apps: Vec<Problem>,
     /// The keywords two things ask for.
@@ -81,13 +97,14 @@ pub struct Problems {
 
 impl Problems {
     /// Every problem but those of Extensions that are down, which follow.
-    pub fn list(&self, extensions: impl IntoIterator<Item = Problem>) -> Vec<Problem> {
+    pub fn list(&self, down: impl IntoIterator<Item = Problem>) -> Vec<Problem> {
         (self.unreadable.iter().cloned())
             .chain(self.config.iter().cloned())
             .chain(self.manifests.iter().cloned())
+            .chain(self.extensions.iter().cloned())
             .chain(self.apps.iter().cloned())
             .chain(self.conflicts.iter().cloned())
-            .chain(extensions)
+            .chain(down)
             .collect()
     }
 }

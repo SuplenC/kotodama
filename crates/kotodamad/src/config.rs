@@ -7,6 +7,7 @@
 //! including a list, replaces the earlier value whole. File names carry no
 //! meaning, and subdirectories (such as `extensions/`) are ignored.
 
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::Sender;
 use std::time::Duration;
@@ -36,10 +37,25 @@ impl fmt::Display for Error {
 
 impl std::error::Error for Error {}
 
+/// The file each value of the merged config came from, by its dotted key,
+/// such as `history.half_life_days`. A list is one value.
+pub type Sources = BTreeMap<String, PathBuf>;
+
 /// Reads and merges every config file in `dirs`, least important directory
 /// first. A directory that doesn't exist counts as empty. Fails on the first
 /// file that can't be read or parsed.
 pub fn load(dirs: &[PathBuf]) -> Result<Table, Error> {
+    load_from(dirs, None)
+}
+
+/// [`load`], and where each value came from.
+pub fn load_with_sources(dirs: &[PathBuf]) -> Result<(Table, Sources), Error> {
+    let mut sources = Sources::new();
+    let config = load_from(dirs, Some(&mut sources))?;
+    Ok((config, sources))
+}
+
+fn load_from(dirs: &[PathBuf], mut sources: Option<&mut Sources>) -> Result<Table, Error> {
     let mut config = Table::new();
     for dir in dirs {
         for path in files(dir)? {
@@ -48,13 +64,39 @@ pub fn load(dirs: &[PathBuf]) -> Result<Table, Error> {
                 reason,
             };
             let text = fs::read_to_string(&path).map_err(|err| error(err.to_string()))?;
-            let table: toml::Table = text
-                .parse()
-                .map_err(|err: toml::de::Error| error(err.message().to_owned()))?;
-            merge(&mut config, from_toml_table(table));
+            let table = parse(&text).map_err(error)?;
+            if let Some(sources) = sources.as_deref_mut() {
+                note_sources(&table, "", &path, sources);
+            }
+            merge(&mut config, table);
         }
     }
     Ok(config)
+}
+
+/// One config file's text as a table.
+pub fn parse(text: &str) -> Result<Table, String> {
+    let table: toml::Table = text
+        .parse()
+        .map_err(|err: toml::de::Error| err.message().to_owned())?;
+    Ok(from_toml_table(table))
+}
+
+/// Notes `path` as the source of every value in `table`, under `prefix`.
+fn note_sources(table: &Table, prefix: &str, path: &Path, sources: &mut Sources) {
+    for (key, value) in table {
+        let key = if prefix.is_empty() {
+            key.clone()
+        } else {
+            format!("{prefix}.{key}")
+        };
+        match value {
+            Value::Table(table) => note_sources(table, &key, path, sources),
+            _ => {
+                sources.insert(key, path.to_owned());
+            }
+        }
+    }
 }
 
 /// Watches `dirs` and sends [`Event::Config`] with the reloaded config after
@@ -137,14 +179,39 @@ pub fn extension_table(config: &Table, name: &str) -> Table {
     }
 }
 
+/// The keys of `[extensions.<name>]` the Daemon reads itself, for every
+/// Extension.
+pub const DAEMON_KEYS: [&str; 7] = [
+    "word",
+    "prefix",
+    "in_search",
+    "enable",
+    "command",
+    "env",
+    "live_query",
+];
+/// The Manifest's keys, which an Extension defined in the config takes from
+/// its table too.
+pub const MANIFEST_KEYS: [&str; 8] = [
+    "description",
+    "title",
+    "icon",
+    "about",
+    "examples",
+    "commands",
+    "contributed_actions",
+    "action_catalog",
+];
+
 /// The `[extensions.<name>]` table as the Extension gets it: without the
 /// keys the Daemon reads itself, which the Extension would warn are no
-/// setting of its own.
-pub fn extension_settings(config: &Table, name: &str) -> Table {
+/// setting of its own; for one `inline`, defined in the config, without its
+/// Manifest's keys too.
+pub fn extension_settings(config: &Table, name: &str, inline: bool) -> Table {
     let mut table = extension_table(config, name);
-    table.remove("word");
-    table.remove("prefix");
-    table.remove("in_search");
+    table.retain(|key, _| {
+        !DAEMON_KEYS.contains(&key.as_str()) && !(inline && MANIFEST_KEYS.contains(&key.as_str()))
+    });
     table
 }
 
@@ -153,6 +220,24 @@ fn from_toml_table(table: toml::Table) -> Table {
         .into_iter()
         .map(|(key, value)| (key, from_toml(value)))
         .collect()
+}
+
+/// `value` as TOML: what a Manifest is read from, and what `kotodamad config`
+/// prints.
+pub fn to_toml(value: &Value) -> toml::Value {
+    match value {
+        Value::String(value) => toml::Value::String(value.clone()),
+        Value::Integer(value) => toml::Value::Integer(*value),
+        Value::Float(value) => toml::Value::Float(*value),
+        Value::Bool(value) => toml::Value::Boolean(*value),
+        Value::Array(values) => toml::Value::Array(values.iter().map(to_toml).collect()),
+        Value::Table(table) => toml::Value::Table(
+            table
+                .iter()
+                .map(|(key, value)| (key.clone(), to_toml(value)))
+                .collect(),
+        ),
+    }
 }
 
 fn from_toml(value: toml::Value) -> Value {

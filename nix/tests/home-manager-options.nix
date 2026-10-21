@@ -51,7 +51,27 @@ let
         liftThreshold = 3;
         timeOfDay = 0.25;
         usageLog = true;
+        undoSeconds = 30;
+        maxResults = 500;
+        maxQueries = 200;
       };
+      paths = {
+        extensionDirs = [ "~/src/extensions" ];
+        defaultExtensionDirs = false;
+        stateDir = "/var/lib/alice/kotodama";
+        cacheDir = "~/.cache/kotodama-test";
+        socket = "/run/user/1000/kd.sock";
+      };
+      search = {
+        rows = 8;
+        nearMisses = false;
+        fallbacks = false;
+      };
+      desktop = {
+        settleMs = 120;
+        paste = "ctrl+shift+v";
+      };
+      log.level = "debug";
       emptyQuery = {
         mostUsed = 0;
         menu = [
@@ -70,6 +90,8 @@ let
         "--new-tab"
       ];
       extensions = {
+        retryMaxSeconds = 10;
+        giveUpAfter = 5;
         apps = {
           terminal = [
             "foot"
@@ -209,7 +231,20 @@ pkgs.runCommand "kotodama-home-manager-options-test"
         "lift_threshold": 3,
         "time_of_day": 0.25,
         "usage_log": True,
+        "undo_seconds": 30,
+        "max_results": 500,
+        "max_queries": 200,
     })
+    expect("paths", everything["paths"], {
+        "extension_dirs": ["~/src/extensions"],
+        "default_extension_dirs": False,
+        "state_dir": "/var/lib/alice/kotodama",
+        "cache_dir": "~/.cache/kotodama-test",
+        "socket": "/run/user/1000/kd.sock",
+    })
+    expect("search", everything["search"], {"rows": 8, "near_misses": False, "fallbacks": False})
+    expect("desktop", everything["desktop"], {"settle_ms": 120, "paste": "ctrl+shift+v"})
+    expect("log", everything["log"], {"level": "debug"})
     expect("empty_query", everything["empty_query"], {
         "most_used": 0,
         "menu": [{"extension": "apps", "item": "firefox"}],
@@ -219,9 +254,10 @@ pkgs.runCommand "kotodama-home-manager-options-test"
 
     extensions = everything["extensions"]
     expect("extensions", sorted(extensions), [
-        "ai", "apps", "calculator", "clipboard", "emoji", "folders", "hyprland", "system",
-        "web-search",
+        "ai", "apps", "calculator", "clipboard", "emoji", "folders", "give_up_after", "hyprland",
+        "retry_max_seconds", "system", "web-search",
     ])
+    expect("restart", (extensions["retry_max_seconds"], extensions["give_up_after"]), (10, 5))
     expect("ai", extensions["ai"], {"url": "http://localhost:11434/v1/messages"})
     expect("apps", extensions["apps"], {
         "terminal": ["foot", "-e"],
