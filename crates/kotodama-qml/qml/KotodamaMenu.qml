@@ -47,7 +47,7 @@ PanelWindow {
         menu.failure = "";
         input.text = query;
         input.cursorPosition = query.length;
-        // The box may show `query` already, behind a Prefix it has left.
+        // The box may show `query` already, in an app it has left.
         search.query = query;
         list.pointer = null;
         visible = true;
@@ -114,11 +114,14 @@ PanelWindow {
         if (menu.undoKey(event))
             return true;
         if (event.key === Qt.Key_Escape) {
-            // Esc clears a list's filter first, then pops the View.
+            // Esc clears a list's filter first, then pops the View, then
+            // leaves the app for the whole search, then closes the menu.
             if (menu.kind === "list" && filter.text !== "")
                 filter.text = "";
             else if (search.depth > 0)
                 search.popView();
+            else if (search.leaveApp())
+                menu.failure = "";
             else
                 menu.hide();
             return true;
@@ -140,6 +143,9 @@ PanelWindow {
             return false;
         if (ctrl && event.key === Qt.Key_K) {
             menu.openActions();
+        } else if (event.key === Qt.Key_Tab && menu.kind === "" && search.enter(list.currentIndex)) {
+            // Tab on an app's entry Item enters the app.
+            menu.failure = "";
         } else if (enter) {
             menu.failure = "";
             search.run(list.currentIndex);
@@ -202,7 +208,7 @@ PanelWindow {
             }
         }
         onActionFailed: message => menu.failure = message
-        // The box shows the rest of the query once it is behind a Prefix,
+        // The box shows the rest of the query once it is in an app,
         // or what the Daemon typed. The cursor keeps its place from the end.
         onQueryReplaced: text => {
             const fromEnd = input.text.length - input.cursorPosition;
@@ -249,8 +255,8 @@ PanelWindow {
             width: parent.width
             height: menu.rowHeight + 12
 
-            // The Extension the search is behind the Prefix of, such as
-            // Emoji: the box holds what follows the Prefix.
+            // The app the search is in, such as Emoji: the box holds what
+            // follows the app's word.
             Rectangle {
                 id: chip
                 objectName: "scope"
@@ -301,8 +307,8 @@ PanelWindow {
                     font: input.font
                 }
 
-                // Backspace with nothing typed behind a Prefix leaves it: the
-                // whole search again, with the Prefix typed.
+                // Backspace with nothing typed in an app leaves it: the whole
+                // search again, with the app's word typed.
                 Keys.onPressed: event => {
                     if (event.key === Qt.Key_Backspace && input.text === "" && search.leaveScope())
                         event.accepted = true;
@@ -414,14 +420,64 @@ PanelWindow {
             id: body
             y: field.height + jobs.height
             width: parent.width
-            height: menu.kind === "" || menu.kind === "list" ? list.height : Math.min(content.height, menu.maxRows * menu.rowHeight)
+            height: menu.kind === "" || menu.kind === "list" ? intro.height + list.height : Math.min(content.height, menu.maxRows * menu.rowHeight)
             clip: true
+
+            // An app's intro card, before anything is typed in it: what it
+            // does, and a few queries with what they give. It comes with the
+            // app's first Results, so the first frame in the app shows it.
+            Column {
+                id: intro
+                objectName: "intro"
+                width: parent.width
+                visible: menu.kind === "" && search.introAbout !== ""
+                height: visible ? implicitHeight : 0
+                topPadding: 10
+                bottomPadding: 10
+                spacing: 4
+
+                Text {
+                    x: 18
+                    width: intro.width - 36
+                    wrapMode: Text.Wrap
+                    maximumLineCount: 3
+                    elide: Text.ElideRight
+                    text: search.introAbout
+                    color: menu.foreground
+                    font.family: menu.fontFamily
+                    font.pixelSize: menu.fontSize - 1
+                }
+
+                Repeater {
+                    model: search.introExamples
+
+                    Text {
+                        required property var modelData
+                        x: 18
+                        width: intro.width - 36
+                        elide: Text.ElideRight
+                        textFormat: Text.PlainText
+                        text: modelData.query + "  →  " + modelData.result
+                        color: menu.dimmed
+                        font.family: menu.fontFamily
+                        font.pixelSize: menu.fontSize - 3
+                    }
+                }
+
+                Rectangle {
+                    x: 18
+                    width: intro.width - 36
+                    height: 1
+                    color: menu.border
+                }
+            }
 
             ListView {
                 id: list
+                y: intro.height
                 width: parent.width
                 visible: menu.kind === "" || menu.kind === "list"
-                height: visible ? Math.min(count * menu.rowHeight, menu.maxRows * menu.rowHeight - jobs.height) : 0
+                height: visible ? Math.max(0, Math.min(count * menu.rowHeight, menu.maxRows * menu.rowHeight - jobs.height - intro.height)) : 0
                 clip: true
                 model: search
                 boundsBehavior: Flickable.StopAtBounds

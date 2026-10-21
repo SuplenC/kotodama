@@ -124,6 +124,7 @@ impl Answer {
                 keyword: None,
                 keywords: vec![],
                 hidden: false,
+                app_only: false,
                 actions: vec![
                     Action::new(COPY, "Copy Answer"),
                     Action::new(COPY_EXPRESSION, "Copy Expression and Answer"),

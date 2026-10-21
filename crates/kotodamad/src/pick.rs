@@ -38,6 +38,7 @@ pub fn view(id: String, title: &str, offering: Vec<Item>) -> View {
         .map(|item| Item {
             keyword: None,
             hidden: false,
+            app_only: false,
             actions: vec![Action::new(PICK, title)],
             ..item
         })

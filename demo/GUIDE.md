@@ -24,7 +24,8 @@ In the menu:
   Extensions' Contributed actions.
 - Ctrl+Shift+Backspace forgets the selected Result.
 - Ctrl+Z, while the Toast shows, puts back what was forgotten.
-- Esc clears a list's filter, pops a View, or closes the menu.
+- Tab, or Enter, on an app's Result enters the app (see below).
+- Esc clears a list's filter, pops a View, leaves an app, or closes the menu.
 
 With nothing typed, the menu shows the Results you use most at this time of
 day, then a fixed menu: this guide, the clipboard history and "Clear history".
@@ -38,6 +39,18 @@ day, then a fixed menu: this guide, the clipboard history and "Clear history".
   `featerpad` and `fetherpad` find FeatherPad.
 - A subtitle is searched once the query has 3 letters.
 - A trailing space makes the last word a whole word.
+
+## Every Extension is an app
+
+Each Extension has an app, found by its title and its word: `projects`,
+`calc`, `emoji`, `clipboard`, `system`, `web`. Tab or Enter on its Result
+enters it: a chip names the app, and before anything is typed a card says
+what it does, with a few queries to try, over its commands and the Items
+you pick most. Typing then searches that Extension alone. Backspace on the
+empty box, or Esc, goes back to the whole search.
+
+Some Items show only in their app: the emoji and the clipboard history stay
+out of the search, so nothing there crowds out apps and files.
 
 ## Apps
 
@@ -89,26 +102,28 @@ Expression and Answer".
 - Anything after `=` that evaluates: `= pi`.
 
 A number alone (`42`) or words get no answer, so they never push other
-Results down.
+Results down. In the calculator's app (`calc`, then Tab) everything typed is
+evaluated, and its card lists examples such as `15min in sec`.
 
 ## Emoji and symbols
 
-Every emoji and the common symbols, behind the Prefix `emoji`: the search
-leaves them out and shows one "Emoji" Result instead. Type `emoji` and a
-space, or press Enter on "Emoji", and a chip shows the search is the emoji
-alone: `emoji fire`, `emoji thumbs`, `emoji like`, `emoji arrow right`,
-`emoji command` (⌘). Backspace on the empty box leaves it. Enter types the
+Every emoji and the common symbols, in the Emoji app alone: the search
+leaves them out and shows the "Emoji" app's Result instead. Type `emoji` and
+press Tab, then `fire`, `thumbs`, `like`, `arrow right` or `command` (⌘).
+Esc goes back to the search. Enter types the
 character into the window the menu was opened from; Ctrl+K offers "Copy" and a
 "Type" Action for each skin tone. Open FeatherPad, then the menu, and pick one
 to see it typed.
 
 ## Clipboard history
 
-Ctrl+Shift+H, or `clipboard` in the search, lists what was copied, newest first; a
-few entries are there from the start. Typing filters the list. Enter pastes
-into the window the menu came from; Ctrl+K offers "Copy to Clipboard", "Show
-Details" and "Delete from History". Copy something in foot or FeatherPad and it
-joins the list. Entries are also found in the search by their text: try `ssh`.
+Ctrl+Shift+H, or "Clipboard History" in the Clipboard app (`clipboard`, then
+Tab), lists what was copied, newest first; a few entries are there from the
+start. Typing filters the list. Enter pastes into the window the menu came
+from; Ctrl+K offers "Copy to Clipboard", "Show Details" and "Delete from
+History". Copy something in foot or FeatherPad and it joins the list. In the
+Clipboard app, entries are also found by their text: try `ssh`. The whole
+search leaves them out.
 
 ## Your keywords: Aliases and Quicklinks
 

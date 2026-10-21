@@ -304,15 +304,23 @@ ShellRoot {
                 }
             }
             Card {
-                title: "Views, emoji and the web"
+                title: "Apps, Views and the web"
                 hue: "#94e2d5"
+                Example {
+                    keys: "Tab"
+                    does: "enter an app: projects, calc, emoji"
+                }
+                Example {
+                    keys: "Esc"
+                    does: "back to the search"
+                }
+                Example {
+                    query: "emoji ⇥ fire"
+                    does: "types 🔥 where you were"
+                }
                 Example {
                     query: "timer 5"
                     does: "a progress View"
-                }
-                Example {
-                    query: "emoji fire"
-                    does: "types 🔥 where you were"
                 }
                 Example {
                     query: "? open a terminal"

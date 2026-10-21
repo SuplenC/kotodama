@@ -598,6 +598,7 @@ fn random_item(random: &mut Random) -> Item {
     item.keyword = (random.below(6) == 0).then(|| random.pick(WORDS).to_lowercase());
     item.keywords = (0..random.below(2)).map(|_| words(random, 2)).collect();
     item.hidden = random.below(12) == 0;
+    item.app_only = random.below(5) == 0;
     item
 }
 

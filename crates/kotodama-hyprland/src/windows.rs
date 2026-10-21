@@ -186,6 +186,7 @@ fn item(address: &str, window: &Window) -> Item {
         keyword: None,
         keywords: vec![window.class.clone()],
         hidden: false,
+        app_only: false,
         actions: vec![
             Action::new(FOCUS, "Focus Window"),
             Action::new(CLOSE, "Close Window"),

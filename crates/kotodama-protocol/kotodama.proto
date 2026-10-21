@@ -51,6 +51,11 @@ message Clipboard {
 message Empty {
 }
 
+message Example {
+  string query = 1;
+  string result = 2;
+}
+
 message FormField {
   string id = 1;
   string label = 2;
@@ -187,6 +192,11 @@ message FromFrontEnd {
   }
 }
 
+message Intro {
+  string about = 1;
+  repeated Example examples = 2;
+}
+
 message Item {
   string id = 1;
   string kind = 2;
@@ -202,6 +212,7 @@ message Item {
   repeated string keywords = 12;
   repeated Action actions = 13;
   bool hidden = 14;
+  bool app_only = 15;
 }
 
 message ItemRef {
@@ -290,6 +301,7 @@ message Scope {
   string prefix = 1;
   string title = 2;
   optional string icon = 3;
+  Intro intro = 4;
 }
 
 message SelectOption {

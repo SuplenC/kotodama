@@ -4,8 +4,15 @@
 name = "emoji"
 description = "Emoji, with their skin tones, and symbols such as arrows, math and ⌘ ⌥ ⇧, typed or copied"
 command = ["./kotodama-emoji"]
-# The emoji stay out of the search, behind `emoji`: `emoji fire`. The search
-# shows one "Emoji" Item that enters it.
+# The emoji stay out of the search, in its app: the search shows one "Emoji"
+# Item, and Tab or Enter on it enters the app.
 prefix = "emoji"
 title = "Emoji"
 icon = "face-smile"
+about = "Emoji and symbols, by name or keyword. Enter types it into the window you came from; Tab picks a skin tone."
+examples = [
+    { query = "fire", result = "🔥 Fire" },
+    { query = "arrow", result = "→ Rightwards Arrow" },
+    { query = "cmd", result = "⌘ Place of Interest Sign" },
+]
+in_search = false

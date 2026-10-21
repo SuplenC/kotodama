@@ -3,7 +3,7 @@
 //! Ctrl+K, so unlike Results they may pass through JavaScript.
 
 use cxx_qt_lib::{QList, QMap, QMapPair_QString_QVariant, QString, QVariant};
-use kotodama_protocol::{FormInput, Job, JobState, Value, ViewContent};
+use kotodama_protocol::{Example, FormInput, Job, JobState, Value, ViewContent};
 
 use crate::rows::Row;
 use crate::views::Views;
@@ -51,6 +51,16 @@ fn job(extension: &str, job: &Job) -> Map {
         ),
         ("message", text(job.message.as_deref().unwrap_or_default())),
     ])
+}
+
+/// An intro card's examples, each `{query, result}`.
+pub fn examples(examples: &[Example]) -> List {
+    list(examples.iter().map(|example| {
+        map([
+            ("query", text(&example.query)),
+            ("result", text(&example.result)),
+        ])
+    }))
 }
 
 /// The jobs still running, oldest first.

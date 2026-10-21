@@ -87,7 +87,7 @@ let
         clipboard = {
           maxEntries = 50;
           maxAgeDays = 0.5;
-          prefix = "";
+          inSearch = true;
         };
         emoji = {
           skinTone = "medium-dark";
@@ -119,6 +119,8 @@ let
           }
         ];
         ai.url = "http://localhost:11434/v1/messages";
+        system.inSearch = false;
+        hyprland.prefix = "hypr";
       };
     }).xdg.configFile."kotodama/home-manager.toml".source;
 
@@ -211,7 +213,8 @@ pkgs.runCommand "kotodama-home-manager-options-test"
 
     extensions = everything["extensions"]
     expect("extensions", sorted(extensions), [
-        "ai", "apps", "calculator", "clipboard", "emoji", "folders", "web-search",
+        "ai", "apps", "calculator", "clipboard", "emoji", "folders", "hyprland", "system",
+        "web-search",
     ])
     expect("ai", extensions["ai"], {"url": "http://localhost:11434/v1/messages"})
     expect("apps", extensions["apps"], {
@@ -225,7 +228,7 @@ pkgs.runCommand "kotodama-home-manager-options-test"
         "rates_url": "http://localhost:8080/latest",
         "decimal_separator": "comma",
     })
-    expect("clipboard", extensions["clipboard"], {"max_entries": 50, "max_age_days": 0.5, "prefix": ""})
+    expect("clipboard", extensions["clipboard"], {"max_entries": 50, "max_age_days": 0.5, "in_search": True})
     expect("emoji", extensions["emoji"], {"skin_tone": "medium-dark", "prefix": "e"})
     expect("folders", extensions["folders"], {
         "folders": [
@@ -239,6 +242,8 @@ pkgs.runCommand "kotodama-home-manager-options-test"
         "file_manager": ["nautilus"],
         "copy_path": ["wl-copy"],
     })
+    expect("system", extensions["system"], {"in_search": False})
+    expect("hyprland", extensions["hyprland"], {"prefix": "hypr"})
     expect("web-search", extensions["web-search"], {
         "engines": [{"name": "Kagi", "url": "https://kagi.com/search?q={query}"}],
     })

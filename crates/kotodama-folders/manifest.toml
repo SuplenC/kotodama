@@ -4,3 +4,10 @@
 name = "folders"
 description = "Projects and scripts, from the folders named in the config"
 command = ["./kotodama-folders"]
+prefix = "projects"
+title = "Projects"
+icon = "folder-development"
+about = "The projects and scripts in the folders the config names. Enter opens a project; Tab shows what else it can do."
+examples = [
+    { query = "kotodama", result = "The project, to open" },
+]

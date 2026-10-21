@@ -251,6 +251,7 @@ fn item(id: String, title: String, url: String) -> Item {
         keywords: Vec::new(),
         actions: vec![Action::new(OPEN, "Open")],
         hidden: false,
+        app_only: false,
     }
 }
 

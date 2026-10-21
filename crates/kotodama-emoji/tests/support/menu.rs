@@ -35,8 +35,9 @@ impl Menu {
     }
 
     /// As [`Menu::start`], knowing the emoji are indexed once `ready` finds
-    /// any: a config that moves them out from behind their Prefix needs
-    /// another query.
+    /// any: a config that puts them in the search needs another query. The
+    /// menu opens in the emoji app, as `kotodama open --prefix emoji` does,
+    /// so a query that starts with `emoji ` searches them alone.
     pub fn start_with(config: &str, ready: &str) -> Self {
         let dir = tempfile::tempdir().expect("make the Daemon's dir");
         let path = |sub: &str| dir.path().join(sub);
@@ -69,6 +70,12 @@ impl Menu {
             ui,
             shown: 0,
         };
+        menu.ui
+            .send(&FromFrontEnd::Open {
+                query: "emoji ".into(),
+                view: None,
+            })
+            .expect("open the emoji app");
         // The Results change once the Items are indexed; from then on each
         // query has one answer.
         let started = Instant::now();

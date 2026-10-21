@@ -581,6 +581,7 @@ fn item(kind: ItemKind) -> Item {
         keywords: vec!["browser".into()],
         actions: vec![action()],
         hidden: true,
+        app_only: true,
     }
 }
 
@@ -802,6 +803,13 @@ fn to_front_end() -> Vec<ToFrontEnd> {
                 prefix: "emoji".into(),
                 title: "Emoji".into(),
                 icon: Some("face-smile".into()),
+                intro: Some(Intro {
+                    about: "Emoji and symbols, typed where you were.".into(),
+                    examples: vec![Example {
+                        query: "fire".into(),
+                        result: "🔥".into(),
+                    }],
+                }),
             }),
         },
         ToFrontEnd::Status {

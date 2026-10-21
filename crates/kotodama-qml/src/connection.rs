@@ -30,7 +30,7 @@ const PUSH_AFTER_POP: Duration = Duration::from_millis(16);
 /// What the connection hands the Qt thread.
 pub enum Update {
     Connected(Writer),
-    /// The Results, their version, and the Prefix the query is behind.
+    /// The Results, their version, and the app the query is in.
     Rows(u32, Vec<Row>, Option<Scope>),
     Down(Vec<String>),
     Close,
@@ -40,7 +40,7 @@ pub enum Update {
     },
     Toggle,
     ActionFailed(String),
-    /// The Daemon replaces the query, as running a Prefix's entry Item does.
+    /// The Daemon replaces the query, as running an app's entry Item does.
     SetQuery(String),
     PushView {
         extension: String,

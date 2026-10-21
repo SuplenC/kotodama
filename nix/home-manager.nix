@@ -17,23 +17,25 @@ let
   toml = pkgs.formats.toml { };
   ai = cfg.extensions.ai;
   # `[extensions.ai]`: only what is set, so the rest keeps the Extension's defaults.
-  aiSettings = lib.filterAttrs (_: value: value != null) {
-    api_key_command =
-      if ai.apiKeyFile != null then
-        [
-          "${pkgs.coreutils}/bin/cat"
-          ai.apiKeyFile
-        ]
-      else
-        ai.apiKeyCommand;
-    inherit (ai)
-      url
-      model
-      effort
-      prefix
-      ;
-    debounce_ms = ai.debounceMs;
-  };
+  aiSettings = lib.filterAttrs (_: value: value != null) (
+    {
+      api_key_command =
+        if ai.apiKeyFile != null then
+          [
+            "${pkgs.coreutils}/bin/cat"
+            ai.apiKeyFile
+          ]
+        else
+          ai.apiKeyCommand;
+      inherit (ai)
+        url
+        model
+        effort
+        ;
+      debounce_ms = ai.debounceMs;
+    }
+    // appSettings ai
+  );
   # A setting that, unset, is left out of the config.
   optional =
     type: description:
@@ -42,16 +44,28 @@ let
       default = null;
       inherit description;
     };
-  # `prefix`, the Daemon's own key in every `[extensions.<name>]`. `unset`
-  # says what the Extension's Manifest gives.
-  prefix =
-    unset:
-    optional (lib.types.strMatching "[^[:space:]]*") ''
-      `prefix`: the word that puts the Extension's Items behind it, out of the
-      search: the search shows one entry Item for the Extension, and
-      `<prefix> <query>` searches its Items alone. `""` puts them back in the
-      search. Unset, ${unset}.
+  # `prefix` and `in_search`, the Daemon's own keys in every
+  # `[extensions.<name>]`. `word` and `searched` say what the Extension's
+  # Manifest gives.
+  app = word: searched: {
+    prefix = optional (lib.types.strMatching "[^[:space:]]+") ''
+      `prefix`: the word that names the Extension's app. Typing it shows the
+      app's entry Item, and Tab or Enter on it enters the app, where the query
+      searches the Extension's Items alone. A word another app has already
+      leaves the app on the Extension's name. Unset, ${word}.
     '';
+    inSearch = optional lib.types.bool ''
+      `in_search`: whether the search shows all the Extension's Items too,
+      `true`, or none of them, `false`, and only its app does. Unset,
+      ${searched}.
+    '';
+  };
+  # The `[extensions.<name>]` keys of `app`, as set.
+  appSettings = options: {
+    inherit (options) prefix;
+    in_search = options.inSearch;
+  };
+  webSearch = app "`web`" "true";
   # The table's settings that are set; the rest keep their defaults.
   set = lib.filterAttrs (_: value: value != null);
   # A list of tables, as the TOML has it: each without its unset settings.
@@ -76,42 +90,50 @@ let
     quicklink_defaults = set { inherit (cfg.quicklinkDefaults) opener; };
     extensions = nonEmpty {
       ai = aiSettings;
-      apps = set {
-        inherit (ext.apps)
-          terminal
-          hidden
-          names
-          prefix
-          ;
-        withdraw_within = ext.apps.withdrawWithin;
-      };
-      calculator = set {
-        inherit (ext.calculator) network prefix;
-        rates_url = ext.calculator.ratesUrl;
-        decimal_separator = ext.calculator.decimalSeparator;
-      };
-      clipboard = set {
-        inherit (ext.clipboard) prefix;
-        max_entries = ext.clipboard.maxEntries;
-        max_age_days = ext.clipboard.maxAgeDays;
-      };
-      emoji = set {
-        inherit (ext.emoji) prefix;
-        skin_tone = ext.emoji.skinTone;
-      };
-      folders = set {
-        folders = tables ext.folders.folders;
-        inherit (ext.folders)
-          terminal
-          open
-          shell
-          lazygit
-          prefix
-          ;
-        file_manager = ext.folders.fileManager;
-        copy_path = ext.folders.copyPath;
-      };
-      web-search = set { inherit (ext.web-search) engines prefix; };
+      apps = set (
+        {
+          inherit (ext.apps)
+            terminal
+            hidden
+            names
+            ;
+          withdraw_within = ext.apps.withdrawWithin;
+        }
+        // appSettings ext.apps
+      );
+      calculator = set (
+        {
+          inherit (ext.calculator) network;
+          rates_url = ext.calculator.ratesUrl;
+          decimal_separator = ext.calculator.decimalSeparator;
+        }
+        // appSettings ext.calculator
+      );
+      clipboard = set (
+        {
+          max_entries = ext.clipboard.maxEntries;
+          max_age_days = ext.clipboard.maxAgeDays;
+        }
+        // appSettings ext.clipboard
+      );
+      emoji = set ({ skin_tone = ext.emoji.skinTone; } // appSettings ext.emoji);
+      folders = set (
+        {
+          folders = tables ext.folders.folders;
+          inherit (ext.folders)
+            terminal
+            open
+            shell
+            lazygit
+            ;
+          file_manager = ext.folders.fileManager;
+          copy_path = ext.folders.copyPath;
+        }
+        // appSettings ext.folders
+      );
+      web-search = set ({ inherit (ext.web-search) engines; } // appSettings ext.web-search);
+      system = set (appSettings ext.system);
+      hyprland = set (appSettings ext.hyprland);
     };
   };
   # Without its empty tables, so options left unset write nothing.
@@ -267,8 +289,8 @@ in
         starting has its pick taken back out of the History. 0 never does; at
         most 30. Unset, 5.
       '';
-      prefix = prefix "none";
-    };
+    }
+    // app "`apps`" "true";
 
     extensions.calculator = {
       network = optional lib.types.bool ''
@@ -286,8 +308,8 @@ in
             "comma"
           ])
           "`decimal_separator`: how decimals are written, `dot` (3.5) or `comma` (3,5); the other separator groups thousands. Unset, the locale's.";
-      prefix = prefix "none";
-    };
+    }
+    // app "`calc`" "true";
 
     extensions.clipboard = {
       maxEntries = optional lib.types.ints.positive ''
@@ -296,8 +318,8 @@ in
       maxAgeDays = optional lib.types.numbers.positive ''
         `max_age_days`: entries older than this many days go. Unset, 7.
       '';
-      prefix = prefix "none";
-    };
+    }
+    // app "`clipboard`" "false";
 
     extensions.emoji = {
       skinTone = optional (lib.types.enum [
@@ -307,8 +329,8 @@ in
         "medium-dark"
         "dark"
       ]) "`skin_tone`: the skin tone \"Type\" and \"Copy\" use. Unset, emoji are their default yellow.";
-      prefix = prefix "`emoji`: `emoji fire` finds 🔥";
-    };
+    }
+    // app "`emoji`" "false";
 
     extensions.folders = {
       folders = optional (lib.types.listOf (
@@ -362,8 +384,8 @@ in
       copyPath = optional command ''
         `copy_path`: what "Copy Path" runs. Unset, `[ "wl-copy" "{path}" ]`.
       '';
-      prefix = prefix "none";
-    };
+    }
+    // app "`projects`" "true";
 
     extensions.web-search.engines =
       optional
@@ -382,7 +404,10 @@ in
           }
         ))
         "`engines`: searched in this order; an empty list leaves only addresses. Unset, DuckDuckGo, Google and Wikipedia.";
-    extensions.web-search.prefix = prefix "none";
+    extensions.web-search.prefix = webSearch.prefix;
+    extensions.web-search.inSearch = webSearch.inSearch;
+    extensions.system = app "`system`" "true";
+    extensions.hyprland = app "`hyprland`" "true, but for the binds, which only its app shows";
 
     # The AI Extension's `[extensions.ai]`, merged into `settings`. With neither
     # a key nor `url` set, the Extension is off.
@@ -430,8 +455,8 @@ in
         `debounce_ms`: how long, in milliseconds, a `?` query must be still
         before it is sent. Unset, 600.
       '';
-      prefix = prefix "none";
-    };
+    }
+    // app "`ai`" "true";
 
     qmlImportPath = lib.mkOption {
       type = lib.types.str;

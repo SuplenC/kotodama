@@ -69,7 +69,7 @@ pub struct Usage {
     /// How many to show.
     pub wanted: usize,
     /// By Extension, whether its Indexed items are left out of the ranking:
-    /// those behind a Prefix, for the Empty query.
+    /// those of the Segments the search leaves to an app, for the Empty query.
     pub left_out: Vec<bool>,
 }
 

@@ -40,6 +40,7 @@ fn items() -> Vec<Item> {
             identity: Some("app:firefox.desktop".into()),
             keywords: vec!["browser".into(), "web".into()],
             hidden: false,
+            app_only: false,
             actions: vec![
                 action("open"),
                 Action {
@@ -58,6 +59,7 @@ fn items() -> Vec<Item> {
             identity: None,
             keywords: vec![],
             hidden: false,
+            app_only: false,
             actions: vec![Action {
                 arguments: vec![
                     Argument {
@@ -86,6 +88,7 @@ fn items() -> Vec<Item> {
             identity: None,
             keywords: vec![],
             hidden: false,
+            app_only: false,
             actions: vec![action("open")],
         },
     ]
@@ -380,6 +383,13 @@ fn to_front_end_messages() -> Vec<ToFrontEnd> {
                 prefix: "emoji".into(),
                 title: "Emoji".into(),
                 icon: Some("face-smile".into()),
+                intro: Some(Intro {
+                    about: "Emoji and symbols, typed where you were.".into(),
+                    examples: vec![Example {
+                        query: "fire".into(),
+                        result: "🔥".into(),
+                    }],
+                }),
             }),
         },
         ToFrontEnd::Results {

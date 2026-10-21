@@ -64,9 +64,10 @@ fn fingerprint(item: &Item) -> u64 {
         keywords,
         hidden,
         actions,
+        app_only,
     } = item;
     (
-        id, kind, identity, title, subtitle, icon, keyword, keywords, hidden,
+        id, kind, identity, title, subtitle, icon, keyword, keywords, hidden, app_only,
     )
         .hash(&mut hasher);
     for Action {
@@ -108,6 +109,7 @@ mod tests {
             keyword: None,
             keywords: Vec::new(),
             hidden: false,
+            app_only: false,
             actions: vec![Action::new("open", "Open")],
         }
     }

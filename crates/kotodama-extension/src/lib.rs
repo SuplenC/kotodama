@@ -60,6 +60,7 @@
 //!                     keyword: None,
 //!                     keywords: Vec::new(),
 //!                     hidden: false,
+//!                     app_only: false,
 //!                     actions: Vec::new(),
 //!                 };
 //!                 sent.publish(&mut writer, [item])?;

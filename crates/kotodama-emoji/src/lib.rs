@@ -168,6 +168,7 @@ impl Character {
             keywords: self.keywords().map(str::to_owned).collect(),
             actions,
             hidden: false,
+            app_only: false,
         }
     }
 }

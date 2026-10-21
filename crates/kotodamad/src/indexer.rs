@@ -1,7 +1,6 @@
 //! Indexing off the keystroke path (ADR 0017): Extensions' changes to their
 //! Items are made on a thread of their own, into a new version of each
-//! changed Extension's Segment, which the Daemon puts in whole between two
-//! events. A keystroke never waits for a change, and never sees half of one.
+//! changed Segment, which the Daemon puts in whole between two events. A keystroke never waits for a change, and never sees half of one.
 //!
 //! Changes that queue up while the thread works are made together, one new
 //! version of each Segment for all of them.
@@ -22,17 +21,20 @@ use std::thread;
 use crate::clock::{DAY_SECS, When};
 use crate::daemon::{Event, ExtensionId};
 use crate::history::{self, Habit};
-use crate::index::{self, Read, Slot, SlotHasher};
+use crate::index::{self, Index, Read, SIDES, Slot, SlotHasher};
 use crate::most_used::{Ahead, Usage, Versions};
 use crate::segment::{Edit, Row, Segment};
 
-/// A new version of one Extension's Segment, for the Daemon to put in.
+/// A new version of an Extension's Segments, those that changed, for the
+/// Daemon to put in together: an Item moved from one to the other is never
+/// in neither, nor in both.
 pub struct Indexed {
     pub(crate) extension: ExtensionId,
-    /// The last change it holds.
+    /// The last change they hold.
     pub(crate) change: u64,
-    pub(crate) segment: Arc<Segment>,
-    /// Items of it to keep resident, read since the last version.
+    /// Each with where it goes in the Index.
+    pub(crate) segments: Vec<(usize, Arc<Segment>)>,
+    /// Items of them to keep resident, read since the last version.
     pub(crate) reads: Vec<Read>,
 }
 
@@ -245,13 +247,14 @@ struct Keeping {
 }
 
 impl Keeping {
-    /// Reads the Items to keep in the Extension's Segment that moved since
-    /// they were sent.
-    fn read(&mut self, segments: &[Arc<Segment>], extension: ExtensionId, reads: &mut Vec<Read>) {
-        let Some(segment) = segments.get(extension.0) else {
+    /// Reads the Items to keep in Segment `at` that moved since they were
+    /// sent.
+    fn read(&mut self, segments: &[Arc<Segment>], at: usize, reads: &mut Vec<Read>) {
+        let Some(segment) = segments.get(at) else {
             return;
         };
-        let n = extension.0 as u32;
+        let n = at as u32;
+        let extension = ExtensionId(at / SIDES);
         let keyed = segment.keyed_rows().copied();
         let aliased = self
             .aliases
@@ -285,8 +288,8 @@ impl Keeping {
     /// sent.
     fn read_all(&mut self, segments: &[Arc<Segment>]) -> Vec<Read> {
         let mut reads = Vec::new();
-        for n in 0..segments.len() {
-            self.read(segments, ExtensionId(n), &mut reads);
+        for at in 0..segments.len() {
+            self.read(segments, at, &mut reads);
         }
         reads
     }
@@ -300,8 +303,9 @@ fn work(queue: Receiver<Job>, dir: Option<Arc<Path>>, mut send: impl FnMut(Event
     let mut segments: Vec<Arc<Segment>> = Vec::new();
     let mut keeping = Keeping::default();
     while let Ok(first) = queue.recv() {
-        // By Extension, the last change each new version holds.
-        let mut changed: Vec<(ExtensionId, u64)> = Vec::new();
+        // By Extension, the last change its new version holds, and which of
+        // its Segments changed.
+        let mut changed: Vec<(ExtensionId, u64, [bool; SIDES])> = Vec::new();
         let mut plan = None;
         let mut pinned = false;
         for job in std::iter::once(first).chain(queue.try_iter()) {
@@ -311,26 +315,48 @@ fn work(queue: Receiver<Job>, dir: Option<Arc<Path>>, mut send: impl FnMut(Event
                     change,
                     edit,
                 } => {
-                    if segments.len() <= extension.0 {
-                        segments.resize_with(extension.0 + 1, empty);
+                    let places = Index::segments_of(extension);
+                    if segments.len() < places.end {
+                        segments.resize_with(places.end, empty);
                     }
-                    // Copies the version the Daemon has, once for all the
-                    // changes to it waiting.
-                    let segment = Arc::make_mut(&mut segments[extension.0]);
-                    match changed.iter_mut().find(|(ext, _)| *ext == extension) {
-                        Some((_, last)) => *last = change,
+                    let at = places.start;
+                    let edits = index::split(edit, [&segments[at], &segments[at + 1]]);
+                    // A change that touches neither Segment still makes a
+                    // version, of the first, so whoever waits for it hears.
+                    let untouched = edits.iter().all(Vec::is_empty);
+                    let n = match changed.iter().position(|(ext, ..)| *ext == extension) {
+                        Some(n) => n,
                         None => {
+                            changed.push((extension, change, [false; SIDES]));
+                            changed.len() - 1
+                        }
+                    };
+                    let (_, last, sides) = &mut changed[n];
+                    *last = change;
+                    for (side, edits) in edits.into_iter().enumerate() {
+                        if edits.is_empty() && !(untouched && side == 0) {
+                            continue;
+                        }
+                        // Copies the version the Daemon has, once for all
+                        // the changes to it waiting.
+                        let segment = Arc::make_mut(&mut segments[at + side]);
+                        if !sides[side] {
                             segment.next_version();
-                            changed.push((extension, change));
+                            sides[side] = true;
+                        }
+                        for edit in edits {
+                            segment.edit(edit);
                         }
                     }
-                    segment.edit(edit);
                 }
                 Job::Clear(extension) => {
-                    if let Some(segment) = segments.get_mut(extension.0) {
-                        *segment = empty();
+                    let places = Index::segments_of(extension);
+                    for at in places.clone() {
+                        if let Some(segment) = segments.get_mut(at) {
+                            *segment = empty();
+                        }
                     }
-                    changed.retain(|(ext, _)| *ext != extension);
+                    changed.retain(|(ext, ..)| *ext != extension);
                     keeping.sent.retain(|slot, _| slot.extension() != extension);
                 }
                 Job::Plan(next) => plan = Some(next),
@@ -340,14 +366,19 @@ fn work(queue: Receiver<Job>, dir: Option<Arc<Path>>, mut send: impl FnMut(Event
                 }
             }
         }
-        for (extension, change) in changed {
-            let segment = Arc::clone(&segments[extension.0]);
+        for (extension, change, sides) in changed {
+            let mut versions = Vec::new();
             let mut reads = Vec::new();
-            keeping.read(&segments, extension, &mut reads);
+            for at in Index::segments_of(extension) {
+                if sides[at % SIDES] {
+                    versions.push((at, Arc::clone(&segments[at])));
+                    keeping.read(&segments, at, &mut reads);
+                }
+            }
             if !send(Event::Indexed(Indexed {
                 extension,
                 change,
-                segment,
+                segments: versions,
                 reads,
             })) {
                 return;
@@ -388,6 +419,7 @@ mod tests {
             keyword: None,
             keywords: vec![],
             hidden: false,
+            app_only: false,
             actions: vec![Action {
                 id: "open".into(),
                 title: "Open".into(),
@@ -395,6 +427,25 @@ mod tests {
                 arguments: vec![],
             }],
         }
+    }
+
+    /// Each version built, as where each Segment in it goes and the change
+    /// it holds.
+    fn versions(built: &[Indexed]) -> Vec<(usize, u64)> {
+        built
+            .iter()
+            .flat_map(|indexed| indexed.segments.iter().map(|(at, _)| (*at, indexed.change)))
+            .collect()
+    }
+
+    /// The Segment at `at` in what was built last.
+    fn segment(built: &[Indexed], at: usize) -> &Segment {
+        built
+            .iter()
+            .rev()
+            .find_map(|indexed| indexed.segments.iter().find(|(n, _)| *n == at))
+            .map(|(_, segment)| &**segment)
+            .unwrap()
     }
 
     /// Runs the thread's work over what is queued already.
@@ -430,12 +481,8 @@ mod tests {
             edit(0, 3, Edit::Add(vec![item("c")])),
             edit(0, 4, Edit::Remove(vec!["a".into()])),
         ]);
-        let versions: Vec<(usize, u64)> = built
-            .iter()
-            .map(|indexed| (indexed.extension.0, indexed.change))
-            .collect();
-        assert_eq!(versions, [(0, 4), (1, 2)]);
-        let first = &built[0].segment;
+        assert_eq!(versions(&built), [(0, 4), (2, 2)]);
+        let first = &built[0].segments[0].1;
         assert_eq!(first.find("a"), None);
         assert!(first.find("c").is_some());
     }
@@ -447,7 +494,7 @@ mod tests {
             edit(0, 2, Edit::Remove(vec!["a".into()])),
             edit(0, 3, Edit::Add(vec![item("c")])),
         ]);
-        let segment = &built[0].segment;
+        let segment = &built[0].segments[0].1;
         assert_eq!(segment.find("b"), Some(1));
         assert_eq!(segment.find("c"), Some(2));
     }
@@ -568,6 +615,50 @@ mod tests {
         let shown = [0, 1, 2, 3].map(|row| Source::Indexed(slot(row)));
         assert_eq!(ranked, [shown, shown]);
         assert_eq!(hot, slots(&[0, 1, 2, 3]));
+    }
+
+    fn app_only(id: &str) -> Item {
+        Item {
+            app_only: true,
+            ..item(id)
+        }
+    }
+
+    #[test]
+    fn an_extensions_items_go_to_the_segment_their_visibility_names() {
+        let built = built(vec![edit(1, 1, Edit::Add(vec![item("a"), app_only("b")]))]);
+
+        assert_eq!(versions(&built), [(2, 1), (3, 1)]);
+        assert!(segment(&built, 2).find("a").is_some());
+        assert_eq!(segment(&built, 2).find("b"), None);
+        assert!(segment(&built, 3).find("b").is_some());
+    }
+
+    #[test]
+    fn an_item_that_changes_visibility_leaves_its_old_segment() {
+        let built = built(vec![
+            edit(0, 1, Edit::Add(vec![item("a"), item("b")])),
+            edit(0, 2, Edit::Add(vec![app_only("a")])),
+        ]);
+
+        assert_eq!(built.len(), 1, "both Segments in one version");
+        assert_eq!(segment(&built, 0).find("a"), None);
+        assert!(segment(&built, 0).find("b").is_some());
+        assert!(segment(&built, 1).find("a").is_some());
+    }
+
+    #[test]
+    fn a_change_to_one_segment_leaves_the_other_alone() {
+        let built = built(vec![edit(0, 1, Edit::Add(vec![app_only("b")]))]);
+
+        assert_eq!(versions(&built), [(1, 1)]);
+    }
+
+    #[test]
+    fn a_change_that_touches_nothing_still_makes_a_version() {
+        let built = built(vec![edit(0, 1, Edit::Remove(vec!["gone".into()]))]);
+
+        assert_eq!(versions(&built), [(0, 1)]);
     }
 
     #[test]

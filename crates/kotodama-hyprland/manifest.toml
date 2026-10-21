@@ -4,3 +4,13 @@
 name = "hyprland"
 description = "Hyprland's open windows, to focus, close, move or float, and its keyboard shortcuts, searchable and listed by modifier"
 command = ["./kotodama-hyprland"]
+# The windows are in the search; the keyboard shortcuts in its app alone.
+prefix = "hyprland"
+title = "Hyprland"
+icon = "preferences-system-windows"
+about = "The open windows, to focus, close, move or float, and every keyboard shortcut, to look up or run."
+examples = [
+    { query = "firefox", result = "Focus its window" },
+    { query = "screenshot", result = "The bind that takes one" },
+]
+commands = ["shortcuts"]

@@ -162,6 +162,7 @@ impl Power {
             keyword: None,
             keywords: self.keywords().iter().map(|&keyword| keyword.to_owned()).collect(),
             hidden: false,
+            app_only: false,
             actions: vec![Action::new(RUN, self.title())],
         }
     }

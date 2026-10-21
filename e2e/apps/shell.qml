@@ -1,6 +1,6 @@
-// The default menu, logging the Extension its search is behind and which
-// Extension owns each row, so the test can tell a search behind a Prefix
-// from the whole search.
+// The default menu, logging the app its search is in, its intro card and
+// which Extension owns each row, so the test can tell a search in an app from
+// the whole search.
 import QtQuick
 import Quickshell
 import Kotodama
@@ -34,6 +34,9 @@ ShellRoot {
             }
             function onScopeChanged() {
                 console.log("scope: [" + menu.search.scope + "]");
+            }
+            function onIntroAboutChanged() {
+                console.log("intro: [" + menu.search.introAbout + "]");
             }
             function onQueryChanged() {
                 console.log("query: [" + menu.search.query + "]");

@@ -3,11 +3,15 @@
 name = "shell-example"
 description = "Bookmarks from the config, and \"Paste path\" on every project"
 command = ["./extension.sh"]
-# Uncommented, these put every Item behind the word `shell`: the search shows
-# one "Shell example" Item in their place, and `shell timer 5` searches them
-# alone. The user's `[extensions.shell-example] prefix` wins over it.
-# prefix = "shell"
-# title = "Shell example"
+# Its app: the search shows a "Shell example" Item, and Tab on it enters an
+# app where the query searches these Items alone. Its word is the name unless
+# `prefix` says otherwise; the user's `[extensions.shell-example] prefix` wins
+# over it. Uncommented, `in_search = false` keeps the Items in the app alone.
+prefix = "shell"
+title = "Shell example"
+about = "Bookmarks from the config, and a timer."
+examples = [{ query = "timer 5", result = "A five-second timer" }]
+# in_search = false
 
 # Offered on every `project` Item, whichever Extension added it.
 [[contributed_actions]]

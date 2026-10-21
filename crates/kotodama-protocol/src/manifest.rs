@@ -2,7 +2,7 @@
 
 use serde::Deserialize;
 
-use crate::{Action, Argument, Error, KindName, is_valid_name};
+use crate::{Action, Argument, Error, Example, KindName, is_valid_name};
 
 /// What an Extension is, how to start it, and what it contributes.
 ///
@@ -10,9 +10,13 @@ use crate::{Action, Argument, Error, KindName, is_valid_name};
 /// name = "kubaos"
 /// command = ["bin/kubaos-kotodama"]
 /// action_catalog = true
-/// # Its Items are searched only behind `suite`, as in `suite go`.
+/// # Its app: entered by `suite`, where `suite go` searches its Items alone.
 /// prefix = "suite"
 /// title = "KubaOS suites"
+/// about = "Switches the Go, Rust and Node versions of a project."
+/// examples = [{ query = "go 1.23", result = "Go 1.23 in this project" }]
+/// # Its Items show inside its app alone, never in the search.
+/// in_search = false
 ///
 /// [live_query]
 /// prefixes = ["suite "]
@@ -39,16 +43,29 @@ pub struct Manifest {
     pub contributed_actions: Vec<ContributedAction>,
     /// Whether the Extension may read the Action catalog.
     pub action_catalog: bool,
-    /// The Prefix its Items are searched behind, unless the user's config
-    /// says otherwise: one word, such as `emoji`. The search leaves them out
-    /// and shows an entry Item instead; `emoji fire` searches them alone.
+    /// The word that enters its app, unless the user's config says
+    /// otherwise: one word, such as `emoji`. `emoji fire` searches its Items
+    /// alone. The `name` stands in without one.
     pub prefix: Option<String>,
     /// The Extension's name as the user reads it, such as `Emoji`: the title
-    /// of its entry Item and of the chip that shows a search is behind its
-    /// Prefix. The `name` stands in without one.
+    /// of its app's entry Item and of the chip that shows the search is in
+    /// its app. The `name` stands in without one.
     pub title: Option<String>,
-    /// The entry Item's icon: a freedesktop icon name or a path.
+    /// The app's icon: a freedesktop icon name or a path.
     pub icon: Option<String>,
+    /// What the app does and how, shown on entering it, before anything is
+    /// typed. The `description` stands in without one.
+    pub about: Option<String>,
+    /// A few queries to type in the app and what each gives, shown under
+    /// `about`.
+    pub examples: Vec<Example>,
+    /// The ids of the Items that are the app's commands, such as one that
+    /// opens a View, listed first on entering it.
+    pub commands: Vec<String>,
+    /// Whether its Items and Live queries are in the search, unless the
+    /// user's config says otherwise. `false` keeps all of them inside its
+    /// app; with `true`, an Item marked `app_only` still is.
+    pub in_search: bool,
 }
 
 impl Manifest {
@@ -57,7 +74,7 @@ impl Manifest {
     }
 }
 
-/// Whether `prefix` can be a Prefix: one word, with no whitespace in it or
+/// Whether `prefix` can be an app's word: one word, with no whitespace in it or
 /// around it.
 pub fn is_valid_prefix(prefix: &str) -> bool {
     !prefix.is_empty() && !prefix.contains(char::is_whitespace)
@@ -117,6 +134,20 @@ struct ManifestToml {
     title: Option<String>,
     #[serde(default)]
     icon: Option<String>,
+    #[serde(default)]
+    about: Option<String>,
+    #[serde(default)]
+    examples: Vec<Example>,
+    #[serde(default)]
+    commands: Vec<String>,
+    #[serde(default = "in_search_by_default")]
+    in_search: bool,
+}
+
+/// An Extension's Items are in the search unless its Manifest says
+/// otherwise.
+fn in_search_by_default() -> bool {
+    true
 }
 
 impl TryFrom<ManifestToml> for Manifest {
@@ -135,7 +166,7 @@ impl TryFrom<ManifestToml> for Manifest {
             && !is_valid_prefix(prefix)
         {
             return Err(format!(
-                "`prefix = {prefix:?}` isn't one word; leave `prefix` out for none"
+                "`prefix = {prefix:?}` isn't one word; leave `prefix` out for the Extension's name"
             ));
         }
         Ok(Manifest {
@@ -148,6 +179,10 @@ impl TryFrom<ManifestToml> for Manifest {
             prefix: toml.prefix,
             title: toml.title,
             icon: toml.icon,
+            about: toml.about,
+            examples: toml.examples,
+            commands: toml.commands,
+            in_search: toml.in_search,
         })
     }
 }

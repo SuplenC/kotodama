@@ -27,6 +27,8 @@ pub enum ToExtension {
         /// The query, without the prefix that routed it here.
         query: String,
         /// The Manifest prefix the query started with, if a prefix routed it.
+        /// In the Extension's app, which routes every query to it, its first
+        /// prefix, as though typed.
         prefix: Option<String>,
     },
     /// The query changed or the menu closed: results for `id` are no longer

@@ -18,6 +18,7 @@ fn note(actions: Vec<Action>) -> Item {
         identity: None,
         keywords: Vec::new(),
         hidden: false,
+        app_only: false,
         actions,
     }
 }

@@ -1,6 +1,7 @@
 //! The Kotodama Daemon. It owns the index and the ranking, runs the Extensions,
 //! and serves Front ends on a Unix socket.
 
+mod apps;
 mod arguments;
 pub mod clock;
 pub mod config;
@@ -22,7 +23,6 @@ mod open_view;
 pub mod paths;
 mod payload;
 mod pick;
-mod prefix;
 pub mod rank;
 mod reserved;
 mod segment;

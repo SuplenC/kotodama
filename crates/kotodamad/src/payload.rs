@@ -179,6 +179,7 @@ mod tests {
             keyword: None,
             keywords: vec!["more".into()],
             hidden: false,
+            app_only: false,
             actions: vec![Action {
                 id: "open".into(),
                 title: "Open".into(),

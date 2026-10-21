@@ -9,7 +9,7 @@
 //! ```
 //!
 //! `--view <extension>/<item>` opens the menu on the View that Item's primary Action pushes.
-//! `--prefix <prefix>` opens it behind an Extension's Prefix, searching that Extension alone, as
+//! `--prefix <prefix>` opens it in the app with that word, searching that Extension alone, as
 //! `--query "<prefix> "` does.
 //!
 //! # Owns

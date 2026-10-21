@@ -20,9 +20,10 @@ ln -s "$target/debug/kotodama-clipboard" "$ext/kotodama-clipboard"
 front_end="$target/debug/examples/front-end"
 copy="$target/debug/examples/copy"
 
-# results <query>: the clipboard's Results for a query, one per line.
+# results <query>: the clipboard's Results for a query in its app, where
+# what was copied is, one per line.
 results() {
-    "$front_end" "$1" 2>/dev/null | awk -F'\t' '$1 == "clipboard" { print $3 }'
+    "$front_end" --app "clipboard $1" 2>/dev/null | awk -F'\t' '$1 == "clipboard" { print $3 }'
 }
 # wait_for_result <query> <title>: waits until the query finds the title.
 wait_for_result() {
@@ -89,24 +90,25 @@ press() {
     wait_for_log quickshell.log "${!#}" "$mark"
 }
 mark=$(log_lines quickshell.log)
-"$target/debug/kotodama" open --query "image 320"
+"$target/debug/kotodama" open --prefix clipboard --query "image 320"
 wait_for_log quickshell.log "focused: true" "$mark"
 press -M ctrl -k k -m ctrl "actions: Paste, Copy to Clipboard, Show Details, Delete from History"
 press -k Down -k Down -k Return "view: detail Copied Image"
 expect_screen detail.png
 press -k Escape "view: search"
-press -k Escape "visible: false"
+# The first Esc leaves the clipboard's app, the next closes the menu.
+press -k Escape -k Escape "visible: false"
 
 # The primary Action pastes into the window that has focus.
 spawn quickshell --path ../type-and-paste/client.qml
 wait_for_log quickshell.log "ready"
-"$front_end" --run "first copy"
+"$front_end" --app --run "clipboard first copy"
 wait_for_log quickshell.log "typed: first copy"
 
 # Copy to Clipboard hands the clip to the Daemon, which sets the clipboard:
 # the next Ctrl+V pastes it.
 mark=$(log_lines quickshell.log)
-"$target/debug/kotodama" open --query "after the secret"
+"$target/debug/kotodama" open --prefix clipboard --query "after the secret"
 wait_for_log quickshell.log "focused: true" "$mark"
 press -M ctrl -k k -m ctrl "actions: Paste, Copy to Clipboard, Show Details, Delete from History"
 copied=$(log_lines kotodamad.log)

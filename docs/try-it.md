@@ -224,6 +224,13 @@ Some need extras: the shell example Extension for the Views checks (link `exampl
 - [ ] "Reboot" asks first; Esc leaves it, Enter reboots.
 - [ ] "Hibernate" is listed only where `busctl call org.freedesktop.login1 /org/freedesktop/login1 org.freedesktop.login1.Manager CanHibernate` says `yes`.
 
+### Apps
+
+- [ ] `projects`, then Tab: the chip and the intro card show in the same frame as the projects, with no flicker of the whole search's rows.
+- [ ] In the Hyprland app, `screenshot` finds the bind; in the search it finds no bind, only windows.
+- [ ] Esc in an app goes back to the search and keeps the menu open; a second Esc closes it.
+- [ ] `[extensions.clipboard] in_search = true` puts the clips back in the search after a config reload.
+
 ### Views
 
 - [ ] `kotodama open --view shell-example/bookmarks` opens the shell example's bookmarks; typing filters; Ctrl+K shows contributed Actions; Esc clears, then pops.

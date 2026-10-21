@@ -290,6 +290,23 @@ impl Setup {
         self.buf.len()
     }
 
+    /// `kotodama open --query <query>`: the menu opens on it, in the app
+    /// whose word it starts with.
+    #[allow(dead_code)] // instructions.rs alone
+    pub fn open(&mut self, query: &str) {
+        self.daemon.handle(
+            Event::FromFrontEnd {
+                front_end: COMMAND,
+                message: FromFrontEnd::Open {
+                    query: query.into(),
+                    view: None,
+                },
+            },
+            self.now,
+        );
+        self.results.try_iter().for_each(drop);
+    }
+
     /// `kotodama toggle`: the menu opens on the Empty query.
     #[allow(dead_code)] // query.rs alone
     pub fn toggle(&mut self) {

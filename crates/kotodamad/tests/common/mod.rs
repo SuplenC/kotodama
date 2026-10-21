@@ -134,6 +134,7 @@ pub fn item(id: &str, title: &str, kind: ItemKind) -> Item {
         identity: None,
         keywords: vec![],
         hidden: false,
+        app_only: false,
         actions: vec![Action::new("open", "open")],
     }
 }

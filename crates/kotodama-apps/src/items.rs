@@ -165,6 +165,7 @@ impl Settings {
             keyword: None,
             keywords,
             hidden: false,
+            app_only: false,
             actions,
         }
     }

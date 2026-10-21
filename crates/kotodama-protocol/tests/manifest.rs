@@ -1,4 +1,4 @@
-use kotodama_protocol::{Action, Argument, KindName, Manifest};
+use kotodama_protocol::{Action, Argument, Example, KindName, Manifest};
 
 fn parse(toml: &str) -> Result<Manifest, String> {
     Manifest::from_toml(toml).map_err(|err| err.to_string())
@@ -171,7 +171,7 @@ fn invalid_manifests_are_rejected_with_the_reason() {
 }
 
 #[test]
-fn a_manifest_may_put_its_items_behind_a_prefix_with_an_entry_item() {
+fn a_manifest_describes_its_app() {
     let manifest = parse(
         r#"
         name = "emoji"
@@ -179,6 +179,13 @@ fn a_manifest_may_put_its_items_behind_a_prefix_with_an_entry_item() {
         prefix = "emoji"
         title = "Emoji"
         icon = "face-smile"
+        about = "Emoji and symbols, typed into the window you came from."
+        examples = [
+            { query = "fire", result = "🔥 Fire" },
+            { query = "arrow", result = "→ Rightwards Arrow" },
+        ]
+        commands = ["settings"]
+        in_search = false
         "#,
     )
     .unwrap();
@@ -186,15 +193,38 @@ fn a_manifest_may_put_its_items_behind_a_prefix_with_an_entry_item() {
     assert_eq!(manifest.prefix.as_deref(), Some("emoji"));
     assert_eq!(manifest.title.as_deref(), Some("Emoji"));
     assert_eq!(manifest.icon.as_deref(), Some("face-smile"));
+    assert_eq!(
+        manifest.about.as_deref(),
+        Some("Emoji and symbols, typed into the window you came from.")
+    );
+    assert_eq!(
+        manifest.examples,
+        [
+            Example {
+                query: "fire".into(),
+                result: "🔥 Fire".into()
+            },
+            Example {
+                query: "arrow".into(),
+                result: "→ Rightwards Arrow".into()
+            },
+        ]
+    );
+    assert_eq!(manifest.commands, ["settings"]);
+    assert!(!manifest.in_search);
 }
 
 #[test]
-fn an_extension_without_a_prefix_shows_its_items_in_the_search() {
+fn an_extension_without_app_keys_keeps_its_items_in_the_search() {
     let manifest = parse("name = \"apps\"\ncommand = [\"x\"]").unwrap();
 
     assert_eq!(manifest.prefix, None);
     assert_eq!(manifest.title, None);
     assert_eq!(manifest.icon, None);
+    assert_eq!(manifest.about, None);
+    assert!(manifest.examples.is_empty());
+    assert!(manifest.commands.is_empty());
+    assert!(manifest.in_search);
 }
 
 #[test]

@@ -111,6 +111,7 @@ pub fn history_item() -> Item {
         keyword: None,
         keywords: vec!["paste".to_owned(), "copied".to_owned()],
         hidden: false,
+        app_only: false,
         actions: vec![
             Action::new(OPEN, "Show Clipboard History"),
             Action::new(CLEAR, "Clear Clipboard History"),
@@ -143,6 +144,7 @@ pub fn clip_item(history: &History, entry: &Entry) -> Item {
         keyword: None,
         keywords: Vec::new(),
         hidden: false,
+        app_only: false,
         actions: vec![
             Action::new(PASTE, "Paste"),
             Action::new(COPY, "Copy to Clipboard"),

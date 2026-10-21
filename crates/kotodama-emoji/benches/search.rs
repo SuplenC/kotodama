@@ -16,7 +16,7 @@ mod menu;
 const QUERIES: usize = 2_000;
 /// One frame at 120 Hz.
 const BUDGET: Duration = Duration::from_millis(8);
-/// Typed one letter at a time behind the emoji's Prefix, as a user would.
+/// Typed one letter at a time in the emoji's app, as a user would.
 const TYPED: [&str; 3] = ["emoji thumbs up", "emoji arrow right", "emoji smiling face"];
 
 fn main() {
