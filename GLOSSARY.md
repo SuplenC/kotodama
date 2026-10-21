@@ -21,7 +21,7 @@ An Extension that ships with Kotodama itself, as opposed to one from elsewhere: 
 _Avoid_: Built-in, core extension
 
 **Manifest**:
-The file that declares an Extension: what it is, how to start it, and what it contributes.
+The file that declares an Extension: what it is, how to start it, and what it contributes. An `[extensions.<name>]` table with a `command`, for an Extension that has no Manifest file, holds the same keys.
 _Avoid_: Config, descriptor
 
 **Item**:
@@ -167,6 +167,10 @@ _Avoid_: Directory scanner, path provider
 **Wire format**:
 The encoding the Daemon and one Extension or Front end agree on at the handshake: postcard (Rust peers on the same Protocol version), protobuf, MessagePack or JSON.
 _Avoid_: Codec, serialization, protocol (for the encoding alone)
+
+**Problem**:
+Something wrong that the user can fix, which the Daemon lists for every Front end and `kotodama check` prints: a config file that doesn't parse, a setting that isn't one or has a bad value, a refused Manifest, a keyword two things ask for, or an Extension that can't start or keeps stopping.
+_Avoid_: Error, warning, diagnostic
 
 **Protocol version**:
 The version of the messages a peer was built for, `major.minor`, named in its hello. A minor version only adds; the Daemon speaks every version from 1.0 on and sends a peer nothing its version lacks.

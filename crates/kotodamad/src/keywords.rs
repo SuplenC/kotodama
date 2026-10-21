@@ -38,6 +38,7 @@ use kotodama_extension::url::{self, PLACEHOLDER};
 use kotodama_protocol::{Action, Argument, Item, ItemKind, NamespacedKind, Table, Value};
 
 use crate::conflict::{Conflict, Holder};
+use crate::problem::Report;
 
 /// A keyword that stands for an Item, or for one of its own Actions.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -174,37 +175,41 @@ impl Keywords {
 
 /// The `[aliases]`, `[quicklinks]` and `[quicklink_defaults]` tables of the
 /// merged config.
-pub fn from_config(config: &Table) -> Keywords {
+pub fn from_config(config: &Table, report: &mut Report) -> Keywords {
     let mut keywords = Keywords::default();
     let default_opener = match default_opener(config) {
         Ok(opener) => opener,
         Err(err) => {
-            log::error!("quicklink_defaults: {err}");
+            report.add("quicklink_defaults", err);
             None
         }
     };
-    for (keyword, value) in tables(config, "aliases") {
+    for (keyword, value) in tables(config, "aliases", report) {
         match alias(value) {
             Ok(alias) => {
                 keywords.aliases.insert(keyword.to_lowercase(), alias);
             }
-            Err(err) => log::error!("alias `{keyword}`: {err}"),
+            Err(err) => report.add(format!("aliases.{keyword}"), err),
         }
     }
-    for (keyword, value) in tables(config, "quicklinks") {
+    for (keyword, value) in tables(config, "quicklinks", report) {
         match quicklink(keyword, value, default_opener.as_deref()) {
             Ok(quicklink) => keywords.quicklinks.push(quicklink),
-            Err(err) => log::error!("quicklink `{keyword}`: {err}"),
+            Err(err) => report.add(format!("quicklinks.{keyword}"), err),
         }
     }
     keywords
 }
 
-fn tables<'a>(config: &'a Table, name: &str) -> impl Iterator<Item = (&'a String, &'a Value)> {
+fn tables<'a>(
+    config: &'a Table,
+    name: &str,
+    report: &mut Report,
+) -> impl Iterator<Item = (&'a String, &'a Value)> + use<'a> {
     match config.get(name) {
         Some(Value::Table(table)) => Some(table.iter()),
         Some(_) => {
-            log::error!("`{name}` should be a table");
+            report.add(name, "should be a table");
             None
         }
         None => None,

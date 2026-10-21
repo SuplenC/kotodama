@@ -16,20 +16,25 @@ use std::time::{Duration, Instant};
 
 use kotodama_protocol::*;
 use kotodamad::clock::{Clock, DAY_SECS};
-use kotodamad::daemon::{Daemon, Desktop, Event, ExtensionId, FrontEndId, Launcher, Output};
+use kotodamad::daemon::{Daemon, Desktop, Ended, Event, ExtensionId, FrontEndId, Launcher, Output};
+
 use kotodamad::discovery::Found;
+use kotodamad::engine::DesktopSettings;
 use kotodamad::history::{History, Store};
 use kotodamad::usage::Entry;
 
+/// The runs started and stopped, and what each run started was told to run.
 #[derive(Clone, Default)]
 pub struct Launches(
     pub Rc<RefCell<Vec<(ExtensionId, u64)>>>,
     pub Rc<RefCell<Vec<(ExtensionId, u64)>>>,
+    pub Rc<RefCell<Vec<Found>>>,
 );
 
 impl Launcher for Launches {
-    fn start(&mut self, extension: ExtensionId, generation: u64, _found: &Found) {
+    fn start(&mut self, extension: ExtensionId, generation: u64, found: &Found) {
         self.0.borrow_mut().push((extension, generation));
+        self.2.borrow_mut().push(found.clone());
     }
 
     fn stop(&mut self, extension: ExtensionId, generation: u64) {
@@ -40,16 +45,21 @@ impl Launcher for Launches {
 /// How many messages a test Extension's channel holds before it counts as full.
 pub const OUTBOX: usize = 64;
 
-/// What the Daemon typed or pasted, the programs it started, and the desktop
-/// notifications it sent, as summary and body.
+/// What the Daemon typed or pasted, the programs it started, the desktop
+/// notifications it sent, as summary and body, and the desktop settings it
+/// gave.
 #[derive(Clone, Default)]
 pub struct Outputs(
     pub Rc<RefCell<Vec<Output>>>,
     pub Rc<RefCell<Vec<Vec<String>>>>,
     pub Rc<RefCell<Vec<(String, String)>>>,
+    pub Rc<RefCell<Vec<DesktopSettings>>>,
 );
 
 impl Desktop for Outputs {
+    fn configure(&mut self, settings: DesktopSettings) {
+        self.3.borrow_mut().push(settings);
+    }
     fn output(&mut self, output: Output) {
         self.0.borrow_mut().push(output);
     }
@@ -256,9 +266,15 @@ impl Harness {
     }
 
     pub fn down(&mut self, ext: &Ext) {
+        self.end(ext, Ended::Stopped("exit status: 1".into()));
+    }
+
+    /// Ends `ext`'s run as `ended` says.
+    pub fn end(&mut self, ext: &Ext, ended: Ended) {
         self.event(Event::ExtensionDown {
             extension: ext.id,
             generation: ext.generation,
+            ended,
         });
     }
 
@@ -268,6 +284,11 @@ impl Harness {
 
     /// A Front end with room for only `room` messages it hasn't read.
     pub fn front_end_with_room(&mut self, room: usize) -> FrontEnd {
+        self.greeted_front_end(room).0
+    }
+
+    /// A Front end, and what the Daemon sent it as it connected.
+    pub fn greeted_front_end(&mut self, room: usize) -> (FrontEnd, Vec<ToFrontEnd>) {
         let id = FrontEndId(self.next_front_end);
         self.next_front_end += 1;
         let (tx, rx) = mpsc::sync_channel(room);
@@ -284,8 +305,8 @@ impl Harness {
             closed,
             shown: Cell::new(0),
         };
-        front_end.drain();
-        front_end
+        let greeting = front_end.drain();
+        (front_end, greeting)
     }
 
     pub fn front_end_sends(&mut self, front_end: &FrontEnd, message: FromFrontEnd) {

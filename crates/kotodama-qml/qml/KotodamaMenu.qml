@@ -907,19 +907,49 @@ PanelWindow {
             }
         }
 
-        Text {
+        // The footer: what the user should know now, else the keys the
+        // selected row takes; and on the right, while the Daemon knows of
+        // any, how many problems there are, which a click lists.
+        Item {
             id: footer
             anchors.top: body.bottom
             width: parent.width
-            leftPadding: 18
-            rightPadding: 18
-            height: text === "" ? 0 : menu.rowHeight * 0.7
-            verticalAlignment: Text.AlignVCenter
-            elide: Text.ElideRight
-            color: search.confirming !== "" || menu.failure !== "" ? menu.error : menu.dimmed
-            font.family: menu.fontFamily
-            font.pixelSize: menu.fontSize - 3
-            text: search.confirming !== "" ? search.confirming : menu.failure !== "" ? menu.failure : search.down.length > 0 ? "Unavailable: " + search.down.join(", ") : menu.hints
+            height: footerText.text === "" && search.problems === 0 ? 0 : menu.rowHeight * 0.7
+
+            Text {
+                id: footerText
+                anchors.left: parent.left
+                anchors.right: problems.left
+                height: parent.height
+                verticalAlignment: Text.AlignVCenter
+                leftPadding: 18
+                rightPadding: 18
+                elide: Text.ElideRight
+                color: search.confirming !== "" || menu.failure !== "" ? menu.error : menu.dimmed
+                font.family: menu.fontFamily
+                font.pixelSize: menu.fontSize - 3
+                text: search.confirming !== "" ? search.confirming : menu.failure !== "" ? menu.failure : search.down.length > 0 ? "Unavailable: " + search.down.join(", ") : menu.hints
+            }
+
+            Text {
+                id: problems
+                anchors.right: parent.right
+                anchors.rightMargin: visible ? 18 : 0
+                height: parent.height
+                verticalAlignment: Text.AlignVCenter
+                width: visible ? implicitWidth : 0
+                visible: search.problems > 0
+                text: search.problems === 1 ? "1 problem" : search.problems + " problems"
+                color: menu.error
+                font.family: menu.fontFamily
+                font.pixelSize: menu.fontSize - 3
+
+                MouseArea {
+                    anchors.fill: parent
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: search.showProblems()
+                }
+            }
         }
 
         // The Toast: what Forget or "Clear history" just did, and the key that

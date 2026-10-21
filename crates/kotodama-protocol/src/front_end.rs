@@ -104,9 +104,17 @@ pub enum ToFrontEnd {
         /// from the rest of the query, as a chip.
         scope: Option<Scope>,
     },
-    /// The Extensions that are down. Their Results are gone until they come back.
+    /// The Extensions that are down, whose Results are gone until they come
+    /// back, and what the user should fix. Sent when a Front end connects and
+    /// whenever either changes, each time whole.
     Status {
         down: Vec<String>,
+        /// Everything wrong the user can fix: a config file that doesn't
+        /// parse, a setting that isn't one or can't be read, a Manifest
+        /// refused, a keyword two things ask for, an Extension that can't
+        /// start or keeps stopping. Empty when nothing is.
+        #[serde(default)]
+        problems: Vec<Problem>,
     },
     /// Close the menu, then answer [`FromFrontEnd::Closed`].
     Close,
@@ -248,6 +256,36 @@ impl TryFrom<ShownResultOwned> for ShownResult {
     }
 }
 
+/// One thing the user should fix, as [`ToFrontEnd::Status`] lists it.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Problem {
+    /// Where it is: a config key and the file that sets it, a Manifest's
+    /// path, a keyword, or an Extension.
+    pub about: String,
+    /// What is wrong, and what to do about it where that isn't plain.
+    pub message: String,
+}
+
+impl Problem {
+    /// The Daemon's own Result that opens the list of problems, which a
+    /// Front end runs with [`Problem::show`] when the user asks for the
+    /// list, as by clicking its count.
+    pub fn list() -> ResultRef {
+        ResultRef {
+            extension: "kotodama".into(),
+            id: "problems".into(),
+        }
+    }
+
+    /// The Action of [`Problem::list`] that opens it.
+    pub fn show() -> ActionRef {
+        ActionRef {
+            extension: "kotodama".into(),
+            id: "show".into(),
+        }
+    }
+}
+
 /// The kind of the Daemon's entry Item for an Extension's app: running it
 /// enters the app, and a Front end runs it on Tab too.
 pub const APP_ENTRY_KIND: &str = "kotodama.app";
@@ -323,10 +361,13 @@ pub struct ActionRef {
     pub id: String,
 }
 
-/// Where the Daemon serves Front ends: `$XDG_RUNTIME_DIR/kotodama.sock`, or
-/// `None` when `XDG_RUNTIME_DIR` isn't set.
+/// Where the Daemon serves Front ends: `$KOTODAMA_SOCKET`, else
+/// `$XDG_RUNTIME_DIR/kotodama.sock`, or `None` when neither is set. A
+/// Daemon whose config moves its socket needs its Front ends pointed there
+/// with `KOTODAMA_SOCKET`.
 pub fn socket_path() -> Option<PathBuf> {
-    std::env::var_os("XDG_RUNTIME_DIR")
-        .filter(|dir| !dir.is_empty())
-        .map(|dir| PathBuf::from(dir).join("kotodama.sock"))
+    let set = |var| std::env::var_os(var).filter(|value: &std::ffi::OsString| !value.is_empty());
+    set("KOTODAMA_SOCKET")
+        .map(PathBuf::from)
+        .or_else(|| set("XDG_RUNTIME_DIR").map(|dir| PathBuf::from(dir).join("kotodama.sock")))
 }

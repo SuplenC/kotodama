@@ -10,7 +10,7 @@ use std::thread;
 
 use kotodama_protocol::{Channel, Error, FromExtension, Hello, ToExtension, WireFormat};
 
-use crate::daemon::{Event, ExtensionId, Launcher};
+use crate::daemon::{Ended, Event, ExtensionId, Launcher};
 use crate::discovery::Found;
 use crate::link::pump;
 
@@ -47,17 +47,21 @@ impl Processes {
 impl Launcher for Processes {
     fn start(&mut self, extension: ExtensionId, generation: u64, found: &Found) {
         let name = found.manifest.name.clone();
-        let down = Event::ExtensionDown {
+        let down = move |ended| Event::ExtensionDown {
             extension,
             generation,
+            ended,
         };
         let mut command = Command::new(found.program());
         command
             .args(&found.manifest.command[1..])
-            .current_dir(&found.dir)
+            .envs(&found.env)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::inherit());
+        if !found.dir.as_os_str().is_empty() {
+            command.current_dir(&found.dir);
+        }
         // An Extension started once the compositor is there finds it, even
         // when the Daemon started before.
         #[cfg(target_os = "linux")]
@@ -67,11 +71,17 @@ impl Launcher for Processes {
         let mut child = match command.spawn() {
             Ok(child) => child,
             Err(err) => {
-                log::error!(
-                    "{name}: couldn't start {}: {err}",
-                    found.program().display()
-                );
-                let _ = self.events.send(down);
+                let program = found.program();
+                let reason = match err.kind() {
+                    std::io::ErrorKind::NotFound if program.is_absolute() => {
+                        format!("its program {} doesn't exist", program.display())
+                    }
+                    std::io::ErrorKind::NotFound => {
+                        format!("its program `{}` isn't on PATH", program.display())
+                    }
+                    _ => format!("couldn't start {}: {err}", program.display()),
+                };
+                let _ = self.events.send(down(Ended::CantStart(reason)));
                 return;
             }
         };
@@ -82,19 +92,33 @@ impl Launcher for Processes {
 
         let events = self.events.clone();
         spawn(format!("ext-{name}"), move || {
-            if let (Some(stdout), Some(stdin)) = stdio
-                && let Err(err) = speak(extension, generation, &name, stdout, stdin, &events)
-            {
-                log::warn!("{name}: {err}");
-            }
+            let spoke = match stdio {
+                (Some(stdout), Some(stdin)) => {
+                    speak(extension, generation, &name, stdout, stdin, &events)
+                }
+                _ => Ok(()),
+            };
             // Kill before waiting, so a process that closed its stdout but kept
             // running doesn't hold this thread. std won't signal a process it
             // has already reaped, so `stop` can't hit a reused pid.
             let mut child = child.lock().unwrap_or_else(|poison| poison.into_inner());
             let _ = child.kill();
-            let _ = child.wait();
+            let status = child.wait();
             drop(child);
-            let _ = events.send(down);
+            let ended = match spoke {
+                // Restarting won't make it speak a protocol it doesn't.
+                Err(
+                    err @ (Error::PeerTooNew { .. }
+                    | Error::PeerTooOld { .. }
+                    | Error::JsonNotOffered),
+                ) => Ended::Refused(err.to_string()),
+                Err(err) => Ended::Stopped(err.to_string()),
+                Ok(()) => Ended::Stopped(match status {
+                    Ok(status) => status.to_string(),
+                    Err(err) => err.to_string(),
+                }),
+            };
+            let _ = events.send(down(ended));
         });
     }
 

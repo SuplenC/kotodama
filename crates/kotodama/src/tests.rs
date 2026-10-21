@@ -77,7 +77,12 @@ fn answered_by(daemon: impl FnOnce(&mut Channel<UnixStream, UnixStream>) + Send 
 #[test]
 fn the_answer_is_how_many_menus_the_daemon_reached() {
     let answer = answered_by(|daemon| {
-        daemon.send(&ToFrontEnd::Status { down: Vec::new() }).unwrap();
+        daemon
+            .send(&ToFrontEnd::Status {
+                down: Vec::new(),
+                problems: Vec::new(),
+            })
+            .unwrap();
         daemon.send(&ToFrontEnd::Reached { menus: 1 }).unwrap();
     });
 

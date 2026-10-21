@@ -71,7 +71,7 @@ fn front_end(
             ToFrontEnd::Results {
                 version, results, ..
             } => break (version, results),
-            ToFrontEnd::Status { down } if !down.is_empty() => {
+            ToFrontEnd::Status { down, .. } if !down.is_empty() => {
                 eprintln!("down: {}", down.join(", "))
             }
             _ => {}

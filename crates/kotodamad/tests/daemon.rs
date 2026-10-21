@@ -13,7 +13,7 @@ use common::*;
 use kotodama_protocol::*;
 use kotodamad::daemon::RERANK_FOR;
 use kotodamad::daemon::{
-    Event, ExtensionId, FrontEndId, HANDSHAKE_TIMEOUT, MAX_LIVE_RESULTS, Output,
+    Ended, Event, ExtensionId, FrontEndId, HANDSHAKE_TIMEOUT, MAX_LIVE_RESULTS, Output,
 };
 use kotodamad::discovery::Found;
 use kotodamad::usage::Used;
@@ -1243,7 +1243,7 @@ fn statuses(ui: &FrontEnd) -> Vec<Vec<String>> {
     ui.drain()
         .into_iter()
         .filter_map(|message| match message {
-            ToFrontEnd::Status { down } => Some(down),
+            ToFrontEnd::Status { down, .. } => Some(down),
             _ => None,
         })
         .collect()
@@ -1262,9 +1262,11 @@ fn a_stopped_extensions_results_disappear_and_a_marker_shows_it_is_down() {
     assert!(messages.iter().any(
         |message| matches!(message, ToFrontEnd::Results { results, .. } if results.is_empty())
     ));
-    assert!(messages.contains(&ToFrontEnd::Status {
-        down: vec!["apps".into()]
-    }));
+    assert!(
+        messages
+            .iter()
+            .any(|message| matches!(message, ToFrontEnd::Status { down, .. } if *down == ["apps"]))
+    );
 }
 
 #[test]
@@ -1685,10 +1687,13 @@ fn an_extension_that_never_finishes_its_handshake_is_stopped_and_restarted() {
     h.event(Event::ExtensionDown {
         extension: ExtensionId(0),
         generation: 1,
+        ended: Ended::Stopped("signal: 9 (SIGKILL)".into()),
     });
-    assert!(ui.drain().contains(&ToFrontEnd::Status {
-        down: vec!["apps".into()]
-    }));
+    assert!(
+        ui.drain()
+            .iter()
+            .any(|message| matches!(message, ToFrontEnd::Status { down, .. } if *down == ["apps"]))
+    );
     h.advance(Duration::from_millis(100));
     assert_eq!(h.launches.0.borrow().len(), 2);
 }
@@ -1840,7 +1845,9 @@ fn an_extension_installed_while_running_is_started_and_searched() {
     h.up(0);
     let ui = h.front_end();
 
-    h.event(Event::Extensions(vec![plain("apps"), plain("bookmarks")]));
+    h.event(Event::Extensions(
+        vec![plain("apps"), plain("bookmarks")].into(),
+    ));
     assert_eq!(h.launches.0.borrow().last(), Some(&(ExtensionId(1), 1)));
     let bookmarks = h.up(1);
     h.add(&bookmarks, vec![app("Kotodama")]);
@@ -1857,7 +1864,7 @@ fn an_extension_removed_while_running_is_stopped_and_never_marked_down_or_restar
     let ui = h.front_end();
     assert_eq!(h.query(&ui, "fire").len(), 2);
 
-    h.event(Event::Extensions(vec![plain("apps")]));
+    h.event(Event::Extensions(vec![plain("apps")].into()));
     assert_eq!(stops(&h), [(ExtensionId(1), bookmarks.generation)]);
     assert_eq!(titles(&ui.results().unwrap()), ["Firefox"]);
 
@@ -1879,7 +1886,7 @@ fn a_changed_manifest_restarts_the_extension_at_once_with_the_new_one() {
     let ui = h.front_end();
     assert_eq!(h.query(&ui, "kotodama")[0].contributed, []);
 
-    h.event(Event::Extensions(vec![plain("projects"), pinner()]));
+    h.event(Event::Extensions(vec![plain("projects"), pinner()].into()));
     assert_eq!(stops(&h), [(ExtensionId(1), old.generation)]);
     let (ext, generation) = *h.launches.0.borrow().last().unwrap();
     assert_eq!(ext, ExtensionId(1));
@@ -1893,7 +1900,7 @@ fn a_changed_manifest_restarts_the_extension_at_once_with_the_new_one() {
 fn an_unchanged_extension_list_changes_nothing() {
     let mut h = Harness::new(vec![plain("apps")]);
     h.up(0);
-    h.event(Event::Extensions(vec![plain("apps")]));
+    h.event(Event::Extensions(vec![plain("apps")].into()));
     assert_eq!(stops(&h), []);
     assert_eq!(h.launches.0.borrow().len(), 1);
 }

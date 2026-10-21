@@ -58,7 +58,12 @@ Every config table below also has typed options, so a typo or a value of the wro
 
 | Option | Config key |
 | --- | --- |
-| `history.{picksToLearn, picksToTakeOver, halfLifeDays, liftThreshold, timeOfDay, usageLog}` | `[history]` |
+| `history.{picksToLearn, picksToTakeOver, halfLifeDays, liftThreshold, timeOfDay, usageLog, undoSeconds, maxResults, maxQueries}` | `[history]` |
+| `paths.{extensionDirs, defaultExtensionDirs, stateDir, cacheDir, socket}` | `[paths]` |
+| `search.{rows, nearMisses, fallbacks}` | `[search]` |
+| `extensions.{retryMaxSeconds, giveUpAfter}` | `retry_max_seconds` and `give_up_after` in `[extensions]` |
+| `desktop.{settleMs, paste}` | `[desktop]` |
+| `log.level` | `[log]` |
 | `emptyQuery.{mostUsed, menu}` | `[empty_query]` |
 | `ranking.kinds` | `[ranking]` |
 | `quicklinkDefaults.opener` | `[quicklink_defaults]` |
@@ -134,9 +139,66 @@ The `kotodamad` of the `default` package (and of `withExtensions`) puts its Bund
 
 ## The Daemon
 
-`kotodamad` serves Front ends on `$XDG_RUNTIME_DIR/kotodama.sock`. It finds Extensions in `$XDG_DATA_DIRS/kotodama/extensions/*/manifest.toml` and `~/.config/kotodama/extensions/*/manifest.toml`, starts each one, and restarts it with backoff when it stops or hangs. Extensions installed, changed or removed while it runs are picked up without a restart. Its config is every top-level `*.toml` in `$XDG_CONFIG_DIRS/kotodama/`, then `~/.config/kotodama/`, merged in order and reloaded when a file changes. `KOTODAMA_LOG=debug` logs more. Under systemd socket activation (`kotodamad.socket`) it serves the socket systemd hands it instead of binding its own.
+`kotodamad` serves Front ends on `$XDG_RUNTIME_DIR/kotodama.sock`, or on `KOTODAMA_SOCKET` when it is set. It finds Extensions in `$XDG_DATA_DIRS/kotodama/extensions/*/manifest.toml` and `~/.config/kotodama/extensions/*/manifest.toml`, starts each one, and restarts it with backoff when it stops or hangs. Extensions installed, changed or removed while it runs are picked up without a restart. Its config is every top-level `*.toml` in `$XDG_CONFIG_DIRS/kotodama/`, then `~/.config/kotodama/`, merged in order and reloaded when a file changes; `kotodamad --config <dir>`, or `KOTODAMA_CONFIG_DIR`, reads that one directory instead. `KOTODAMA_LOG=debug` logs more. Under systemd socket activation (`kotodamad.socket`) it serves the socket systemd hands it instead of binding its own.
+
+What it finds wrong that you can fix is a problem: a config file that doesn't parse (the last good config stays), a setting that isn't one or has a bad value, a Manifest it refuses, a keyword two things ask for, an Extension that can't start, speaks a protocol it doesn't, or keeps stopping. The menu's footer counts them, and a click on the count, or the `problems` Result, lists them. `kotodama check` prints them, one a line, and exits with 1 when there is any. An Extension that can't start, or that speaks another protocol, isn't restarted until its program or its Manifest changes.
 
 Apps, Quicklinks and every other program started for the user get a systemd scope of their own in `app.slice`, asked of the user manager over D-Bus as `systemd-run --user --scope` would, so each outlives a stop or restart of the Daemon, whose service would otherwise take every process in its cgroup down with it. The program moves into its scope before it runs, so what it starts at once lands there too. An app's scope is named for its desktop id, as in `app-kotodama-firefox-<pid>.scope`, following the systemd and XDG convention, so tools that group processes by app see the right name; a program with no desktop id, such as a Quicklink's command, gives the scope its file name. Without a user manager, programs start without a scope. `KOTODAMA_LAUNCH_PREFIX`, when set, replaces the scope: programs run after its words instead, such as `uwsm app --`, or start directly when it is empty. Extensions inherit it from the Daemon and should do the same; the Rust ones get both through `kotodama-extension`. When the Daemon has no prefix and there is a user manager, it hands Extensions `systemd-run --user --scope --slice=app.slice --collect --quiet` as their prefix, with `KOTODAMA_LAUNCH_SCOPED=1`, so an Extension in any language that starts programs through the prefix gets the scope too; one that asks for the scope itself, as the Rust ones do, ignores a prefix marked so. The words are split on whitespace, so the prefix can't contain a path with spaces.
+
+### The config
+
+`kotodama config` prints the config the Daemon would run with: every key, the default where nothing sets it, and which file set each one. `kotodama config --schema` prints every key with what it does. A table or key that isn't one, or a value out of range, is a problem, and the default applies.
+
+Every setting reloads with the config, except `state_dir`, `cache_dir` and `socket`, which are read once when the Daemon starts; changing one logs that a restart is needed. The values shown are the defaults:
+
+```toml
+[paths]
+extension_dirs = []            # more Extension directories, read after the default ones
+default_extension_dirs = true  # false reads only extension_dirs
+# state_dir = "~/.local/state/kotodama"  # the History and the Usage log; at start
+# cache_dir = "~/.cache/kotodama"        # the Items that wait unshown; at start
+# socket = "/run/user/1000/kotodama.sock"  # at start; KOTODAMA_SOCKET wins
+
+[search]
+rows = 10           # rows a search fills until the Front end says how many it shows; 1 to 50
+near_misses = true  # Results a typo away when real matches leave rows empty
+fallbacks = true    # ask fallbacks, such as web search, what real matches leave empty
+
+[extensions]
+retry_max_seconds = 30  # the longest wait before a crashed Extension restarts; waits double from 100 ms
+give_up_after = 0       # crashes in a row after which it stays down until its program or Manifest changes; 0 never gives up
+
+[desktop]
+settle_ms = 50    # how long keys wait after the menu closes; 0 to 5000
+paste = "ctrl+v"  # or "ctrl+shift+v", which terminals take, or "type", which types the text
+
+[log]
+level = "info"  # "error", "warn", "info" or "debug"; KOTODAMA_LOG wins
+```
+
+A path in `[paths]` is absolute or starts with `~/`. An Extension in a later directory replaces one of the same name before it, so `extension_dirs` can hold a build of a Bundled extension. `[paths]` wins over the XDG variables, and an environment variable named for one setting, `KOTODAMA_SOCKET`, wins over `[paths]`, so Front ends started with it find a moved socket.
+
+`[extensions.<name>]` holds an Extension's own settings, which it gets, and the Daemon's keys, which it doesn't: `enable`, `command`, `env`, `live_query`, `word`, `prefix` and `in_search`.
+
+```toml
+[extensions.emoji]
+enable = false  # never started, though still installed
+
+[extensions.apps]
+command = ["/home/me/src/kotodama/target/debug/kotodama-apps"]  # replaces the Manifest's
+env = { RUST_LOG = "debug" }
+live_query = { debounce_ms = 0 }  # replaces the Manifest's `prefixes`, `triggers` or `debounce_ms`
+
+# No Extension named notes is installed, so this table defines one: the
+# Manifest's keys go here too, and the rest are its settings.
+[extensions.notes]
+command = ["notes-kotodama"]  # an absolute path, or found on PATH
+title = "Notes"
+word = "note"
+folder = "/home/me/notes"     # a setting the Extension gets
+```
+
+A bare program name in a `command` from the config is looked up on `PATH`, which a Manifest's never is. A changed `command`, `env` or `live_query` restarts the Extension.
 
 ### Ranking that learns
 
@@ -146,7 +208,7 @@ A query with a typo still finds what was meant: `fierfox`, `firfox` and `firefx`
 
 Every Action the user runs is recorded in the History, `$XDG_STATE_HOME/kotodama/history.json` (by default `~/.local/state/kotodama/`), except on an answer, such as the calculator's: an answer takes the top row whatever its Frecency, and is a new Result for every expression, so the History keeps nothing of it. A picked Result gets a Frecency boost, which halves every 14 days but never quite reaches zero. Frecency also learns the time of day: picks count in full at the times of day the Result is usually picked, and half as much at a time of day it never is, so something used every morning ranks higher in the morning. A Result used about daily for a week ranks one tier higher, but never above an exact title. When the user picks the same Result 3 times for one query, it becomes that query's Learned choice: it ranks first for that query and for the queries that extend it or that it extends (`fi`, `fir`, `fire`), but only over the Results that ranked above it when it was picked, so a new app with exactly that title still wins. Two picks of another Result since the Learned choice was last picked take over from it. Learning fades with Frecency's half-life; when two Learned choices apply, the one picked more often wins, then the one learned for the closer query. Both apply to Indexed items and Live query results. Items that several Extensions offer with the same Identity (a page from bookmarks and from browser history) share their Frecency and Learned choices: picking one raises the others. Each still shows as a Result of its own, and the one the user picks through most takes the best place any of them ranks in. The "Clear history" Result empties the History.
 
-The Action panel of a Result the History keeps anything for offers "Forget", which drops its Frecency, every Learned choice for it, the picks of the Aliases that name it and, for a Result with an Identity, the History of that thing from every Extension. It also offers "Clear the history of" its Extension, which forgets every Result of that Extension, the Aliases that name them, and the shared History of the Identities its Items carry, though another Extension offers them too: the History doesn't know which Extension a pick of a shared thing came through. Another Extension's Result of such a thing keeps only its own picks, which decide its place among the Results of that thing. Ctrl+Shift+Backspace forgets the selected Result without opening the panel. For a minute after Forget, clearing an Extension's History or "Clear history", the menu shows a Toast such as "Forgot “Firefox”", and Ctrl+Z puts back what was forgotten; typing `undo` finds a Result that does the same, latest first. Anything picked since stays as it is.
+The Action panel of a Result the History keeps anything for offers "Forget", which drops its Frecency, every Learned choice for it, the picks of the Aliases that name it and, for a Result with an Identity, the History of that thing from every Extension. It also offers "Clear the history of" its Extension, which forgets every Result of that Extension, the Aliases that name them, and the shared History of the Identities its Items carry, though another Extension offers them too: the History doesn't know which Extension a pick of a shared thing came through. Another Extension's Result of such a thing keeps only its own picks, which decide its place among the Results of that thing. Ctrl+Shift+Backspace forgets the selected Result without opening the panel. For a minute (`undo_seconds`) after Forget, clearing an Extension's History or "Clear history", the menu shows a Toast such as "Forgot “Firefox”", and Ctrl+Z puts back what was forgotten; typing `undo` finds a Result that does the same, latest first. Anything picked since stays as it is.
 
 These numbers are settings in the config's `[history]` table, which reloads with the config. The values shown are the defaults:
 
@@ -158,9 +220,12 @@ half_life_days = 14     # how long a pick takes to count half as much; above 0
 lift_threshold = 5.0    # the Frecency that lifts a Result one tier, about a week of daily use; above 0
 time_of_day = 0.5       # how much less picks count at a time of day the Result is never picked; 0 to 1
 usage_log = false       # log queries and picks, to tune ranking from real use
+undo_seconds = 60       # how long Forget and Clear history can be undone; 0 to 86400
+max_results = 2000      # the most Results kept; past it the least used go
+max_queries = 1000      # the most queries whose Learned choice is kept; past it the least recent go
 ```
 
-A setting that doesn't parse is logged and keeps its default. With `usage_log = true`, every query typed and every Action run is appended to `$XDG_STATE_HOME/kotodama/usage.jsonl`, one JSON object per line, which only the user can read and which never leaves the machine:
+A setting that doesn't parse is a problem and keeps its default. With `usage_log = true`, every query typed and every Action run is appended to `$XDG_STATE_HOME/kotodama/usage.jsonl`, one JSON object per line, which only the user can read and which never leaves the machine:
 
 ```json
 {"at":1760870400,"kind":"query","query":"fi"}

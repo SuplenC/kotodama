@@ -32,7 +32,8 @@ pub enum Update {
     Connected(Writer),
     /// The Results, their version, and the app the query is in.
     Rows(u32, Vec<Row>, Option<Scope>),
-    Down(Vec<String>),
+    /// The Extensions that are down, and how many problems there are.
+    Status(Vec<String>, usize),
     Close,
     Open {
         query: String,
@@ -241,7 +242,7 @@ fn update(message: ToFrontEnd) -> Option<Update> {
             results,
             scope,
         } => Update::Rows(version, results.into_iter().map(Row::from).collect(), scope),
-        ToFrontEnd::Status { down } => Update::Down(down),
+        ToFrontEnd::Status { down, problems } => Update::Status(down, problems.len()),
         ToFrontEnd::Close => Update::Close,
         ToFrontEnd::ActionFailed { message } => Update::ActionFailed(message),
         ToFrontEnd::Open { query, view } => Update::Open { query, view },

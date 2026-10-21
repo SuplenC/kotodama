@@ -3,7 +3,8 @@
 //! does, so any character can be typed whatever the user's layout. A copy
 //! sets the clipboard through ext-data-control, or wlr-data-control on a
 //! compositor that has only that (`kotodama_extension::wayland`, shared with
-//! the clipboard Extension); a paste does, then sends Ctrl+V.
+//! the clipboard Extension); a paste does, then sends Ctrl+V, or Ctrl+Shift+V,
+//! or types the text instead, as `[desktop] paste` says.
 //!
 //! The Wayland connection lives on a thread of its own, opened on the first
 //! request, and stays open: the Daemon must keep serving the clipboard it set
@@ -12,7 +13,7 @@
 //! started before the compositor's environment reached it still types; a
 //! request that finds no compositor fails, and the next one tries again.
 //!
-//! Keys wait [`SETTLE`] after the menu closes before they go out. The window
+//! Keys wait `[desktop] settle_ms` after the menu closes before they go out. The window
 //! that gets the keyboard back may not take keys at once: QtWayland makes a
 //! window active only after a round trip that follows `wl_keyboard.enter`,
 //! and drops keys until then. Nothing on Wayland tells another client when
@@ -28,6 +29,7 @@ use std::time::{Duration, Instant};
 use kotodama_extension::Chain;
 
 use crate::daemon::{Desktop, Output};
+use crate::engine::DesktopSettings;
 use crate::host::spawn;
 
 /// The keymap a virtual keyboard uploads to type some text: one key per
@@ -83,21 +85,17 @@ fn keysym(c: char) -> String {
     }
 }
 
-/// The modifier mask for Control in the standard XKB modifier order.
+/// The modifier masks for Shift and Control in the standard XKB modifier
+/// order.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+const SHIFT: u32 = 1;
 #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 const CONTROL: u32 = 1 << 2;
 
-/// How long after the menu closes keys wait, so the window that gets the
-/// keyboard back is ready for them (see the module docs). Two scheduler
-/// periods of a busy machine (CFS aims to run every runnable thread within
-/// about 24 ms on 8 CPUs).
+/// How much longer keys wait, `settle` after the request to send them came.
 #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
-const SETTLE: Duration = Duration::from_millis(50);
-
-/// How much longer keys wait, given when the request to send them came.
-#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
-fn settle_left(requested: Instant, now: Instant) -> Duration {
-    (requested + SETTLE).saturating_duration_since(now)
+fn settle_left(requested: Instant, settle: Duration, now: Instant) -> Duration {
+    (requested + settle).saturating_duration_since(now)
 }
 
 /// Starts `command` as an Extension starts a program
@@ -134,6 +132,7 @@ fn notify(summary: String, body: String) {
 pub struct Wayland {
     #[cfg(target_os = "linux")]
     worker: Option<linux::Worker>,
+    settings: DesktopSettings,
 }
 
 impl Wayland {
@@ -144,6 +143,10 @@ impl Wayland {
 
 #[cfg(target_os = "linux")]
 impl Desktop for Wayland {
+    fn configure(&mut self, settings: DesktopSettings) {
+        self.settings = settings;
+    }
+
     fn launch(&mut self, command: Vec<String>) {
         launch(command);
     }
@@ -159,7 +162,7 @@ impl Desktop for Wayland {
                 .ok();
         }
         if let Some(worker) = &self.worker
-            && !worker.send(output)
+            && !worker.send(output, self.settings)
         {
             self.worker = None;
         }
@@ -168,6 +171,10 @@ impl Desktop for Wayland {
 
 #[cfg(not(target_os = "linux"))]
 impl Desktop for Wayland {
+    fn configure(&mut self, settings: DesktopSettings) {
+        self.settings = settings;
+    }
+
     fn launch(&mut self, command: Vec<String>) {
         launch(command);
     }
@@ -188,7 +195,7 @@ mod linux {
     use std::os::fd::{AsFd, OwnedFd};
     use std::sync::mpsc::{self, Receiver, Sender};
     use std::thread;
-    use std::time::Instant;
+    use std::time::{Duration, Instant};
 
     use kotodama_extension::wayland::{DataControl, DataControlHandler, Display};
     use kotodama_protocol::Clipboard;
@@ -201,11 +208,12 @@ mod linux {
         zwp_virtual_keyboard_v1::ZwpVirtualKeyboardV1,
     };
 
-    use super::{CONTROL, Keymap, Output, settle_left};
+    use super::{CONTROL, Keymap, Output, SHIFT, settle_left};
+    use crate::engine::{DesktopSettings, Paste};
     use crate::host::spawn;
 
-    /// What to do, and when the Daemon asked: once the menu had closed.
-    type Request = (Output, Instant);
+    /// What to do, when the Daemon asked, once the menu had closed, and how.
+    type Request = (Output, Instant, DesktopSettings);
 
     /// The handle the Daemon holds: requests go down a channel, and a byte
     /// down a pipe wakes the thread, which also waits on the Wayland socket.
@@ -223,8 +231,10 @@ mod linux {
         }
 
         /// False once the thread has stopped.
-        pub fn send(&self, output: Output) -> bool {
-            self.requests.send((output, Instant::now())).is_ok()
+        pub fn send(&self, output: Output, settings: DesktopSettings) -> bool {
+            self.requests
+                .send((output, Instant::now(), settings))
+                .is_ok()
                 && rustix::io::write(&self.wake, &[1]).is_ok()
         }
     }
@@ -268,14 +278,14 @@ mod linux {
                 if matches!(rustix::io::read(wake, &mut buf), Ok(0)) {
                     return;
                 }
-                for (output, requested) in inbox.try_iter() {
+                for (output, requested, settings) in inbox.try_iter() {
                     if client.is_none() {
                         client = Client::connect()
                             .map_err(|err| log::error!("can't type or paste: {err}"))
                             .ok();
                     }
                     if let Some(c) = &mut client
-                        && let Err(err) = c.output(output, requested)
+                        && let Err(err) = c.output(output, requested, settings)
                     {
                         log::error!("can't type or paste: {err}");
                         client = None;
@@ -326,18 +336,29 @@ mod linux {
         }
 
         /// Does what was asked at `requested`, once the menu had closed.
-        fn output(&mut self, output: Output, requested: Instant) -> Result<(), String> {
-            match output {
-                Output::Type(text) => self.type_text(&text, requested),
-                Output::Paste(clipboard) => self.paste(clipboard, requested),
-                Output::Copy(clipboard) => self.copy(clipboard),
+        fn output(
+            &mut self,
+            output: Output,
+            requested: Instant,
+            settings: DesktopSettings,
+        ) -> Result<(), String> {
+            let wait = Wait {
+                requested,
+                settle: settings.settle,
+            };
+            match (output, settings.paste) {
+                (Output::Type(text), _) | (Output::Paste(Clipboard::Text(text)), Paste::Type) => {
+                    self.type_text(&text, wait)
+                }
+                (Output::Paste(clipboard), paste) => self.paste(clipboard, paste, wait),
+                (Output::Copy(clipboard), _) => self.copy(clipboard),
             }
         }
 
-        fn type_text(&mut self, text: &str, requested: Instant) -> Result<(), String> {
+        fn type_text(&mut self, text: &str, wait: Wait) -> Result<(), String> {
             let keymap = Keymap::new(text);
             self.upload(&keymap)?;
-            settle(requested);
+            wait.settle();
             for c in text.chars() {
                 if let Some(code) = keymap.code(c) {
                     self.tap(code);
@@ -346,12 +367,16 @@ mod linux {
             self.roundtrip()
         }
 
-        fn paste(&mut self, clipboard: Clipboard, requested: Instant) -> Result<(), String> {
+        fn paste(&mut self, clipboard: Clipboard, paste: Paste, wait: Wait) -> Result<(), String> {
             self.copy(clipboard)?;
             let keymap = Keymap::new("v");
             self.upload(&keymap)?;
-            settle(requested);
-            self.keyboard.modifiers(CONTROL, 0, 0, 0);
+            wait.settle();
+            let modifiers = match paste {
+                Paste::CtrlShiftV => CONTROL | SHIFT,
+                Paste::CtrlV | Paste::Type => CONTROL,
+            };
+            self.keyboard.modifiers(modifiers, 0, 0, 0);
             self.tap(keymap.code('v').unwrap_or(1));
             self.keyboard.modifiers(0, 0, 0, 0);
             self.roundtrip()
@@ -423,9 +448,18 @@ mod linux {
         }
     }
 
-    /// Waits out what is left of [`SETTLE`](super::SETTLE) since `requested`.
-    fn settle(requested: Instant) {
-        thread::sleep(settle_left(requested, Instant::now()));
+    /// When the Daemon asked, and how long keys wait after that.
+    #[derive(Clone, Copy)]
+    struct Wait {
+        requested: Instant,
+        settle: Duration,
+    }
+
+    impl Wait {
+        /// Waits out what is left of it.
+        fn settle(self) {
+            thread::sleep(settle_left(self.requested, self.settle, Instant::now()));
+        }
     }
 
     /// The Daemon never reads the clipboard: every offer is dropped as it
@@ -443,15 +477,20 @@ mod tests {
     use std::time::{Duration, Instant};
 
     use super::{Keymap, settle_left};
+    use crate::engine::DEFAULT_SETTLE;
 
     #[test]
     fn keys_wait_a_bounded_moment_after_the_menu_closes() {
         let closed = Instant::now();
         let ms = Duration::from_millis;
-        assert_eq!(settle_left(closed, closed), ms(50));
+        assert_eq!(settle_left(closed, DEFAULT_SETTLE, closed), ms(50));
         // Connecting and uploading the keymap count towards it.
-        assert_eq!(settle_left(closed, closed + ms(20)), ms(30));
-        assert_eq!(settle_left(closed, closed + ms(80)), Duration::ZERO);
+        assert_eq!(settle_left(closed, DEFAULT_SETTLE, closed + ms(20)), ms(30));
+        assert_eq!(
+            settle_left(closed, DEFAULT_SETTLE, closed + ms(80)),
+            Duration::ZERO
+        );
+        assert_eq!(settle_left(closed, ms(200), closed + ms(80)), ms(120));
     }
 
     #[test]

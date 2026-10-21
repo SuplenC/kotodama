@@ -24,7 +24,7 @@ use std::time::Instant;
 
 use cxx_qt::{CxxQtType, Initialize, Threading};
 use cxx_qt_lib::{QByteArray, QHash, QHashPair_i32_QByteArray, QModelIndex, QString, QVariant};
-use kotodama_protocol::{FromFrontEnd, Intro, ResultRef, Scope, UNDO_SHORTCUT, Value};
+use kotodama_protocol::{FromFrontEnd, Intro, Problem, ResultRef, Scope, UNDO_SHORTCUT, Value};
 
 use connection::{Update, Writer};
 use rows::{Model, Row, Rows};
@@ -73,6 +73,9 @@ pub mod qobject {
         #[qproperty(QString, highlight_color, cxx_name = "highlightColor", READ, WRITE = set_highlight_color, NOTIFY)]
         #[qproperty(bool, connected, READ, NOTIFY)]
         #[qproperty(QStringList, down, READ, NOTIFY)]
+        /// How many problems the Daemon knows of, which the user should
+        /// fix; `showProblems` lists them.
+        #[qproperty(i32, problems, READ, NOTIFY)]
         #[qproperty(i32, latency, READ, NOTIFY)]
         /// The top View, as a map; empty at the search. See `variant::view`.
         #[qproperty(QMap_QString_QVariant, view, READ, NOTIFY)]
@@ -196,6 +199,12 @@ pub mod qobject {
         #[qinvokable]
         #[cxx_name = "isUndoKey"]
         fn is_undo_key(self: &KotodamaSearch, key: i32, modifiers: i32) -> bool;
+
+        /// Opens the list of problems in a View. False if there are none, or
+        /// the Daemon isn't there to list them.
+        #[qinvokable]
+        #[cxx_name = "showProblems"]
+        fn show_problems(self: Pin<&mut KotodamaSearch>) -> bool;
 
         /// Tells the Daemon which rows are on screen.
         #[qinvokable]
@@ -365,6 +374,7 @@ pub struct SearchRust {
     highlight_color: QString,
     connected: bool,
     down: QStringList,
+    problems: i32,
     /// Microseconds from the query that Results were last asked for to the
     /// model showing them.
     latency: i32,
@@ -423,6 +433,7 @@ impl Default for SearchRust {
             highlight_color: QString::from("#89b4fa"),
             connected: false,
             down: QStringList::default(),
+            problems: 0,
             latency: 0,
             rows: Rows::default(),
             results: None,
@@ -773,6 +784,19 @@ impl KotodamaSearch {
         shortcut::matches(UNDO_SHORTCUT, key, modifiers)
     }
 
+    fn show_problems(mut self: Pin<&mut Self>) -> bool {
+        if self.problems == 0 {
+            return false;
+        }
+        let shown = self.on_screen;
+        self.as_mut().rust_mut().send(&FromFrontEnd::RunAction {
+            result: Problem::list(),
+            shown,
+            action: Problem::show(),
+            arguments: Default::default(),
+        })
+    }
+
     fn closed(mut self: Pin<&mut Self>) {
         self.as_mut().rust_mut().send(&FromFrontEnd::Closed);
     }
@@ -892,9 +916,14 @@ impl KotodamaSearch {
                 self.as_mut().set_intro(intro);
                 Shown::Same
             }
-            Update::Down(down) => {
+            Update::Status(down, problems) => {
                 self.as_mut().rust_mut().down = down.iter().map(QString::from).collect();
                 self.as_mut().down_changed();
+                let problems = i32::try_from(problems).unwrap_or(i32::MAX);
+                if problems != self.problems {
+                    self.as_mut().rust_mut().problems = problems;
+                    self.as_mut().problems_changed();
+                }
                 Shown::Same
             }
             Update::Close => {
