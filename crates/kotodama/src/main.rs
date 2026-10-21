@@ -5,10 +5,12 @@
 //! kotodama toggle
 //! kotodama open --query "fir"
 //! kotodama open --view clipboard/history
+//! kotodama open --prefix emoji
 //! ```
 //!
 //! `--view <extension>/<item>` opens the menu on the View that Item's primary
-//! Action pushes (ADR 0014).
+//! Action pushes. `--prefix <prefix>` opens it behind an Extension's Prefix,
+//! searching that Extension alone, as `--query "<prefix> "` does.
 
 #![forbid(unsafe_code)]
 
@@ -19,7 +21,7 @@ use std::time::Duration;
 use kotodama_protocol::{Channel, FromFrontEnd, Hello, WireFormat, socket_path};
 
 const USAGE: &str = "usage: kotodama toggle
-       kotodama open [--view <extension>/<item>] [--query <text>]";
+       kotodama open [--view <extension>/<item>] [--prefix <prefix>] [--query <text>]";
 
 /// Under socket activation the first keypress also starts the Daemon, so the
 /// handshake may wait for it to come up.
@@ -48,17 +50,21 @@ fn parse(args: &[String]) -> Result<FromFrontEnd, String> {
     match command.as_str() {
         "toggle" if rest.is_empty() => Ok(FromFrontEnd::Toggle),
         "open" => {
-            let (mut query, mut view) = (String::new(), None);
+            let (mut query, mut view, mut prefix) = (String::new(), None, None);
             while let [flag, value, tail @ ..] = rest {
                 match flag.as_str() {
                     "--query" => query.clone_from(value),
                     "--view" => view = Some(value.clone()),
+                    "--prefix" => prefix = Some(value.as_str()),
                     _ => return Err(format!("unknown option {flag}")),
                 }
                 rest = tail;
             }
             if let [extra] = rest {
                 return Err(format!("{extra} needs a value, or isn't an option"));
+            }
+            if let Some(prefix) = prefix {
+                query = format!("{prefix} {query}");
             }
             Ok(FromFrontEnd::Open { query, view })
         }
@@ -102,6 +108,24 @@ mod tests {
             parse(&args("open")),
             Ok(FromFrontEnd::Open {
                 query: String::new(),
+                view: None,
+            })
+        );
+    }
+
+    #[test]
+    fn open_behind_a_prefix_types_it_before_the_query() {
+        assert_eq!(
+            parse(&args("open --prefix emoji")),
+            Ok(FromFrontEnd::Open {
+                query: "emoji ".into(),
+                view: None,
+            })
+        );
+        assert_eq!(
+            parse(&args("open --query fire --prefix emoji")),
+            Ok(FromFrontEnd::Open {
+                query: "emoji fire".into(),
                 view: None,
             })
         );

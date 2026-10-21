@@ -47,6 +47,8 @@ PanelWindow {
         menu.failure = "";
         input.text = query;
         input.cursorPosition = query.length;
+        // The box may show `query` already, behind a Prefix it has left.
+        search.query = query;
         visible = true;
         menu.focusView();
     }
@@ -199,6 +201,13 @@ PanelWindow {
             }
         }
         onActionFailed: message => menu.failure = message
+        // The box shows the rest of the query once it is behind a Prefix,
+        // or what the Daemon typed. The cursor keeps its place from the end.
+        onQueryReplaced: text => {
+            const fromEnd = input.text.length - input.cursorPosition;
+            input.text = text;
+            input.cursorPosition = Math.max(0, text.length - fromEnd);
+        }
         // A list View's rows changed: its selected Item is at `row`, or the
         // top row is selected, as in the search, if it went away.
         onSelectRow: row => {
@@ -239,10 +248,35 @@ PanelWindow {
             width: parent.width
             height: menu.rowHeight + 12
 
+            // The Extension the search is behind the Prefix of, such as
+            // Emoji: the box holds what follows the Prefix.
+            Rectangle {
+                id: chip
+                objectName: "scope"
+                x: 14
+                anchors.verticalCenter: parent.verticalCenter
+                visible: menu.kind === "" && search.scope !== ""
+                width: chipLabel.implicitWidth + 20
+                height: menu.rowHeight - 16
+                radius: height / 2
+                color: menu.selection
+                border.color: menu.accent
+                border.width: 1
+
+                Text {
+                    id: chipLabel
+                    anchors.centerIn: parent
+                    text: search.scope
+                    color: menu.accent
+                    font.family: menu.fontFamily
+                    font.pixelSize: menu.fontSize
+                }
+            }
+
             TextInput {
                 id: input
                 anchors.fill: parent
-                anchors.leftMargin: 18
+                anchors.leftMargin: chip.visible ? chip.x + chip.width + 10 : 18
                 anchors.rightMargin: 18
                 visible: menu.kind === ""
                 verticalAlignment: TextInput.AlignVCenter
@@ -261,12 +295,19 @@ PanelWindow {
                     anchors.fill: parent
                     verticalAlignment: Text.AlignVCenter
                     visible: input.text === ""
-                    text: menu.placeholder
+                    text: search.scope !== "" ? "Search " + search.scope : menu.placeholder
                     color: menu.dimmed
                     font: input.font
                 }
 
-                Keys.onPressed: event => event.accepted = menu.key(event)
+                // Backspace with nothing typed behind a Prefix leaves it: the
+                // whole search again, with the Prefix typed.
+                Keys.onPressed: event => {
+                    if (event.key === Qt.Key_Backspace && input.text === "" && search.leaveScope())
+                        event.accepted = true;
+                    else
+                        event.accepted = menu.key(event);
+                }
             }
 
             // A list View's filter, with the View's title until something is

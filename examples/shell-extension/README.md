@@ -32,7 +32,7 @@ The Daemon starts `command` from `manifest.toml`, in this directory, and talks t
 {"remove_items":{"ids":["a"]}}
 ```
 
-**Handshake.** Each side sends a hello first, always in JSON: `{"version":9,"formats":["json"]}`. `version` is the protocol version, `PROTOCOL_VERSION` in `crates/kotodama-protocol`; the Daemon turns away a hello with any other. List the Wire formats you support, from `postcard`, `msgpack` and `json`. Both sides then use the fastest they share. JSON is required, so offering only JSON is enough.
+**Handshake.** Each side sends a hello first, always in JSON: `{"version":10,"formats":["json"]}`. `version` is the protocol version, `PROTOCOL_VERSION` in `crates/kotodama-protocol`; the Daemon turns away a hello with any other. List the Wire formats you support, from `postcard`, `msgpack` and `json`. Both sides then use the fastest they share. JSON is required, so offering only JSON is enough.
 
 **Messages.** A message is an object with one key, its name, holding its fields: `{"add_items": {"items": [...]}}`. A message without fields is just its name as a string: `"request_action_catalog"`. Optional fields can be left out.
 
@@ -60,6 +60,8 @@ Adding an Item whose id you already sent replaces it. `remove_items` takes the i
 Typing into a `list` filters it. The Daemon matches the Items as it does the search, best first and in your order within each Tier, and never asks you. To filter it yourself, as for results from a web service, set `"filters_itself": true` in the list: you then get `{"filter_view": {"view": "...", "text": "..."}}` with the whole text on each keystroke, empty once cleared, and answer with an `update_view` holding the Items to show. Contributed actions are offered on a list's Items by their kind, as on Results. Closing the menu pops nothing and sends nothing: your Views are still there when it opens again. Submitting a form sends you `submit_form` with its values. Answer an Action that pushed a View with `"keep_open"`.
 
 **Jobs.** Report long work with `job_progress`: an `id`, a `title`, a `state` (`running`, `succeeded` or `failed`), and optionally a `progress` from 0 to 1 and a `message`. A job runs on when the menu closes. The menu lists running jobs when it opens again, and when one finishes, the Daemon sends a desktop notification with its title and message.
+
+**A Prefix.** An Extension with many Items, such as emoji, can keep them out of the search behind a word: `prefix = "shell"` in `manifest.toml`, with an optional `title` and `icon`. The search then shows one entry Item, found by the title and the Prefix, in their place. `shell timer 5` searches only your Items, and the menu shows a chip with the title in front of what follows the Prefix. Backspace on an empty box leaves the Prefix, Enter on the entry Item enters it, and `kotodama open --prefix shell` opens the menu behind it. Nothing changes in the protocol for you: the Daemon reads the Prefix and searches your Items as it always does, and your Live queries get only what follows the Prefix. The user's `[extensions.<name>] prefix` overrides yours, and `prefix = ""` puts your Items back in the search. The commented lines in `manifest.toml` turn it on for this example.
 
 **Contributed actions.** Declare them in `manifest.toml` under `[[contributed_actions]]`, with the Item kind they apply to. They arrive as ordinary `run_action` messages carrying the other Extension's Item id, kind and kind field. That is all you ever see of another Extension's Items.
 
