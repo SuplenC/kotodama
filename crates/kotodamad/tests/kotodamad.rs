@@ -531,6 +531,30 @@ fn aliases_and_quicklinks_follow_the_config_directory_without_a_restart() {
 }
 
 #[test]
+fn an_alias_that_cannot_run_reaches_the_front_end_as_a_row_that_decodes() {
+    // Regression: #152.
+    let root = Daemon::home();
+    fs::write(
+        root.path().join("config/kotodama/keywords.toml"),
+        "[aliases]\nn = { extension = \"notes\", item = \"todo\" }\n",
+    )
+    .unwrap();
+    let daemon = Daemon::start(root);
+    let mut ui = daemon.connect();
+
+    ui.send(FromFrontEnd::Query { text: "n".into() });
+    let results = ui.until(|message| match message {
+        ToFrontEnd::Results { results, .. } => Some(results),
+        _ => None,
+    });
+
+    let row = &results[0];
+    assert_eq!(row.alias.as_deref(), Some("n"));
+    assert_eq!(row.unavailable.as_deref(), Some("No Extension notes"));
+    assert_eq!(row.item.actions, [], "nothing to run");
+}
+
+#[test]
 fn the_usage_log_is_written_once_the_config_turns_it_on() {
     let root = Daemon::home();
     install(
