@@ -1,3 +1,16 @@
 {
-  ".": "0.0.0"
+  "crates/kotodama": "0.0.0",
+  "crates/kotodamad": "0.0.0",
+  "crates/kotodama-protocol": "0.0.0",
+  "crates/kotodama-extension": "0.0.0",
+  "crates/kotodama-qml": "0.0.0",
+  "crates/kotodama-ai": "0.0.0",
+  "crates/kotodama-apps": "0.0.0",
+  "crates/kotodama-calculator": "0.0.0",
+  "crates/kotodama-clipboard": "0.0.0",
+  "crates/kotodama-emoji": "0.0.0",
+  "crates/kotodama-folders": "0.0.0",
+  "crates/kotodama-hyprland": "0.0.0",
+  "crates/kotodama-system": "0.0.0",
+  "crates/kotodama-web-search": "0.0.0"
 }

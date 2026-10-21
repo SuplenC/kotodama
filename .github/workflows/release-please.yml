@@ -1,10 +1,17 @@
 name: Release
 
-# release-please reads the Conventional Commits that reach main and keeps one
-# release PR open with the next version and its changelog. Merging that PR
-# tags the release and publishes it on GitHub. Its config is
-# release-please-config.json; .release-please-manifest.json holds the last
-# released version.
+# release-please reads the Conventional Commits that reach main and keeps a
+# release PR open for each package they touch, by path: the core (crates/kotodama
+# and crates/kotodamad, released together), kotodama-protocol,
+# kotodama-extension, the Front end (kotodama-qml) and each Bundled extension.
+# Each PR raises that crate's version and adds to its CHANGELOG.md; merging it
+# tags the release, `kotodama-folders-v1.2.0`, and publishes it on GitHub. Its
+# config is release-please-config.json; .release-please-manifest.json holds
+# each package's last released version.
+#
+# The first release puts every package at 1.0.0: add `"release-as": "1.0.0"`
+# to the top of release-please-config.json for that run, and take it out once
+# the release PRs are merged.
 #
 # It runs only when started by hand for now: the repo doesn't let workflows open
 # PRs, so a run on every push to main would fail. Put `push: branches: [main]`

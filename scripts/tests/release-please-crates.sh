@@ -1,28 +1,40 @@
 #!/usr/bin/env bash
-# Checks that release-please bumps every workspace crate's Cargo.lock entry.
+# Checks that every workspace crate is a release-please package of its own: a
+# package in release-please-config.json whose Cargo.lock entry it bumps, and a
+# version in .release-please-manifest.json.
 set -euo pipefail
 
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 config=${RELEASE_PLEASE_CONFIG:-$root/release-please-config.json}
+manifest=${RELEASE_PLEASE_MANIFEST:-$root/.release-please-manifest.json}
 failed=0
 
-# The workspace members' package names, read from each member's Cargo.toml,
-# so the check needs no jq.
-members=$(sed -n 's/^members = \[\(.*\)\]/\1/p' "$root/Cargo.toml" | tr -d '" ' | tr ',' '\n' |
-    while read -r dir; do sed -n 's/^name = "\(.*\)"/\1/p' "$root/$dir/Cargo.toml" | head -1; done)
-lock_path=$(grep -F '"Cargo.lock"' -A1 "$config" | grep -F jsonpath)
+# The workspace members' directories, so the check needs no jq.
+members=$(sed -n 's/^members = \[\(.*\)\]/\1/p' "$root/Cargo.toml" | tr -d '" ' | tr ',' '\n')
 
 if [ -z "$members" ]; then
     echo "FAIL no workspace members found in $root/Cargo.toml" >&2
     exit 1
 fi
 
-for crate in $members; do
-    if grep -qF "@.name.value == '$crate'" <<<"$lock_path"; then
-        echo "ok   $crate is bumped in Cargo.lock"
-    else
-        echo "FAIL $crate is a workspace member missing from release-please-config.json's Cargo.lock extra-files"
+for dir in $members; do
+    crate=$(sed -n 's/^name = "\(.*\)"/\1/p' "$root/$dir/Cargo.toml" | head -1)
+    # The package's block: its key, then its extra-files.
+    block=$(grep -F "\"$dir\": {" -A3 "$config" || true)
+    if [ -z "$block" ]; then
+        echo "FAIL $crate ($dir) is a workspace member but no package in release-please-config.json"
         failed=1
+    elif ! grep -qF "\"path\": \"/Cargo.lock\", \"jsonpath\": \"\$.package[?(@.name.value == '$crate')].version\"" <<<"$block"; then
+        echo "FAIL $crate's package in release-please-config.json doesn't bump its Cargo.lock entry"
+        failed=1
+    elif ! grep -qF "\"$dir\": " "$manifest"; then
+        echo "FAIL $crate ($dir) has no version in .release-please-manifest.json"
+        failed=1
+    elif grep -qx 'version.workspace = true' "$root/$dir/Cargo.toml"; then
+        echo "FAIL $crate takes the workspace's version instead of its own"
+        failed=1
+    else
+        echo "ok   $crate is released on its own"
     fi
 done
 

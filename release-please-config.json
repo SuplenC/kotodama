@@ -1,22 +1,84 @@
 {
   "$schema": "https://raw.githubusercontent.com/googleapis/release-please/main/schemas/config.json",
+  "release-type": "rust",
+  "bump-minor-pre-major": true,
+  "separate-pull-requests": true,
+  "plugins": [
+    {
+      "type": "linked-versions",
+      "groupName": "kotodama",
+      "components": ["kotodama", "kotodamad"]
+    }
+  ],
   "packages": {
-    ".": {
-      "release-type": "simple",
-      "package-name": "kotodama",
-      "include-component-in-tag": false,
-      "bump-minor-pre-major": true,
+    "crates/kotodama": {
       "extra-files": [
-        {
-          "type": "toml",
-          "path": "Cargo.toml",
-          "jsonpath": "$.workspace.package.version"
-        },
-        {
-          "type": "toml",
-          "path": "Cargo.lock",
-          "jsonpath": "$.package[?(@.name.value == 'kotodama' || @.name.value == 'kotodama-ai' || @.name.value == 'kotodama-apps' || @.name.value == 'kotodama-calculator' || @.name.value == 'kotodama-clipboard' || @.name.value == 'kotodama-emoji' || @.name.value == 'kotodama-extension' || @.name.value == 'kotodama-folders' || @.name.value == 'kotodama-hyprland' || @.name.value == 'kotodama-protocol' || @.name.value == 'kotodama-qml' || @.name.value == 'kotodama-system' || @.name.value == 'kotodama-web-search' || @.name.value == 'kotodamad')].version"
-        }
+        { "type": "toml", "path": "/Cargo.lock", "jsonpath": "$.package[?(@.name.value == 'kotodama')].version" }
+      ]
+    },
+    "crates/kotodamad": {
+      "extra-files": [
+        { "type": "toml", "path": "/Cargo.lock", "jsonpath": "$.package[?(@.name.value == 'kotodamad')].version" }
+      ]
+    },
+    "crates/kotodama-protocol": {
+      "extra-files": [
+        { "type": "toml", "path": "/Cargo.lock", "jsonpath": "$.package[?(@.name.value == 'kotodama-protocol')].version" }
+      ]
+    },
+    "crates/kotodama-extension": {
+      "extra-files": [
+        { "type": "toml", "path": "/Cargo.lock", "jsonpath": "$.package[?(@.name.value == 'kotodama-extension')].version" }
+      ]
+    },
+    "crates/kotodama-qml": {
+      "extra-files": [
+        { "type": "toml", "path": "/Cargo.lock", "jsonpath": "$.package[?(@.name.value == 'kotodama-qml')].version" }
+      ]
+    },
+    "crates/kotodama-ai": {
+      "extra-files": [
+        { "type": "toml", "path": "/Cargo.lock", "jsonpath": "$.package[?(@.name.value == 'kotodama-ai')].version" }
+      ]
+    },
+    "crates/kotodama-apps": {
+      "extra-files": [
+        { "type": "toml", "path": "/Cargo.lock", "jsonpath": "$.package[?(@.name.value == 'kotodama-apps')].version" }
+      ]
+    },
+    "crates/kotodama-calculator": {
+      "extra-files": [
+        { "type": "toml", "path": "/Cargo.lock", "jsonpath": "$.package[?(@.name.value == 'kotodama-calculator')].version" }
+      ]
+    },
+    "crates/kotodama-clipboard": {
+      "extra-files": [
+        { "type": "toml", "path": "/Cargo.lock", "jsonpath": "$.package[?(@.name.value == 'kotodama-clipboard')].version" }
+      ]
+    },
+    "crates/kotodama-emoji": {
+      "extra-files": [
+        { "type": "toml", "path": "/Cargo.lock", "jsonpath": "$.package[?(@.name.value == 'kotodama-emoji')].version" }
+      ]
+    },
+    "crates/kotodama-folders": {
+      "extra-files": [
+        { "type": "toml", "path": "/Cargo.lock", "jsonpath": "$.package[?(@.name.value == 'kotodama-folders')].version" }
+      ]
+    },
+    "crates/kotodama-hyprland": {
+      "extra-files": [
+        { "type": "toml", "path": "/Cargo.lock", "jsonpath": "$.package[?(@.name.value == 'kotodama-hyprland')].version" }
+      ]
+    },
+    "crates/kotodama-system": {
+      "extra-files": [
+        { "type": "toml", "path": "/Cargo.lock", "jsonpath": "$.package[?(@.name.value == 'kotodama-system')].version" }
+      ]
+    },
+    "crates/kotodama-web-search": {
+      "extra-files": [
+        { "type": "toml", "path": "/Cargo.lock", "jsonpath": "$.package[?(@.name.value == 'kotodama-web-search')].version" }
       ]
     }
   }
