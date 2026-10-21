@@ -4,3 +4,8 @@
 name = "emoji"
 description = "Emoji, with their skin tones, and symbols such as arrows, math and ⌘ ⌥ ⇧, typed or copied"
 command = ["./kotodama-emoji"]
+# The emoji stay out of the search, behind `emoji`: `emoji fire`. The search
+# shows one "Emoji" Item that enters it.
+prefix = "emoji"
+title = "Emoji"
+icon = "face-smile"
