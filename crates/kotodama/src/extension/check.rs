@@ -94,8 +94,8 @@ impl Options {
 pub(crate) fn check(options: &Options, out: &mut impl Write) -> bool {
     let mut report = Report::new(out);
     report.heading(format!("Checking the Extension in {}", options.dir.display()));
-    // The program is started in the directory, where a relative path to it no longer leads; the
-    // Daemon's directories are absolute.
+    // The program starts in the directory, where a path relative to the caller's leads nowhere.
+    // The Daemon's directories are absolute.
     let dir = fs::canonicalize(&options.dir).unwrap_or_else(|_| options.dir.clone());
     if let Some(manifest) = manifest(&dir, &mut report)
         && let Some(program) = program(&dir, &manifest, &mut report)

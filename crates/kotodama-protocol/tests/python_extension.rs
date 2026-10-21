@@ -14,7 +14,10 @@ use example::Example;
 const EXAMPLE: &str = "python-extension";
 
 fn config(cases: &[&str]) -> ToExtension {
-    let cases = cases.iter().map(|case| Value::String((*case).into())).collect();
+    let cases = cases
+        .iter()
+        .map(|case| Value::String((*case).into()))
+        .collect();
     ToExtension::Config(BTreeMap::from([("cases".into(), Value::Array(cases))]))
 }
 
@@ -56,7 +59,11 @@ fn run(example: &mut Example, item: &Item, action: &str) -> Outcome {
         item: item.to_ref(),
         arguments: BTreeMap::new(),
     });
-    let FromExtension::ActionDone { invocation, outcome } = example.recv() else {
+    let FromExtension::ActionDone {
+        invocation,
+        outcome,
+    } = example.recv()
+    else {
         panic!("expected action_done")
     };
     assert_eq!(invocation, 7);
@@ -81,12 +88,26 @@ fn the_python_example_answers_a_live_query_with_the_text_in_each_case_best_first
     let (results, done) = live_query(&mut example, 3, "hello world");
 
     assert!(done);
-    let titles: Vec<_> = results.iter().map(|result| result.item.title.as_str()).collect();
+    let titles: Vec<_> = results
+        .iter()
+        .map(|result| result.item.title.as_str())
+        .collect();
     assert_eq!(
         titles,
-        ["HELLO WORLD", "hello world", "Hello World", "hello_world", "hello-world", "helloWorld"]
+        [
+            "HELLO WORLD",
+            "hello world",
+            "Hello World",
+            "hello_world",
+            "hello-world",
+            "helloWorld"
+        ]
     );
-    assert!(results.windows(2).all(|pair| pair[0].score.get() > pair[1].score.get()));
+    assert!(
+        results
+            .windows(2)
+            .all(|pair| pair[0].score.get() > pair[1].score.get())
+    );
     assert!(
         results
             .iter()
@@ -119,9 +140,15 @@ fn the_python_example_offers_only_the_configured_cases_and_says_when_none_is_kno
     let mut example = started();
 
     example.send(config(&["camel", "nope"]));
-    assert!(matches!(example.recv(), FromExtension::Status { usable: true, .. }));
+    assert!(matches!(
+        example.recv(),
+        FromExtension::Status { usable: true, .. }
+    ));
     let (results, _) = live_query(&mut example, 5, "hello world");
-    let titles: Vec<_> = results.iter().map(|result| result.item.title.as_str()).collect();
+    let titles: Vec<_> = results
+        .iter()
+        .map(|result| result.item.title.as_str())
+        .collect();
     assert_eq!(titles, ["helloWorld"]);
 
     example.send(config(&["nope"]));
@@ -129,7 +156,10 @@ fn the_python_example_offers_only_the_configured_cases_and_says_when_none_is_kno
         panic!("expected status")
     };
     assert!(!usable);
-    assert!(note.expect("a note").contains("[extensions.text-case] cases"));
+    assert!(
+        note.expect("a note")
+            .contains("[extensions.text-case] cases")
+    );
 }
 
 #[test]

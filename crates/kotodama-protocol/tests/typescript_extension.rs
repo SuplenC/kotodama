@@ -35,7 +35,10 @@ fn titles(example: &mut Example, id: u64, query: &str) -> Vec<String> {
     };
     assert_eq!(live_query, id);
     assert!(done);
-    results.into_iter().map(|result| result.item.title).collect()
+    results
+        .into_iter()
+        .map(|result| result.item.title)
+        .collect()
 }
 
 #[test]
@@ -50,7 +53,11 @@ fn the_typescript_example_shows_a_timestamp_as_a_date_and_a_date_as_a_timestamp(
 
     assert_eq!(
         titles(&mut example, 1, "1700000000"),
-        ["2023-11-14T22:13:20.000Z", "1700000000", "Tue, 14 Nov 2023 22:13:20 GMT"]
+        [
+            "2023-11-14T22:13:20.000Z",
+            "1700000000",
+            "Tue, 14 Nov 2023 22:13:20 GMT"
+        ]
     );
     assert_eq!(titles(&mut example, 2, "2024-02-29")[1], "1709164800");
     assert_eq!(titles(&mut example, 3, "not a date"), Vec::<String>::new());

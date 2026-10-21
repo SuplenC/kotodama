@@ -7,11 +7,14 @@ use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
 use kotodama_protocol::{Channel, FromExtension, Hello, Manifest, ToExtension, WireFormat};
 
 pub fn dir(example: &str) -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples").join(example)
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../examples")
+        .join(example)
 }
 
 pub fn manifest(example: &str) -> Manifest {
-    let toml = std::fs::read_to_string(dir(example).join("manifest.toml")).expect("read the Manifest");
+    let toml =
+        std::fs::read_to_string(dir(example).join("manifest.toml")).expect("read the Manifest");
     Manifest::from_toml(&toml).expect("a valid Manifest")
 }
 
@@ -33,7 +36,8 @@ impl Example {
             .spawn()
             .expect("start the example");
         let (stdout, stdin) = (child.stdout.take().unwrap(), child.stdin.take().unwrap());
-        let channel = Channel::accept(stdout, stdin, &Hello::new(&WireFormat::ALL)).expect("the handshake");
+        let channel =
+            Channel::accept(stdout, stdin, &Hello::new(&WireFormat::ALL)).expect("the handshake");
         Example {
             child,
             channel: Some(channel),
@@ -45,7 +49,9 @@ impl Example {
     }
 
     pub fn send(&mut self, message: ToExtension) {
-        self.channel_mut().send(&message).expect("send to the example");
+        self.channel_mut()
+            .send(&message)
+            .expect("send to the example");
     }
 
     pub fn recv(&mut self) -> FromExtension {
