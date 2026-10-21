@@ -1,6 +1,6 @@
 # 24. A Prefix keeps an Extension's Items out of the search, behind one entry Item
 
-Status: accepted (2026-10-21)
+Status: superseded by ADR 0027 (2026-10-21)
 
 The emoji Extension indexes over 2,000 Items. In the search they crowd out apps and files: `fire` shows 🔥 and 🧑‍🚒 among Firefox, and `editor` shows 📝. Most of the time nobody searching for an app wants an emoji. When they do want one, they know it.
 

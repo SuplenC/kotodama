@@ -52,9 +52,9 @@ _Avoid_: Cached item, preloaded item
 An Item an Extension sends ahead of time that the search never shows; only `kotodama open --view` reaches it, to run its primary Action, which usually pushes a View.
 _Avoid_: Private item, internal item
 
-**Prefix**:
-A word, such as `emoji`, that one Extension's Items sit behind: the search leaves them out and shows one entry Item for the Extension, and a query that starts with the Prefix and a space, such as `emoji fire`, searches those Items alone. Unlike a Hidden item, they are still searched, behind the Prefix; unlike a View, the search behind it is the search, with Results.
-_Avoid_: Scope, mode, namespace, trigger
+**App**:
+The search over one Extension's Items alone, which every Extension has. The search shows its entry Item, found by the App's title and word (`emoji`, `projects`, `calc`); Tab or Enter on it enters the App, where an intro card from the Manifest shows until something is typed, and Esc goes back to the whole search. Each Item is in the search, or in its App only. Unlike a Hidden item, an App only Item is still searched, in its App; unlike a View, the search in an App is the search, with Results.
+_Avoid_: Prefix, scope, mode, namespace, trigger
 
 **Live query**:
 A query the Daemon forwards to an Extension as the user types, for sources that can't be indexed ahead of time, such as a calculator or web search.
