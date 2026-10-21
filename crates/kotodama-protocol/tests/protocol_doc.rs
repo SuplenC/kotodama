@@ -229,7 +229,7 @@ fn describe(label: &str) -> Option<&'static str> {
         "ToFrontEnd::results" => {
             "The whole ranked list for the query, best first, and the app it is in."
         }
-        "ToFrontEnd::status" => "The Extensions that are down.",
+        "ToFrontEnd::status" => "The Extensions that are down, and the problems the user can fix.",
         "ToFrontEnd::close" => "Close the menu, then answer `closed`.",
         "ToFrontEnd::action_failed" => "An Action failed; show `message` and stay open.",
         "ToFrontEnd::push_view" => {

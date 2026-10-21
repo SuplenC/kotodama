@@ -1288,13 +1288,19 @@ The whole ranked list for the query, best first, and the app it is in.
 
 ### `status`
 
-The Extensions that are down.
+The Extensions that are down, and the problems the user can fix.
 
 ```json
 {
   "status": {
     "down": [
       "shell"
+    ],
+    "problems": [
+      {
+        "about": "history.half_life_days in ~/.config/kotodama/config.toml",
+        "message": "should be a number of days above 0"
+      }
     ]
   }
 }
