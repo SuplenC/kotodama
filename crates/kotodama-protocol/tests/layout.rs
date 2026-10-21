@@ -1,15 +1,23 @@
-//! Pins the encoding of every message, so a change to it can't ship without a
-//! new `PROTOCOL_VERSION` (ADR 0012).
+//! Pins the encoding of every message under each protocol version, so a
+//! change can't ship without a new version, and a new minor version can't
+//! break a peer on an older one.
 //!
-//! `layout.txt` holds the postcard and JSON encodings of a sample of every
-//! message, every variant of every enum in one, and every field set to a value
-//! that isn't its default. Its first line names the protocol version it belongs
-//! to. When a message changes:
+//! `layouts/<major>.<minor>.txt` holds, for one version, the postcard,
+//! protobuf, MessagePack and JSON encodings of a sample of every message:
+//! every variant of every enum in one, and every field set to a value that
+//! isn't its default. A file is written once, when its version is new, and
+//! never again. Against the current version's file, the test checks that this
+//! build encodes every sample exactly as pinned. Against an older minor
+//! version's, it checks that this build still decodes what that version sent,
+//! and that what it sends a peer on that version, in the formats such a peer
+//! may be on, is byte for byte what that version encoded: so the older peer
+//! reads it. When a message changes:
 //!
-//! 1. bump `PROTOCOL_VERSION` in `src/handshake.rs`;
+//! 1. raise `PROTOCOL_VERSION` in `src/version.rs`: the minor version when the
+//!    change only adds, and mark what is new with [`Since`] or `unread`;
 //! 2. give anything new a sample here;
-//! 3. rerun this test with `KOTODAMA_BLESS_LAYOUT=1`, which rewrites
-//!    `layout.txt`. It refuses while the version is still the old one.
+//! 3. rerun this test with `KOTODAMA_BLESS_LAYOUT=1`, which writes the new
+//!    version's file. It never writes over one that exists.
 //!
 //! The samples are written out in full, never with `..`, so a new field stops
 //! this file compiling until it has a value. A variant without a sample fails
@@ -18,28 +26,86 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::{Debug, Write as _};
 use std::path::{Path, PathBuf};
+use std::rc::Rc;
 
 use kotodama_protocol::*;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 
+#[path = "layout/schema.rs"]
+mod schema;
+
 const BLESS: &str = "KOTODAMA_BLESS_LAYOUT";
 
-fn snapshot_path() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/layout.txt")
+const FORMATS: [(WireFormat, &str); 4] = [
+    (WireFormat::Postcard, "postcard"),
+    (WireFormat::Protobuf, "protobuf"),
+    (WireFormat::MessagePack, "msgpack"),
+    (WireFormat::Json, "json"),
+];
+
+fn layouts_dir() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/layouts")
+}
+
+/// The versions with a pinned layout, and where each one's file is.
+fn pinned_versions() -> Vec<(Version, PathBuf)> {
+    let mut versions: Vec<_> = std::fs::read_dir(layouts_dir())
+        .map(|dir| {
+            dir.filter_map(|entry| {
+                let path = entry.ok()?.path();
+                let (major, minor) = path.file_stem()?.to_str()?.split_once('.')?;
+                Some((Version::new(major.parse().ok()?, minor.parse().ok()?), path))
+            })
+            .collect()
+        })
+        .unwrap_or_default();
+    versions.sort();
+    versions
 }
 
 #[test]
 fn the_layout_of_every_message_is_the_one_pinned_for_this_protocol_version() {
-    let actual = layout();
-    let path = snapshot_path();
-    let pinned = std::fs::read_to_string(&path).unwrap_or_default();
+    let actual = layout(&samples(), PROTOCOL_VERSION);
+    let path = layouts_dir().join(format!("{PROTOCOL_VERSION}.txt"));
+    let pinned = std::fs::read_to_string(&path).ok();
     let bless = std::env::var_os(BLESS).is_some();
-    match check(&pinned, &actual, PROTOCOL_VERSION, bless) {
+    match check(pinned.as_deref(), &actual, PROTOCOL_VERSION, bless) {
         Verdict::Same => {}
-        Verdict::Write => std::fs::write(&path, &actual).unwrap(),
+        Verdict::Write => {
+            std::fs::create_dir_all(layouts_dir()).unwrap();
+            std::fs::write(&path, &actual).unwrap();
+        }
         Verdict::Fail(message) => panic!("{message}"),
     }
+}
+
+#[test]
+fn what_the_daemon_sends_a_peer_on_an_older_minor_version_is_what_that_version_reads() {
+    let samples = samples();
+    let mut failures = Vec::new();
+    for (version, path) in pinned_versions() {
+        if version.major == PROTOCOL_VERSION.major && version < PROTOCOL_VERSION {
+            failures.extend(check_older(
+                version,
+                &std::fs::read_to_string(path).unwrap(),
+                &samples,
+            ));
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+#[test]
+fn every_major_version_from_the_first_release_on_has_a_pinned_layout() {
+    let pinned: Vec<Version> = pinned_versions()
+        .into_iter()
+        .map(|(version, _)| version)
+        .collect();
+    assert!(
+        pinned.contains(&FIRST_VERSION),
+        "no layout pinned for {FIRST_VERSION}: {pinned:?}"
+    );
 }
 
 #[derive(Debug, PartialEq)]
@@ -49,138 +115,355 @@ enum Verdict {
     Fail(String),
 }
 
-/// Compares the pinned layout with this build's. A changed layout may only be
-/// written over the pinned one under a new protocol version.
-fn check(pinned: &str, actual: &str, version: u32, bless: bool) -> Verdict {
-    if pinned == actual {
-        return Verdict::Same;
+/// Compares the layout pinned for `version`, if any, with this build's. A
+/// layout is only written for a version that has none.
+fn check(pinned: Option<&str>, actual: &str, version: Version, bless: bool) -> Verdict {
+    match pinned {
+        Some(pinned) if pinned == actual => Verdict::Same,
+        Some(pinned) => {
+            let before: BTreeSet<&str> = pinned.lines().collect();
+            let changed: Vec<&str> = actual
+                .lines()
+                .filter(|line| !before.contains(line))
+                .take(5)
+                .collect();
+            Verdict::Fail(format!(
+                "The protocol's encoding changed, but PROTOCOL_VERSION is still {version}, whose \
+                 layout is pinned. A peer built for {version} would pass the handshake and then \
+                 misread messages. Raise PROTOCOL_VERSION in crates/kotodama-protocol/src/version.rs \
+                 (the minor version if the change only adds), then rerun with {BLESS}=1 to pin the \
+                 new version's layout.\nFirst changed lines:\n{}",
+                changed.join("\n")
+            ))
+        }
+        None if bless => Verdict::Write,
+        None => Verdict::Fail(format!(
+            "No layout is pinned for protocol {version}. Rerun this test with {BLESS}=1 to pin it."
+        )),
     }
-    let pinned_version = pinned
-        .lines()
-        .next()
-        .and_then(|line| line.strip_prefix("protocol version "))
-        .and_then(|version| version.parse::<u32>().ok());
-    let same_version = pinned_version == Some(version);
-    let changed: Vec<&str> = {
-        let before: BTreeSet<&str> = pinned.lines().collect();
-        actual
-            .lines()
-            .filter(|line| !before.contains(line))
-            .take(5)
-            .collect()
-    };
-    if same_version {
-        return Verdict::Fail(format!(
-            "The protocol's encoding changed, but PROTOCOL_VERSION is still {version}. \
-             A peer built before this change would pass the handshake and then misread \
-             messages. Bump PROTOCOL_VERSION in crates/kotodama-protocol/src/handshake.rs \
-             (ADR 0012), then rerun with {BLESS}=1 to pin the new layout.\n\
-             First changed lines:\n{}",
-            changed.join("\n")
-        ));
-    }
-    if bless {
-        return Verdict::Write;
-    }
-    Verdict::Fail(format!(
-        "PROTOCOL_VERSION is {version}, but layout.txt pins {}. Rerun this test with \
-         {BLESS}=1 to pin this version's layout.",
-        pinned_version.map_or("nothing".into(), |version| format!("version {version}"))
-    ))
 }
 
 #[test]
-fn a_changed_layout_under_the_same_version_is_refused_even_when_blessing() {
-    let pinned = "protocol version 2\nItem postcard 00\n";
-    let changed = "protocol version 2\nItem postcard 00 01\n";
+fn a_changed_layout_under_a_pinned_version_is_refused_even_when_blessing() {
+    let pinned = "protocol version 1.0\nItem postcard 00\n";
+    let changed = "protocol version 1.0\nItem postcard 00 01\n";
     for bless in [false, true] {
-        let Verdict::Fail(message) = check(pinned, changed, 2, bless) else {
-            panic!("a changed layout under version 2 should fail");
+        let Verdict::Fail(message) = check(Some(pinned), changed, Version::new(1, 0), bless) else {
+            panic!("a changed layout under a pinned version should fail");
         };
-        assert!(message.contains("Bump PROTOCOL_VERSION"), "{message}");
+        assert!(message.contains("Raise PROTOCOL_VERSION"), "{message}");
         assert!(message.contains("Item postcard 00 01"), "{message}");
     }
 }
 
 #[test]
-fn a_changed_layout_is_pinned_only_once_the_version_is_bumped() {
-    let pinned = "protocol version 2\nItem postcard 00\n";
-    let changed = "protocol version 3\nItem postcard 00 01\n";
-    assert_eq!(check(pinned, changed, 3, true), Verdict::Write);
-    assert!(matches!(check(pinned, changed, 3, false), Verdict::Fail(_)));
-    assert_eq!(check(changed, changed, 3, false), Verdict::Same);
+fn a_layout_is_pinned_only_for_a_version_without_one() {
+    let layout = "protocol version 1.1\nItem postcard 00 01\n";
+    let version = Version::new(1, 1);
+    assert_eq!(check(None, layout, version, true), Verdict::Write);
+    assert!(matches!(
+        check(None, layout, version, false),
+        Verdict::Fail(_)
+    ));
+    assert_eq!(check(Some(layout), layout, version, false), Verdict::Same);
 }
 
-/// Every sample's encodings, one line each.
-fn layout() -> String {
-    let mut out = format!("protocol version {PROTOCOL_VERSION}\n");
-    record_enum(&mut out, "ToExtension", &to_extension());
-    record_enum(&mut out, "FromExtension", &from_extension());
-    record_enum(&mut out, "FromFrontEnd", &from_front_end());
-    record_enum(&mut out, "ToFrontEnd", &to_front_end());
-    record_enum(&mut out, "Outcome", &outcomes());
-    record_enum(&mut out, "Clipboard", &clipboards());
-    record_enum(&mut out, "ViewContent", &view_contents());
-    record_enum(&mut out, "FormInput", &form_inputs());
-    record_enum(&mut out, "JobState", &job_states());
-    for value in values() {
-        record(
-            &mut out,
-            &format!("Value::{}", value_variant(&value)),
-            &value,
-        );
+/// `kotodama.proto` describes this version's messages, for other languages'
+/// protobuf code generators. Blessing the layout rewrites it.
+#[test]
+fn the_published_protobuf_schema_is_this_versions() {
+    let mut schema = schema::Schema::default();
+    for sample in samples() {
+        (sample.add_to_schema)(&mut schema);
     }
+    // The one ItemRef sample has one kind's field; the others are left out.
     for item in items() {
-        record(
-            &mut out,
-            &format!("Item::{}", kind_variant(&item.kind)),
-            &item,
+        schema.add(&ItemRef {
+            id: item.id,
+            kind: item.kind,
+        });
+    }
+    let header = format!(
+        "// The Kotodama protocol {PROTOCOL_VERSION} as Protocol Buffers, for the `protobuf` Wire format.\n\
+         // Written by crates/kotodama-protocol/tests/layout.rs from the protocol's types; don't edit.\n\
+         //\n\
+         // Each frame (an ASCII length, a newline, then the payload) holds one message.\n\
+         // An Extension reads ToExtension and writes FromExtension; a Front end reads\n\
+         // ToFrontEnd and writes FromFrontEnd. The hello before them is always JSON.\n\
+         // A field absent from a message holds its default; unknown fields are\n\
+         // skipped, and a peer on an older minor version is never sent a field or a\n\
+         // variant its version lacks.\n\
+         \n\
+         syntax = \"proto3\";\n\
+         \n\
+         package kotodama.v{};\n",
+        PROTOCOL_VERSION.major
+    );
+    let actual = schema.render(&header).unwrap_or_else(|err| panic!("{err}"));
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("kotodama.proto");
+    let pinned = std::fs::read_to_string(&path).unwrap_or_default();
+    if pinned != actual {
+        assert!(
+            std::env::var_os(BLESS).is_some(),
+            "kotodama.proto doesn't describe protocol {PROTOCOL_VERSION}. Rerun this test with {BLESS}=1 \
+             to rewrite it."
         );
+        std::fs::write(&path, &actual).unwrap();
+    }
+}
+
+/// A sample message, with what the test does with it in each format.
+struct Sample {
+    label: String,
+    /// For what the Daemon sends, the minor version that added it, which no
+    /// older peer is sent. `None` for what the Daemon only receives: an older
+    /// peer never sends what its version lacks.
+    since: Option<u32>,
+    /// Encodes the sample for a peer on a version.
+    encode: Box<dyn Fn(WireFormat, Version) -> Vec<u8>>,
+    decode: Box<Decode>,
+    add_to_schema: Box<dyn Fn(&mut schema::Schema)>,
+}
+
+/// Decodes bytes, and tells whether they hold the sample.
+type Decode = dyn Fn(WireFormat, &[u8]) -> Result<bool, String>;
+
+fn sample<T>(label: String, since: Option<u32>, value: T) -> Sample
+where
+    T: Serialize + DeserializeOwned + PartialEq + Debug + 'static,
+{
+    let value = Rc::new(value);
+    let decoded = Rc::clone(&value);
+    let described = Rc::clone(&value);
+    Sample {
+        label,
+        since,
+        add_to_schema: Box::new(move |schema| schema.add(&*described)),
+        encode: Box::new(move |format, version| format.encode_for(version, &*value).unwrap()),
+        decode: Box::new(move |format, bytes| {
+            format
+                .decode::<T>(bytes)
+                .map(|back| back == *decoded)
+                .map_err(|err| err.to_string())
+        }),
+    }
+}
+
+/// Every sample's encodings for a peer on `version`, one line each.
+///
+/// For the current version, each encoding is checked to decode back to its
+/// sample first: some types decode through a different struct than they
+/// encode with, and the pinned bytes are only worth pinning if this build
+/// also reads them.
+fn layout(samples: &[Sample], version: Version) -> String {
+    let mut out = format!("protocol version {version}\n");
+    for sample in samples {
+        for (format, name) in FORMATS {
+            let bytes = (sample.encode)(format, version);
+            if version == PROTOCOL_VERSION {
+                match (sample.decode)(format, &bytes) {
+                    Ok(true) => {}
+                    Ok(false) => panic!("{} decodes differently from {name}", sample.label),
+                    Err(err) => panic!("{} doesn't decode from {name}: {err}", sample.label),
+                }
+            }
+            write!(out, "{} {name}", sample.label).unwrap();
+            if format == WireFormat::Json {
+                write!(out, " {}", String::from_utf8(bytes).unwrap()).unwrap();
+            } else {
+                for byte in bytes {
+                    write!(out, " {byte:02x}").unwrap();
+                }
+            }
+            out.push('\n');
+        }
     }
     out
 }
 
-/// Records a sample's encodings, after checking each decodes back to it: some
-/// types decode through a different struct than they encode with, and the
-/// pinned bytes are only worth pinning if this build also reads them.
-fn record<T: Serialize + DeserializeOwned + PartialEq + Debug>(
-    out: &mut String,
-    label: &str,
-    sample: &T,
-) {
-    let postcard = WireFormat::Postcard.encode(sample).unwrap();
-    let json = String::from_utf8(WireFormat::Json.encode(sample).unwrap()).unwrap();
-    for (format, bytes) in [
-        (WireFormat::Postcard, postcard.as_slice()),
-        (WireFormat::Json, json.as_bytes()),
-    ] {
-        let back: T = format
-            .decode(bytes)
-            .unwrap_or_else(|err| panic!("{label} doesn't decode from {format:?}: {err:?}"));
-        assert_eq!(&back, sample, "{label} decodes differently from {format:?}");
+/// Every encoding in a pinned layout, by label.
+fn parse(layout: &str) -> BTreeMap<&str, Vec<(WireFormat, Vec<u8>)>> {
+    let mut encodings: BTreeMap<&str, Vec<_>> = BTreeMap::new();
+    for line in layout.lines().skip(1) {
+        let mut parts = line.splitn(3, ' ');
+        let (Some(label), Some(name)) = (parts.next(), parts.next()) else {
+            panic!("a line without a label and a format: {line}");
+        };
+        let data = parts.next().unwrap_or("");
+        let (format, _) = FORMATS
+            .into_iter()
+            .find(|(_, known)| *known == name)
+            .unwrap_or_else(|| panic!("an unknown format: {line}"));
+        let bytes = if format == WireFormat::Json {
+            data.as_bytes().to_vec()
+        } else {
+            data.split(' ')
+                .filter(|byte| !byte.is_empty())
+                .map(|byte| u8::from_str_radix(byte, 16).unwrap())
+                .collect()
+        };
+        encodings.entry(label).or_default().push((format, bytes));
     }
-    write!(out, "{label} postcard").unwrap();
-    for byte in postcard {
-        write!(out, " {byte:02x}").unwrap();
-    }
-    writeln!(out, "\n{label} json {json}").unwrap();
+    encodings
 }
 
-/// Records each sample under its variant's name, and fails if a variant of
-/// `T` has no sample.
-fn record_enum<T: Serialize + DeserializeOwned + PartialEq + Debug>(
-    out: &mut String,
-    name: &str,
-    samples: &[T],
-) {
-    let mut covered = BTreeSet::new();
+/// What is wrong in talking to a peer on `version`, an older minor version of
+/// this major whose layout is `pinned`.
+fn check_older(version: Version, pinned: &str, samples: &[Sample]) -> Vec<String> {
+    let recorded = parse(pinned);
+    let mut failures = Vec::new();
+    for (label, encodings) in &recorded {
+        let Some(sample) = samples.iter().find(|sample| sample.label == *label) else {
+            failures.push(format!(
+                "{label} was in protocol {version} and is gone: a minor version only adds"
+            ));
+            continue;
+        };
+        // Postcard is only spoken between peers on the same version.
+        for (format, bytes) in encodings
+            .iter()
+            .filter(|(format, _)| *format != WireFormat::Postcard)
+        {
+            if let Err(err) = (sample.decode)(*format, bytes) {
+                failures.push(format!(
+                    "{label} as protocol {version} sent it in {format:?} no longer decodes: {err}"
+                ));
+            }
+            if (sample.encode)(*format, version) != *bytes {
+                failures.push(format!(
+                    "{label} encoded in {format:?} for a peer on protocol {version} isn't what {version} \
+                     encoded: a field added since needs #[serde(default, skip_serializing_if = \
+                     \"crate::version::unread::<MINOR, _>\")]"
+                ));
+            }
+        }
+    }
     for sample in samples {
-        let variant = match serde_json::to_value(sample).unwrap() {
+        if let Some(since) = sample.since
+            && !recorded.contains_key(sample.label.as_str())
+            && since <= version.minor
+        {
+            failures.push(format!(
+                "{} is new since protocol {version}, but its since() is {since}, so the Daemon would \
+                 send it to a peer on {version}, which can't read it. Make since() name the minor \
+                 version that added it.",
+                sample.label
+            ));
+        }
+    }
+    failures
+}
+
+#[test]
+fn an_older_minor_versions_layout_that_this_build_matches_passes() {
+    let samples = samples();
+    let pinned = layout(&samples, Version::new(PROTOCOL_VERSION.major, 0));
+    assert_eq!(
+        check_older(Version::new(PROTOCOL_VERSION.major, 0), &pinned, &samples),
+        Vec::<String>::new()
+    );
+}
+
+#[test]
+fn an_older_minor_version_that_reads_an_encoding_differently_fails() {
+    let samples = samples();
+    let version = Version::new(PROTOCOL_VERSION.major, 0);
+    let pinned = layout(&samples, version).replace(
+        r#"ToExtension::cancel_live_query json {"cancel_live_query":{"id":4}}"#,
+        r#"ToExtension::cancel_live_query json {"cancel_live_query":{"id":5}}"#,
+    );
+    let failures = check_older(version, &pinned, &samples);
+    assert_eq!(failures.len(), 1, "{failures:?}");
+    assert!(
+        failures[0].contains("ToExtension::cancel_live_query encoded in Json"),
+        "{failures:?}"
+    );
+}
+
+#[test]
+fn a_message_an_older_minor_version_had_may_not_go() {
+    let samples = samples();
+    let version = Version::new(PROTOCOL_VERSION.major, 0);
+    let pinned = format!("{}Gone::message json \"gone\"\n", layout(&samples, version));
+    let failures = check_older(version, &pinned, &samples);
+    assert_eq!(
+        failures,
+        ["Gone::message was in protocol 1.0 and is gone: a minor version only adds"]
+    );
+}
+
+#[test]
+fn a_message_new_since_an_older_minor_version_must_say_it_is_newer() {
+    let samples = samples();
+    let version = Version::new(PROTOCOL_VERSION.major, 0);
+    let pinned: String = layout(&samples, version)
+        .lines()
+        .filter(|line| !line.starts_with("ToFrontEnd::close "))
+        .map(|line| format!("{line}\n"))
+        .collect();
+    let failures = check_older(version, &pinned, &samples);
+    assert_eq!(failures.len(), 1, "{failures:?}");
+    assert!(
+        failures[0].starts_with("ToFrontEnd::close is new since protocol 1.0"),
+        "{failures:?}"
+    );
+}
+
+/// Every sample, in the order the layout lists them.
+fn samples() -> Vec<Sample> {
+    let mut samples = Vec::new();
+    enum_samples(&mut samples, "ToExtension", to_extension(), |m| {
+        Some(m.since())
+    });
+    enum_samples(&mut samples, "FromExtension", from_extension(), |_| None);
+    enum_samples(&mut samples, "FromFrontEnd", from_front_end(), |_| None);
+    enum_samples(&mut samples, "ToFrontEnd", to_front_end(), |m| {
+        Some(m.since())
+    });
+    enum_samples(&mut samples, "Outcome", outcomes(), |_| None);
+    enum_samples(&mut samples, "Clipboard", clipboards(), |_| None);
+    enum_samples(&mut samples, "ViewContent", view_contents(), |m| {
+        Some(m.since())
+    });
+    enum_samples(&mut samples, "FormInput", form_inputs(), |m| {
+        Some(m.since())
+    });
+    enum_samples(&mut samples, "JobState", job_states(), |m| Some(m.since()));
+    // The Daemon sends Values in an Extension's config. No Value is newer than
+    // the first version; one that is needs a since() to say so.
+    for value in values() {
+        samples.push(sample(
+            format!("Value::{}", value_variant(&value)),
+            Some(0),
+            value,
+        ));
+    }
+    for item in items() {
+        let label = format!("Item::{}", kind_variant(&item.kind));
+        samples.push(sample(label, Some(item.since()), item));
+    }
+    samples
+}
+
+/// A sample for each variant, under the variant's name; fails if a variant of
+/// `T` has none.
+fn enum_samples<T>(
+    out: &mut Vec<Sample>,
+    name: &str,
+    values: Vec<T>,
+    since: impl Fn(&T) -> Option<u32>,
+) where
+    T: Serialize + DeserializeOwned + PartialEq + Debug + 'static,
+{
+    let mut covered = BTreeSet::new();
+    for value in values {
+        let variant = match serde_json::to_value(&value).unwrap() {
             serde_json::Value::String(variant) => variant,
             serde_json::Value::Object(map) if map.len() == 1 => map.into_iter().next().unwrap().0,
             other => panic!("{name} isn't an externally tagged enum: {other}"),
         };
-        record(out, &format!("{name}::{variant}"), sample);
+        let since = since(&value);
+        out.push(sample(format!("{name}::{variant}"), since, value));
         covered.insert(variant);
     }
     let all = variants::<T>();
@@ -188,8 +471,8 @@ fn record_enum<T: Serialize + DeserializeOwned + PartialEq + Debug>(
     for variant in all {
         assert!(
             covered.contains(&variant),
-            "{name}::{variant} has no sample in tests/layout.rs; add one, \
-             and bump PROTOCOL_VERSION if the variant is new (ADR 0012)"
+            "{name}::{variant} has no sample in tests/layout.rs; add one, and raise \
+             PROTOCOL_VERSION if the variant is new"
         );
     }
 }

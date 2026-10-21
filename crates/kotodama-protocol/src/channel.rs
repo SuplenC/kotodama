@@ -6,7 +6,8 @@ use std::io::{BufRead, BufReader, BufWriter, Read, Write};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 
-use crate::{Error, Hello, WireFormat, frame};
+use crate::version::{self, PROTOCOL_VERSION};
+use crate::{Error, Hello, Since, Version, WireFormat, frame};
 
 /// Sends and receives whole messages in the Wire format agreed at the handshake.
 /// Works over any byte streams: a Unix socket, or an Extension's stdio.
@@ -14,6 +15,8 @@ pub struct Channel<R, W: Write> {
     reader: BufReader<R>,
     writer: BufWriter<W>,
     format: WireFormat,
+    /// The protocol version the other side named in its hello.
+    peer: Version,
     buf: Vec<u8>,
 }
 
@@ -31,38 +34,75 @@ pub struct ChannelReader<R> {
 pub struct ChannelWriter<W: Write> {
     writer: BufWriter<W>,
     format: WireFormat,
+    peer: Version,
     buf: Vec<u8>,
 }
 
 impl<R: Read, W: Write> Channel<R, W> {
-    /// Sends `ours`, reads the peer's [`Hello`], and settles on the fastest Wire
-    /// format both support. Both sides call this at once; neither waits for the
-    /// other to go first.
+    /// An Extension's or a Front end's side: sends `ours`, reads the Daemon's
+    /// [`Hello`], and settles on the fastest Wire format both support. Both
+    /// sides call theirs at once; neither waits for the other to go first.
+    ///
+    /// # Errors
+    ///
+    /// As [`Hello::accept_daemon`]: a Daemon older than `ours` is refused.
     pub fn handshake(reader: R, writer: W, ours: &Hello) -> Result<Self, Error> {
+        Self::open(reader, writer, ours, Hello::accept_daemon)
+    }
+
+    /// The Daemon's side of [`Channel::handshake`].
+    ///
+    /// # Errors
+    ///
+    /// As [`Hello::accept_peer`]: a peer newer than `ours` is refused.
+    pub fn accept(reader: R, writer: W, ours: &Hello) -> Result<Self, Error> {
+        Self::open(reader, writer, ours, Hello::accept_peer)
+    }
+
+    fn open(
+        reader: R,
+        writer: W,
+        ours: &Hello,
+        agree: impl FnOnce(&Hello, &Hello) -> Result<WireFormat, Error>,
+    ) -> Result<Self, Error> {
         let mut channel = Channel {
             reader: BufReader::new(reader),
             writer: BufWriter::new(writer),
             format: WireFormat::Json,
+            peer: PROTOCOL_VERSION,
             buf: Vec::new(),
         };
         channel.send(ours)?;
         let peer: Hello = channel
             .recv()?
             .ok_or_else(|| Error::Io(std::io::ErrorKind::UnexpectedEof.into()))?;
-        channel.format = ours.negotiate(&peer)?;
+        channel.format = agree(ours, &peer)?;
+        channel.peer = peer.protocol();
         Ok(channel)
+    }
+
+    /// The protocol version the other side speaks.
+    pub fn peer(&self) -> Version {
+        self.peer
     }
 
     pub fn format(&self) -> WireFormat {
         self.format
     }
 
-    /// Sends one message and flushes it.
+    /// Sends one message, without the fields the peer's version lacks, and
+    /// flushes it.
     pub fn send<T: Serialize + ?Sized>(&mut self, message: &T) -> Result<(), Error> {
         self.buf.clear();
-        self.format.encode_into(message, &mut self.buf)?;
+        self.format
+            .encode_for_into(self.peer, message, &mut self.buf)?;
         frame::write(&mut self.writer, &self.buf)?;
         Ok(())
+    }
+
+    /// Whether the peer's version can read `message`; see [`ChannelWriter::reads`].
+    pub fn reads<T: Since + ?Sized>(&self, message: &T) -> bool {
+        reads(self.peer, message)
     }
 
     /// The next message, or `None` once the peer has closed the connection.
@@ -84,6 +124,7 @@ impl<R: Read, W: Write> Channel<R, W> {
             ChannelWriter {
                 writer: self.writer,
                 format: self.format,
+                peer: self.peer,
                 buf: Vec::new(),
             },
         )
@@ -135,11 +176,31 @@ impl<W: Write> ChannelWriter<W> {
         self.format
     }
 
-    /// Sends one message and flushes it.
+    /// The protocol version the other side speaks.
+    pub fn peer(&self) -> Version {
+        self.peer
+    }
+
+    /// Sends one message, without the fields the peer's version lacks, and
+    /// flushes it.
     pub fn send<T: Serialize + ?Sized>(&mut self, message: &T) -> Result<(), Error> {
         self.buf.clear();
-        self.format.encode_into(message, &mut self.buf)?;
+        self.format
+            .encode_for_into(self.peer, message, &mut self.buf)?;
         frame::write(&mut self.writer, &self.buf)?;
         Ok(())
     }
+
+    /// Whether the peer's version can read `message`: false for a message, or
+    /// a value in one, that a newer minor version added, which the Daemon
+    /// doesn't send that peer.
+    pub fn reads<T: Since + ?Sized>(&self, message: &T) -> bool {
+        reads(self.peer, message)
+    }
+}
+
+fn reads<T: Since + ?Sized>(peer: Version, message: &T) -> bool {
+    // A peer on this version or a newer one reads everything, without the
+    // message being looked through.
+    !version::older_minor(peer) || message.since() <= peer.minor
 }

@@ -1,10 +1,11 @@
 //! A connection to an Extension or a Front end once its handshake is done:
-//! one thread writes what the Daemon sends, and the calling thread reads.
+//! one thread writes what the Daemon sends, leaving out what the peer's
+//! protocol version can't read, and the calling thread reads.
 
 use std::io::{Read, Write};
 use std::sync::mpsc::{self, SyncSender};
 
-use kotodama_protocol::{Channel, Error};
+use kotodama_protocol::{Channel, Error, Since};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 
@@ -28,13 +29,18 @@ where
     R: Read,
     W: Write + Send + 'static,
     In: DeserializeOwned,
-    Out: Serialize + Send + 'static,
+    Out: Serialize + Since + Send + 'static,
 {
     let (mut reader, mut writer) = channel.split();
     let (sender, outbox) = mpsc::sync_channel::<Out>(OUTBOX);
     spawn(format!("{name}-w"), move || {
         // Ends when the Daemon drops the sender or the peer stops taking bytes.
         for message in outbox {
+            // A peer on an older minor version isn't sent what its version
+            // lacks; one on the Daemon's own version reads everything.
+            if !writer.reads(&message) {
+                continue;
+            }
             if writer.send(&message).is_err() {
                 break;
             }

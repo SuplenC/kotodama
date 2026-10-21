@@ -37,7 +37,7 @@ impl Spawned {
             .spawn()
             .unwrap();
         let (stdout, stdin) = (child.stdout.take().unwrap(), child.stdin.take().unwrap());
-        let channel = Channel::handshake(stdout, stdin, &Hello::new(&WireFormat::ALL)).unwrap();
+        let channel = Channel::accept(stdout, stdin, &Hello::new(&WireFormat::ALL)).unwrap();
         let (mut reader, writer) = channel.split();
         let (sender, received) = mpsc::channel();
         thread::spawn(move || {

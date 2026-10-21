@@ -122,12 +122,16 @@ done_with() {
 }
 
 # The handshake is always JSON. Both sides send a hello; this script offers JSON
-# only, so JSON is what the connection uses from here on. Both must speak the
-# same protocol version, which goes up whenever a message changes.
-version=10
-send "{\"version\":$version,\"formats\":[\"json\"]}"
+# only, so JSON is what the connection uses from here on. The hello names the
+# protocol version the script was written for, 1.0. The Daemon speaks that
+# version or a newer one, and talks to the script in 1.0's terms; an older
+# Daemon can't.
+major=1
+minor=0
+send "{\"version\":$major,\"minor\":$minor,\"formats\":[\"json\"]}"
 read_frame
-if ! jq -e --argjson version "$version" '.version == $version' <<<"$frame" >/dev/null; then
+if ! jq -e --argjson major "$major" --argjson minor "$minor" \
+    '[.version, (.minor // 0)] >= [$major, $minor]' <<<"$frame" >/dev/null; then
     echo "shell-example: unsupported protocol version: $frame" >&2
     exit 1
 fi

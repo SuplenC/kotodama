@@ -104,7 +104,7 @@ pub fn serve(listener: UnixListener, events: Sender<Event>) {
 fn connection(id: FrontEndId, stream: UnixStream, events: &Sender<Event>) -> Result<(), Error> {
     // A Front end that connects and never says hello mustn't hold a thread.
     stream.set_read_timeout(Some(HANDSHAKE_TIMEOUT))?;
-    let channel = Channel::handshake(
+    let channel = Channel::accept(
         stream.try_clone()?,
         stream.try_clone()?,
         &Hello::new(&WireFormat::ALL),

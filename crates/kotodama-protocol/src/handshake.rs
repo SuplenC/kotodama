@@ -1,25 +1,26 @@
 //! The handshake: the first frame each side sends, always in JSON because no
 //! other Wire format is agreed yet.
+//!
+//! The Daemon talks to a peer on its own version or an older one, and turns
+//! away a newer peer with an error naming the version the peer needs. A peer
+//! talks to a Daemon on its version or a newer one, which adapts to it.
 
 use serde::{Deserialize, Deserializer, Serialize};
 
+use crate::version::{FIRST_VERSION, PROTOCOL_VERSION, Version};
 use crate::{Error, WireFormat};
 
-/// The protocol version this crate speaks. Both sides of a connection must
-/// speak the same one, so a peer that would misread this side's messages is
-/// turned away at the handshake rather than failing at some later decode.
-///
-/// It goes up by one with every change an older peer can't read in some Wire
-/// format; see `docs/adr/0012-the-protocol-version-goes-up-with-every-layout-change.md`.
-/// The `layout` test fails until it does.
-pub const PROTOCOL_VERSION: u32 = 10;
-
 /// What one side sends to open a connection. Both sides send theirs straight
-/// away, without waiting for the other's, and each then picks the same Wire format
-/// with [`Hello::negotiate`].
+/// away, without waiting for the other's. The Daemon then checks the peer's
+/// with [`Hello::accept_peer`], the peer the Daemon's with
+/// [`Hello::accept_daemon`], and both arrive at the same Wire format.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Hello {
+    /// The major protocol version.
     pub version: u32,
+    /// The minor protocol version; 0 when left out.
+    #[serde(default)]
+    pub minor: u32,
     /// The Wire formats this side supports. JSON is required. Names this side
     /// doesn't know are dropped, so a newer peer can offer formats an older one
     /// lacks.
@@ -28,28 +29,78 @@ pub struct Hello {
 }
 
 impl Hello {
+    /// This side's hello: [`PROTOCOL_VERSION`] and `formats`.
+    #[must_use]
     pub fn new(formats: &[WireFormat]) -> Self {
         Hello {
-            version: PROTOCOL_VERSION,
+            version: PROTOCOL_VERSION.major,
+            minor: PROTOCOL_VERSION.minor,
             formats: formats.to_vec(),
         }
     }
 
-    /// The fastest Wire format both sides support. The order of either list
-    /// doesn't matter, so both sides arrive at the same answer. Fails if either
-    /// side leaves out JSON, which every side must support.
-    pub fn negotiate(&self, peer: &Hello) -> Result<WireFormat, Error> {
-        if self.version != peer.version {
-            return Err(Error::VersionMismatch {
-                ours: self.version,
-                theirs: peer.version,
+    /// The protocol version this hello names.
+    pub fn protocol(&self) -> Version {
+        Version::new(self.version, self.minor)
+    }
+
+    /// The Daemon's side: the Wire format for `peer`, an Extension or a Front
+    /// end, on this version or an older one.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::PeerTooNew`] for a peer on a newer version than this side,
+    /// [`Error::PeerTooOld`] for one older than any released version, and
+    /// [`Error::JsonNotOffered`] as for [`Hello::negotiate`].
+    pub fn accept_peer(&self, peer: &Hello) -> Result<WireFormat, Error> {
+        let (ours, theirs) = (self.protocol(), peer.protocol());
+        if theirs > ours {
+            return Err(Error::PeerTooNew { peer: theirs, ours });
+        }
+        if theirs < FIRST_VERSION || theirs.major < ours.major {
+            // Every major version is kept: an older one would be spoken in its
+            // own frozen types, and there is none before this one.
+            return Err(Error::PeerTooOld { peer: theirs, ours });
+        }
+        self.negotiate(peer)
+    }
+
+    /// An Extension's or a Front end's side: the Wire format for the Daemon,
+    /// which speaks this version or a newer one.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::DaemonTooOld`] for a Daemon on an older version than this
+    /// side, and [`Error::JsonNotOffered`] as for [`Hello::negotiate`].
+    pub fn accept_daemon(&self, daemon: &Hello) -> Result<WireFormat, Error> {
+        let (ours, theirs) = (self.protocol(), daemon.protocol());
+        if theirs < ours {
+            return Err(Error::DaemonTooOld {
+                daemon: theirs,
+                ours,
             });
         }
+        self.negotiate(daemon)
+    }
+
+    /// The fastest Wire format both sides support, leaving out postcard unless
+    /// both are on the same version: postcard has no room for a field one side
+    /// lacks. The order of either list doesn't matter, so both sides arrive at
+    /// the same answer. This checks no versions; [`Hello::accept_peer`] and
+    /// [`Hello::accept_daemon`] do.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::JsonNotOffered`] if either side leaves out JSON, which every
+    /// side must support.
+    pub fn negotiate(&self, peer: &Hello) -> Result<WireFormat, Error> {
         if !self.formats.contains(&WireFormat::Json) || !peer.formats.contains(&WireFormat::Json) {
             return Err(Error::JsonNotOffered);
         }
+        let same_version = self.protocol() == peer.protocol();
         Ok(WireFormat::ALL
             .into_iter()
+            .filter(|&format| format != WireFormat::Postcard || same_version)
             .find(|format| self.formats.contains(format) && peer.formats.contains(format))
             .unwrap_or(WireFormat::Json))
     }
