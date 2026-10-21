@@ -39,6 +39,10 @@ bench *args:
 e2e *args:
     @{{ dev }} just _e2e "$@"
 
+# Run Kotodama on a headless sway desktop served over VNC on localhost:5900, to try it by hand; `--keep` keeps its state between runs
+demo *args:
+    @scripts/demo "$@"
+
 # Rebuild the dev container image locally (machines without Nix only)
 image:
     docker build -t "$(scripts/dev-image)" docker

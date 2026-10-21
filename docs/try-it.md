@@ -1,6 +1,42 @@
 # Trying Kotodama on Hyprland
 
-How to run Kotodama on your own Hyprland desktop with home-manager, and what to check by hand once it runs. The checks are the ones CI can't cover, from #1.
+How to run Kotodama on your own Hyprland desktop with home-manager, and what to check by hand once it runs. To look at it first without a Wayland desktop, on a Mac say, see [Try it on macOS](#try-it-on-macos). The checks are the ones CI can't cover, from #1.
+
+## Try it on macOS
+
+`just demo` runs Kotodama on a Linux desktop of its own, in the dev container, and shows it to you over VNC. It works the same on Linux, with Nix and without a container.
+
+```sh
+just demo           # state starts fresh every run
+just demo --keep    # History and clipboard history kept between runs
+```
+
+The first run fetches the toolchain and builds a release, which takes a while. Then Screen Sharing opens `vnc://localhost:5900`; log in as `kotodama`, password `kotodama`. The server listens on localhost only. Ctrl+C in the terminal stops everything.
+
+What's on the desktop: headless sway with the Daemon, the Bundled extensions, the [shell example Extension](../examples/shell-extension/README.md) and the shipped Front end. The menu is open at the start.
+
+- **Alt+Space** or **Ctrl+Space** opens and closes the menu. Super doesn't make it through Screen Sharing, and macOS may keep Ctrl+Space for switching input sources.
+- **Alt+V** opens the clipboard history.
+- **Alt+Return** opens a terminal (foot); **Alt+Shift+Q** closes a window.
+
+Things to find: apps (foot, FeatherPad, htop, which opens in foot), the calculator (`12 km in mi`), emoji (`smile`), the shell example's bookmarks and `timer 5`, and web searches. Copy something in foot or FeatherPad and it shows up in the clipboard history.
+
+For the AI Extension, pass your Claude API key; it reaches the container's environment and nothing else, and the demo's config reads it from there:
+
+```sh
+ANTHROPIC_API_KEY=sk-ant-... just demo
+```
+
+Then type `?` and a request in plain words, such as `? open a terminal`.
+
+What doesn't work in the demo:
+
+- The Hyprland Extension: the desktop is sway, so there are no windows or Hyprland shortcuts to find.
+- Anything that leaves the desktop: there's no browser, so opening a web search or a bookmark does nothing, and no notification daemon.
+- Your own desktop: apps, files and clipboard are the demo's, not your Mac's.
+- The feel: the menu is drawn in software and sent over VNC, so it is slower than on real hardware.
+
+Logs are in the dev container's cargo volume; `just shell` and look in `$CARGO_TARGET_DIR/demo-logs`.
 
 ## Install
 

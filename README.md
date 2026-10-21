@@ -516,6 +516,7 @@ The first run fetches the toolchain (Rust, Qt 6, Quickshell, sway) into the `kot
 | `just test` | Runs the tests; extra arguments go to `cargo nextest run` |
 | `just bench` | Runs the benchmarks; extra arguments go to `cargo bench` |
 | `just e2e` | Runs the e2e tests against headless sway, or only those named (`just e2e menu`); `just e2e --update menu` rewrites a test's reference image |
+| `just demo` | Runs Kotodama on a desktop of its own, a headless sway served over VNC on `localhost:5900`, to try it by hand; on macOS it opens Screen Sharing. See [Try it on macOS](docs/try-it.md#try-it-on-macos) |
 | `just image` | Rebuilds the dev container image locally, e.g. after editing `docker/` without committing |
 
 Nix only sees files that git tracks, so `git add` new files before running a recipe.

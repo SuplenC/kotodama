@@ -48,12 +48,23 @@ common=$(git -C "$root" rev-parse --path-format=absolute --git-common-dir 2>/dev
 if [ -n "$common" ] && [ "$common" != "$root/.git" ]; then
     git_dir=(-v "$common:$common" -v "$root:$root")
 fi
+# A recipe may publish ports (KOTODAMA_DEV_PORTS, as `docker run -p` takes
+# them, separated by spaces) and pass variables from this environment
+# (KOTODAMA_DEV_ENV, names separated by spaces; Docker reads their values).
+extra=()
+for ports in ${KOTODAMA_DEV_PORTS:-}; do
+    extra+=(-p "$ports")
+done
+for name in ${KOTODAMA_DEV_ENV:-}; do
+    extra+=(-e "$name")
+done
 target=/cargo/target-$(printf '%s' "$root" | cksum | cut -d' ' -f1)
 exec docker run --rm --init "${tty[@]}" \
     -v kotodama-nix:/nix \
     -v kotodama-cargo:/cargo \
     -v "$root:/work" \
     ${git_dir[@]+"${git_dir[@]}"} \
+    ${extra[@]+"${extra[@]}"} \
     -e CI \
     -e CARGO_TARGET_DIR="$target" \
     "$image" "$@"
