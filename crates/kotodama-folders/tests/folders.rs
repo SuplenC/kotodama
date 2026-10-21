@@ -7,6 +7,8 @@
 mod git;
 
 use std::collections::BTreeMap;
+use std::ffi::OsStr;
+use std::ffi::OsString;
 use std::fmt::Write;
 use std::fs;
 use std::ops::Deref;
@@ -50,9 +52,16 @@ impl DerefMut for Folders {
 impl Folders {
     /// Starts the Extension with `home` as its home folder.
     fn start(home: TempDir) -> Self {
+        let path = std::env::var_os("PATH").unwrap_or_default();
+        Folders::start_with_path(home, &path)
+    }
+
+    /// Starts the Extension with `home` as its home folder and `path` as its `PATH`.
+    fn start_with_path(home: TempDir, path: &OsStr) -> Self {
         let extension = Spawned::start(
             Command::new(env!("CARGO_BIN_EXE_kotodama-folders"))
                 .env("HOME", home.path())
+                .env("PATH", path)
                 .env("KOTODAMA_LAUNCH_PREFIX", ""),
             WAIT,
         );
@@ -164,11 +173,19 @@ fn action_ids(item: &Item) -> Vec<&str> {
     item.actions.iter().map(|action| action.id.as_str()).collect()
 }
 
+/// `dir` first, then the tests' own `PATH`.
+fn path_before(dir: &Path) -> OsString {
+    let inherited = std::env::var_os("PATH").unwrap_or_default();
+    std::env::join_paths(std::iter::once(dir.to_owned()).chain(std::env::split_paths(&inherited))).unwrap()
+}
+
 #[test]
 fn nothing_is_sent_before_the_config_and_folders_come_from_it() {
     let home = home();
     repo(&home.path().join("Projects/kotodama"));
-    let mut folders = Folders::start(home);
+    let bin = home.path().join("bin");
+    executable(&bin.join("lazygit"), "#!/bin/sh\n");
+    let mut folders = Folders::start_with_path(home, bin.as_os_str());
     folders.quiet();
 
     folders.configure(r#"folders = [{ path = "~/Projects", kind = "projects" }]"#);
@@ -185,6 +202,116 @@ fn nothing_is_sent_before_the_config_and_folders_come_from_it() {
     assert_eq!(
         action_ids(project),
         ["open", "shell", "lazygit", "file-manager", "copy-path"]
+    );
+}
+
+#[test]
+fn without_lazygit_on_the_path_a_project_has_no_lazygit_action() {
+    let home = home();
+    repo(&home.path().join("Projects/app"));
+    let empty = home.path().join("empty");
+    fs::create_dir_all(&empty).unwrap();
+    let mut folders = Folders::start_with_path(home, empty.as_os_str());
+
+    folders.configure(r#"folders = [{ path = "~/Projects", kind = "projects" }]"#);
+    let project = folders.added()["app"].clone();
+
+    assert_eq!(action_ids(&project), ["open", "shell", "file-manager", "copy-path"]);
+    match folders.run(&project, "lazygit") {
+        Outcome::Failed { message } => assert!(message.contains("lazygit")),
+        other => panic!("expected a failure, got {other:?}"),
+    }
+}
+
+#[test]
+fn a_lazygit_command_in_the_config_offers_the_action_without_lazygit_on_the_path() {
+    let home = home();
+    repo(&home.path().join("Projects/app"));
+    let empty = home.path().join("empty");
+    fs::create_dir_all(&empty).unwrap();
+    let mut folders = Folders::start_with_path(home, empty.as_os_str());
+
+    folders.configure(
+        r#"
+        folders = [{ path = "~/Projects", kind = "projects" }]
+        lazygit = ["gitui"]
+        "#,
+    );
+
+    assert_eq!(
+        action_ids(&folders.added()["app"]),
+        ["open", "shell", "lazygit", "file-manager", "copy-path"]
+    );
+}
+
+#[test]
+fn by_default_a_project_opens_a_terminal_in_its_folder_through_xdg_terminal_exec() {
+    let home = home();
+    let bin = home.path().join("bin");
+    let out = home.path().join("out");
+    let recorder = recorder(home.path(), &out);
+    executable(
+        &bin.join("xdg-terminal-exec"),
+        &format!("#!/bin/sh\nexec '{}' \"$@\"\n", recorder.display()),
+    );
+    repo(&home.path().join("Projects/app"));
+    let path = path_before(&bin);
+    let mut folders = Folders::start_with_path(home, &path);
+    folders.configure(r#"folders = [{ path = "~/Projects", kind = "projects" }]"#);
+    let project = folders.added()["app"].clone();
+    let dir = folders.path().join("Projects/app");
+
+    for action in ["open", "shell"] {
+        assert_eq!(folders.run(&project, action), Outcome::Close);
+
+        assert_eq!(
+            recorded(&out),
+            [dir.to_str().unwrap().to_owned(), format!("--dir={}", dir.display())]
+        );
+        fs::remove_file(&out).unwrap();
+    }
+}
+
+#[test]
+fn by_default_a_script_runs_through_xdg_terminal_exec_and_waits_after_it_exits() {
+    let home = home();
+    let bin = home.path().join("bin");
+    let out = home.path().join("out");
+    let shown = home.path().join("shown");
+    // The terminal runs its command with nothing to read, so the wait for Enter ends at once, and
+    // what the window would show goes to `shown`.
+    executable(
+        &bin.join("xdg-terminal-exec"),
+        &format!(
+            "#!/bin/sh\n\"$@\" < /dev/null > '{0}.tmp'\nmv '{0}.tmp' '{0}'\n",
+            shown.display()
+        ),
+    );
+    executable(
+        &home.path().join("Scripts/greet"),
+        &format!(
+            "#!/bin/sh\n# kotodama: args=prompt\n{{ pwd; printf '%s\\n' \"$@\"; }} > '{}'\nexit 4\n",
+            out.display()
+        ),
+    );
+    let path = path_before(&bin);
+    let mut folders = Folders::start_with_path(home, &path);
+    folders.configure(r#"folders = [{ path = "~/Scripts", kind = "scripts" }]"#);
+    let item = folders.added()["greet"].clone();
+
+    let argument = item.actions[0].arguments[0].name.clone();
+    assert_eq!(
+        folders.run_with(&item, "run", &[(&argument, "one 'two words'")]),
+        Outcome::Close
+    );
+
+    assert_eq!(
+        recorded(&shown).last().map(String::as_str),
+        Some("[Exited with status 4. Press Enter to close.]")
+    );
+    assert_eq!(
+        recorded(&out),
+        [folders.path().join("Scripts").to_str().unwrap(), "one", "two words"]
     );
 }
 

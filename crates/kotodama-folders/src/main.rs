@@ -1,5 +1,5 @@
 //! The Folder source Bundled extension: the git repositories in the projects folders, as Items of
-//! kind `project` that open in a tmux session named as `tms` names it, and the executable files in
+//! kind `project` named as `tms` names its tmux sessions, and the executable files in
 //! the scripts folders, as Items of kind `file` that run them. Both are kept up to date as the
 //! folders change. See `settings.rs` for its config table.
 //!
@@ -116,7 +116,8 @@ impl Extension {
     fn message(&mut self, message: ToExtension) -> Result<(), kotodama_protocol::Error> {
         match message {
             ToExtension::Config(config) => {
-                self.settings = Settings::from_config(&config, self.home.as_deref());
+                let path = std::env::var_os("PATH");
+                self.settings = Settings::from_config(&config, self.home.as_deref(), path.as_deref());
                 // Items follow once the folders are searched.
                 self.scanner.search(self.settings.folders.clone());
                 Ok(())
@@ -155,10 +156,11 @@ impl Extension {
             .map(|script| (items::id(&script.path), script))
             .collect();
         let home = self.home.as_deref();
+        let settings = &self.settings;
         let all = self
             .projects
             .values()
-            .map(|project| items::project(project, home))
+            .map(|project| items::project(project, home, settings))
             .chain(self.scripts.values().map(|script| items::script(script, home)));
         self.sent.publish(&mut self.writer, all)
     }
@@ -215,7 +217,10 @@ impl Extension {
         let command = match action {
             OPEN => &self.settings.open,
             SHELL => &self.settings.shell,
-            LAZYGIT => &self.settings.lazygit,
+            LAZYGIT => match &self.settings.lazygit {
+                Some(lazygit) => lazygit,
+                None => return Err(RunError::no_project_action(action)),
+            },
             FILE_MANAGER => &self.settings.file_manager,
             COPY_PATH => &self.settings.copy_path,
             _ => return Err(RunError::no_project_action(action)),

@@ -337,20 +337,23 @@ in
       terminal = optional command ''
         `terminal`: what a script runs in; the script and its arguments
         follow. It should keep the window open once the script exits. Unset,
-        `[ "ghostty" "--wait-after-command=true" "-e" ]`.
+        `xdg-terminal-exec` running the script in `sh`, which waits for
+        Enter after it exits.
       '';
       open = optional command ''
-        `open`: what a project's "Open" runs. In every project command,
-        `{path}` is the project's folder and `{session}` its tmux session.
-        Unset, ghostty running tmux with nvim.
+        `open`: what a project's "Open" runs, in the project's folder. In
+        every project command, `{path}` is the project's folder and
+        `{session}` its tmux session. Unset,
+        `[ "xdg-terminal-exec" "--dir={path}" ]`.
       '';
       shell = optional command ''
         `shell`: what "Open Terminal Here" runs. Unset,
-        `[ "ghostty" "--working-directory={path}" ]`.
+        `[ "xdg-terminal-exec" "--dir={path}" ]`.
       '';
       lazygit = optional command ''
         `lazygit`: what "Open in Lazygit" runs. Unset,
-        `[ "ghostty" "-e" "lazygit" "--path" "{path}" ]`.
+        `[ "xdg-terminal-exec" "lazygit" "--path" "{path}" ]`, and the
+        Action is offered only when `lazygit` is on the Extension's `PATH`.
       '';
       fileManager = optional command ''
         `file_manager`: what "Open in File Manager" runs. Unset,
