@@ -25,7 +25,12 @@ let
         ]
       else
         ai.apiKeyCommand;
-    inherit (ai) url model effort;
+    inherit (ai)
+      url
+      model
+      effort
+      prefix
+      ;
     debounce_ms = ai.debounceMs;
   };
   # A setting that, unset, is left out of the config.
@@ -36,6 +41,16 @@ let
       default = null;
       inherit description;
     };
+  # `prefix`, the Daemon's own key in every `[extensions.<name>]`. `unset`
+  # says what the Extension's Manifest gives.
+  prefix =
+    unset:
+    optional (lib.types.strMatching "[^[:space:]]*") ''
+      `prefix`: the word that puts the Extension's Items behind it, out of the
+      search: the search shows one entry Item for the Extension, and
+      `<prefix> <query>` searches its Items alone. `""` puts them back in the
+      search. Unset, ${unset}.
+    '';
   # The table's settings that are set; the rest keep their defaults.
   set = lib.filterAttrs (_: value: value != null);
   # A list of tables, as the TOML has it: each without its unset settings.
@@ -61,19 +76,28 @@ let
     extensions = nonEmpty {
       ai = aiSettings;
       apps = set {
-        inherit (ext.apps) terminal hidden names;
+        inherit (ext.apps)
+          terminal
+          hidden
+          names
+          prefix
+          ;
         withdraw_within = ext.apps.withdrawWithin;
       };
       calculator = set {
-        inherit (ext.calculator) network;
+        inherit (ext.calculator) network prefix;
         rates_url = ext.calculator.ratesUrl;
         decimal_separator = ext.calculator.decimalSeparator;
       };
       clipboard = set {
+        inherit (ext.clipboard) prefix;
         max_entries = ext.clipboard.maxEntries;
         max_age_days = ext.clipboard.maxAgeDays;
       };
-      emoji = set { skin_tone = ext.emoji.skinTone; };
+      emoji = set {
+        inherit (ext.emoji) prefix;
+        skin_tone = ext.emoji.skinTone;
+      };
       folders = set {
         folders = tables ext.folders.folders;
         inherit (ext.folders)
@@ -81,11 +105,12 @@ let
           open
           shell
           lazygit
+          prefix
           ;
         file_manager = ext.folders.fileManager;
         copy_path = ext.folders.copyPath;
       };
-      web-search = set { inherit (ext.web-search) engines; };
+      web-search = set { inherit (ext.web-search) engines prefix; };
     };
   };
   # Without its empty tables, so options left unset write nothing.
@@ -233,6 +258,7 @@ in
         starting has its pick taken back out of the History. 0 never does; at
         most 30. Unset, 5.
       '';
+      prefix = prefix "none";
     };
 
     extensions.calculator = {
@@ -251,6 +277,7 @@ in
             "comma"
           ])
           "`decimal_separator`: how decimals are written, `dot` (3.5) or `comma` (3,5); the other separator groups thousands. Unset, the locale's.";
+      prefix = prefix "none";
     };
 
     extensions.clipboard = {
@@ -260,15 +287,19 @@ in
       maxAgeDays = optional lib.types.numbers.positive ''
         `max_age_days`: entries older than this many days go. Unset, 7.
       '';
+      prefix = prefix "none";
     };
 
-    extensions.emoji.skinTone = optional (lib.types.enum [
-      "light"
-      "medium-light"
-      "medium"
-      "medium-dark"
-      "dark"
-    ]) "`skin_tone`: the skin tone \"Type\" and \"Copy\" use. Unset, emoji are their default yellow.";
+    extensions.emoji = {
+      skinTone = optional (lib.types.enum [
+        "light"
+        "medium-light"
+        "medium"
+        "medium-dark"
+        "dark"
+      ]) "`skin_tone`: the skin tone \"Type\" and \"Copy\" use. Unset, emoji are their default yellow.";
+      prefix = prefix "`emoji`: `emoji fire` finds 🔥";
+    };
 
     extensions.folders = {
       folders = optional (lib.types.listOf (
@@ -319,6 +350,7 @@ in
       copyPath = optional command ''
         `copy_path`: what "Copy Path" runs. Unset, `[ "wl-copy" "{path}" ]`.
       '';
+      prefix = prefix "none";
     };
 
     extensions.web-search.engines =
@@ -338,6 +370,7 @@ in
           }
         ))
         "`engines`: searched in this order; an empty list leaves only addresses. Unset, DuckDuckGo, Google and Wikipedia.";
+    extensions.web-search.prefix = prefix "none";
 
     # The AI Extension's `[extensions.ai]`, merged into `settings`. With neither
     # a key nor `url` set, the Extension is off.
@@ -385,6 +418,7 @@ in
         `debounce_ms`: how long, in milliseconds, a `?` query must be still
         before it is sent. Unset, 600.
       '';
+      prefix = prefix "none";
     };
 
     qmlImportPath = lib.mkOption {
