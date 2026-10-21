@@ -107,6 +107,13 @@ Both sides use the fastest format they share, in the order postcard, protobuf, m
 - an Item of another Extension's kind;
 - `request_action_catalog` without `action_catalog = true`.
 
+It also says when it takes a message but drops part of it, and keeps the rest:
+
+- an Action bound to a key the menu keeps for itself (see [Actions](#actions)): the Action is kept without the binding, and the reason names the Action and the key. A Contributed action bound to one is a problem of the Manifest, listed with the user's problems;
+- a Live result marked `answer` from an Extension whose `debounce_ms` isn't 0: it is kept as a plain result.
+
+`kotodama extension check` counts each of these as a problem.
+
 ## Items
 
 ```json
@@ -162,7 +169,7 @@ The Daemon does the typing, pasting and copying, so don't call `wtype` or `wl-co
 An Action can also carry:
 
 - `arguments`: each with a `name`, an optional `placeholder`, and `optional: true` if it may be left out. With an Item `keyword`, the user types them after it. Each Argument takes one word, and the last takes the rest. The Daemon asks for a missing required one in a form, so `run_action` always has them.
-- `shortcut`: a key binding such as `"ctrl+o"`, which runs the Action without opening the Action panel. It needs Ctrl, Alt or Super, since a bare key types into the search. The menu keeps `ctrl+k`, `ctrl+n`, `ctrl+p`, `ctrl+z` and `ctrl+shift+backspace` for itself, and the Daemon drops an Action's binding to one of them.
+- `shortcut`: a key binding such as `"ctrl+o"`, which runs the Action without opening the Action panel. It needs Ctrl, Alt or Super, since a bare key types into the search. The menu keeps `ctrl+k`, `ctrl+n`, `ctrl+p`, `ctrl+z` and `ctrl+shift+backspace` for itself, and the Daemon drops an Action's binding to one of them and rejects it (see [Talking to the Daemon](#talking-to-the-daemon)).
 - `confirm: true`: for an Action that can't be undone, such as deleting something or powering off. The menu asks in its footer and runs the Action on a second Enter only, so you need no form of your own.
 
 **Withdrawing a pick.** Running an Action counts as picking its Result, which raises it in the ranking. When the run turns out to be a mistake, as when an app the Action launched closed again at once, send `{"withdraw_pick": {"invocation": 7}}` within a minute. The History is then as if the user had never picked it.
@@ -192,7 +199,7 @@ Answer with `live_results`, in one batch or several, and mark the last one `done
 ```
 
 - `score` runs from 0 to 1: how well the result matches. The Daemon maps it onto the scale it ranks Items on.
-- `answer: true` marks the one result that answers the query outright, such as a sum. The Daemon puts it in the top row, and its History learns nothing from it. Only an Extension whose `debounce_ms` is 0 may send one; the Daemon ignores the mark otherwise.
+- `answer: true` marks the one result that answers the query outright, such as a sum. The Daemon puts it in the top row, and its History learns nothing from it. Only an Extension whose `debounce_ms` is 0 may send one; the Daemon rejects the mark otherwise, and keeps the result.
 - `debounce_ms` is how long the query must stay unchanged before it is sent. 0 sends one on every keystroke, which suits work that takes microseconds. Something slow, or something that costs money per request, wants 100 or more.
 - `{"cancel_live_query": {"id": 12}}` means the query changed or the menu closed. Stop working on it; anything sent for it afterwards is dropped.
 - The Daemon keeps at most 500 results per query.
@@ -228,7 +235,7 @@ Each Item shows in the search, or in its app alone. `app_only: true` puts one It
 {"status": {"usable": false, "note": "Set a token in [extensions.notes]"}}
 ```
 
-It sends `{"status": {"usable": true}}` once it can. The app's intro card shows the `note`. A usable Extension may send a note too, such as that it is paused. The Daemon forgets the status when the Extension stops, so send it again after every start. In Rust, `kotodama_extension::SentStatus` sends each change once.
+It sends `{"status": {"usable": true}}` once it can. Meanwhile it gets no Live queries; once it is usable again, it is sent what is typed. The app's intro card shows the `note`. A usable Extension may send a note too, such as that it is paused. The Daemon forgets the status when the Extension stops, so send it again after every start. In Rust, `kotodama_extension::SentStatus` sends each change once.
 
 ## Configuration
 

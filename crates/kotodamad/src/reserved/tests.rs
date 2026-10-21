@@ -27,9 +27,16 @@ fn note(actions: Vec<Action>) -> Item {
 fn a_reserved_binding_is_dropped_and_the_action_kept() {
     let mut actions = vec![bound("undo-mine", "Ctrl+Z"), bound("open", "ctrl+o")];
 
-    let dropped = release_actions(&mut actions);
+    let mut released = Vec::new();
+    release_actions(&mut actions, &mut released);
 
-    assert_eq!(dropped, 1);
+    assert_eq!(
+        released,
+        [Released {
+            action: "undo-mine".into(),
+            shortcut: "Ctrl+Z".into()
+        }]
+    );
     assert_eq!(actions[0].id, "undo-mine");
     assert_eq!(actions[0].shortcut, None);
     assert_eq!(actions[1].shortcut.as_deref(), Some("ctrl+o"));
@@ -49,7 +56,7 @@ fn a_list_views_items_lose_their_reserved_bindings() {
         },
     };
 
-    assert_eq!(release_message(&mut message), 1);
+    assert_eq!(release_message(&mut message).len(), 1);
     let FromExtension::ReplaceView { with, .. } = &message else {
         panic!("still a ReplaceView");
     };

@@ -457,10 +457,9 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
         };
         session.query = text;
         read_query(&self.apps, &mut self.matcher, session);
-        let logged = (self.history.settings().usage_log
-            && !session.query.is_empty()
-            && !session.in_private_app(&self.apps))
-        .then(|| session.query.clone());
+        let logged =
+            (self.history.settings().usage_log && !session.query.is_empty() && !session.in_private_app(&self.apps))
+                .then(|| session.query.clone());
         session.searched = true;
         session.update = Update::Fresh;
         session.typed = now;
@@ -477,7 +476,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
                 continue;
             }
             if let (Some(debounce), Some((query, prefix))) =
-                (ext.debounce(), session.live_query(ExtensionId(ext_id), ext, searched))
+                (ext.asked(), session.live_query(ExtensionId(ext_id), ext, searched))
             {
                 session.live[ext_id] = Live::asking(query, prefix, now + debounce);
             }

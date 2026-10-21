@@ -31,6 +31,7 @@ use regex::Regex;
 use crate::daemon::Event;
 use crate::daemon::OWN;
 use crate::problem::Report;
+use crate::reserved;
 
 /// How long the Extension directories must stay still before they are read
 /// again, so a package install that writes many files is read once, whole.
@@ -209,6 +210,9 @@ fn load(dir: &Path, manifest_path: &Path, report: &mut Report) -> Result<Found, 
             manifest_path.display().to_string(),
             "`prefix` is the old name of `word`; call it `word`",
         );
+    }
+    for released in reserved::in_manifest(&manifest) {
+        report.add(manifest_path.display().to_string(), released.reason());
     }
     Found::new(manifest, dir.to_owned()).map_err(|err| Chain(&err).to_string())
 }
