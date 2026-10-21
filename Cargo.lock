@@ -832,6 +832,7 @@ name = "kotodama"
 version = "0.1.0"
 dependencies = [
  "kotodama-protocol",
+ "thiserror 2.0.21",
 ]
 
 [[package]]

@@ -1,5 +1,5 @@
-//! The `kotodama` command, for a compositor keybind: it asks the Daemon to open
-//! or toggle the menu, and the Daemon passes that on to the Front ends.
+//! The `kotodama` command, for a compositor keybind: it asks the Daemon to open or toggle the menu,
+//! and the Daemon passes that on to the Front ends.
 //!
 //! ```sh
 //! kotodama toggle
@@ -8,13 +8,27 @@
 //! kotodama open --prefix emoji
 //! ```
 //!
-//! `--view <extension>/<item>` opens the menu on the View that Item's primary
-//! Action pushes. `--prefix <prefix>` opens it behind an Extension's Prefix,
-//! searching that Extension alone, as `--query "<prefix> "` does.
+//! `--view <extension>/<item>` opens the menu on the View that Item's primary Action pushes.
+//! `--prefix <prefix>` opens it behind an Extension's Prefix, searching that Extension alone, as
+//! `--query "<prefix> "` does.
+//!
+//! # Owns
+//!
+//! - The command line: its commands, options, usage and exit codes.
+//! - Sending its one `FromFrontEnd` to the Daemon as a Front end.
+//!
+//! # Not here
+//!
+//! - The socket's path, the handshake and the framing: `kotodama-protocol` (`socket_path`,
+//!   `Channel`).
+//! - What the Daemon does with the message: `kotodamad/src/daemon.rs`.
+//! - Showing the menu: the Front end, `kotodama-qml`.
 
 #![forbid(unsafe_code)]
 
+use std::io;
 use std::os::unix::net::UnixStream;
+use std::path::PathBuf;
 use std::process::ExitCode;
 use std::time::Duration;
 
@@ -27,9 +41,59 @@ use kotodama_protocol::socket_path;
 const USAGE: &str = "usage: kotodama toggle
        kotodama open [--view <extension>/<item>] [--prefix <prefix>] [--query <text>]";
 
-/// Under socket activation the first keypress also starts the Daemon, so the
-/// handshake may wait for it to come up.
+/// Under socket activation the first keypress also starts the Daemon, so the handshake may wait
+/// for it to come up.
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// Why the command line is not one `kotodama` understands. It is printed above the usage.
+#[derive(Debug, PartialEq, Eq, thiserror::Error)]
+enum ParseError {
+    #[error("no command given")]
+    NoCommand,
+    /// The whole command line, as typed.
+    #[error("unknown command {0}")]
+    UnknownCommand(String),
+    #[error("unknown option {0}")]
+    UnknownOption(String),
+    /// The last argument, left without a value.
+    #[error("{0} needs a value, or isn't an option")]
+    NoValue(String),
+}
+
+/// Why the message did not reach the Daemon.
+#[derive(Debug, thiserror::Error)]
+enum SendError {
+    #[error("XDG_RUNTIME_DIR isn't set")]
+    NoRuntimeDir,
+    /// The hint reads after the OS's reason, so the reason is part of this message and not its
+    /// `source()`.
+    #[error("{}: {reason}; is kotodamad running?", socket.display())]
+    Connect { socket: PathBuf, reason: io::Error },
+    #[error(transparent)]
+    Socket(io::Error),
+    #[error(transparent)]
+    Handshake(kotodama_protocol::Error),
+    #[error(transparent)]
+    Send(kotodama_protocol::Error),
+}
+
+impl SendError {
+    fn connect(socket: PathBuf, reason: io::Error) -> Self {
+        Self::Connect { socket, reason }
+    }
+
+    fn socket(err: io::Error) -> Self {
+        Self::Socket(err)
+    }
+
+    fn handshake(err: kotodama_protocol::Error) -> Self {
+        Self::Handshake(err)
+    }
+
+    fn send(err: kotodama_protocol::Error) -> Self {
+        Self::Send(err)
+    }
+}
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -49,8 +113,10 @@ fn main() -> ExitCode {
     }
 }
 
-fn parse(args: &[String]) -> Result<FromFrontEnd, String> {
-    let (command, mut rest) = args.split_first().ok_or("no command given")?;
+/// Reads the arguments after the program's name into the message for the Daemon. `help` prints
+/// the usage and exits.
+fn parse(args: &[String]) -> Result<FromFrontEnd, ParseError> {
+    let (command, mut rest) = args.split_first().ok_or(ParseError::NoCommand)?;
     match command.as_str() {
         "toggle" if rest.is_empty() => Ok(FromFrontEnd::Toggle),
         "open" => {
@@ -60,12 +126,12 @@ fn parse(args: &[String]) -> Result<FromFrontEnd, String> {
                     "--query" => query.clone_from(value),
                     "--view" => view = Some(value.clone()),
                     "--prefix" => prefix = Some(value.as_str()),
-                    _ => return Err(format!("unknown option {flag}")),
+                    _ => return Err(ParseError::UnknownOption(flag.clone())),
                 }
                 rest = tail;
             }
             if let [extra] = rest {
-                return Err(format!("{extra} needs a value, or isn't an option"));
+                return Err(ParseError::NoValue(extra.clone()));
             }
             if let Some(prefix) = prefix {
                 query = format!("{prefix} {query}");
@@ -76,69 +142,21 @@ fn parse(args: &[String]) -> Result<FromFrontEnd, String> {
             println!("{USAGE}");
             std::process::exit(0);
         }
-        _ => Err(format!("unknown command {}", args.join(" "))),
+        _ => Err(ParseError::UnknownCommand(args.join(" "))),
     }
 }
 
-fn send(message: &FromFrontEnd) -> Result<(), Box<dyn std::error::Error>> {
-    let socket = socket_path().ok_or("XDG_RUNTIME_DIR isn't set")?;
-    let stream =
-        UnixStream::connect(&socket).map_err(|err| format!("{}: {err}; is kotodamad running?", socket.display()))?;
-    stream.set_read_timeout(Some(HANDSHAKE_TIMEOUT))?;
-    let mut channel = Channel::handshake(stream.try_clone()?, stream, &Hello::new(&WireFormat::ALL))?;
-    channel.send(message)?;
-    Ok(())
+fn send(message: &FromFrontEnd) -> Result<(), SendError> {
+    let socket = socket_path().ok_or(SendError::NoRuntimeDir)?;
+    let stream = UnixStream::connect(&socket).map_err(|reason| SendError::connect(socket, reason))?;
+    stream
+        .set_read_timeout(Some(HANDSHAKE_TIMEOUT))
+        .map_err(SendError::socket)?;
+    let reader = stream.try_clone().map_err(SendError::socket)?;
+    let mut channel =
+        Channel::handshake(reader, stream, &Hello::new(&WireFormat::ALL)).map_err(SendError::handshake)?;
+    channel.send(message).map_err(SendError::send)
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn args(line: &str) -> Vec<String> {
-        line.split(' ').map(String::from).collect()
-    }
-
-    #[test]
-    fn open_takes_a_query_and_a_view_in_any_order() {
-        assert_eq!(
-            parse(&args("open --view clipboard --query fir")),
-            Ok(FromFrontEnd::Open {
-                query: "fir".into(),
-                view: Some("clipboard".into()),
-            })
-        );
-        assert_eq!(
-            parse(&args("open")),
-            Ok(FromFrontEnd::Open {
-                query: String::new(),
-                view: None,
-            })
-        );
-    }
-
-    #[test]
-    fn open_behind_a_prefix_types_it_before_the_query() {
-        assert_eq!(
-            parse(&args("open --prefix emoji")),
-            Ok(FromFrontEnd::Open {
-                query: "emoji ".into(),
-                view: None,
-            })
-        );
-        assert_eq!(
-            parse(&args("open --query fire --prefix emoji")),
-            Ok(FromFrontEnd::Open {
-                query: "emoji fire".into(),
-                view: None,
-            })
-        );
-    }
-
-    #[test]
-    fn a_flag_without_a_value_or_an_unknown_one_is_an_error() {
-        assert!(parse(&args("open --query")).is_err());
-        assert!(parse(&args("open --size 3")).is_err());
-        assert!(parse(&args("toggle now")).is_err());
-        assert!(parse(&[]).is_err());
-    }
-}
+mod tests;
