@@ -2,6 +2,18 @@
 //! directories as an Indexed item of kind `app`, kept up to date as apps are
 //! installed and removed. Its desktop actions, such as "New Private Window",
 //! are extra Actions. See `items.rs` for its config table.
+//!
+//! # Owns
+//!
+//! - The protocol loop: the config, the Actions, and the Items sent.
+//! - Watching the `applications` directories, and rescanning when they settle.
+//! - Starting an app, and withdrawing its pick when it closes soon after.
+//!
+//! # Not here
+//!
+//! - Finding the apps: `scan.rs`, on `entry.rs` and `exec.rs`.
+//! - The config table and the Items: `items.rs`.
+//! - How an app is started and followed: `kotodama_extension::launch`.
 
 #![forbid(unsafe_code)]
 
@@ -11,16 +23,25 @@ mod items;
 mod scan;
 
 use std::collections::BTreeMap;
+use std::io;
 use std::process::ExitCode;
 use std::sync::mpsc::Sender;
 use std::time::Duration;
 
-use kotodama_extension::watch::{RecursiveMode, Watcher};
-use kotodama_extension::{Connection, Event, SentItems, Writer, launch};
-use kotodama_protocol::{FromExtension, Outcome, ToExtension};
+use kotodama_extension::Connection;
+use kotodama_extension::Event;
+use kotodama_extension::SentItems;
+use kotodama_extension::Writer;
+use kotodama_extension::launch;
+use kotodama_extension::watch::RecursiveMode;
+use kotodama_extension::watch::Watcher;
+use kotodama_protocol::FromExtension;
+use kotodama_protocol::Outcome;
+use kotodama_protocol::ToExtension;
 
-use items::Settings;
-use scan::{App, Environment};
+use crate::items::Settings;
+use crate::scan::App;
+use crate::scan::Environment;
 
 /// How long the `applications` directories must stay still before they are
 /// read again, so a package install that writes many files is read once,
@@ -29,7 +50,7 @@ const SETTLE: Duration = Duration::from_millis(200);
 
 /// What the Extension's own threads send it.
 enum Own {
-    /// An `applications` directory changed, and these are the apps now.
+    /// An `applications` directory changed, and this is the rescan of every one.
     Scanned(BTreeMap<String, App>),
     /// The app the run `invocation` started closed soon after it started.
     ExitedSoon { invocation: u64 },
@@ -47,11 +68,11 @@ fn run() -> Result<(), kotodama_protocol::Error> {
     } = kotodama_extension::connect()?;
 
     let exits = events.clone();
-    // Rescans happen on the watching thread, so an Action never waits for one.
     let dirs = scan::application_dirs();
     let env = Environment::from_env();
     let apps = scan::scan(&dirs, &env);
     let watching = dirs.clone();
+    // Rescans happen on the watching thread, so an Action never waits for one.
     let watcher = Watcher::start(
         "watch",
         RecursiveMode::Recursive,
@@ -91,9 +112,7 @@ fn run() -> Result<(), kotodama_protocol::Error> {
                 extension.publish()?;
             }
             Event::Own(Own::ExitedSoon { invocation }) => {
-                extension
-                    .writer
-                    .send(&FromExtension::WithdrawPick { invocation })?;
+                extension.writer.send(&FromExtension::WithdrawPick { invocation })?;
             }
             Event::Hangup => break,
         }
@@ -128,12 +147,11 @@ impl Extension {
             } => {
                 let outcome = match self.run(invocation, &item.id, &action) {
                     Ok(()) => Outcome::Close,
-                    Err(message) => Outcome::Failed { message },
+                    Err(err) => Outcome::Failed {
+                        message: err.to_string(),
+                    },
                 };
-                self.writer.send(&FromExtension::ActionDone {
-                    invocation,
-                    outcome,
-                })
+                self.writer.send(&FromExtension::ActionDone { invocation, outcome })
             }
             _ => Ok(()),
         }
@@ -144,26 +162,17 @@ impl Extension {
         if !self.configured {
             return Ok(());
         }
-        self.sent
-            .publish(&mut self.writer, self.settings.items(&self.apps))
+        self.sent.publish(&mut self.writer, self.settings.items(&self.apps))
     }
 
     /// Starts the app, after the terminal if it runs in one, in its working
     /// directory if it names one. If it closes within
     /// [`Settings::withdraw_within`], everything it started gone, and no
     /// copy of it ran before, the run's pick is withdrawn.
-    fn run(&self, invocation: u64, id: &str, action: &str) -> Result<(), String> {
-        let app = self
-            .apps
-            .get(id)
-            .ok_or_else(|| format!("the app `{id}` is gone"))?;
-        let command = items::command(app, action)
-            .ok_or_else(|| format!("{} has no Action `{action}`", app.name))?;
-        let terminal: &[String] = if app.terminal {
-            &self.settings.terminal
-        } else {
-            &[]
-        };
+    fn run(&self, invocation: u64, id: &str, action: &str) -> Result<(), RunError> {
+        let app = self.apps.get(id).ok_or_else(|| RunError::gone(id))?;
+        let command = items::command(app, action).ok_or_else(|| RunError::no_action(app, action))?;
+        let terminal: &[String] = if app.terminal { &self.settings.terminal } else { &[] };
         let argv: Vec<String> = terminal.iter().chain(command).cloned().collect();
         let exits = self.exits.clone();
         // The app's own program, not the terminal's: the terminal runs
@@ -172,15 +181,38 @@ impl Extension {
         launch::launch_watched(
             &argv,
             app.dir.as_deref(),
-            launch::App {
-                id: &app.id,
-                program,
-            },
+            launch::App { id: &app.id, program },
             self.settings.withdraw_within,
             move || {
                 let _ = exits.send(Event::Own(Own::ExitedSoon { invocation }));
             },
         )
-        .map_err(|err| err.to_string())
+        .map_err(RunError::Launch)
+    }
+}
+
+/// Why an Action did not start its app. Its `Display` is the message of the
+/// failed Outcome.
+#[derive(Debug, thiserror::Error)]
+enum RunError {
+    #[error("the app `{0}` is gone")]
+    Gone(String),
+    #[error("{app} has no Action `{action}`")]
+    NoAction { app: String, action: String },
+    /// Starting the program failed; its error is the message as it is.
+    #[error(transparent)]
+    Launch(io::Error),
+}
+
+impl RunError {
+    fn gone(id: &str) -> Self {
+        RunError::Gone(id.to_owned())
+    }
+
+    fn no_action(app: &App, action: &str) -> Self {
+        RunError::NoAction {
+            app: app.name.clone(),
+            action: action.to_owned(),
+        }
     }
 }

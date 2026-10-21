@@ -9,7 +9,11 @@ repository.workspace = true
 [dependencies]
 kotodama-extension = { path = "../kotodama-extension", features = ["watch"] }
 kotodama-protocol = { path = "../kotodama-protocol" }
+thiserror = "2.0.21"
 
 [dev-dependencies]
 kotodama-extension = { path = "../kotodama-extension", features = ["testing"] }
 tempfile = "3.27.0"
+
+[lints]
+workspace = true

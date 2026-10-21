@@ -1,6 +1,15 @@
 //! Reading one `.desktop` file, as the Desktop Entry Specification describes it:
 //! the `[Desktop Entry]` group and its `[Desktop Action <id>]` groups, with
 //! localized values picked for the user's locale.
+//!
+//! # Owns
+//!
+//! - The `.desktop` file format: groups, keys, localized keys, string escapes and lists.
+//!
+//! # Not here
+//!
+//! - Whether an entry is shown, and the app it becomes: `scan.rs`.
+//! - Splitting `Exec` into arguments: `exec.rs`.
 
 /// A desktop entry, in the specification's words: what a `.desktop` file says,
 /// before anything is decided about showing it. It isn't an Item; the scan
@@ -48,6 +57,7 @@ pub struct Locale(Vec<String>);
 impl Locale {
     /// From a POSIX locale name such as `LC_MESSAGES` holds. `C` and `POSIX`
     /// have no translations.
+    #[must_use]
     pub fn new(name: &str) -> Self {
         if name.is_empty() || name == "C" || name == "POSIX" || name.starts_with("C.") {
             return Locale::default();
@@ -80,11 +90,7 @@ impl Locale {
     fn rank(&self, key: Option<&str>) -> Option<usize> {
         match key {
             None => Some(0),
-            Some(key) => self
-                .0
-                .iter()
-                .position(|ours| ours == key)
-                .map(|at| self.0.len() - at),
+            Some(key) => self.0.iter().position(|ours| ours == key).map(|at| self.0.len() - at),
         }
     }
 }
@@ -94,6 +100,8 @@ impl Locale {
 struct Localized(Option<(usize, String)>);
 
 impl Localized {
+    /// Keeps `value` unless a better match is already kept. Of two equal ones,
+    /// the later line wins.
     fn offer(&mut self, rank: usize, value: &str) {
         if self.0.as_ref().is_none_or(|(best, _)| rank >= *best) {
             self.0 = Some((rank, value.to_owned()));
@@ -105,6 +113,8 @@ impl Localized {
     }
 }
 
+/// A `[Desktop Action <id>]` group as it is read, before `Actions` decides
+/// whether it is one of the entry's.
 #[derive(Default)]
 struct ActionGroup {
     id: String,
@@ -113,53 +123,68 @@ struct ActionGroup {
     exec: Option<String>,
 }
 
+impl ActionGroup {
+    /// Takes one `key=value` line of the group. A localized key other than
+    /// `Name` is not the specification's, so it is skipped.
+    fn set(&mut self, key: &str, localized: bool, rank: usize, value: &str) {
+        match key {
+            "Name" => self.name.offer(rank, &unescape(value)),
+            _ if localized => {}
+            "Icon" => self.icon = Some(unescape(value)),
+            "Exec" => self.exec = Some(unescape(value)),
+            _ => {}
+        }
+    }
+}
+
+/// The group the lines being read belong to.
+#[derive(Clone, Copy, Default)]
 enum Group {
     Entry,
+    /// The action group at this index in [`Parser::groups`].
     Action(usize),
+    #[default]
     Other,
+}
+
+/// What [`parse`] has read so far.
+#[derive(Default)]
+struct Parser {
+    entry: Entry,
+    seen_entry: bool,
+    name: Localized,
+    generic_name: Localized,
+    comment: Localized,
+    keywords: Localized,
+    /// The ids `Actions` lists, in its order.
+    action_ids: Vec<String>,
+    /// Every action group, in the file's order, listed or not.
+    groups: Vec<ActionGroup>,
+    group: Group,
 }
 
 /// Reads a `.desktop` file. `None` if it has no `[Desktop Entry]` group or no
 /// `Name`, which makes it no desktop entry at all.
 pub fn parse(text: &str, locale: &Locale) -> Option<Entry> {
-    let mut entry = Entry::default();
-    let mut seen_entry = false;
-    let mut name = Localized::default();
-    let mut generic_name = Localized::default();
-    let mut comment = Localized::default();
-    let mut keywords = Localized::default();
-    let mut action_ids = Vec::new();
-    let mut groups: Vec<ActionGroup> = Vec::new();
-    let mut group = Group::Other;
-
+    let mut parser = Parser::default();
     for line in text.lines() {
+        parser.line(line, locale);
+    }
+    parser.finish()
+}
+
+impl Parser {
+    fn line(&mut self, line: &str, locale: &Locale) {
         let line = line.trim_start();
         if line.is_empty() || line.starts_with('#') {
-            continue;
+            return;
         }
         if let Some(header) = line.strip_prefix('[') {
-            let header = header.trim_end().strip_suffix(']').unwrap_or(header);
-            group = if header == "Desktop Entry" {
-                // The first group must be this one; a second copy is ignored.
-                if seen_entry {
-                    Group::Other
-                } else {
-                    seen_entry = true;
-                    Group::Entry
-                }
-            } else if let Some(id) = header.strip_prefix("Desktop Action ") {
-                groups.push(ActionGroup {
-                    id: id.to_owned(),
-                    ..ActionGroup::default()
-                });
-                Group::Action(groups.len() - 1)
-            } else {
-                Group::Other
-            };
-            continue;
+            self.group = self.header(header);
+            return;
         }
         let Some((key, value)) = line.split_once('=') else {
-            continue;
+            return;
         };
         let (key, value) = (key.trim_end(), value.trim_start());
         let (key, lang) = match key.split_once('[') {
@@ -167,64 +192,100 @@ pub fn parse(text: &str, locale: &Locale) -> Option<Entry> {
             None => (key, None),
         };
         let Some(rank) = locale.rank(lang) else {
-            continue;
+            return;
         };
-        match group {
-            Group::Entry => match key {
-                "Name" => name.offer(rank, &unescape(value)),
-                "GenericName" => generic_name.offer(rank, &unescape(value)),
-                "Comment" => comment.offer(rank, &unescape(value)),
-                "Keywords" => keywords.offer(rank, value),
-                _ if lang.is_some() => {}
-                "Type" => entry.kind = unescape(value),
-                "Icon" => entry.icon = Some(unescape(value)),
-                "Exec" => entry.exec = Some(unescape(value)),
-                "TryExec" => entry.try_exec = Some(unescape(value)),
-                "Path" => entry.path = Some(unescape(value)),
-                "Terminal" => entry.terminal = value == "true",
-                "NoDisplay" => entry.no_display = value == "true",
-                "Hidden" => entry.hidden = value == "true",
-                "OnlyShowIn" => entry.only_show_in = list(value),
-                "NotShowIn" => entry.not_show_in = list(value),
-                "Actions" => action_ids = list(value),
-                _ => {}
-            },
-            Group::Action(n) => {
-                let action = &mut groups[n];
-                match key {
-                    "Name" => action.name.offer(rank, &unescape(value)),
-                    _ if lang.is_some() => {}
-                    "Icon" => action.icon = Some(unescape(value)),
-                    "Exec" => action.exec = Some(unescape(value)),
-                    _ => {}
-                }
-            }
+        match self.group {
+            Group::Entry => self.set(key, lang.is_some(), rank, value),
+            Group::Action(n) => self.groups[n].set(key, lang.is_some(), rank, value),
             Group::Other => {}
         }
     }
-    if !seen_entry {
-        return None;
-    }
-    entry.name = name.get().filter(|name| !name.is_empty())?;
-    entry.generic_name = generic_name.get().filter(|text| !text.is_empty());
-    entry.comment = comment.get().filter(|text| !text.is_empty());
-    entry.keywords = keywords.get().as_deref().map(list).unwrap_or_default();
-    entry.icon = entry.icon.filter(|icon| !icon.is_empty());
-    for id in action_ids {
-        let Some(n) = groups.iter().position(|group| group.id == id) else {
-            continue;
+
+    /// The group a `[header]` line opens, given the line after its `[`.
+    fn header(&mut self, header: &str) -> Group {
+        let header = header.trim_end().strip_suffix(']').unwrap_or(header);
+        if header == "Desktop Entry" {
+            // The first group must be this one; a second copy is ignored.
+            if self.seen_entry {
+                return Group::Other;
+            }
+            self.seen_entry = true;
+            return Group::Entry;
+        }
+        let Some(id) = header.strip_prefix("Desktop Action ") else {
+            return Group::Other;
         };
-        let group = std::mem::take(&mut groups[n]);
-        if let (Some(name), Some(exec)) = (group.name.get(), group.exec) {
-            entry.actions.push(DesktopAction {
-                id,
-                name,
-                icon: group.icon.filter(|icon| !icon.is_empty()),
-                exec,
-            });
+        self.groups.push(ActionGroup {
+            id: id.to_owned(),
+            ..ActionGroup::default()
+        });
+        Group::Action(self.groups.len() - 1)
+    }
+
+    /// Takes one `key=value` line of the `[Desktop Entry]` group. A localized
+    /// key other than the four localestrings is not the specification's, so
+    /// it is skipped.
+    fn set(&mut self, key: &str, localized: bool, rank: usize, value: &str) {
+        let entry = &mut self.entry;
+        match key {
+            "Name" => self.name.offer(rank, &unescape(value)),
+            "GenericName" => self.generic_name.offer(rank, &unescape(value)),
+            "Comment" => self.comment.offer(rank, &unescape(value)),
+            "Keywords" => self.keywords.offer(rank, value),
+            _ if localized => {}
+            "Type" => entry.kind = unescape(value),
+            "Icon" => entry.icon = Some(unescape(value)),
+            "Exec" => entry.exec = Some(unescape(value)),
+            "TryExec" => entry.try_exec = Some(unescape(value)),
+            "Path" => entry.path = Some(unescape(value)),
+            "Terminal" => entry.terminal = value == "true",
+            "NoDisplay" => entry.no_display = value == "true",
+            "Hidden" => entry.hidden = value == "true",
+            "OnlyShowIn" => entry.only_show_in = list(value),
+            "NotShowIn" => entry.not_show_in = list(value),
+            "Actions" => self.action_ids = list(value),
+            _ => {}
         }
     }
-    Some(entry)
+
+    /// The entry, with the best translation of each localized value and the
+    /// listed actions that have a name and an `Exec`.
+    fn finish(self) -> Option<Entry> {
+        let Parser {
+            mut entry,
+            seen_entry,
+            name,
+            generic_name,
+            comment,
+            keywords,
+            action_ids,
+            mut groups,
+            group: _,
+        } = self;
+        if !seen_entry {
+            return None;
+        }
+        entry.name = name.get().filter(|name| !name.is_empty())?;
+        entry.generic_name = generic_name.get().filter(|text| !text.is_empty());
+        entry.comment = comment.get().filter(|text| !text.is_empty());
+        entry.keywords = keywords.get().as_deref().map(list).unwrap_or_default();
+        entry.icon = entry.icon.filter(|icon| !icon.is_empty());
+        for id in action_ids {
+            let Some(n) = groups.iter().position(|group| group.id == id) else {
+                continue;
+            };
+            let group = std::mem::take(&mut groups[n]);
+            if let (Some(name), Some(exec)) = (group.name.get(), group.exec) {
+                entry.actions.push(DesktopAction {
+                    id,
+                    name,
+                    icon: group.icon.filter(|icon| !icon.is_empty()),
+                    exec,
+                });
+            }
+        }
+        Some(entry)
+    }
 }
 
 /// Undoes the string escapes: `\s`, `\n`, `\t`, `\r` and `\\`. Any other
@@ -245,12 +306,11 @@ fn unescape(value: &str) -> String {
             Some('n') => out.push('\n'),
             Some('t') => out.push('\t'),
             Some('r') => out.push('\r'),
-            Some('\\') => out.push('\\'),
+            Some('\\') | None => out.push('\\'),
             Some(other) => {
                 out.push('\\');
                 out.push(other);
             }
-            None => out.push('\\'),
         }
     }
     out
@@ -282,109 +342,4 @@ fn list(value: &str) -> Vec<String> {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn polish() -> Locale {
-        Locale::new("pl_PL.UTF-8")
-    }
-
-    #[test]
-    fn values_are_read_from_the_desktop_entry_group_only() {
-        let entry = parse(
-            "# A comment\n[Desktop Entry]\nType=Application\nName=Files\nExec=nautilus\n\
-             [Something Else]\nName=Not this\n",
-            &Locale::default(),
-        )
-        .unwrap();
-        assert_eq!(entry.name, "Files");
-        assert_eq!(entry.kind, "Application");
-        assert_eq!(entry.exec.as_deref(), Some("nautilus"));
-    }
-
-    #[test]
-    fn a_file_without_a_desktop_entry_group_or_a_name_is_no_entry() {
-        assert_eq!(parse("[Other]\nName=X\n", &Locale::default()), None);
-        assert_eq!(parse("[Desktop Entry]\nExec=x\n", &Locale::default()), None);
-    }
-
-    #[test]
-    fn localized_values_follow_the_locale_most_specific_first() {
-        let text = "[Desktop Entry]\nName=Files\nName[pl]=Pliki\nName[pl_PL]=Pliki PL\n\
-                    Name[de]=Dateien\nGenericName=File Manager\nGenericName[pl]=Menedżer plików\n\
-                    Keywords=folder;\nKeywords[pl]=katalog;teczka;\n";
-        let entry = parse(text, &polish()).unwrap();
-        assert_eq!(entry.name, "Pliki PL");
-        assert_eq!(entry.generic_name.as_deref(), Some("Menedżer plików"));
-        assert_eq!(entry.keywords, ["katalog", "teczka"]);
-
-        let entry = parse(text, &Locale::new("en_US.UTF-8")).unwrap();
-        assert_eq!(entry.name, "Files");
-        assert_eq!(entry.keywords, ["folder"]);
-    }
-
-    #[test]
-    fn a_locale_with_a_modifier_prefers_the_modified_translation() {
-        let text = "[Desktop Entry]\nName=Name\nName[sr]=Ime\nName[sr@latin]=Ime latinicom\n";
-        assert_eq!(
-            parse(text, &Locale::new("sr_RS.UTF-8@latin")).unwrap().name,
-            "Ime latinicom"
-        );
-        assert_eq!(parse(text, &Locale::new("C")).unwrap().name, "Name");
-    }
-
-    #[test]
-    fn strings_and_lists_are_unescaped() {
-        let entry = parse(
-            "[Desktop Entry]\nName=A\\sB\nComment=line\\none\nKeywords=semi\\;colon;back\\\\slash;;\n\
-             OnlyShowIn=GNOME;KDE;\n",
-            &Locale::default(),
-        )
-        .unwrap();
-        assert_eq!(entry.name, "A B");
-        assert_eq!(entry.comment.as_deref(), Some("line\none"));
-        assert_eq!(entry.keywords, ["semi;colon", "back\\slash"]);
-        assert_eq!(entry.only_show_in, ["GNOME", "KDE"]);
-    }
-
-    #[test]
-    fn flags_are_true_only_when_they_say_true() {
-        let entry = parse(
-            "[Desktop Entry]\nName=A\nTerminal=true\nNoDisplay=false\nHidden=true\n",
-            &Locale::default(),
-        )
-        .unwrap();
-        assert!(entry.terminal);
-        assert!(!entry.no_display);
-        assert!(entry.hidden);
-    }
-
-    #[test]
-    fn desktop_actions_come_in_the_order_actions_lists_them() {
-        let entry = parse(
-            "[Desktop Entry]\nName=Firefox\nExec=firefox %u\nActions=private;new-window;missing;\n\
-             [Desktop Action new-window]\nName=New Window\nName[pl]=Nowe okno\nExec=firefox --new-window %u\n\
-             [Desktop Action private]\nName=New Private Window\nExec=firefox --private-window %u\nIcon=private\n\
-             [Desktop Action unlisted]\nName=Unlisted\nExec=firefox\n",
-            &polish(),
-        )
-        .unwrap();
-        assert_eq!(
-            entry.actions,
-            [
-                DesktopAction {
-                    id: "private".into(),
-                    name: "New Private Window".into(),
-                    icon: Some("private".into()),
-                    exec: "firefox --private-window %u".into(),
-                },
-                DesktopAction {
-                    id: "new-window".into(),
-                    name: "Nowe okno".into(),
-                    icon: None,
-                    exec: "firefox --new-window %u".into(),
-                },
-            ]
-        );
-    }
-}
+mod tests;

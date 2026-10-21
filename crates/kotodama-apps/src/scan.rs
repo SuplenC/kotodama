@@ -1,14 +1,31 @@
 //! Finding the apps: every `.desktop` file in the `applications` directory of
 //! each XDG data directory, by desktop id.
+//!
+//! # Owns
+//!
+//! - The `applications` directories, in the XDG order, and the desktop ids of the files in them.
+//! - Which entries are shown: `Hidden`, `NoDisplay`, `OnlyShowIn`, `NotShowIn` and `TryExec`.
+//!
+//! # Not here
+//!
+//! - Reading one file: `entry.rs`. Its `Exec`: `exec.rs`.
+//! - The Items the apps become: `items.rs`.
+//! - Watching the directories for changes: `main.rs`.
 
-use std::collections::{BTreeMap, HashSet};
+use std::collections::BTreeMap;
+use std::collections::HashSet;
 use std::env;
+use std::ffi::OsStr;
 use std::ffi::OsString;
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::Path;
+use std::path::PathBuf;
 
-use crate::entry::{self, Entry, Locale};
-use crate::exec::{self, Fields};
+use crate::entry;
+use crate::entry::Entry;
+use crate::entry::Locale;
+use crate::exec;
+use crate::exec::Fields;
 
 /// How deep `applications` directories are searched, so a symlink loop can't
 /// keep the scan going.
@@ -43,6 +60,7 @@ pub struct AppAction {
 }
 
 /// What decides which entries are shown, read once from the environment.
+#[derive(Debug)]
 pub struct Environment {
     pub locale: Locale,
     /// `XDG_CURRENT_DESKTOP`, split on `:`.
@@ -52,6 +70,9 @@ pub struct Environment {
 }
 
 impl Environment {
+    /// Takes the locale from the first of `LC_ALL`, `LC_MESSAGES` and `LANG`
+    /// that is set and not empty.
+    #[must_use]
     pub fn from_env() -> Self {
         let locale = ["LC_ALL", "LC_MESSAGES", "LANG"]
             .into_iter()
@@ -83,11 +104,10 @@ pub fn application_dirs() -> Vec<PathBuf> {
         .filter(|dirs| !dirs.is_empty())
         .unwrap_or_else(|| "/usr/local/share:/usr/share".into());
     let mut out: Vec<PathBuf> = Vec::new();
-    for dir in home.into_iter().chain(
-        dirs.split(':')
-            .filter(|dir| !dir.is_empty())
-            .map(PathBuf::from),
-    ) {
+    for dir in home
+        .into_iter()
+        .chain(dirs.split(':').filter(|dir| !dir.is_empty()).map(PathBuf::from))
+    {
         let dir = dir.join("applications");
         if !out.contains(&dir) {
             out.push(dir);
@@ -161,19 +181,11 @@ fn collect(dir: &Path, prefix: &str, depth: usize, out: &mut Vec<(String, PathBu
 /// A desktop id without `.desktop`: the app's Item id, and how the config
 /// names it, with the suffix or without.
 pub fn app_id(desktop_id: &str) -> String {
-    desktop_id
-        .strip_suffix(".desktop")
-        .unwrap_or(desktop_id)
-        .to_owned()
+    desktop_id.strip_suffix(".desktop").unwrap_or(desktop_id).to_owned()
 }
 
 /// The app an entry describes, or `None` if it isn't one to show here.
-fn app(
-    desktop_id: String,
-    path: &Path,
-    entry: Entry,
-    env: &Environment,
-) -> Result<Option<App>, String> {
+fn app(desktop_id: String, path: &Path, entry: Entry, env: &Environment) -> Result<Option<App>, exec::Error> {
     if entry.kind != "Application" || entry.hidden || entry.no_display || !shown_in(&entry, env) {
         return Ok(None);
     }
@@ -231,7 +243,7 @@ fn shown_in(entry: &Entry, env: &Environment) -> bool {
 
 /// Whether `program`, a path or a name looked up in `PATH`, is an executable
 /// file.
-fn installed(program: &str, path: Option<&std::ffi::OsStr>) -> bool {
+fn installed(program: &str, path: Option<&OsStr>) -> bool {
     if program.contains('/') {
         return executable(Path::new(program));
     }

@@ -13,14 +13,32 @@
 //! # mistake: its pick is withdrawn. 0 never withdraws one; at most 30.
 //! withdraw_within = 5
 //! ```
+//!
+//! # Owns
+//!
+//! - The config table and its defaults.
+//! - The Item an app becomes: its title, keywords, identity and Actions.
+//! - Which command each Action runs.
+//!
+//! # Not here
+//!
+//! - Finding the apps: `scan.rs`.
+//! - Starting the command, and withdrawing the pick: `main.rs`.
 
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::BTreeMap;
+use std::collections::HashMap;
+use std::collections::HashSet;
 use std::time::Duration;
 
 use kotodama_extension::config;
-use kotodama_protocol::{Action, Item, ItemKind, Table, Value};
+use kotodama_protocol::Action;
+use kotodama_protocol::Item;
+use kotodama_protocol::ItemKind;
+use kotodama_protocol::Table;
+use kotodama_protocol::Value;
 
-use crate::scan::{App, app_id};
+use crate::scan::App;
+use crate::scan::app_id;
 
 /// The primary Action, which starts the app.
 pub const OPEN: &str = "open";
@@ -41,8 +59,10 @@ pub const DEFAULT_WITHDRAW_WITHIN: Duration = Duration::from_secs(5);
 /// starts once it has its scope, so this leaves room for a slow start.
 const MAX_WITHDRAW_WITHIN: f64 = 30.0;
 
+/// The settings the config table sets.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Settings {
+    /// What runs an app with `Terminal=true`, the app's command after it.
     pub terminal: Vec<String>,
     /// App ids, without `.desktop`.
     pub hidden: HashSet<String>,
@@ -68,6 +88,7 @@ impl Default for Settings {
 impl Settings {
     /// Reads the config table. A setting of the wrong shape is logged and left
     /// at its default; the others still apply.
+    #[must_use]
     pub fn from_config(config: &Table) -> Self {
         let mut settings = Settings::default();
         if let Some(terminal) = config::command(config, "terminal") {
@@ -96,9 +117,7 @@ impl Settings {
         if let Some(value) = config.get("withdraw_within") {
             match seconds(value) {
                 Some(within) => settings.withdraw_within = within,
-                None => {
-                    config::warn("`withdraw_within` should be a number of seconds from 0 to 30")
-                }
+                None => config::warn("`withdraw_within` should be a number of seconds from 0 to 30"),
             }
         }
         settings
@@ -111,6 +130,7 @@ impl Settings {
             .map(|app| self.item(app))
     }
 
+    /// The Item for `app`, under its configured name if it has one.
     fn item(&self, app: &App) -> Item {
         let renamed = self.names.get(&app.id);
         let title = renamed.unwrap_or(&app.name).clone();
@@ -126,19 +146,18 @@ impl Settings {
         }
         let mut actions = Vec::with_capacity(1 + app.actions.len());
         actions.push(Action::new(OPEN, "Open"));
-        actions.extend(app.actions.iter().map(|desktop| {
-            Action::new(
-                format!("{DESKTOP_ACTION}{}", desktop.id),
-                desktop.name.clone(),
-            )
-        }));
+        actions.extend(
+            app.actions
+                .iter()
+                .map(|desktop| Action::new(format!("{DESKTOP_ACTION}{}", desktop.id), desktop.name.clone())),
+        );
         Item {
             id: app.id.clone(),
             kind: ItemKind::App {
                 desktop_id: app.desktop_id.clone(),
             },
             // The same app from another Extension, such as a Folder source,
-            // shares its History (ADR 0008).
+            // shares its History.
             identity: Some(format!("app:{}", app.desktop_id)),
             title,
             subtitle: app.generic_name.clone().or_else(|| app.comment.clone()),
