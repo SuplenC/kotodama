@@ -5,6 +5,7 @@ mod apps;
 mod arguments;
 pub mod clock;
 pub mod config;
+pub mod conflict;
 pub mod daemon;
 pub mod desktop;
 pub mod discovery;

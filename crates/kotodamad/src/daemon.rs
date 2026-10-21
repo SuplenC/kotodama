@@ -26,6 +26,7 @@ use crate::apps::Apps;
 use crate::arguments;
 use crate::clock::{Clock, When};
 use crate::config::extension_settings;
+use crate::conflict::{self, Conflict};
 use crate::discovery::Found;
 use crate::empty_query::EmptyQuery;
 use crate::history::{
@@ -998,6 +999,8 @@ pub struct Daemon<L, D, S> {
     kind_places: KindPlaces,
     /// Each Extension's app.
     apps: Apps,
+    /// The keywords two things asked for, as last told to the user.
+    conflicts: Vec<Conflict>,
     /// One per Quicklink, then one per app (its entry Item), then the
     /// clear-history Item, then the Undo Item while there is something to
     /// undo.
@@ -1080,6 +1083,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             kinds: KindOrder::default(),
             kind_places: KindPlaces::default(),
             apps: Apps::default(),
+            conflicts: Vec::new(),
             own: Vec::new(),
             undos: Vec::new(),
             frecent: Arc::default(),
@@ -3361,7 +3365,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
     }
 
     /// Reads each installed Extension's app from its Manifest and the
-    /// config. When they changed, the Index reads the Segments the search
+    /// config. Reports the keywords lost, once each time they change. When they changed, the Index reads the Segments the search
     /// now shows, every session's query is read again, and the entry Items
     /// are rebuilt.
     fn load_apps(&mut self) {
@@ -3371,7 +3375,14 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             .enumerate()
             .filter(|(_, ext)| !matches!(ext.state, State::Removed))
             .map(|(n, ext)| (ExtensionId(n), &ext.found.manifest));
-        let apps = Apps::new(installed, &self.config);
+        let apps = Apps::new(installed, &self.config, &self.keywords);
+        let conflicts: Vec<Conflict> = (self.keywords.conflicts().into_iter())
+            .chain(apps.conflicts().iter().cloned())
+            .collect();
+        if conflicts != self.conflicts {
+            conflict::report(&conflicts);
+            self.conflicts = conflicts;
+        }
         if apps == self.apps {
             return;
         }

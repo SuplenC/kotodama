@@ -11,6 +11,7 @@ fn apps(manifests: &[&str], config: Table) -> Apps {
             .enumerate()
             .map(|(n, manifest)| (ExtensionId(n), manifest)),
         &config,
+        &crate::keywords::from_config(&config),
     )
 }
 
@@ -60,18 +61,150 @@ fn the_search_reads_the_items_an_extension_means_for_it() {
     );
 }
 
-#[test]
-fn two_apps_never_share_a_word_the_second_falls_back_to_its_name() {
-    let apps = apps(
-        &[
-            "name = \"emoji\"\ncommand = [\"x\"]\nword = \"e\"",
-            "name = \"editors\"\ncommand = [\"x\"]\nword = \"E\"",
-            "name = \"e\"\ncommand = [\"x\"]",
-        ],
-        Table::new(),
-    );
+fn words_by_name(apps: &Apps, manifests: &[&str]) -> Vec<(String, String)> {
+    let names: Vec<String> = manifests
+        .iter()
+        .map(|toml| Manifest::from_toml(toml).unwrap().name)
+        .collect();
+    apps.iter()
+        .map(|app| (names[app.extension.0].clone(), app.word.clone()))
+        .collect()
+}
 
-    assert_eq!(words(&apps), ["e", "editors"]);
+fn pairs(pairs: &[(&str, &str)]) -> Vec<(String, String)> {
+    pairs
+        .iter()
+        .map(|&(name, word)| (name.to_owned(), word.to_owned()))
+        .collect()
+}
+
+const EMOJI_E: &str = "name = \"emoji\"\ncommand = [\"x\"]\nword = \"e\"";
+const EDITORS_E: &str = "name = \"editors\"\ncommand = [\"x\"]\nword = \"E\"";
+const E: &str = "name = \"e\"\ncommand = [\"x\"]";
+
+#[test]
+fn two_apps_never_share_a_word_the_name_sorting_first_keeps_it() {
+    let manifests = [EMOJI_E, EDITORS_E, E];
+    let apps = apps(&manifests, Table::new());
+
+    // A Manifest's word goes before an Extension's name, so `e` the
+    // Extension, whose word is its name, gets `e-2`.
+    assert_eq!(
+        words_by_name(&apps, &manifests),
+        pairs(&[("e", "e-2"), ("editors", "e"), ("emoji", "emoji")])
+    );
+    assert_eq!(apps.conflicts().len(), 2);
+}
+
+#[test]
+fn the_words_dont_depend_on_the_order_extensions_are_found_in() {
+    let one = [EMOJI_E, EDITORS_E, E];
+    let other = [E, EDITORS_E, EMOJI_E];
+
+    assert_eq!(
+        words_by_name(&apps(&one, Table::new()), &one),
+        words_by_name(&apps(&other, Table::new()), &other)
+    );
+}
+
+#[test]
+fn a_word_the_config_sets_goes_before_one_a_manifest_sets() {
+    let manifests = [EDITORS_E, "name = \"zed\"\ncommand = [\"x\"]"];
+    let apps = apps(&manifests, config("zed", "word", Value::String("e".into())));
+
+    assert_eq!(
+        words_by_name(&apps, &manifests),
+        pairs(&[("editors", "editors"), ("zed", "e")])
+    );
+    assert_eq!(
+        apps.conflicts(),
+        [Conflict::WordTaken {
+            extension: "editors".into(),
+            word: "e".into(),
+            holder: Holder::App("zed".into()),
+            instead: "editors".into(),
+        }]
+    );
+}
+
+/// The config with `[quicklinks.<keyword>]` and `[aliases.<keyword>]` for
+/// each of the given keywords.
+fn keywords(quicklinks: &[&str], aliases: &[&str]) -> Table {
+    let quicklink = || {
+        Value::Table(Table::from([(
+            "url".to_owned(),
+            Value::String("https://example.com".into()),
+        )]))
+    };
+    let alias = || {
+        Value::Table(Table::from([
+            ("extension".to_owned(), Value::String("apps".into())),
+            ("item".to_owned(), Value::String("firefox".into())),
+        ]))
+    };
+    let table = |keywords: &[&str], value: &dyn Fn() -> Value| {
+        Value::Table(
+            keywords
+                .iter()
+                .map(|keyword| ((*keyword).to_owned(), value()))
+                .collect(),
+        )
+    };
+    Table::from([
+        ("quicklinks".to_owned(), table(quicklinks, &quicklink)),
+        ("aliases".to_owned(), table(aliases, &alias)),
+    ])
+}
+
+#[test]
+fn a_quicklink_keeps_its_keyword_and_the_app_goes_by_its_name() {
+    let manifests = ["name = \"calculator\"\ncommand = [\"x\"]\nword = \"calc\""];
+    let apps = apps(&manifests, keywords(&["calc"], &[]));
+
+    assert_eq!(words(&apps), ["calculator"]);
+    assert_eq!(
+        apps.conflicts(),
+        [Conflict::WordTaken {
+            extension: "calculator".into(),
+            word: "calc".into(),
+            holder: Holder::Quicklink,
+            instead: "calculator".into(),
+        }]
+    );
+}
+
+#[test]
+fn an_alias_keeps_its_keyword() {
+    let apps = apps(&[EMOJI_E], keywords(&[], &["e"]));
+
+    assert_eq!(words(&apps), ["emoji"]);
+    assert!(matches!(
+        apps.conflicts(),
+        [Conflict::WordTaken {
+            holder: Holder::Alias,
+            ..
+        }]
+    ));
+}
+
+#[test]
+fn an_app_whose_word_and_name_are_both_held_still_gets_a_word() {
+    let apps = apps(&[EMOJI_E], keywords(&["e", "emoji"], &[]));
+
+    assert_eq!(words(&apps), ["emoji-2"]);
+    assert_eq!(apps.scope_of("emoji-2 fire").map(|(n, _)| n), Some(0));
+}
+
+#[test]
+fn an_alias_over_a_quicklink_is_a_conflict() {
+    let keywords = crate::keywords::from_config(&keywords(&["gh"], &["gh"]));
+
+    assert_eq!(
+        keywords.conflicts(),
+        [Conflict::QuicklinkUnderAlias {
+            keyword: "gh".into()
+        }]
+    );
 }
 
 #[test]

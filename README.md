@@ -256,7 +256,7 @@ in_search = true    # the emoji in the search too
 in_search = false   # projects and scripts only in their app
 ```
 
-`in_search = true` shows every Item of the Extension in the search, `false` none of them; unset, the Manifest's `in_search` or, without one, each Item says. When two apps have the same word, the first one found keeps it and the other falls back to its Extension's name. `docs/adr/0027-every-extension-is-an-app-with-items-in-the-search-or-in-the-app-alone.md` explains the design, and how an app differs from a Hidden item and a View.
+`in_search = true` shows every Item of the Extension in the search, `false` none of them; unset, the Manifest's `in_search` or, without one, each Item says. A keyword has one holder, in this order: an Alias, a Quicklink, a word set in `[extensions.<name>]`, a word set in a Manifest, an Extension's name; between two apps, the Extension whose name sorts first. An app that loses its word goes by its Extension's name, or the name and `-2`, `-3`, so it stays reachable, and the Daemon logs a warning for every keyword lost. `docs/adr/0028-one-keyword-table-with-a-fixed-precedence.md` gives the reasons. `docs/adr/0027-every-extension-is-an-app-with-items-in-the-search-or-in-the-app-alone.md` explains the design, and how an app differs from a Hidden item and a View.
 
 ### Trying it
 
