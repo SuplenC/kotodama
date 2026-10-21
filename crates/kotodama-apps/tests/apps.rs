@@ -62,7 +62,7 @@ impl Apps {
                 .envs(env.iter().copied()),
             WAIT,
         );
-        Apps { dir, extension }
+        Apps { extension, dir }
     }
 
     /// Starts the Extension and sends it `config`.
@@ -119,7 +119,7 @@ fn app(name: &str, exec: &str) -> String {
 
 fn titles(items: &[Item]) -> Vec<&str> {
     let mut titles: Vec<&str> = items.iter().map(|item| item.title.as_str()).collect();
-    titles.sort();
+    titles.sort_unstable();
     titles
 }
 

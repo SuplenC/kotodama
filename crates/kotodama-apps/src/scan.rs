@@ -1,9 +1,21 @@
 //! Finding the apps: every `.desktop` file in the `applications` directory of
 //! each XDG data directory, by desktop id.
+//!
+//! # Owns
+//!
+//! - The `applications` directories, in the XDG order, and the desktop ids of the files in them.
+//! - Which entries are shown: `Hidden`, `NoDisplay`, `OnlyShowIn`, `NotShowIn` and `TryExec`.
+//!
+//! # Not here
+//!
+//! - Reading one file: `entry.rs`. Its `Exec`: `exec.rs`.
+//! - The Items the apps become: `items.rs`.
+//! - Watching the directories for changes: `main.rs`.
 
 use std::collections::BTreeMap;
 use std::collections::HashSet;
 use std::env;
+use std::ffi::OsStr;
 use std::ffi::OsString;
 use std::fs;
 use std::path::Path;
@@ -48,6 +60,7 @@ pub struct AppAction {
 }
 
 /// What decides which entries are shown, read once from the environment.
+#[derive(Debug)]
 pub struct Environment {
     pub locale: Locale,
     /// `XDG_CURRENT_DESKTOP`, split on `:`.
@@ -57,6 +70,9 @@ pub struct Environment {
 }
 
 impl Environment {
+    /// Takes the locale from the first of `LC_ALL`, `LC_MESSAGES` and `LANG`
+    /// that is set and not empty.
+    #[must_use]
     pub fn from_env() -> Self {
         let locale = ["LC_ALL", "LC_MESSAGES", "LANG"]
             .into_iter()
@@ -169,7 +185,7 @@ pub fn app_id(desktop_id: &str) -> String {
 }
 
 /// The app an entry describes, or `None` if it isn't one to show here.
-fn app(desktop_id: String, path: &Path, entry: Entry, env: &Environment) -> Result<Option<App>, String> {
+fn app(desktop_id: String, path: &Path, entry: Entry, env: &Environment) -> Result<Option<App>, exec::Error> {
     if entry.kind != "Application" || entry.hidden || entry.no_display || !shown_in(&entry, env) {
         return Ok(None);
     }
@@ -227,7 +243,7 @@ fn shown_in(entry: &Entry, env: &Environment) -> bool {
 
 /// Whether `program`, a path or a name looked up in `PATH`, is an executable
 /// file.
-fn installed(program: &str, path: Option<&std::ffi::OsStr>) -> bool {
+fn installed(program: &str, path: Option<&OsStr>) -> bool {
     if program.contains('/') {
         return executable(Path::new(program));
     }

@@ -1,8 +1,18 @@
 //! Turning an `Exec` value into the program and arguments to run, as the
 //! Desktop Entry Specification describes: quoting, then field codes.
+//!
+//! # Owns
+//!
+//! - Splitting `Exec` into arguments and expanding its field codes.
+//!
+//! # Not here
+//!
+//! - The string escapes, which reading the file undoes first: `entry.rs`.
+//! - Starting the command: `kotodama_extension::launch`, from `main.rs`.
 
 /// What the field codes expand to. Kotodama starts apps with no files or URLs,
 /// so `%f`, `%F`, `%u` and `%U` expand to nothing.
+#[derive(Debug)]
 pub struct Fields<'a> {
     /// The translated name, for `%c`.
     pub name: &'a str,
@@ -12,9 +22,23 @@ pub struct Fields<'a> {
     pub file: &'a str,
 }
 
+/// Why an `Exec` value is no command to run.
+#[derive(Debug, thiserror::Error)]
+pub enum Error {
+    #[error("`Exec` ends inside a quote")]
+    UnclosedQuote,
+    #[error("`Exec` is empty")]
+    Empty,
+}
+
 /// Splits `exec`, with the string escapes already undone, into arguments and
-/// expands the field codes. Fails on an unclosed quote or an empty command.
-pub fn command(exec: &str, fields: &Fields) -> Result<Vec<String>, String> {
+/// expands the field codes.
+///
+/// # Errors
+///
+/// [`Error::UnclosedQuote`] on a quote left open, [`Error::Empty`] when no
+/// argument is left once the field codes expand.
+pub fn command(exec: &str, fields: &Fields) -> Result<Vec<String>, Error> {
     let mut argv = Vec::new();
     for arg in split(exec)? {
         match arg.as_str() {
@@ -29,14 +53,14 @@ pub fn command(exec: &str, fields: &Fields) -> Result<Vec<String>, String> {
         }
     }
     if argv.is_empty() {
-        return Err("`Exec` is empty".into());
+        return Err(Error::Empty);
     }
     Ok(argv)
 }
 
 /// Splits on unquoted whitespace. Inside double quotes, a backslash escapes
 /// `"`, `` ` ``, `$` and `\`.
-fn split(exec: &str) -> Result<Vec<String>, String> {
+fn split(exec: &str) -> Result<Vec<String>, Error> {
     let mut args = Vec::new();
     let mut arg: Option<String> = None;
     let mut chars = exec.chars();
@@ -53,10 +77,10 @@ fn split(exec: &str) -> Result<Vec<String>, String> {
                                 arg.push('\\');
                                 arg.push(c);
                             }
-                            None => return Err("`Exec` ends inside a quote".into()),
+                            None => return Err(Error::UnclosedQuote),
                         },
                         Some(c) => arg.push(c),
-                        None => return Err("`Exec` ends inside a quote".into()),
+                        None => return Err(Error::UnclosedQuote),
                     }
                 }
             }
@@ -96,55 +120,4 @@ fn expand(arg: &str, fields: &Fields) -> String {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    const FIELDS: Fields = Fields {
-        name: "Firefox",
-        icon: Some("firefox"),
-        file: "/usr/share/applications/firefox.desktop",
-    };
-
-    fn run(exec: &str) -> Vec<String> {
-        command(exec, &FIELDS).unwrap()
-    }
-
-    #[test]
-    fn file_and_url_codes_are_dropped() {
-        assert_eq!(run("firefox %u"), ["firefox"]);
-        assert_eq!(run("gimp-2.10 %U --new"), ["gimp-2.10", "--new"]);
-    }
-
-    #[test]
-    fn quoted_arguments_keep_their_spaces_and_escapes() {
-        assert_eq!(
-            run(r#"sh -c "echo \"hi\" \$HOME \\ \`x\`" end"#),
-            ["sh", "-c", r#"echo "hi" $HOME \ `x`"#, "end"]
-        );
-        assert_eq!(run(r#""/opt/My App/app"  --flag"#), ["/opt/My App/app", "--flag"]);
-    }
-
-    #[test]
-    fn icon_name_and_file_codes_expand() {
-        assert_eq!(
-            run("app %i --title=%c --from %k 100%%"),
-            [
-                "app",
-                "--icon",
-                "firefox",
-                "--title=Firefox",
-                "--from",
-                "/usr/share/applications/firefox.desktop",
-                "100%"
-            ]
-        );
-        let fields = Fields { icon: None, ..FIELDS };
-        assert_eq!(command("app %i", &fields).unwrap(), ["app"]);
-    }
-
-    #[test]
-    fn an_unclosed_quote_or_nothing_to_run_is_an_error() {
-        assert!(command(r#"app "open"#, &FIELDS).is_err());
-        assert!(command("  %U ", &FIELDS).is_err());
-    }
-}
+mod tests;
