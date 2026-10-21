@@ -119,7 +119,7 @@ pkgs.testers.runNixOSTest {
         user("kotodama toggle")
         machine.wait_for_unit("kotodamad.service", "alice")
         machine.wait_until_succeeds(
-            as_alice(f"{front_end} show the keyboard")
+            as_alice(f"{front_end} --app hyprland show the keyboard")
             + " | grep -P '^hyprland\t/64/F1\tShow the keyboard shortcuts$'"
         )
 

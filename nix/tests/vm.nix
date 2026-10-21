@@ -172,13 +172,17 @@ pkgs.testers.runNixOSTest {
             as_alice(f"{front_end} dozer") + " | grep -P '^apps\tdozer\tDozer$'"
         )
         machine.wait_until_succeeds(
-            as_alice(f"{front_end} clipboard") + " | grep -P '^clipboard\thistory\tClipboard History$'"
+            as_alice(f"{front_end} clipboard") + " | grep -P '^kotodama\tprefix:clipboard\tClipboard$'"
+        )
+        # What was copied is in the clipboard's app alone, the History first.
+        machine.wait_until_succeeds(
+            as_alice(f"{front_end} --app clipboard") + " | grep -P '^clipboard\thistory\tClipboard History$'"
         )
         machine.wait_until_succeeds(
             as_alice(f"{front_end} --wait 6\\*7") + " | grep -P '^calculator\t6\\*7\t42$'"
         )
         machine.wait_until_succeeds(
-            as_alice(f"{front_end} emoji thumbs") + " | grep -P '^emoji\t👍\t👍 Thumbs up$'"
+            as_alice(f"{front_end} --app emoji thumbs") + " | grep -P '^emoji\t👍\t👍 Thumbs up$'"
         )
 
     with subtest("the Folder source lists the configured projects and scripts"):

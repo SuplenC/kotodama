@@ -3,6 +3,8 @@
     front-end.py QUERY          prints the Results, one `extension<TAB>id<TAB>title` per line
     front-end.py --run QUERY    also runs the top Result's primary Action
     front-end.py --wait QUERY   waits for Results that aren't empty, as a Live query's
+    front-end.py --app QUERY    first enters the app QUERY's first word names, as
+                                `kotodama open --prefix` does; it goes before --run or --wait
     front-end.py --listen       prints `ready`, then, for each View pushed, `view<TAB>extension<TAB>id`
                                 and its Items, one `title<TAB>subtitle` per line, and `open<TAB>view`
                                 for each request to open, as `kotodama open` sends
@@ -47,6 +49,9 @@ def listen(sock, reader):
 
 def main():
     args = sys.argv[1:]
+    app = args[:1] == ["--app"]
+    if app:
+        args = args[1:]
     run = args[:1] == ["--run"]
     wait = args[:1] == ["--wait"]
     query = " ".join(args[1:] if run or wait else args)
@@ -63,6 +68,11 @@ def main():
         sock.settimeout(None)
         listen(sock, reader)
 
+    if app:
+        word = query.split()[0]
+        # In the app with nothing typed, the query is the word and a space.
+        query = word + " " + query[len(word) :].lstrip()
+        send(sock, {"open": {"query": word + " ", "view": None}})
     send(sock, {"query": {"text": query}})
     while True:
         message = recv(reader)
