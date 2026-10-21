@@ -53,8 +53,12 @@ An Item an Extension sends ahead of time that the search never shows; only `koto
 _Avoid_: Private item, internal item
 
 **App**:
-The search over one Extension's Items alone, which every Extension has. The search shows its entry Item, found by the App's title and word (`emoji`, `projects`, `calc`); Tab or Enter on it enters the App, where an intro card from the Manifest shows until something is typed, and Esc goes back to the whole search. Each Item is in the search, or in its App only. Unlike a Hidden item, an App only Item is still searched, in its App; unlike a View, the search in an App is the search, with Results.
-_Avoid_: Prefix, scope, mode, namespace, trigger
+The search over one Extension's Items alone, which every Extension has. The search shows its entry Item, found by the App's title and its Word; Tab or Enter on it enters the App, where an intro card from the Manifest shows until something is typed, and Esc goes back to the whole search. Each Item is in the search, or in its App only. Unlike a Hidden item, an App only Item is still searched, in its App; unlike a View, the search in an App is the search, with Results. A program installed on the desktop is an application, never an App: its Item kind is `app`, and the `apps` Extension's App is the Applications App.
+_Avoid_: Prefix, scope, mode, namespace, trigger; app for a desktop application
+
+**Word**:
+The one word that names an App, such as `emoji`, `projects` or `calc`: the Manifest's `word`, which the user's `[extensions.<name>] word` overrides, else the Extension's name. Typing it finds the App's entry Item; it enters nothing by itself. `kotodama open --app <word>` opens the menu in the App.
+_Avoid_: Prefix, keyword (an Item's own), trigger
 
 **Live query**:
 A query the Daemon forwards to an Extension as the user types, for sources that can't be indexed ahead of time, such as a calculator or web search.

@@ -18,7 +18,7 @@ fn emoji() -> Apps {
     apps(
         &[
             "name = \"apps\"\ncommand = [\"x\"]",
-            "name = \"emoji\"\ncommand = [\"x\"]\nprefix = \"emo\"\nin_search = false",
+            "name = \"emoji\"\ncommand = [\"x\"]\nword = \"emo\"\nin_search = false",
         ],
         Table::new(),
     )
@@ -64,8 +64,8 @@ fn the_search_reads_the_items_an_extension_means_for_it() {
 fn two_apps_never_share_a_word_the_second_falls_back_to_its_name() {
     let apps = apps(
         &[
-            "name = \"emoji\"\ncommand = [\"x\"]\nprefix = \"e\"",
-            "name = \"editors\"\ncommand = [\"x\"]\nprefix = \"E\"",
+            "name = \"emoji\"\ncommand = [\"x\"]\nword = \"e\"",
+            "name = \"editors\"\ncommand = [\"x\"]\nword = \"E\"",
             "name = \"e\"\ncommand = [\"x\"]",
         ],
         Table::new(),
@@ -77,8 +77,18 @@ fn two_apps_never_share_a_word_the_second_falls_back_to_its_name() {
 #[test]
 fn the_config_chooses_the_word() {
     let apps = apps(
-        &["name = \"emoji\"\ncommand = [\"x\"]\nprefix = \"emo\""],
-        config("emoji", "prefix", Value::String("Smile".into())),
+        &["name = \"emoji\"\ncommand = [\"x\"]\nword = \"emo\""],
+        config("emoji", "word", Value::String("Smile".into())),
+    );
+
+    assert_eq!(words(&apps), ["smile"]);
+}
+
+#[test]
+fn the_configs_prefix_is_still_read_as_the_word() {
+    let apps = apps(
+        &["name = \"emoji\"\ncommand = [\"x\"]\nword = \"emo\""],
+        config("emoji", "prefix", Value::String("smile".into())),
     );
 
     assert_eq!(words(&apps), ["smile"]);
@@ -88,8 +98,8 @@ fn the_config_chooses_the_word() {
 fn a_word_in_the_config_that_isnt_one_word_is_ignored() {
     for word in ["two words", ""] {
         let apps = apps(
-            &["name = \"emoji\"\ncommand = [\"x\"]\nprefix = \"emo\""],
-            config("emoji", "prefix", Value::String(word.into())),
+            &["name = \"emoji\"\ncommand = [\"x\"]\nword = \"emo\""],
+            config("emoji", "word", Value::String(word.into())),
         );
 
         assert_eq!(words(&apps), ["emo"], "{word:?}");

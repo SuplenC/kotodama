@@ -6,7 +6,7 @@ description = "Desktop applications, from the .desktop files in the XDG data dir
 command = ["./kotodama-apps"]
 # Its app, which Tab on the "Applications" Item enters; every app is in the
 # search too.
-prefix = "apps"
+word = "apps"
 title = "Applications"
 icon = "applications-other"
 about = "Every installed application. Type part of a name, a description or a category; Enter launches it."

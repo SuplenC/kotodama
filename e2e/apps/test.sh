@@ -104,10 +104,10 @@ if grep -F "focused: false" <(tail -n +"$((mark + 1))" "$E2E_OUT/quickshell.log"
 fi
 press -k Escape "focused: false"
 
-# The emoji are in their app, which `kotodama open --prefix` opens on, and not
+# The emoji are in their app, which `kotodama open --app` opens on, and not
 # in the search.
 mark=$(log_lines quickshell.log)
-open --prefix emoji --query fire
+open --app emoji --query fire
 wait_for_log quickshell.log "scope: [Emoji]" "$mark"
 wait_for_log quickshell.log "rows: [emoji" "$mark"
 close

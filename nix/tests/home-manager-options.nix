@@ -91,7 +91,7 @@ let
         };
         emoji = {
           skinTone = "medium-dark";
-          prefix = "e";
+          word = "e";
         };
         folders = {
           folders = [
@@ -120,6 +120,7 @@ let
         ];
         ai.url = "http://localhost:11434/v1/messages";
         system.inSearch = false;
+        # `prefix`, the old name of `word`, is still read.
         hyprland.prefix = "hypr";
       };
     }).xdg.configFile."kotodama/home-manager.toml".source;
@@ -229,7 +230,7 @@ pkgs.runCommand "kotodama-home-manager-options-test"
         "decimal_separator": "comma",
     })
     expect("clipboard", extensions["clipboard"], {"max_entries": 50, "max_age_days": 0.5, "in_search": True})
-    expect("emoji", extensions["emoji"], {"skin_tone": "medium-dark", "prefix": "e"})
+    expect("emoji", extensions["emoji"], {"skin_tone": "medium-dark", "word": "e"})
     expect("folders", extensions["folders"], {
         "folders": [
             {"path": "~/Projects", "kind": "projects", "depth": 2},
@@ -243,7 +244,7 @@ pkgs.runCommand "kotodama-home-manager-options-test"
         "copy_path": ["wl-copy"],
     })
     expect("system", extensions["system"], {"in_search": False})
-    expect("hyprland", extensions["hyprland"], {"prefix": "hypr"})
+    expect("hyprland", extensions["hyprland"], {"word": "hypr"})
     expect("web-search", extensions["web-search"], {
         "engines": [{"name": "Kagi", "url": "https://kagi.com/search?q={query}"}],
     })

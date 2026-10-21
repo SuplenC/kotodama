@@ -2,7 +2,7 @@
 //! for a query, and with `--run` runs the top Result's primary Action, or with
 //! `--action <id>` its Action `id`, answering the Daemon's Close as a real menu
 //! would. With `--app` first, the query's first word names an app, which it
-//! enters first, as `kotodama open --prefix` does.
+//! enters first, as `kotodama open --app` does.
 //!
 //! ```sh
 //! cargo run -p kotodamad --example front-end -- firefox

@@ -376,7 +376,7 @@ pub struct SearchRust {
     /// The intro card shown, which the two above hold.
     intro: Option<Intro>,
     /// The word of the app the search is in, which `query` follows.
-    prefix: Option<String>,
+    word: Option<String>,
     /// The query last sent, the app's word and all.
     sent: Option<String>,
     writer: Option<Writer>,
@@ -413,7 +413,7 @@ impl Default for SearchRust {
             intro_about: QString::default(),
             intro_examples: variant::List::default(),
             intro: None,
-            prefix: None,
+            word: None,
             sent: None,
             writer: None,
             asked: None,
@@ -445,7 +445,7 @@ impl KotodamaSearch {
             self.as_mut().rust_mut().query = query;
             self.as_mut().query_changed();
         }
-        let text = scope::full(self.prefix.as_deref(), &String::from(&self.query));
+        let text = scope::full(self.word.as_deref(), &String::from(&self.query));
         if self.sent.as_deref() != Some(text.as_str()) {
             self.as_mut().send_query(text);
         }
@@ -458,16 +458,16 @@ impl KotodamaSearch {
         let Some(scope) = scope else {
             return;
         };
-        if self.prefix.is_some() {
+        if self.word.is_some() {
             return;
         }
         let query = String::from(&self.query);
-        let Some(rest) = scope::behind(&query, &scope.prefix) else {
+        let Some(rest) = scope::behind(&query, &scope.word) else {
             return;
         };
         let rest = QString::from(rest);
         let mut this = self.as_mut().rust_mut();
-        this.prefix = Some(scope.prefix);
+        this.word = Some(scope.word);
         this.scope = QString::from(&scope.title);
         this.query = rest.clone();
         self.as_mut().scope_changed();
@@ -480,13 +480,13 @@ impl KotodamaSearch {
     /// Results come back to say whether it is in an app. Returns the word
     /// of the app it was in.
     fn drop_scope(mut self: Pin<&mut Self>) -> Option<String> {
-        let prefix = self.as_mut().rust_mut().prefix.take()?;
+        let word = self.as_mut().rust_mut().word.take()?;
         let mut this = self.as_mut().rust_mut();
         this.scope = QString::default();
         this.sent = None;
         self.as_mut().scope_changed();
         self.as_mut().set_intro(None);
-        Some(prefix)
+        Some(word)
     }
 
     /// Shows `intro` as the intro card, or none.
@@ -524,10 +524,10 @@ impl KotodamaSearch {
     }
 
     fn leave_scope(mut self: Pin<&mut Self>) -> bool {
-        let Some(prefix) = self.as_mut().drop_scope() else {
+        let Some(word) = self.as_mut().drop_scope() else {
             return false;
         };
-        let text = QString::from(&prefix);
+        let text = QString::from(&word);
         self.as_mut().set_query(text.clone());
         self.as_mut().query_replaced(text);
         true
@@ -782,7 +782,7 @@ impl KotodamaSearch {
                 self.as_mut().set_connected(true);
                 // A Daemon that restarted has no idea what is typed. Even
                 // nothing typed has Results: those of the Empty query.
-                let text = scope::full(self.prefix.as_deref(), &String::from(&self.query));
+                let text = scope::full(self.word.as_deref(), &String::from(&self.query));
                 self.as_mut().send_query(text);
                 Shown::Same
             }

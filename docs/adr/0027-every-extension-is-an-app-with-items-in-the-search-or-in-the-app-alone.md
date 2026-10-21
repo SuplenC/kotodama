@@ -1,6 +1,6 @@
 # 27. Every Extension is an app, and each Item is in the search or in the app alone
 
-Status: accepted (2026-10-21). Supersedes ADR 0024.
+Status: accepted (2026-10-21). Supersedes ADR 0024. Amended (2026-10-21), before protocol 1.0 froze: the word's key is `word` in the Manifest and the config (`prefix`, its old name, still read with a warning), `kotodama open --app` (`--prefix` still read), `Scope.word`, and the entry Item `app:<extension>`.
 
 ADR 0024 put one Extension's Items behind a Prefix. That was all or nothing: the emoji were all behind `emoji`, and the apps all in the search. Some Extensions have Items of both sorts. Hyprland's windows belong in the search, but its binds, one per key combination, crowd it. Clipboard clips are private and noisy, while the History View should stay reachable. The owner asked for Raycast's model: every Extension is an app. You enter it from the search, it introduces itself, and it searches its own Items. Each Item is in the search, or in its app only.
 

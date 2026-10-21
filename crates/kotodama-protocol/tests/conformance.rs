@@ -380,7 +380,7 @@ fn to_front_end_messages() -> Vec<ToFrontEnd> {
             version: 2,
             results: vec![],
             scope: Some(Scope {
-                prefix: "emoji".into(),
+                word: "emoji".into(),
                 title: "Emoji".into(),
                 icon: Some("face-smile".into()),
                 intro: Some(Intro {

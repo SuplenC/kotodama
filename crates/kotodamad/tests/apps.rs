@@ -11,7 +11,7 @@ use kotodamad::discovery::Found;
 /// The emoji Extension as its Manifest declares it: every Item app only.
 fn emoji() -> Found {
     manifest(
-        "name = \"emoji\"\ncommand = [\"x\"]\nprefix = \"emoji\"\ntitle = \"Emoji\"\nicon = \"face-smile\"\nabout = \"Emoji, typed where you were.\"\nexamples = [{ query = \"fire\", result = \"🔥 Fire\" }]\nin_search = false",
+        "name = \"emoji\"\ncommand = [\"x\"]\nword = \"emoji\"\ntitle = \"Emoji\"\nicon = \"face-smile\"\nabout = \"Emoji, typed where you were.\"\nexamples = [{ query = \"fire\", result = \"🔥 Fire\" }]\nin_search = false",
     )
 }
 
@@ -112,7 +112,7 @@ fn last_results(sent: Vec<ToFrontEnd>) -> (Vec<(String, String)>, Option<Scope>)
 
 fn emoji_scope(intro: bool) -> Option<Scope> {
     Some(Scope {
-        prefix: "emoji".into(),
+        word: "emoji".into(),
         title: "Emoji".into(),
         icon: Some("face-smile".into()),
         intro: intro.then(|| Intro {
@@ -361,7 +361,7 @@ fn in_search_false_in_the_config_puts_the_whole_extension_behind_its_app() {
 
 #[test]
 fn the_config_gives_an_extension_a_word_of_its_own() {
-    let mut desk = Desk::with(plain("emoji"), "[extensions.emoji]\nprefix = \"em\"");
+    let mut desk = Desk::with(plain("emoji"), "[extensions.emoji]\nword = \"em\"");
 
     assert_eq!(desk.titles("fire")[0], "🔥 Fire");
     desk.enter("em", "emoji");
@@ -370,7 +370,7 @@ fn the_config_gives_an_extension_a_word_of_its_own() {
     assert_eq!(
         scope,
         Some(Scope {
-            prefix: "em".into(),
+            word: "em".into(),
             title: "emoji".into(),
             icon: None,
             intro: None,
@@ -380,7 +380,7 @@ fn the_config_gives_an_extension_a_word_of_its_own() {
 
 #[test]
 fn the_config_overrides_the_manifests_word() {
-    let mut desk = Desk::new("[extensions.emoji]\nprefix = \"e\"");
+    let mut desk = Desk::new("[extensions.emoji]\nword = \"e\"");
 
     desk.enter("emoji", "Emoji");
 

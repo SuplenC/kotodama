@@ -6,7 +6,7 @@ description = "Emoji, with their skin tones, and symbols such as arrows, math an
 command = ["./kotodama-emoji"]
 # The emoji stay out of the search, in its app: the search shows one "Emoji"
 # Item, and Tab or Enter on it enters the app.
-prefix = "emoji"
+word = "emoji"
 title = "Emoji"
 icon = "face-smile"
 about = "Emoji and symbols, by name or keyword. Enter types it into the window you came from; Tab picks a skin tone."

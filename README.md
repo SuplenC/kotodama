@@ -62,7 +62,7 @@ Every config table below also has typed options, so a typo or a value of the wro
 | `emptyQuery.{mostUsed, menu}` | `[empty_query]` |
 | `ranking.kinds` | `[ranking]` |
 | `quicklinkDefaults.opener` | `[quicklink_defaults]` |
-| `extensions.<name>.{prefix, inSearch}`, for every Extension above and below, and `system` and `hyprland` | `prefix` and `in_search` in `[extensions.<name>]` (see [Apps](#apps)) |
+| `extensions.<name>.{word, inSearch}`, for every Extension above and below, and `system` and `hyprland` (`prefix` is the old name of `word`, still read) | `word` and `in_search` in `[extensions.<name>]` (see [Apps](#apps)) |
 | `extensions.apps.{terminal, hidden, names, withdrawWithin}` | `[extensions.apps]` |
 | `extensions.clipboard.{maxEntries, maxAgeDays}` | `[extensions.clipboard]` |
 | `extensions.calculator.{network, ratesUrl, decimalSeparator}` | `[extensions.calculator]` |
@@ -71,7 +71,7 @@ Every config table below also has typed options, so a typo or a value of the wro
 | `extensions.ai.{apiKeyCommand, apiKeyFile, url, model, effort, debounceMs}` | `[extensions.ai]` (see [AI](#ai)) |
 | `extensions.folders.{folders, terminal, open, shell, lazygit, fileManager, copyPath}` | `[extensions.folders]` |
 
-Each option is the key in camelCase. `decimalSeparator`, `skinTone` and a folder's `kind` take only the values their Extension knows, a `prefix` only one word, and numbers are checked against the ranges the tables below give. The Hyprland and system Extensions have no settings of their own.
+Each option is the key in camelCase. `decimalSeparator`, `skinTone` and a folder's `kind` take only the values their Extension knows, a `word` only one word, and numbers are checked against the ranges the tables below give. The Hyprland and system Extensions have no settings of their own.
 
 ```nix
 programs.kotodama = {
@@ -227,14 +227,14 @@ Typing a Quicklink's keyword ranks it as an exact match, with Frecency deciding 
 
 ### Apps
 
-Every Extension is an app: the search over its Items alone. The search shows one entry Item for it, such as "Emoji" or "Projects", found by the app's title and its word (`emoji`, `projects`, `calc`) and ranked like any other Result; typing the word exactly puts it first. Tab or Enter on the entry Item enters the app, so `projects` and Tab is enough. The menu shows a chip naming the app in front of the search box, and, until something is typed, an intro card from the Manifest: what the app does, and a few queries to try with what they give. Under it are the app's commands, then its most picked Items, then the rest. Typing searches that Extension's Items alone, and an Extension with Live queries gets every query typed in its app, whether its triggers match or not: the calculator answers anything typed in it. Esc, or Backspace on the empty box, goes back to the whole search. `kotodama open --prefix emoji` (or `--query "emoji "`) opens the menu in the app. Learned choices in an app are kept apart from the same words in the search.
+Every Extension is an app: the search over its Items alone. The search shows one entry Item for it, such as "Emoji" or "Projects", found by the app's title and its word (`emoji`, `projects`, `calc`) and ranked like any other Result; typing the word exactly puts it first. Tab or Enter on the entry Item enters the app, so `projects` and Tab is enough. The menu shows a chip naming the app in front of the search box, and, until something is typed, an intro card from the Manifest: what the app does, and a few queries to try with what they give. Under it are the app's commands, then its most picked Items, then the rest. Typing searches that Extension's Items alone, and an Extension with Live queries gets every query typed in its app, whether its triggers match or not: the calculator answers anything typed in it. Esc, or Backspace on the empty box, goes back to the whole search. `kotodama open --app emoji` opens the menu in the app. Learned choices in an app are kept apart from the same words in the search.
 
 Each Item is in the search, or in its app only: an Item with `app_only = true` only its app shows. The search reads one Segment of each Extension's Items and the app reads two, so the choice costs nothing per row on a keystroke. An Extension's Live queries and Fallbacks are asked in its app, and in the search unless it has every Item in the app only (`in_search = false`).
 
 An Extension's Manifest names its app and says what goes in it:
 
 ```toml
-prefix = "calc"                  # the app's word; unset, the Extension's name
+word = "calc"                    # the app's word; unset, the Extension's name
 title = "Calculator"             # the entry Item's title; unset, the name
 icon = "accessories-calculator"
 about = "Arithmetic, units, currency, dates and time zones. Enter copies the answer."
@@ -249,7 +249,7 @@ The config overrides the word and the visibility, for any Extension:
 
 ```toml
 [extensions.emoji]
-prefix = "e"        # one word: `e`, then Tab, searches the emoji
+word = "e"          # one word: `e`, then Tab, searches the emoji
 in_search = true    # the emoji in the search too
 
 [extensions.folders]
@@ -377,7 +377,7 @@ decimal_separator = "comma"
 # or dark. Unset, emoji are their default yellow.
 skin_tone = "medium"
 # The word that names the Emoji app. Unset, emoji.
-prefix = "emoji"
+word = "emoji"
 # Whether the search shows the emoji too. Unset, false: only the app does.
 in_search = false
 ```
@@ -566,7 +566,7 @@ bind = SUPER, Space, exec, kotodama toggle
 bind = SUPER, V, exec, kotodama open --view clipboard/history
 ```
 
-`kotodama open [--view <extension>/<item>] [--prefix <prefix>] [--query <text>]` opens it with text already typed. `--prefix emoji` opens it in the Emoji app, searching only the emoji. `--view` opens it on a View: it names an Item by its Extension and id, and the Daemon runs that Item's primary Action, such as "Show Clipboard History" on the clipboard's `history` Item, and opens the menu once the View it pushes is there, so the menu never shows the search first. Esc pops the View to the search. The Item may be hidden, so the search never shows it (ADR 0015). If the name matches no Item, or the Action fails, the menu opens on the search and says why. If the View hasn't arrived within a second (an Extension that is slow to start, say), the menu opens on the search, and the View still goes on top when it arrives. To try it, build the module and point Quickshell at it:
+`kotodama open [--view <extension>/<item>] [--app <word>] [--query <text>]` opens it with text already typed. `--app emoji` opens it in the Emoji app, searching only the emoji (`--prefix` is its old name, still read). `--view` opens it on a View: it names an Item by its Extension and id, and the Daemon runs that Item's primary Action, such as "Show Clipboard History" on the clipboard's `history` Item, and opens the menu once the View it pushes is there, so the menu never shows the search first. Esc pops the View to the search. The Item may be hidden, so the search never shows it (ADR 0015). If the name matches no Item, or the Action fails, the menu opens on the search and says why. If the View hasn't arrived within a second (an Extension that is slow to start, say), the menu opens on the search, and the View still goes on top when it arrives. To try it, build the module and point Quickshell at it:
 
 ```sh
 QML_IMPORT_PATH=$(scripts/qml-module --release) quickshell --path shell.qml

@@ -23,18 +23,29 @@ fn open_takes_a_query_and_a_view_in_any_order() {
 }
 
 #[test]
-fn open_behind_a_prefix_types_it_before_the_query() {
+fn open_in_an_app_types_its_word_before_the_query() {
     assert_eq!(
-        parse(&args("open --prefix emoji")),
+        parse(&args("open --app emoji")),
         Ok(FromFrontEnd::Open {
             query: "emoji ".into(),
             view: None,
         })
     );
     assert_eq!(
-        parse(&args("open --query fire --prefix emoji")),
+        parse(&args("open --query fire --app emoji")),
         Ok(FromFrontEnd::Open {
             query: "emoji fire".into(),
+            view: None,
+        })
+    );
+}
+
+#[test]
+fn prefix_is_still_read_as_app() {
+    assert_eq!(
+        parse(&args("open --prefix emoji")),
+        Ok(FromFrontEnd::Open {
+            query: "emoji ".into(),
             view: None,
         })
     );

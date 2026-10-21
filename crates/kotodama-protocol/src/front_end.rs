@@ -248,7 +248,7 @@ pub const APP_ENTRY_KIND: &str = "kotodama.app";
 pub struct Scope {
     /// The app's word, in lowercase, as the query starts with it before a
     /// space.
-    pub prefix: String,
+    pub word: String,
     /// The Extension's name as the user reads it, such as `Emoji`.
     pub title: String,
     pub icon: Option<String>,

@@ -172,7 +172,7 @@ pkgs.testers.runNixOSTest {
             as_alice(f"{front_end} dozer") + " | grep -P '^apps\tdozer\tDozer$'"
         )
         machine.wait_until_succeeds(
-            as_alice(f"{front_end} clipboard") + " | grep -P '^kotodama\tprefix:clipboard\tClipboard$'"
+            as_alice(f"{front_end} clipboard") + " | grep -P '^kotodama\tapp:clipboard\tClipboard$'"
         )
         # What was copied is in the clipboard's app alone, the History first.
         machine.wait_until_succeeds(

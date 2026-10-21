@@ -800,7 +800,7 @@ fn to_front_end() -> Vec<ToFrontEnd> {
                 unavailable: Some("apps isn't running".into()),
             }],
             scope: Some(Scope {
-                prefix: "emoji".into(),
+                word: "emoji".into(),
                 title: "Emoji".into(),
                 icon: Some("face-smile".into()),
                 intro: Some(Intro {

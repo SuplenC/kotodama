@@ -5,9 +5,9 @@ description = "Bookmarks from the config, and \"Paste path\" on every project"
 command = ["./extension.sh"]
 # Its app: the search shows a "Shell example" Item, and Tab on it enters an
 # app where the query searches these Items alone. Its word is the name unless
-# `prefix` says otherwise; the user's `[extensions.shell-example] prefix` wins
+# `word` says otherwise; the user's `[extensions.shell-example] word` wins
 # over it. Uncommented, `in_search = false` keeps the Items in the app alone.
-prefix = "shell"
+word = "shell"
 title = "Shell example"
 about = "Bookmarks from the config, and a timer."
 examples = [{ query = "timer 5", result = "A five-second timer" }]

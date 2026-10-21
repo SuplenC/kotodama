@@ -9,7 +9,7 @@ The shared protocol. Maintained by hand: fix stale lines when you find them, and
 - `item.rs`: `Item` (incl. `hidden`, ADR 0015, and `app_only`, ADR 0027), `ItemRef`, `Action` (`Action::new` with `shortcut` and `arguments` setters), `ItemKind` (`ItemKind::shared_index`, its place in `SHARED_KINDS`), `SHARED_KINDS`, `NamespacedKind`, `KindName`.
 - `view.rs`: `View`, `ViewContent` (a list's `filters_itself`), forms (`FormField`, `FormInput`), `Job`, `JobState`.
 - `value.rs`: `Value`, `Table`, `Bytes`, `Fraction`.
-- `manifest.rs`: `Manifest::from_toml`, `LiveQueries` (`fallback`), `ContributedAction` (ADR 0002); the app (ADR 0027): `prefix`, `title`, `icon`, `about`, `examples`, `commands`, `in_search`; `is_valid_prefix`.
+- `manifest.rs`: `Manifest::from_toml`, `LiveQueries` (`fallback`), `ContributedAction` (ADR 0002); the app (ADR 0027): `word` (or `prefix`, its old name), `title`, `icon`, `about`, `examples`, `commands`, `in_search`; `is_valid_word`.
 - `version.rs`: `Version`, `PROTOCOL_VERSION`, `FIRST_VERSION`, `Since` (the minor version a message needs), `unread` (a field left out for an older minor version) (ADR 0026).
 - `handshake.rs`: `Hello` with `minor`, `accept_peer` (the Daemon's side: a newer peer is refused), `accept_daemon` (a peer's side), `negotiate` (postcard only on the same version).
 - `frame.rs`: length-prefixed frames, `MAX_FRAME_LEN` (ADR 0004).

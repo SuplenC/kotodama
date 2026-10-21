@@ -6,7 +6,7 @@
 //! # Owns
 //!
 //! - [`Apps`]: each Extension's app, from its Manifest and the user's
-//!   `[extensions.<name>]` `prefix` and `in_search`, and the app a query is
+//!   `[extensions.<name>]` `word` and `in_search`, and the app a query is
 //!   in.
 //! - [`App::entry`]: the entry Item. [`App::scope`]: what a Front end shows
 //!   inside, the intro card included.
@@ -18,7 +18,7 @@
 
 use kotodama_protocol::{
     APP_ENTRY_KIND, Action, Intro, Item, ItemKind, Manifest, NamespacedKind, Scope, Table, Value,
-    is_valid_prefix,
+    is_valid_word,
 };
 
 use crate::config::extension_table;
@@ -46,7 +46,18 @@ pub struct App {
 /// The id of an Extension's entry Item, among the Daemon's own Items: by the
 /// Extension's name, so its History outlives a change of word.
 fn entry_id(extension: &str) -> String {
-    format!("prefix:{extension}")
+    format!("app:{extension}")
+}
+
+/// The word `[extensions.<name>]` sets: `word`, or `prefix`, its old name,
+/// which is still read and warned about.
+fn configured_word<'t>(table: &'t Table, name: &str) -> Option<&'t Value> {
+    if let Some(word) = table.get("word") {
+        return Some(word);
+    }
+    let word = table.get("prefix")?;
+    log::warn!("[extensions.{name}] prefix is deprecated; call it `word`");
+    Some(word)
 }
 
 impl App {
@@ -76,7 +87,7 @@ impl App {
     /// later keystrokes nothing.
     pub fn scope(&self, typed: bool) -> Scope {
         Scope {
-            prefix: self.word.clone(),
+            word: self.word.clone(),
             title: self.title.clone(),
             icon: self.icon.clone(),
             intro: (!typed).then(|| self.intro.clone()),
@@ -92,7 +103,7 @@ pub struct Apps {
 
 impl Apps {
     /// The apps of `extensions`, by their Manifests, unless the config's
-    /// `[extensions.<name>]` says otherwise: `prefix` is the word, and
+    /// `[extensions.<name>]` says otherwise: `word` is the word, and
     /// `in_search` puts every Item in the search, or none.
     pub fn new<'a>(
         extensions: impl IntoIterator<Item = (ExtensionId, &'a Manifest)>,
@@ -102,13 +113,13 @@ impl Apps {
         for (extension, manifest) in extensions {
             let name = &manifest.name;
             let table = extension_table(config, name);
-            let chosen = match table.get("prefix") {
-                Some(Value::String(word)) if is_valid_prefix(word) => Some(word.as_str()),
+            let chosen = match configured_word(&table, name) {
+                Some(Value::String(word)) if is_valid_word(word) => Some(word.as_str()),
                 Some(other) => {
-                    log::warn!("[extensions.{name}] prefix: {other:?} isn't one word; ignoring it");
-                    manifest.prefix.as_deref()
+                    log::warn!("[extensions.{name}] word: {other:?} isn't one word; ignoring it");
+                    manifest.word.as_deref()
                 }
-                None => manifest.prefix.as_deref(),
+                None => manifest.word.as_deref(),
             };
             let taken = |word: &str| apps.iter().any(|app| app.word == word);
             let chosen = chosen.unwrap_or(name).to_lowercase();

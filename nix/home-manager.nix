@@ -44,15 +44,16 @@ let
       default = null;
       inherit description;
     };
-  # `prefix` and `in_search`, the Daemon's own keys in every
-  # `[extensions.<name>]`. `word` and `searched` say what the Extension's
+  # `word` and `in_search`, the Daemon's own keys in every
+  # `[extensions.<name>]`. `default` and `searched` say what the Extension's
   # Manifest gives.
-  app = word: searched: {
-    prefix = optional (lib.types.strMatching "[^[:space:]]+") ''
-      `prefix`: the word that names the Extension's app. Typing it shows the
+  app = default: searched: {
+    word = optional (lib.types.strMatching "[^[:space:]]+") ''
+      `word`: the word that names the Extension's app. Typing it shows the
       app's entry Item, and Tab or Enter on it enters the app, where the query
-      searches the Extension's Items alone. A word another app has already
-      leaves the app on the Extension's name. Unset, ${word}.
+      searches the Extension's Items alone. A word an Alias, a Quicklink or
+      another app has already leaves the app on the Extension's name. Unset,
+      ${default}.
     '';
     inSearch = optional lib.types.bool ''
       `in_search`: whether the search shows all the Extension's Items too,
@@ -62,7 +63,7 @@ let
   };
   # The `[extensions.<name>]` keys of `app`, as set.
   appSettings = options: {
-    inherit (options) prefix;
+    inherit (options) word;
     in_search = options.inSearch;
   };
   webSearch = app "`web`" "true";
@@ -169,8 +170,29 @@ let
     config.programs.quickshell.enable or false && config.programs.quickshell.systemd.enable;
 in
 {
-  # `extensions.<name>.enable` and `finalPackage`.
-  imports = [ ./home-manager-extensions.nix ];
+  # `extensions.<name>.enable` and `finalPackage`. `prefix` is the old name of
+  # each Bundled extension's `word`, still read, with a warning.
+  imports = [
+    ./home-manager-extensions.nix
+  ]
+  ++ map (
+    name:
+    lib.mkRenamedOptionModule
+      [
+        "programs"
+        "kotodama"
+        "extensions"
+        name
+        "prefix"
+      ]
+      [
+        "programs"
+        "kotodama"
+        "extensions"
+        name
+        "word"
+      ]
+  ) (lib.attrNames (import ./extensions.nix));
 
   options.programs.kotodama = {
     enable = lib.mkEnableOption "Kotodama, a command menu for Wayland";
@@ -404,7 +426,7 @@ in
           }
         ))
         "`engines`: searched in this order; an empty list leaves only addresses. Unset, DuckDuckGo, Google and Wikipedia.";
-    extensions.web-search.prefix = webSearch.prefix;
+    extensions.web-search.word = webSearch.word;
     extensions.web-search.inSearch = webSearch.inSearch;
     extensions.system = app "`system`" "true";
     extensions.hyprland = app "`hyprland`" "true, but for the binds, which only its app shows";

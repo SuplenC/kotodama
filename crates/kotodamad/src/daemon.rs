@@ -2405,7 +2405,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             // The menu may open on the Empty query, which may have been
             // ranked hours ago.
             FromFrontEnd::Open { query, view } => {
-                // `kotodama open --prefix <word>` opens on the app: the
+                // `kotodama open --app <word>` opens on the app: the
                 // query the menus send back starts with its word.
                 if let Some((n, _)) = self.apps.scope_of(&query) {
                     for session in self.sessions.values_mut() {

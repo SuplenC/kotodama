@@ -298,7 +298,7 @@ message ResultRef {
 }
 
 message Scope {
-  string prefix = 1;
+  string word = 1;
   string title = 2;
   optional string icon = 3;
   Intro intro = 4;

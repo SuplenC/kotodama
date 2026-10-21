@@ -5,12 +5,12 @@
 //! kotodama toggle
 //! kotodama open --query "fir"
 //! kotodama open --view clipboard/history
-//! kotodama open --prefix emoji
+//! kotodama open --app emoji
 //! ```
 //!
 //! `--view <extension>/<item>` opens the menu on the View that Item's primary Action pushes.
-//! `--prefix <prefix>` opens it in the app with that word, searching that Extension alone, as
-//! `--query "<prefix> "` does.
+//! `--app <word>` opens it in the app with that word, searching that Extension alone; `--prefix`
+//! is its old name, still read.
 //!
 //! # Owns
 //!
@@ -39,7 +39,7 @@ use kotodama_protocol::WireFormat;
 use kotodama_protocol::socket_path;
 
 const USAGE: &str = "usage: kotodama toggle
-       kotodama open [--view <extension>/<item>] [--prefix <prefix>] [--query <text>]";
+       kotodama open [--view <extension>/<item>] [--app <word>] [--query <text>]";
 
 /// Under socket activation the first keypress also starts the Daemon, so the handshake may wait
 /// for it to come up.
@@ -120,12 +120,12 @@ fn parse(args: &[String]) -> Result<FromFrontEnd, ParseError> {
     match command.as_str() {
         "toggle" if rest.is_empty() => Ok(FromFrontEnd::Toggle),
         "open" => {
-            let (mut query, mut view, mut prefix) = (String::new(), None, None);
+            let (mut query, mut view, mut app) = (String::new(), None, None);
             while let [flag, value, tail @ ..] = rest {
                 match flag.as_str() {
                     "--query" => query.clone_from(value),
                     "--view" => view = Some(value.clone()),
-                    "--prefix" => prefix = Some(value.as_str()),
+                    "--app" | "--prefix" => app = Some(value.as_str()),
                     _ => return Err(ParseError::UnknownOption(flag.clone())),
                 }
                 rest = tail;
@@ -133,8 +133,8 @@ fn parse(args: &[String]) -> Result<FromFrontEnd, ParseError> {
             if let [extra] = rest {
                 return Err(ParseError::NoValue(extra.clone()));
             }
-            if let Some(prefix) = prefix {
-                query = format!("{prefix} {query}");
+            if let Some(word) = app {
+                query = format!("{word} {query}");
             }
             Ok(FromFrontEnd::Open { query, view })
         }

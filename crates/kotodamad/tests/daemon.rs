@@ -1354,11 +1354,11 @@ fn a_config_change_reaches_only_the_extensions_whose_table_changed() {
 }
 
 #[test]
-fn the_prefix_in_an_extensions_table_is_the_daemons_and_never_reaches_it() {
+fn the_word_in_an_extensions_table_is_the_daemons_and_never_reaches_it() {
     let dir = tempfile::tempdir().unwrap();
     std::fs::write(
         dir.path().join("a.toml"),
-        "[extensions.apps]\nterminal = \"foot\"\nprefix = \"app\"",
+        "[extensions.apps]\nterminal = \"foot\"\nword = \"app\"\nprefix = \"ap\"",
     )
     .unwrap();
     let config = kotodamad::config::load(&[dir.path().to_owned()]).unwrap();

@@ -62,7 +62,7 @@ fn the_emoji_are_searched_in_their_app_alone() {
     let mut menu = Menu::start("");
 
     assert!(!menu.ids("fire").contains(&"🔥".to_owned()));
-    assert_eq!(menu.ids("emoji")[0], "prefix:emoji");
+    assert_eq!(menu.ids("emoji")[0], "app:emoji");
 }
 
 #[test]
