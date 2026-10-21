@@ -206,6 +206,7 @@ Some need extras: the shell example Extension for the Views checks (link `exampl
 
 - [ ] `bind = SUPER, V, exec, kotodama open --view clipboard/history`: opens on the list at the first press after login, Esc goes to the search.
 - [ ] The password manager's `x-kde-passwordManagerHint` keeps its copies out of clipboard history.
+- [ ] In the clipboard app, Pause Clipboard History for 5 minutes: the intro card says so, nothing copied shows up, and the history keeps copies again once it is over or resumed.
 
 ### Hyprland
 

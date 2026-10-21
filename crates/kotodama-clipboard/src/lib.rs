@@ -5,7 +5,8 @@
 //!
 //! # Owns
 //!
-//! - What the binary, its tests and its bench share: `copied`, `history`, `items` and `wayland`.
+//! - What the binary, its tests and its bench share: `copied`, `history`, `items`, `pause` and
+//!   `wayland`.
 //!
 //! # Not here
 //!
@@ -16,4 +17,5 @@
 pub mod copied;
 pub mod history;
 pub mod items;
+pub mod pause;
 pub mod wayland;

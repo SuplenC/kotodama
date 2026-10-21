@@ -3441,6 +3441,14 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             // is never a Learned choice, which would take over from the one
             // among the real matches.
             self.history.touch(&result.extension, &result.id, when)
+        } else if session
+            .scope
+            .and_then(|n| self.apps.get(n))
+            .is_some_and(|app| app.searched == [false; SIDES])
+        {
+            // An app kept out of the search, as the clipboard's, holds what
+            // may be private: what is typed in it is never kept.
+            self.history.touch(&result.extension, &result.id, when)
         } else {
             let key = source
                 .and_then(|source| self.history_key(session, source))

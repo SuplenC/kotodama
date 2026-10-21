@@ -36,6 +36,7 @@ use crate::history::Content;
 use crate::history::Entry;
 use crate::history::History;
 use crate::history::Limits;
+use crate::pause::Pause;
 
 /// The Item that opens the history, by id. Entries' ids are numbers, so it
 /// never clashes with one.
@@ -57,6 +58,17 @@ pub const DELETE: &str = "delete";
 pub const OPEN: &str = "open";
 /// The history Item's Action that clears the history.
 pub const CLEAR: &str = "clear";
+
+/// The Item that pauses the history and resumes it, by id.
+pub const PAUSE: &str = "pause";
+/// The pause Item's Action that keeps nothing copied for 5 minutes.
+pub const PAUSE_5_MINUTES: &str = "pause-5-minutes";
+/// The pause Item's Action that keeps nothing copied for an hour.
+pub const PAUSE_HOUR: &str = "pause-hour";
+/// The pause Item's Action that keeps nothing copied until resumed.
+pub const PAUSE_UNTIL_RESUMED: &str = "pause-until-resumed";
+/// The pause Item's Action, while paused, that keeps copies again.
+pub const RESUME: &str = "resume";
 
 /// How many characters of a text the detail View shows at most; pasting
 /// gives all of it.
@@ -117,6 +129,61 @@ pub fn history_item() -> Item {
             // Nothing brings the history back.
             Action::new(CLEAR, "Clear Clipboard History").confirm(),
         ],
+    }
+}
+
+/// The Item that pauses the history, or resumes it while `pause` holds at
+/// `now`.
+pub fn pause_item(pause: Pause, now: u64) -> Item {
+    let (title, subtitle, actions) = if pause.keeps(now) {
+        (
+            "Pause Clipboard History",
+            "Keep nothing copied for a while, as for a password",
+            vec![
+                Action::new(PAUSE_5_MINUTES, "Pause for 5 Minutes"),
+                Action::new(PAUSE_HOUR, "Pause for an Hour"),
+                Action::new(PAUSE_UNTIL_RESUMED, "Pause Until Resumed"),
+            ],
+        )
+    } else {
+        (
+            "Resume Clipboard History",
+            "Paused: nothing copied is kept",
+            vec![Action::new(RESUME, "Resume Clipboard History")],
+        )
+    };
+    Item {
+        id: PAUSE.to_owned(),
+        kind: kind("pause"),
+        identity: None,
+        title: title.to_owned(),
+        subtitle: Some(subtitle.to_owned()),
+        icon: Some(
+            if pause.keeps(now) {
+                "media-playback-pause"
+            } else {
+                "media-playback-start"
+            }
+            .to_owned(),
+        ),
+        keyword: None,
+        keywords: ["pause", "resume", "private", "password"].map(str::to_owned).to_vec(),
+        hidden: false,
+        app_only: false,
+        actions,
+    }
+}
+
+/// The pause the pause Item's `action` asks for at `now`, or `None` for
+/// another Action.
+#[must_use]
+pub fn paused_by(action: &str, now: u64) -> Option<Pause> {
+    match action {
+        PAUSE_5_MINUTES => Some(Pause::Until(now + 5 * 60)),
+        PAUSE_HOUR => Some(Pause::Until(now + 60 * 60)),
+        PAUSE_UNTIL_RESUMED => Some(Pause::UntilResumed),
+        RESUME => Some(Pause::Off),
+        _ => None,
     }
 }
 

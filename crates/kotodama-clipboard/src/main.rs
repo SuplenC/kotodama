@@ -2,12 +2,14 @@
 //! so it survives a restart, and offered as Indexed items of kind
 //! `clipboard.clip` that paste it back. A `Clipboard History` Item lists
 //! them all, newest first, and clears them. What a password manager marks
-//! sensitive is never kept. See `items.rs` for the config table.
+//! sensitive is never kept, nor anything copied while the history is paused.
+//! See `items.rs` for the config table.
 //!
 //! # Owns
 //!
 //! - The protocol loop: the config, the Actions, and the Items and Views sent.
-//! - Expiring entries on time, and starting to watch the clipboard once the config is in.
+//! - Expiring entries and ending a pause on time, and starting to watch the clipboard once the
+//!   config is in.
 //!
 //! # Not here
 //!
@@ -19,6 +21,7 @@
 #![forbid(unsafe_code)]
 
 use std::io;
+use std::path::PathBuf;
 use std::process::ExitCode;
 use std::sync::mpsc::RecvTimeoutError;
 use std::time::Duration;
@@ -36,11 +39,14 @@ use kotodama_clipboard::items::DELETE;
 use kotodama_clipboard::items::DETAIL_VIEW;
 use kotodama_clipboard::items::HISTORY;
 use kotodama_clipboard::items::LIST_VIEW;
+use kotodama_clipboard::items::PAUSE;
+use kotodama_clipboard::pause::Pause;
 use kotodama_clipboard::wayland::Change;
 use kotodama_clipboard::wayland::Clipboard;
 use kotodama_extension::Chain;
 use kotodama_extension::Connection;
 use kotodama_extension::Event;
+use kotodama_extension::SentStatus;
 use kotodama_extension::Writer;
 use kotodama_extension::dirs;
 use kotodama_protocol::Bytes;
@@ -63,6 +69,7 @@ fn now() -> u64 {
 fn run() -> Result<(), Error> {
     let state = dirs::state("clipboard").ok_or(Error::NoStateDir)?;
     let history = History::open(&state);
+    let pause = Pause::load(&state, now());
     let Connection {
         writer,
         events,
@@ -77,13 +84,17 @@ fn run() -> Result<(), Error> {
         configured: false,
         list_open: false,
         detail: None,
+        state,
+        pause,
+        status: SentStatus::default(),
     };
     loop {
-        let event = match extension.next_expiry() {
+        let event = match extension.next_wake() {
             Some(wait) => match received.recv_timeout(wait) {
                 Ok(event) => event,
                 Err(RecvTimeoutError::Timeout) => {
                     extension.expire()?;
+                    extension.pause_moved_on()?;
                     continue;
                 }
                 Err(RecvTimeoutError::Disconnected) => break,
@@ -131,6 +142,11 @@ struct Extension {
     list_open: bool,
     /// The entry the detail View shows, while it is open.
     detail: Option<u64>,
+    /// The state directory, which keeps the pause beside the history.
+    state: PathBuf,
+    /// The pause as last sent: the pause Item and the app's note show it.
+    pause: Pause,
+    status: SentStatus,
 }
 
 type Sent = Result<(), Error>;
@@ -145,7 +161,9 @@ impl Extension {
                     self.removed(&removed)
                 } else {
                     self.configured = true;
-                    let items = std::iter::once(items::history_item())
+                    self.send_status()?;
+                    let items = [items::history_item(), items::pause_item(self.pause, now())]
+                        .into_iter()
                         .chain(
                             self.history
                                 .entries()
@@ -178,8 +196,12 @@ impl Extension {
         }
     }
 
-    /// Keeps what was just copied, and tells the Daemon.
+    /// Keeps what was just copied, and tells the Daemon; while paused,
+    /// drops it.
     fn copied(&mut self, copied: Copied) -> Sent {
+        if !self.pause.keeps(now()) {
+            return Ok(());
+        }
         let recorded = match self.history.record(copied, now(), &self.limits) {
             Ok(recorded) => recorded,
             Err(err) => {
@@ -202,18 +224,64 @@ impl Extension {
         self.removed(&removed)
     }
 
-    /// How long until the next entry turns too old.
-    /// `None` until the config is in: the user's limits aren't known yet.
-    fn next_expiry(&self) -> Option<Duration> {
+    /// How long until the next entry turns too old, or the pause's note
+    /// changes or it ends, whichever comes first. `None` until the config
+    /// is in: the user's limits aren't known yet.
+    fn next_wake(&self) -> Option<Duration> {
         if !self.configured {
             return None;
         }
-        let at = self.history.next_expiry(&self.limits)?;
-        Some(Duration::from_secs(at.saturating_sub(now())))
+        let now = now();
+        let expiry = self.history.next_expiry(&self.limits).map(|at| at.saturating_sub(now));
+        let pause = self.pause.next_change(now);
+        let wait = match (expiry, pause) {
+            (Some(expiry), Some(pause)) => expiry.min(pause),
+            (wait, None) | (None, wait) => wait?,
+        };
+        Some(Duration::from_secs(wait))
+    }
+
+    /// Pauses the history or resumes it, keeping the pause on disk so a
+    /// restart doesn't end it.
+    fn set_pause(&mut self, pause: Pause) -> Sent {
+        if let Err(err) = pause.save(&self.state) {
+            kotodama_extension::log!("couldn't keep the pause through a restart: {err}");
+        }
+        self.pause = pause;
+        self.send(&FromExtension::AddItems {
+            items: vec![items::pause_item(pause, now())],
+        })?;
+        self.send_status()
+    }
+
+    /// Ends a pause whose time is up, and counts down the minutes in the
+    /// app's note.
+    fn pause_moved_on(&mut self) -> Sent {
+        let settled = self.pause.settled(now());
+        if settled == self.pause {
+            self.send_status()
+        } else {
+            self.set_pause(settled)
+        }
+    }
+
+    /// Tells the Daemon the app can do something, with the pause on its
+    /// intro card while there is one.
+    fn send_status(&mut self) -> Sent {
+        let sent = match self.pause.note(now()) {
+            Some(note) => self.status.noted(&mut self.writer, note),
+            None => self.status.usable(&mut self.writer),
+        };
+        sent.map_err(Error::Protocol)
     }
 
     /// Runs one Action on an entry or on the history Item.
     fn run(&mut self, id: &str, action: &str) -> Result<Outcome, RunError> {
+        if id == PAUSE {
+            let pause = items::paused_by(action, now()).ok_or_else(|| RunError::NoPauseAction(action.to_owned()))?;
+            self.set_pause(pause).map_err(RunError::Send)?;
+            return Ok(Outcome::Close);
+        }
         if id == HISTORY {
             return match action {
                 items::OPEN => {
@@ -328,6 +396,8 @@ enum RunError {
     NoHistoryAction(String),
     #[error("A clip has no Action `{0}`")]
     NoClipAction(String),
+    #[error("Pause Clipboard History has no Action `{0}`")]
+    NoPauseAction(String),
     #[error("Couldn't read the clip")]
     Read(#[source] io::Error),
     /// A View couldn't be sent to the Daemon; its error is the message as it

@@ -657,3 +657,39 @@ fn opening_an_app_that_cant_do_anything_shows_why_on_its_intro_card() {
     assert_eq!(intro.about, "Windows and binds.");
     assert_eq!(intro.note.as_deref(), Some("Hyprland isn't running"));
 }
+
+/// The id of every Learned choice.
+fn choices(desk: &Desk) -> Vec<String> {
+    desk.h
+        .daemon
+        .history()
+        .choices(u64::MAX)
+        .map(|(_, id, _)| id.to_owned())
+        .collect()
+}
+
+#[test]
+fn what_is_typed_in_an_app_kept_out_of_the_search_is_never_a_learned_choice() {
+    let mut desk = Desk::new("");
+
+    for _ in 0..3 {
+        desk.enter("emoji", "Emoji");
+        desk.pick("emoji fire", "🔥 Fire");
+    }
+    let in_the_app = choices(&desk);
+    for _ in 0..3 {
+        desk.pick("fire", "Firefox");
+    }
+
+    // Entering the app by its entry Item is learned in the whole search.
+    assert_eq!(in_the_app, ["app:emoji"]);
+    assert!(
+        choices(&desk).contains(&"firefox".to_owned()),
+        "the whole search learns as ever"
+    );
+    let history = desk.h.daemon.history();
+    assert!(
+        history.picked().any(|(_, id, _)| id == "fire"),
+        "Frecency still counts the pick"
+    );
+}
