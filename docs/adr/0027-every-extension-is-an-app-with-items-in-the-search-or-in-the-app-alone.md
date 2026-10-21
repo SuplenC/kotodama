@@ -1,6 +1,6 @@
 # 27. Every Extension is an app, and each Item is in the search or in the app alone
 
-Status: accepted (2026-10-21). Supersedes ADR 0024. Amended (2026-10-21), before protocol 1.0 froze: the word's key is `word` in the Manifest and the config (`prefix`, its old name, still read with a warning), `kotodama open --app` (`--prefix` still read), `Scope.word`, and the entry Item `app:<extension>`.
+Status: accepted (2026-10-21). Supersedes ADR 0024. Amended (2026-10-21): see [Amendments](#amendments).
 
 ADR 0024 put one Extension's Items behind a Prefix. That was all or nothing: the emoji were all behind `emoji`, and the apps all in the search. Some Extensions have Items of both sorts. Hyprland's windows belong in the search, but its binds, one per key combination, crowd it. Clipboard clips are private and noisy, while the History View should stay reachable. The owner asked for Raycast's model: every Extension is an app. You enter it from the search, it introduces itself, and it searches its own Items. Each Item is in the search, or in its app only.
 
@@ -58,3 +58,8 @@ An app is not a View. Nothing is pushed, and the rows are Results with everythin
 ## Later
 
 A user-defined app over several Extensions, such as `dev` for projects and scripts, would be a `Reach` over their Segments and a config table naming them. Nothing here builds that.
+
+## Amendments
+
+- **The word is `word` (2026-10-21).** Before protocol 1.0 froze, the word's key became `word` in the Manifest and the config (`prefix`, its old name, is still read, with a warning), `kotodama open --prefix` became `--app` (`--prefix` is still read), `Scope.prefix` became `Scope.word`, and the entry Item's id became `app:<extension>`. Typing the word scopes nothing, so "prefix" named something Kotodama doesn't have.
+- **The entry Item matches as a word start at best, and keeps what follows the word (2026-10-21).** The app's word was an exact keyword (ADR 0021), so `calc` ranked the Calculator app above GNOME Calculator and `system` ranked the System app above System Monitor; Enter then entered an app instead of launching one. The entry Item's title and word now match at most as a word start, so on a tie the Item kind puts the application first (ADR 0011), and a few picks make the entry Item the Learned choice for its word. Its word still finds it with text after it: for `emoji fire` the row reads `Search Emoji for “fire”`, and running it enters the app with `fire` still typed.

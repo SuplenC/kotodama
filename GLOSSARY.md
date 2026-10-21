@@ -57,7 +57,7 @@ The search over one Extension's Items alone, which every Extension has. The sear
 _Avoid_: Prefix, scope, mode, namespace, trigger; app for a desktop application
 
 **Word**:
-The one word that names an App, such as `emoji`, `projects` or `calc`: the Manifest's `word`, which the user's `[extensions.<name>] word` overrides, else the Extension's name. Typing it finds the App's entry Item; it enters nothing by itself. `kotodama open --app <word>` opens the menu in the App.
+The one word that names an App, such as `emoji`, `projects` or `calc`: the Manifest's `word`, which the user's `[extensions.<name>] word` overrides, else the Extension's name. Typing it finds the App's entry Item, ranked as a word start; it enters nothing by itself. `kotodama open --app <word>` opens the menu in the App.
 _Avoid_: Prefix, keyword (an Item's own), trigger
 
 **Live query**:

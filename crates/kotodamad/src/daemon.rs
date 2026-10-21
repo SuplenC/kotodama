@@ -689,6 +689,17 @@ impl Own {
             does,
         }
     }
+
+    /// The best it may match by. An app's entry Item matches at most as a
+    /// word start, its title or word typed whole included, so that
+    /// GNOME Calculator ranks above the Calculator app for `calc`. A few
+    /// picks of the entry Item make it the Learned choice for the word.
+    fn tier_cap(&self) -> Tier {
+        match self.does {
+            OwnAction::App(_) => Tier::WordStart,
+            _ => Tier::Exact,
+        }
+    }
 }
 
 /// The clear-history Item.
@@ -819,6 +830,8 @@ struct Keyword {
     alias: bool,
     /// The Alias's own Frecency, which ranks it instead of its Result's.
     frecency: Option<f64>,
+    /// How well the keyword makes it match: exact, but for an app's word.
+    tier: Tier,
 }
 
 /// The id an Alias's picks are kept under, for the Extension [`OWN`].
@@ -2659,6 +2672,12 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
         }
     }
 
+    /// What the session's query has after the `n`th app's word, if it starts
+    /// with it: what entering the app keeps typed.
+    fn after_word<'q>(&self, session: &'q Session, n: usize) -> Option<&'q str> {
+        after_keyword(&session.query, &self.apps.get(n)?.word)
+    }
+
     fn extension_named(&self, name: &str) -> Option<ExtensionId> {
         self.extensions
             .iter()
@@ -2908,7 +2927,9 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
                 self.picked(front_end, result, action, now);
             }
             OwnAction::App(n) => {
-                let text = format!("{} ", self.apps.get(n).ok_or_else(gone)?.word);
+                let word = &self.apps.get(n).ok_or_else(gone)?.word;
+                let rest = self.after_word(session, n).unwrap_or_default();
+                let text = format!("{word} {rest}");
                 // The Front end takes the query from here, so the app, its
                 // intro card included, is in the Results that follow, with
                 // no query back first.
@@ -3666,7 +3687,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
                 let kind = self.kinds.place(&own.item.kind);
                 candidates.push(Candidate::new(
                     Source::Own(n as u32),
-                    tier,
+                    tier.min(own.tier_cap()),
                     kind,
                     score,
                     len,
@@ -3940,10 +3961,11 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
         }
 
         // What the query names: an Alias, typed alone or before an Argument,
-        // goes first. A Quicklink's keyword, an app's word typed alone or an
-        // Item's own keyword counts as an exact match, which a Learned choice
-        // can beat. In an app, only its Extension's Items' keywords count,
-        // typed first past its word.
+        // goes first. A Quicklink's keyword or an Item's own keyword counts as
+        // an exact match, which a Learned choice can beat. An app's word
+        // counts as a word start, so an application named like the app ranks
+        // above its entry Item. In an app, only its Extension's Items'
+        // keywords count, typed first past its word.
         let root = session.reach == Reach::Root;
         let mut words = session.key.split(' ');
         let first = if root { words.next() } else { words.nth(1) };
@@ -3963,6 +3985,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
                 source,
                 alias: true,
                 frecency: Some(self.history.frecency(OWN, &alias_id(keyword), when)),
+                tier: Tier::Exact,
             });
             if source != Source::Unavailable {
                 primary = alias.action.clone().map(|action| (source, action));
@@ -3979,6 +4002,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
                 source: Source::Own(n as u32),
                 alias: false,
                 frecency: None,
+                tier: self.own[n].tier_cap(),
             });
         }
         for slot in self.index.keyed(first, session.reach) {
@@ -3986,12 +4010,14 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
                 source: Source::Indexed(slot),
                 alias: false,
                 frecency: None,
+                tier: Tier::Exact,
             });
         }
         for Keyword {
             source,
             alias,
             frecency,
+            tier,
         } in named
         {
             let at_n = match candidates.iter().position(|c| c.source == source) {
@@ -4006,7 +4032,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
                     };
                     let mut candidate = Candidate::new(
                         source,
-                        Tier::Exact,
+                        tier,
                         self.kinds.place(&item.kind),
                         session.max_score,
                         item.title.chars().count() as u32,
@@ -4021,8 +4047,8 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
                 candidate.class = Class::Named;
                 candidate.by_alias = true;
             }
-            candidate.tier = Tier::Exact.coarse();
-            candidate.fine = Tier::Exact;
+            candidate.tier = candidate.tier.max(tier.coarse());
+            candidate.fine = candidate.fine.max(tier);
             if let Some(frecency) = frecency {
                 candidate.frecency = frecency;
             }
@@ -4484,16 +4510,25 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             }
         }
         let mut item = item.clone();
-        if let Source::Own(n) = source
-            && let Some(OwnAction::Quicklink(quicklink)) =
-                self.own.get(n as usize).map(|own| own.does)
-        {
-            let quicklink = &self.keywords.quicklinks[quicklink];
-            if quicklink.takes_query()
-                && let Some(query) = after_keyword(&session.query, &quicklink.keyword)
-                && !query.is_empty()
-            {
-                item.title = format!("{} for “{query}”", item.title);
+        if let Source::Own(n) = source {
+            match self.own.get(n as usize).map(|own| own.does) {
+                Some(OwnAction::Quicklink(quicklink)) => {
+                    let quicklink = &self.keywords.quicklinks[quicklink];
+                    if quicklink.takes_query()
+                        && let Some(query) = after_keyword(&session.query, &quicklink.keyword)
+                        && !query.is_empty()
+                    {
+                        item.title = format!("{} for “{query}”", item.title);
+                    }
+                }
+                Some(OwnAction::App(app)) => {
+                    if let Some(query) = self.after_word(session, app)
+                        && !query.is_empty()
+                    {
+                        item.title = format!("Search {} for “{query}”", item.title);
+                    }
+                }
+                _ => {}
             }
         }
         if let Some(at) = primary.and_then(|id| item.actions.iter().position(|a| a.id == id)) {

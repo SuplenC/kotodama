@@ -9,7 +9,7 @@ command = ["./kotodama-emoji"]
 word = "emoji"
 title = "Emoji"
 icon = "face-smile"
-about = "Emoji and symbols, by name or keyword. Enter types it into the window you came from; Tab picks a skin tone."
+about = "Emoji and symbols, by name or keyword. Enter types it into the window you came from; Ctrl+K types it in another skin tone."
 examples = [
     { query = "fire", result = "🔥 Fire" },
     { query = "arrow", result = "→ Rightwards Arrow" },

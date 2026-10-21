@@ -7,7 +7,7 @@ command = ["./kotodama-folders"]
 word = "projects"
 title = "Projects"
 icon = "folder-development"
-about = "The projects and scripts in the folders the config names. Enter opens a project; Tab shows what else it can do."
+about = "The projects and scripts in the folders the config names. Enter opens a project; Ctrl+K shows what else it can do."
 examples = [
     { query = "kotodama", result = "The project, to open" },
 ]

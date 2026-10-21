@@ -134,14 +134,51 @@ fn the_search_leaves_out_an_app_only_extensions_items() {
 }
 
 #[test]
-fn the_word_typed_alone_ranks_its_entry_item_first() {
+fn the_word_typed_alone_finds_its_entry_item_as_a_word_start() {
     let mut desk = Desk::new("");
 
     let (rows, scope) = desk.search("emoji");
 
-    assert_eq!(rows[0], ("kotodama".to_owned(), "Emoji".to_owned()));
+    assert_eq!(
+        rows[..2],
+        [
+            ("apps".to_owned(), "Emoji Keyboard".to_owned()),
+            ("kotodama".to_owned(), "Emoji".to_owned()),
+        ]
+    );
     assert!(rows.iter().all(|(extension, _)| extension != "emoji"));
     assert_eq!(scope, None);
+}
+
+#[test]
+fn the_entry_item_found_by_the_word_says_what_follows_it() {
+    let mut desk = Desk::new("");
+
+    let (rows, scope) = desk.search("emoji fire");
+
+    assert_eq!(
+        rows[0],
+        ("kotodama".to_owned(), "Search Emoji for “fire”".to_owned())
+    );
+    assert_eq!(scope, None);
+}
+
+#[test]
+fn entering_the_app_keeps_what_follows_the_word() {
+    let mut desk = Desk::new("");
+
+    desk.pick("emoji fire", "Search Emoji for “fire”");
+
+    let sent = desk.ui.drain();
+    assert!(
+        sent.contains(&ToFrontEnd::SetQuery {
+            text: "emoji fire".into(),
+        }),
+        "{sent:?}"
+    );
+    let (rows, scope) = last_results(sent);
+    assert_eq!(rows[0].1, "🔥 Fire");
+    assert_eq!(scope, emoji_scope(false));
 }
 
 #[test]
