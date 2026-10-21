@@ -4,9 +4,11 @@ version = "0.1.0"
 edition = "2024"
 publish = false
 
+# The protocol version the Extension speaks, which both crates' major.minor
+# names. A Kotodama that speaks this version or a later one runs it.
 [dependencies]
-kotodama-extension = { git = "https://github.com/SuplenC/kotodama" }
-kotodama-protocol = { git = "https://github.com/SuplenC/kotodama" }
+kotodama-extension = "{{protocol}}"
+kotodama-protocol = "{{protocol}}"
 
 # An Extension runs as long as the Daemon does, so it is built small.
 [profile.release]

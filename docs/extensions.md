@@ -18,7 +18,7 @@ Three complete examples show more:
 - [examples/python-extension](../examples/python-extension): Python's standard library, in JSON. It covers a Live query, two Actions, the config table, and `status`.
 - [examples/typescript-extension](../examples/typescript-extension): Node, in protobuf, with a hand-written codec. It covers a Live query and two Actions.
 
-A Rust Extension builds on the `kotodama-extension` crate, as the Bundled extensions do. It does the handshake, reads messages on a thread, sends only the Items that changed, and logs `rejected`.
+A Rust Extension builds on the `kotodama-extension` crate, as the Bundled extensions do. It does the handshake, reads messages on a thread, sends only the Items that changed, and logs `rejected`. It and `kotodama-protocol` are on crates.io, and their `major.minor` is the protocol version they speak: depend on `"1.0"` of both, as `kotodama extension new --lang rust` does.
 
 ## Where it lives, and how it runs
 

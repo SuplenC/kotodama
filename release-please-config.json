@@ -24,12 +24,14 @@
     "crates/kotodama-protocol": {
       "extra-files": [
         { "type": "toml", "path": "/Cargo.lock", "jsonpath": "$.package[?(@.name.value == 'kotodama-protocol')].version" }
-      ]
+      ],
+      "versioning": "always-bump-patch"
     },
     "crates/kotodama-extension": {
       "extra-files": [
         { "type": "toml", "path": "/Cargo.lock", "jsonpath": "$.package[?(@.name.value == 'kotodama-extension')].version" }
-      ]
+      ],
+      "versioning": "always-bump-patch"
     },
     "crates/kotodama-qml": {
       "extra-files": [

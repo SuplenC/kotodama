@@ -19,3 +19,4 @@ The runtime every Rust Extension is built on: the Bundled extensions, and any in
 - `<module>/tests.rs`: each module's unit tests, beside it (`config/tests.rs`, `scope/tests.rs`, `wayland/display/tests.rs`, ...).
 - `tests/watch.rs`: the watcher against the real file system.
 - `tests/log.rs`: where `log!` goes, with and without a `log` logger installed.
+- `tests/version.rs`: the crate's major.minor, and its requirement on `kotodama-protocol`, are the protocol version it speaks (`README.md`, which crates.io shows).

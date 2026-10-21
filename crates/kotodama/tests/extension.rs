@@ -4,6 +4,7 @@
 //! provides.
 
 use std::env;
+use std::fmt::Write as _;
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
@@ -163,21 +164,17 @@ fn the_python_scaffold_passes_the_check() {
 fn the_rust_scaffold_builds_and_passes_the_check() {
     let parent = tempfile::tempdir().unwrap();
     let dir = scaffold(parent.path(), "rust");
-    // The scaffold depends on the crates in the Kotodama repository on GitHub. This test builds
-    // it against the ones in this checkout instead, offline, and in this workspace's target
-    // directory, whose build of them it reuses.
+    // The scaffold depends on the crates as published on crates.io. This test builds it against
+    // the ones in this checkout instead, which must meet the version it asks for, offline, and in
+    // this workspace's target directory, whose build of them it reuses.
     let crates = repo().join("crates");
     let manifest = Path::new(&dir).join("Cargo.toml");
-    let cargo_toml = fs::read_to_string(&manifest).unwrap();
-    let mut local = cargo_toml.clone();
+    let mut cargo_toml = fs::read_to_string(&manifest).unwrap();
+    cargo_toml.push_str("\n[patch.crates-io]\n");
     for name in ["kotodama-extension", "kotodama-protocol"] {
-        local = local.replace(
-            &format!(r#"{name} = {{ git = "https://github.com/SuplenC/kotodama" }}"#),
-            &format!("{name} = {{ path = {:?} }}", crates.join(name)),
-        );
+        writeln!(cargo_toml, "{name} = {{ path = {:?} }}", crates.join(name)).unwrap();
     }
-    assert_ne!(local, cargo_toml, "the scaffold's dependencies moved");
-    fs::write(&manifest, local).unwrap();
+    fs::write(&manifest, cargo_toml).unwrap();
 
     let target = env::var_os("CARGO_TARGET_DIR").map_or_else(
         || env::current_exe().unwrap().ancestors().nth(3).unwrap().to_owned(),

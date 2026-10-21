@@ -902,7 +902,7 @@ dependencies = [
 
 [[package]]
 name = "kotodama-extension"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "kotodama-protocol",
  "libc",
@@ -942,7 +942,7 @@ dependencies = [
 
 [[package]]
 name = "kotodama-protocol"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "base64",
  "bilrost",

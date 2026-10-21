@@ -1,10 +1,14 @@
 [package]
 name = "kotodama-extension"
-version = "0.1.0"
+# Its major.minor is the protocol version it speaks, as kotodama-protocol's is:
+# see README.md.
+version = "1.0.0"
 description = "What every Rust Extension of Kotodama needs: the protocol over stdio, lean memory, config readers, sending only changed Items, starting programs and watching directories"
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
+keywords = ["kotodama", "launcher", "wayland", "extension", "plugin"]
+categories = ["gui", "api-bindings"]
 
 [features]
 # The directory watcher, which brings in `notify`. Off unless asked for.
@@ -17,7 +21,8 @@ testing = []
 wayland = ["dep:wayland-client", "dep:wayland-protocols", "dep:wayland-protocols-wlr"]
 
 [dependencies]
-kotodama-protocol = { path = "../kotodama-protocol" }
+# The protocol version this crate speaks, raised with it.
+kotodama-protocol = { path = "../kotodama-protocol", version = "1.0" }
 log = "0.4.34"
 notify = { version = "8", optional = true }
 thiserror = "2.0.21"
@@ -30,6 +35,10 @@ wayland-protocols-wlr = { version = "0.3.12", features = ["client"], optional = 
 
 [dev-dependencies]
 tempfile = "3.27.0"
+
+# docs.rs documents the optional modules too.
+[package.metadata.docs.rs]
+features = ["watch", "wayland"]
 
 [lints]
 workspace = true

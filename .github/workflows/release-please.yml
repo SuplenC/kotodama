@@ -13,6 +13,16 @@ name: Release
 # to the top of release-please-config.json for that run, and take it out once
 # the release PRs are merged.
 #
+# kotodama-protocol and kotodama-extension also go to crates.io, by the
+# `crates-io` job, once release-please has released them. Their major.minor is
+# the protocol version they speak (their README.md), so their release PRs only
+# ever raise the patch version (`always-bump-patch`). A change to
+# PROTOCOL_VERSION raises both crates' versions in their Cargo.toml and
+# kotodama-extension's requirement on kotodama-protocol, which their tests
+# check, and has a `Release-As: <major>.<minor>.0` footer, which release-please
+# applies to both. Publishing needs a CARGO_REGISTRY_TOKEN secret, a crates.io
+# token with the publish-new and publish-update scopes.
+#
 # It runs only when started by hand for now: the repo doesn't let workflows open
 # PRs, so a run on every push to main would fail. Put `push: branches: [main]`
 # back once that's allowed or a RELEASE_PLEASE_TOKEN secret exists.
@@ -26,9 +36,32 @@ permissions:
 jobs:
   release-please:
     runs-on: ubuntu-latest
+    outputs:
+      protocol: ${{ steps.release.outputs['crates/kotodama-protocol--release_created'] }}
+      extension: ${{ steps.release.outputs['crates/kotodama-extension--release_created'] }}
     steps:
       # A PR opened with GITHUB_TOKEN doesn't start CI. With a RELEASE_PLEASE_TOKEN
       # secret (a fine-grained token with contents and pull-requests write) it does.
-      - uses: googleapis/release-please-action@v5
+      - id: release
+        uses: googleapis/release-please-action@v5
         with:
           token: ${{ secrets.RELEASE_PLEASE_TOKEN || secrets.GITHUB_TOKEN }}
+
+  crates-io:
+    needs: release-please
+    if: needs.release-please.outputs.protocol == 'true' || needs.release-please.outputs.extension == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+    steps:
+      - uses: actions/checkout@v7
+      - run: rustup toolchain install stable --profile minimal && rustup default stable
+      # kotodama-extension depends on the kotodama-protocol of its own version,
+      # so a new protocol version goes up first; cargo waits until crates.io
+      # serves it.
+      - if: needs.release-please.outputs.protocol == 'true'
+        run: cargo publish --locked -p kotodama-protocol
+      - if: needs.release-please.outputs.extension == 'true'
+        run: cargo publish --locked -p kotodama-extension

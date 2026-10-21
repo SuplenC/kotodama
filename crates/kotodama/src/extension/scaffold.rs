@@ -17,6 +17,7 @@ use std::path::Path;
 use std::path::PathBuf;
 use std::str::FromStr;
 
+use kotodama_protocol::PROTOCOL_VERSION;
 use kotodama_protocol::is_valid_name;
 
 /// The name the Daemon's own Results go by, which no Extension may take.
@@ -100,7 +101,12 @@ struct File {
 
 /// The files of the Extension `name` in `language`.
 fn files(name: &str, language: Language) -> Vec<File> {
-    let fill = |template: &str, command: &str| template.replace("{{command}}", command).replace("{{name}}", name);
+    let fill = |template: &str, command: &str| {
+        template
+            .replace("{{command}}", command)
+            .replace("{{name}}", name)
+            .replace("{{protocol}}", &PROTOCOL_VERSION.to_string())
+    };
     let make = |path, contents, executable| File {
         path,
         contents,

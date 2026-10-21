@@ -10,7 +10,7 @@ The shared protocol. Maintained by hand: fix stale lines when you find them, and
 - `view.rs`: `View`, `ViewContent` (a list's `filters_itself`), forms (`FormField`, `FormInput`), `Job`, `JobState`.
 - `value.rs`: `Value`, `Table`, `Bytes`, `Fraction` (`FractionError`).
 - `manifest.rs`: `Manifest::from_toml` (the private `ManifestError`, the rules a Manifest breaks), `LiveQueries` (`fallback`), `ContributedAction` (ADR 0002); the app (ADR 0027): `word` (or `prefix`, its old name), `title`, `icon`, `about`, `examples`, `commands`, `in_search`; `is_valid_word`.
-- `version.rs`: `Version`, `PROTOCOL_VERSION`, `FIRST_VERSION`, `Since` (the minor version a message needs), `unread` (a field left out for an older minor version) (ADR 0026).
+- `version.rs`: `Version`, `PROTOCOL_VERSION`, `FIRST_VERSION`, `Since` (the minor version a message needs), `unread` (a field left out for an older minor version) (ADR 0026). The crate's major.minor is `PROTOCOL_VERSION` (`README.md`, which crates.io shows; checked in `version/tests.rs`).
 - `handshake.rs`: `Hello` with `minor`, `accept_peer` (the Daemon's side: a newer peer is refused), `accept_daemon` (a peer's side), `negotiate` (postcard only on the same version).
 - `frame.rs`: length-prefixed frames, `MAX_FRAME_LEN` (ADR 0004).
 - `wire.rs`: `WireFormat` (postcard, protobuf, MessagePack, JSON) `encode`/`decode`; `encode_for` (for a peer on an older minor version).
