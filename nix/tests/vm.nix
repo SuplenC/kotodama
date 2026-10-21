@@ -3,7 +3,8 @@
 # starts the Daemon, that home-manager's settings reach it, that it reaches
 # the session bus and finds apps wherever NixOS installs them, that the
 # Folder source lists projects and scripts, that the programs it starts
-# outlive it, and that apps and Extensions a switch installs show up without a
+# outlive it, that a Bundled extension left off is neither installed nor
+# started, and that apps and Extensions a switch installs show up without a
 # restart.
 {
   pkgs,
@@ -78,6 +79,9 @@ pkgs.testers.runNixOSTest {
       home.stateVersion = "25.11";
       programs.kotodama = {
         enable = true;
+        # Off by default, unlike apps, calculator, clipboard, emoji and
+        # web-search. hyprland, system and ai stay off.
+        extensions.folders.enable = true;
         settings.quicklinks.nap = {
           title = "Nap";
           command = [
@@ -184,6 +188,13 @@ pkgs.testers.runNixOSTest {
         machine.wait_until_succeeds(
             as_alice(f"{front_end} vm sync") + " | grep -P '^folders\t/home/alice/Scripts/vm-sync.sh\tVM sync$'"
         )
+
+    with subtest("a Bundled extension left off is neither installed nor started"):
+        # Every Extension that is on has started by now: each answered above.
+        extensions = user("ls ~/.nix-profile/share/kotodama/extensions").split()
+        assert extensions == ["apps", "calculator", "clipboard", "emoji", "folders", "web-search"], extensions
+        for name in ["hyprland", "system", "ai"]:
+            machine.fail(pgrep(f"kotodama-{name}"))
 
     with subtest("a background script notifies the desktop when it is done"):
         user(f"{front_end} --run vm sync")
