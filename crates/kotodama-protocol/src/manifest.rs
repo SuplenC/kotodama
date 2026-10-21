@@ -1,4 +1,14 @@
 //! The `manifest.toml` that declares an Extension.
+//!
+//! # Owns
+//!
+//! - [`Manifest`], its [`LiveQueries`] and [`ContributedAction`]s, and the rules a Manifest must
+//!   keep to parse.
+//!
+//! # Not here
+//!
+//! - What the Daemon refuses beyond them, such as a trigger that doesn't compile: `kotodamad`'s
+//!   `discovery.rs`.
 
 use serde::Deserialize;
 
@@ -39,6 +49,7 @@ pub struct Manifest {
     /// Names the Extension everywhere: its config table is `[extensions.<name>]`
     /// and its own Item kinds are `<name>.<kind>`.
     pub name: String,
+    /// What the Extension does, in a sentence.
     pub description: Option<String>,
     /// The program and its arguments. A relative program path is resolved
     /// against the Extension's directory. It speaks the protocol on stdio.
@@ -76,6 +87,24 @@ pub struct Manifest {
 }
 
 impl Manifest {
+    /// Parses a `manifest.toml`.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::Manifest`] if `toml` doesn't parse, has a key the Manifest
+    /// doesn't know, or breaks a rule: an invalid name, an empty `command`, a
+    /// `word` that isn't one word, or a `live_query` that routes nothing.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use kotodama_protocol::Manifest;
+    ///
+    /// let manifest = Manifest::from_toml("name = \"notes\"\ncommand = [\"./notes\"]")?;
+    /// assert_eq!(manifest.name, "notes");
+    /// assert!(manifest.in_search);
+    /// # Ok::<(), kotodama_protocol::Error>(())
+    /// ```
     pub fn from_toml(toml: &str) -> Result<Self, Error> {
         toml::from_str(toml).map_err(|err| Error::Manifest(err.to_string()))
     }
@@ -118,8 +147,23 @@ pub struct LiveQueries {
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
 #[serde(from = "ContributedActionToml")]
 pub struct ContributedAction {
+    /// The kind of Item it is offered on.
     pub kind: KindName,
     pub action: Action,
+}
+
+/// Why a Manifest's TOML breaks its rules. Serde reads it into the parser's
+/// error, which names the line.
+#[derive(Debug, thiserror::Error)]
+enum ManifestError {
+    #[error("`{0}` isn't a valid Extension name; use lowercase letters, digits and hyphens")]
+    InvalidName(String),
+    #[error("`command` is empty; it needs at least the program to run")]
+    NoCommand,
+    #[error("`word = {0:?}` isn't one word; leave `word` out for the Extension's name")]
+    NotOneWord(String),
+    #[error("`live_query` needs at least one prefix or trigger, or `fallback`")]
+    RoutesNothing,
 }
 
 #[derive(Deserialize)]
@@ -158,23 +202,18 @@ fn in_search_by_default() -> bool {
 }
 
 impl TryFrom<ManifestToml> for Manifest {
-    type Error = String;
-    fn try_from(toml: ManifestToml) -> Result<Self, String> {
+    type Error = ManifestError;
+    fn try_from(toml: ManifestToml) -> Result<Self, ManifestError> {
         if !is_valid_name(&toml.name) {
-            return Err(format!(
-                "`{}` isn't a valid Extension name; use lowercase letters, digits and hyphens",
-                toml.name
-            ));
+            return Err(ManifestError::InvalidName(toml.name));
         }
         if toml.command.is_empty() {
-            return Err("`command` is empty; it needs at least the program to run".into());
+            return Err(ManifestError::NoCommand);
         }
-        if let Some(word) = &toml.word
+        if let Some(word) = toml.word.as_ref()
             && !is_valid_word(word)
         {
-            return Err(format!(
-                "`word = {word:?}` isn't one word; leave `word` out for the Extension's name"
-            ));
+            return Err(ManifestError::NotOneWord(word.clone()));
         }
         Ok(Manifest {
             name: toml.name,
@@ -207,10 +246,10 @@ struct LiveQueriesToml {
 }
 
 impl TryFrom<LiveQueriesToml> for LiveQueries {
-    type Error = String;
-    fn try_from(toml: LiveQueriesToml) -> Result<Self, String> {
+    type Error = ManifestError;
+    fn try_from(toml: LiveQueriesToml) -> Result<Self, ManifestError> {
         if toml.prefixes.is_empty() && toml.triggers.is_empty() && !toml.fallback {
-            return Err("`live_query` needs at least one prefix or trigger, or `fallback`".into());
+            return Err(ManifestError::RoutesNothing);
         }
         Ok(LiveQueries {
             prefixes: toml.prefixes,

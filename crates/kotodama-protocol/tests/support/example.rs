@@ -56,8 +56,8 @@ impl Example {
         self.channel().format()
     }
 
-    pub fn send(&mut self, message: ToExtension) {
-        self.channel_mut().send(&message).expect("send to the example");
+    pub fn send(&mut self, message: &ToExtension) {
+        self.channel_mut().send(message).expect("send to the example");
     }
 
     pub fn recv(&mut self) -> FromExtension {

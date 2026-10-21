@@ -164,8 +164,7 @@ fn a_peer_built_for_a_newer_major_is_turned_away_at_the_handshake_not_at_a_later
     .unwrap();
 
     let error = Channel::accept(peer_hello.as_slice(), Vec::new(), &Hello::new(&WireFormat::ALL))
-        .err()
-        .expect("a peer on a newer major should fail the handshake");
+        .expect_err("a peer on a newer major should fail the handshake");
 
     assert!(matches!(
         error,

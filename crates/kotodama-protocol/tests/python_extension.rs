@@ -20,7 +20,7 @@ fn config(cases: &[&str]) -> ToExtension {
 
 fn started() -> Example {
     let mut example = Example::start(EXAMPLE);
-    example.send(ToExtension::Config(BTreeMap::new()));
+    example.send(&ToExtension::Config(BTreeMap::new()));
     assert_eq!(
         example.recv(),
         FromExtension::Status {
@@ -32,7 +32,7 @@ fn started() -> Example {
 }
 
 fn live_query(example: &mut Example, id: u64, query: &str) -> (Vec<LiveResult>, bool) {
-    example.send(ToExtension::LiveQuery {
+    example.send(&ToExtension::LiveQuery {
         id,
         query: query.into(),
         prefix: Some("case ".into()),
@@ -50,7 +50,7 @@ fn live_query(example: &mut Example, id: u64, query: &str) -> (Vec<LiveResult>, 
 }
 
 fn run(example: &mut Example, item: &Item, action: &str) -> Outcome {
-    example.send(ToExtension::RunAction {
+    example.send(&ToExtension::RunAction {
         invocation: 7,
         action: action.into(),
         item: item.to_ref(),
@@ -121,13 +121,13 @@ fn the_python_example_copies_or_types_the_result_picked() {
 fn the_python_example_offers_only_the_configured_cases_and_says_when_none_is_known() {
     let mut example = started();
 
-    example.send(config(&["camel", "nope"]));
+    example.send(&config(&["camel", "nope"]));
     assert!(matches!(example.recv(), FromExtension::Status { usable: true, .. }));
     let (results, _) = live_query(&mut example, 5, "hello world");
     let titles: Vec<_> = results.iter().map(|result| result.item.title.as_str()).collect();
     assert_eq!(titles, ["helloWorld"]);
 
-    example.send(config(&["nope"]));
+    example.send(&config(&["nope"]));
     let FromExtension::Status { usable, note } = example.recv() else {
         panic!("expected status")
     };

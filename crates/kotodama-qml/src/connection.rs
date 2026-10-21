@@ -174,17 +174,25 @@ fn connect() -> Result<(Reader, UnixStream, Writer), Error> {
             "XDG_RUNTIME_DIR isn't set",
         ))
     })?;
-    let stream = UnixStream::connect(socket)?;
-    stream.set_read_timeout(Some(HANDSHAKE_TIMEOUT))?;
+    let stream = UnixStream::connect(socket).map_err(Error::Io)?;
+    stream
+        .set_read_timeout(Some(HANDSHAKE_TIMEOUT))
+        .map_err(Error::Io)?;
     let channel = Channel::handshake(
-        stream.try_clone()?,
-        stream.try_clone()?,
+        stream.try_clone().map_err(Error::Io)?,
+        stream.try_clone().map_err(Error::Io)?,
         &Hello::new(&WireFormat::ALL),
     )?;
-    stream.set_read_timeout(None)?;
-    stream.set_write_timeout(Some(WRITE_TIMEOUT))?;
+    stream.set_read_timeout(None).map_err(Error::Io)?;
+    stream
+        .set_write_timeout(Some(WRITE_TIMEOUT))
+        .map_err(Error::Io)?;
     let (reader, channel) = channel.split();
-    Ok((reader, stream.try_clone()?, Writer { channel, stream }))
+    Ok((
+        reader,
+        stream.try_clone().map_err(Error::Io)?,
+        Writer { channel, stream },
+    ))
 }
 
 /// Reads until the Daemon hangs up or the model is gone. What has arrived

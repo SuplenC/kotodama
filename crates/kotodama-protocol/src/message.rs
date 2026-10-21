@@ -1,8 +1,18 @@
 //! The messages a Daemon and an Extension exchange once the handshake is done.
 //!
-//! Every message is an enum variant, tagged in JSON by its snake_case name:
+//! Every message is an enum variant, tagged in JSON by its `snake_case` name:
 //! `{"remove_items": {"ids": ["a"]}}`, or just `"request_action_catalog"` for a
 //! variant without fields.
+//!
+//! # Owns
+//!
+//! - [`ToExtension`], [`FromExtension`], and what they carry: [`LiveResult`], [`Outcome`],
+//!   [`Clipboard`], [`CatalogEntry`].
+//!
+//! # Not here
+//!
+//! - Items and Actions: `item.rs`. Views and jobs: `view.rs`. The Front end's messages:
+//!   `front_end.rs`.
 
 use std::collections::BTreeMap;
 
@@ -40,8 +50,8 @@ pub enum ToExtension {
         /// prefix, as though typed.
         prefix: Option<String>,
     },
-    /// The query changed or the menu closed: results for `id` are no longer
-    /// wanted.
+    /// The query changed or the menu closed: results for `id` aren't wanted
+    /// any more.
     CancelLiveQuery { id: u64 },
     /// Runs one of this Extension's Actions on an Item. For a Contributed action
     /// the Item belongs to another Extension, and `item` is all this Extension
@@ -84,12 +94,9 @@ pub enum ToExtension {
 pub enum FromExtension {
     /// Indexes Items. An Item whose id is already indexed replaces the old one,
     /// which is how an Item is updated.
-    AddItems {
-        items: Vec<Item>,
-    },
-    RemoveItems {
-        ids: Vec<String>,
-    },
+    AddItems { items: Vec<Item> },
+    /// Takes the Items with these ids out of the index.
+    RemoveItems { ids: Vec<String> },
     /// Results for a Live query, streamed in as many batches as the Extension
     /// likes.
     LiveResults {
@@ -101,23 +108,18 @@ pub enum FromExtension {
         done: bool,
     },
     /// Answers a [`ToExtension::RunAction`].
-    ActionDone {
-        invocation: u64,
-        outcome: Outcome,
-    },
+    ActionDone { invocation: u64, outcome: Outcome },
+    /// Shows a View on top of the search, or of the View open.
     PushView(View),
     /// Replaces the open View with the same id.
     UpdateView(View),
-    PopView {
-        view: String,
-    },
+    /// Closes the open View `view`, as Esc does.
+    PopView { view: String },
     /// Pops the open View `view` and pushes `with` in one step, as a wizard
     /// goes from one step to the next: the search never shows in between.
     /// Pushes `with` alone if `view` isn't open.
-    ReplaceView {
-        view: String,
-        with: View,
-    },
+    ReplaceView { view: String, with: View },
+    /// A job's whole state, sent on every change.
     JobProgress(Job),
     /// Asks for the Action catalog; allowed only if the Manifest says so.
     RequestActionCatalog,
@@ -125,13 +127,14 @@ pub enum FromExtension {
     /// Action launched closed right after: the History becomes as if the user
     /// had never picked the Result. Only the Extension that ran the Action may
     /// withdraw its pick, for a minute after [`ToExtension::RunAction`].
-    /// Withdrawing a pick the Daemon doesn't know, or one it no longer keeps,
+    /// Withdrawing a pick the Daemon doesn't know, or one it has let go,
     /// does nothing.
     WithdrawPick {
         /// The `invocation` of the [`ToExtension::RunAction`] that ran it.
         invocation: u64,
     },
-    /// Whether the Extension can do anything now, sent whenever that changes.
+    /// Whether the Extension can do anything at the moment, sent whenever that
+    /// changes.
     /// The search shows its app's entry Item only while it can, so a user on
     /// another compositor, or before setting the Extension up, never enters
     /// an app with nothing in it. Until an Extension sends one, it counts as
@@ -150,6 +153,7 @@ pub enum FromExtension {
 /// One Live query result.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct LiveResult {
+    /// The Item shown as the result.
     pub item: Item,
     /// How well the result matches the query, from 0 to 1. The Daemon maps it
     /// onto the scale it ranks Indexed items on.
@@ -201,7 +205,9 @@ pub enum Outcome {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Clipboard {
+    /// Plain text.
     Text(String),
+    /// An image, as its file's bytes.
     Image {
         /// The image's MIME type, such as `image/png`.
         mime: String,

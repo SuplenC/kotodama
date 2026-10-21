@@ -103,13 +103,15 @@ pub fn serve(listener: UnixListener, events: Sender<Event>) {
 
 fn connection(id: FrontEndId, stream: UnixStream, events: &Sender<Event>) -> Result<(), Error> {
     // A Front end that connects and never says hello mustn't hold a thread.
-    stream.set_read_timeout(Some(HANDSHAKE_TIMEOUT))?;
+    stream
+        .set_read_timeout(Some(HANDSHAKE_TIMEOUT))
+        .map_err(Error::Io)?;
     let channel = Channel::accept(
-        stream.try_clone()?,
-        stream.try_clone()?,
+        stream.try_clone().map_err(Error::Io)?,
+        stream.try_clone().map_err(Error::Io)?,
         &Hello::new(&WireFormat::ALL),
     )?;
-    stream.set_read_timeout(None)?;
+    stream.set_read_timeout(None).map_err(Error::Io)?;
     pump(
         &format!("front-end-{}", id.0),
         channel,

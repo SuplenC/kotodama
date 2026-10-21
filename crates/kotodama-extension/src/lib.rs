@@ -192,7 +192,8 @@ pub fn connect<T: Send + 'static>() -> Result<Connection<T>, Error> {
                 }
             }
             let _ = messages.send(Event::Hangup);
-        })?;
+        })
+        .map_err(Error::Io)?;
     Ok(Connection {
         writer,
         events,

@@ -63,11 +63,11 @@ fn bench(c: &mut Criterion) {
             b.iter(|| {
                 buf.clear();
                 format.encode_into(black_box(&message), &mut buf).unwrap();
-            })
+            });
         });
         let bytes = format.encode(&message).unwrap();
         group.bench_function(BenchmarkId::new("decode", &name), |b| {
-            b.iter(|| format.decode::<FromExtension>(black_box(&bytes)).unwrap())
+            b.iter(|| format.decode::<FromExtension>(black_box(&bytes)).unwrap());
         });
     }
     group.finish();

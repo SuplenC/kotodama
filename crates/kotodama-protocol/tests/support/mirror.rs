@@ -103,6 +103,10 @@ pub mod prost {
     }
 
     #[derive(Clone, PartialEq, ::prost::Message)]
+    #[expect(
+        clippy::struct_field_names,
+        reason = "mirrors `ToFrontEnd::Results`, whose field is `results`"
+    )]
     pub struct Results {
         #[prost(uint32, tag = "1")]
         pub version: u32,
@@ -511,6 +515,10 @@ pub mod bilrost {
     }
 
     #[derive(Clone, Debug, PartialEq, ::bilrost::Message)]
+    #[expect(
+        clippy::struct_field_names,
+        reason = "mirrors `ToFrontEnd::Results`, whose field is `results`"
+    )]
     pub struct Results {
         pub version: u32,
         pub results: Vec<ShownResult>,

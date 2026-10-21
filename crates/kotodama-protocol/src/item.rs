@@ -1,4 +1,14 @@
 //! Items, Item kinds and the Actions an Item offers.
+//!
+//! # Owns
+//!
+//! - [`Item`], [`ItemRef`], [`ItemKind`] and the kind names ([`KindName`], [`NamespacedKind`],
+//!   [`SHARED_KINDS`]), [`Action`] and its [`Argument`]s.
+//! - The flat shape an Item has on the wire, and the checks an Item passes as it is decoded.
+//!
+//! # Not here
+//!
+//! - Which minor version an Item kind needs: `version.rs`.
 
 use std::fmt;
 use std::path::Path;
@@ -27,7 +37,9 @@ pub struct Item {
     /// them: picking one counts for all. `None` keeps the Item's History its
     /// own.
     pub identity: Option<String>,
+    /// The Item's name, which the search matches first.
     pub title: String,
+    /// A line under the title, such as an app's description.
     pub subtitle: Option<String>,
     /// A freedesktop icon name or an absolute path.
     pub icon: Option<String>,
@@ -40,7 +52,7 @@ pub struct Item {
     pub actions: Vec<Action>,
     /// Kept out of the search: only `kotodama open --view` reaches it, as the
     /// entry point to a View of an Extension that would rather not list one,
-    /// such as one with only Live queries (ADR 0015). Ignored outside
+    /// such as one with only Live queries. Ignored outside
     /// `add_items`.
     pub hidden: bool,
     /// Shown inside its Extension's app alone, never by the whole search,
@@ -61,6 +73,8 @@ pub struct ItemRef {
 }
 
 impl Item {
+    /// The Item's id and kind, as the Daemon names it to an Extension.
+    #[must_use]
     pub fn to_ref(&self) -> ItemRef {
         ItemRef {
             id: self.id.clone(),
@@ -70,32 +84,27 @@ impl Item {
 }
 
 /// What sort of thing an Item is. Other Extensions offer Contributed actions by
-/// kind (ADR 0002), so each shared kind carries the one field those Actions need.
+/// kind, so each shared kind carries the one field those Actions need.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum ItemKind {
-    App {
-        desktop_id: String,
-    },
-    File {
-        path: PathBuf,
-    },
-    Folder {
-        path: PathBuf,
-    },
-    Project {
-        path: PathBuf,
-    },
-    Window {
-        address: String,
-    },
-    Url {
-        url: String,
-    },
+    /// An installed app, by its desktop id, such as `firefox.desktop`.
+    App { desktop_id: String },
+    /// A file, by its absolute path.
+    File { path: PathBuf },
+    /// A folder, by its absolute path.
+    Folder { path: PathBuf },
+    /// A project's folder, by its absolute path.
+    Project { path: PathBuf },
+    /// An open window, by the compositor's address for it.
+    Window { address: String },
+    /// A web address.
+    Url { url: String },
     /// Any other kind, owned by one Extension and named after it.
     Namespaced(NamespacedKind),
 }
 
 impl ItemKind {
+    /// The kind's name on the wire: a shared kind's, or `<extension>.<kind>`.
     pub fn name(&self) -> &str {
         match self {
             ItemKind::App { .. } => "app",
@@ -130,7 +139,7 @@ impl ItemKind {
         }
     }
 
-    fn from_wire(name: String, fields: KindFields) -> Result<Self, String> {
+    fn from_wire(name: String, fields: KindFields) -> Result<Self, ItemError> {
         let KindFields {
             desktop_id,
             path,
@@ -150,10 +159,10 @@ impl ItemKind {
             "url" => Some("url"),
             _ => None,
         };
-        if let Some((extra, _)) = present.iter().find(|&&(field, set)| set && Some(field) != needs) {
-            return Err(format!("a `{name}` Item can't have `{extra}`"));
+        if let Some(&(extra, _)) = present.iter().find(|&&(field, set)| set && Some(field) != needs) {
+            return Err(ItemError::extra_field(name, extra));
         }
-        let missing = || format!("a `{name}` Item needs `{}`", needs.unwrap_or_default());
+        let missing = || ItemError::missing_field(&name, needs.unwrap_or_default());
         Ok(match name.as_str() {
             "app" => ItemKind::App {
                 desktop_id: desktop_id.ok_or_else(missing)?,
@@ -173,7 +182,7 @@ impl ItemKind {
             "url" => ItemKind::Url {
                 url: url.ok_or_else(missing)?,
             },
-            _ => ItemKind::Namespaced(NamespacedKind::new(name)?),
+            _ => ItemKind::Namespaced(NamespacedKind::new(name).map_err(ItemError::Kind)?),
         })
     }
 
@@ -182,7 +191,7 @@ impl ItemKind {
         match self {
             ItemKind::App { desktop_id } => fields.desktop_id = Some(desktop_id),
             ItemKind::File { path } | ItemKind::Folder { path } | ItemKind::Project { path } => {
-                fields.path = Some(path)
+                fields.path = Some(path);
             }
             ItemKind::Window { address } => fields.address = Some(address),
             ItemKind::Url { url } => fields.url = Some(url),
@@ -201,26 +210,41 @@ pub const SHARED_KINDS: [&str; 6] = ["app", "file", "folder", "project", "window
 pub struct NamespacedKind(String);
 
 impl NamespacedKind {
-    pub fn new(kind: impl Into<String>) -> Result<Self, String> {
+    /// The kind `<extension>.<kind>`.
+    ///
+    /// # Errors
+    ///
+    /// [`KindError::Unknown`] for a single name, which no shared kind has, and
+    /// [`KindError::Invalid`] for anything else that isn't two names.
+    pub fn new(kind: impl Into<String>) -> Result<Self, KindError> {
         let kind = kind.into();
         match kind.split_once('.') {
             Some((extension, local)) if is_valid_name(extension) && is_valid_name(local) => Ok(NamespacedKind(kind)),
-            None if is_valid_name(&kind) => Err(format!(
-                "unknown Item kind `{kind}`; an Extension's own kinds are named `<extension>.{kind}`"
-            )),
-            _ => Err(format!(
-                "`{kind}` isn't a valid Item kind; it should look like `<extension>.<kind>`"
-            )),
+            None if is_valid_name(&kind) => Err(KindError::Unknown(kind)),
+            _ => Err(KindError::Invalid(kind)),
         }
     }
 
+    /// The whole kind, `<extension>.<kind>`.
     pub fn as_str(&self) -> &str {
         &self.0
     }
 
+    /// The Extension the kind belongs to: the part before the dot.
     pub fn extension(&self) -> &str {
         self.0.split_once('.').map_or("", |(extension, _)| extension)
     }
+}
+
+/// Why a name isn't an Item kind.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum KindError {
+    /// One name, with no Extension before it, that isn't a shared kind.
+    #[error("unknown Item kind `{0}`; an Extension's own kinds are named `<extension>.{0}`")]
+    Unknown(String),
+    /// Not a shared kind, nor two names joined by a dot.
+    #[error("`{0}` isn't a valid Item kind; it should look like `<extension>.<kind>`")]
+    Invalid(String),
 }
 
 /// The name of an Item kind, shared or namespaced, without an Item: what a
@@ -230,7 +254,12 @@ impl NamespacedKind {
 pub struct KindName(String);
 
 impl KindName {
-    pub fn new(name: impl Into<String>) -> Result<Self, String> {
+    /// A shared kind's name, or a namespaced kind's.
+    ///
+    /// # Errors
+    ///
+    /// As [`NamespacedKind::new`], for a name that isn't a shared kind's.
+    pub fn new(name: impl Into<String>) -> Result<Self, KindError> {
         let name = name.into();
         if SHARED_KINDS.contains(&name.as_str()) {
             Ok(KindName(name))
@@ -239,14 +268,15 @@ impl KindName {
         }
     }
 
+    /// The kind's name.
     pub fn as_str(&self) -> &str {
         &self.0
     }
 }
 
 impl TryFrom<String> for KindName {
-    type Error = String;
-    fn try_from(name: String) -> Result<Self, String> {
+    type Error = KindError;
+    fn try_from(name: String) -> Result<Self, KindError> {
         KindName::new(name)
     }
 }
@@ -279,11 +309,13 @@ pub struct Action {
     /// Unique among one Extension's Actions; the Daemon sends it back when the
     /// Action runs.
     pub id: String,
+    /// What the Action panel lists it as, such as `Open in a new window`.
     pub title: String,
     /// A key binding such as `ctrl+o`, which runs the Action without opening the
     /// Action panel.
     #[serde(default)]
     pub shortcut: Option<String>,
+    /// What the user types or fills in for the Action.
     #[serde(default)]
     pub arguments: Vec<Argument>,
     /// Whether the Front end asks the user to confirm before it runs, as for
@@ -295,6 +327,7 @@ pub struct Action {
 impl Action {
     /// An Action with no shortcut, no Arguments and no confirm step; the
     /// setters below add them.
+    #[must_use]
     pub fn new(id: impl Into<String>, title: impl Into<String>) -> Self {
         Action {
             id: id.into(),
@@ -321,12 +354,14 @@ impl Action {
     }
 
     /// Binds the Action to `shortcut`, such as `ctrl+o`.
+    #[must_use]
     pub fn shortcut(mut self, shortcut: impl Into<String>) -> Self {
         self.shortcut = Some(shortcut.into());
         self
     }
 
     /// Asks for `arguments` when the Action runs.
+    #[must_use]
     pub fn arguments(mut self, arguments: Vec<Argument>) -> Self {
         self.arguments = arguments;
         self
@@ -337,11 +372,43 @@ impl Action {
 /// but not typed opens a form.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Argument {
+    /// Names the value in the Action's `arguments`.
     pub name: String,
+    /// Shown greyed out until something is typed.
     #[serde(default)]
     pub placeholder: Option<String>,
+    /// The Action runs without it.
     #[serde(default)]
     pub optional: bool,
+}
+
+/// Why an Item or an [`ItemRef`] that arrived isn't valid. Serde reads it into
+/// the Wire format's decode error.
+#[derive(Debug, thiserror::Error)]
+pub(crate) enum ItemError {
+    #[error("a `{kind}` Item can't have `{field}`")]
+    ExtraField { kind: String, field: &'static str },
+    #[error("a `{kind}` Item needs `{field}`")]
+    MissingField { kind: String, field: &'static str },
+    #[error(transparent)]
+    Kind(KindError),
+    #[error("Item `{0}` has no Actions; it needs at least its primary Action")]
+    NoActions(String),
+    #[error("Item `{0}` has an empty identity; leave it out instead")]
+    EmptyIdentity(String),
+}
+
+impl ItemError {
+    fn extra_field(kind: String, field: &'static str) -> Self {
+        ItemError::ExtraField { kind, field }
+    }
+
+    fn missing_field(kind: &str, field: &'static str) -> Self {
+        ItemError::MissingField {
+            kind: kind.to_owned(),
+            field,
+        }
+    }
 }
 
 // The flat wire shapes. Serializing borrows the Item; deserializing owns it and
@@ -441,13 +508,10 @@ impl Serialize for Item {
 }
 
 impl TryFrom<ItemOwned> for Item {
-    type Error = String;
-    fn try_from(wire: ItemOwned) -> Result<Self, String> {
+    type Error = ItemError;
+    fn try_from(wire: ItemOwned) -> Result<Self, ItemError> {
         if wire.actions.is_empty() {
-            return Err(format!(
-                "Item `{}` has no Actions; it needs at least its primary Action",
-                wire.id
-            ));
+            return Err(ItemError::NoActions(wire.id));
         }
         wire.into_item_without_actions()
     }
@@ -456,7 +520,7 @@ impl TryFrom<ItemOwned> for Item {
 impl ItemOwned {
     /// The Item, checked for everything but having an Action: a Result the
     /// Daemon shows as unavailable carries none.
-    pub(crate) fn into_item_without_actions(self) -> Result<Item, String> {
+    pub(crate) fn into_item_without_actions(self) -> Result<Item, ItemError> {
         let fields = KindFields {
             desktop_id: self.desktop_id,
             path: self.path,
@@ -465,10 +529,7 @@ impl ItemOwned {
         };
         let kind = ItemKind::from_wire(self.kind, fields)?;
         if self.identity.as_deref() == Some("") {
-            return Err(format!(
-                "Item `{}` has an empty identity; leave it out instead",
-                self.id
-            ));
+            return Err(ItemError::EmptyIdentity(self.id));
         }
         Ok(Item {
             id: self.id,
@@ -527,8 +588,8 @@ impl Serialize for ItemRef {
 }
 
 impl TryFrom<ItemRefOwned> for ItemRef {
-    type Error = String;
-    fn try_from(wire: ItemRefOwned) -> Result<Self, String> {
+    type Error = ItemError;
+    fn try_from(wire: ItemRefOwned) -> Result<Self, ItemError> {
         let fields = KindFields {
             desktop_id: wire.desktop_id,
             path: wire.path,

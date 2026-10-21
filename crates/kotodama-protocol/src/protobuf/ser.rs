@@ -1,4 +1,12 @@
 //! Writing a serde value as a protobuf message.
+//!
+//! # Owns
+//!
+//! - [`to_vec`] and the serializers it writes with.
+//!
+//! # Not here
+//!
+//! - The mapping from serde onto protobuf: `protobuf.rs`'s docs. Reading a message back: `de.rs`.
 
 use serde::ser;
 use serde::ser::Impossible;

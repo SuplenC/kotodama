@@ -79,5 +79,5 @@ fn only_a_peer_on_an_older_minor_version_of_this_major_is_sent_less() {
     assert!(!older_minor(PROTOCOL_VERSION));
     assert!(!older_minor(Version::new(major, minor + 1)));
     assert!(!older_minor(Version::new(major + 1, 0)));
-    assert!(older_minor(Version::new(major, 0)) == (minor > 0));
+    assert_eq!(older_minor(Version::new(major, 0)), minor > 0);
 }

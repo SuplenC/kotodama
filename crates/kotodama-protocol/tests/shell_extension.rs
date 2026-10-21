@@ -48,8 +48,8 @@ impl Extension {
         Extension { child, channel }
     }
 
-    fn send(&mut self, message: ToExtension) {
-        self.channel.send(&message).unwrap();
+    fn send(&mut self, message: &ToExtension) {
+        self.channel.send(message).unwrap();
     }
 
     fn recv(&mut self) -> FromExtension {
@@ -89,7 +89,7 @@ fn the_shell_example_settles_on_json() {
 #[test]
 fn the_shell_example_turns_its_config_table_into_url_items() {
     let mut extension = Extension::start();
-    extension.send(bookmarks(&[
+    extension.send(&bookmarks(&[
         ("Kotodama", "https://github.com/SuplenC/kotodama"),
         ("Wayland", "https://wayland.freedesktop.org"),
     ]));
@@ -124,12 +124,12 @@ fn the_shell_example_turns_its_config_table_into_url_items() {
 #[test]
 fn the_shell_example_replaces_its_items_when_the_config_reloads() {
     let mut extension = Extension::start();
-    extension.send(bookmarks(&[("A", "https://a.example"), ("B", "https://b.example")]));
+    extension.send(&bookmarks(&[("A", "https://a.example"), ("B", "https://b.example")]));
     let FromExtension::AddItems { items: first } = extension.recv() else {
         panic!("expected add_items")
     };
 
-    extension.send(bookmarks(&[("C", "https://c.example")]));
+    extension.send(&bookmarks(&[("C", "https://c.example")]));
     let FromExtension::RemoveItems { ids } = extension.recv() else {
         panic!("expected remove_items")
     };
@@ -149,7 +149,7 @@ fn the_shell_example_replaces_its_items_when_the_config_reloads() {
 #[test]
 fn the_shell_examples_hidden_bookmarks_item_lists_them_in_a_view_it_leaves_the_daemon_to_filter() {
     let mut extension = Extension::start();
-    extension.send(bookmarks(&[
+    extension.send(&bookmarks(&[
         ("Kotodama", "https://github.com/SuplenC/kotodama"),
         ("Wayland", "https://wayland.freedesktop.org"),
     ]));
@@ -163,7 +163,7 @@ fn the_shell_examples_hidden_bookmarks_item_lists_them_in_a_view_it_leaves_the_d
     assert!(list.hidden, "only `kotodama open --view` reaches it");
     assert!(items.iter().all(|item| item.hidden == (item.id == "bookmarks")));
 
-    extension.send(ToExtension::RunAction {
+    extension.send(&ToExtension::RunAction {
         invocation: 9,
         action: list.actions[0].id.clone(),
         item: ItemRef {
@@ -201,10 +201,10 @@ fn the_shell_example_contributes_an_action_for_projects() {
     assert_eq!(contributed[0].kind.as_str(), "project");
 
     let mut extension = Extension::start();
-    extension.send(bookmarks(&[]));
+    extension.send(&bookmarks(&[]));
     assert!(matches!(extension.recv(), FromExtension::AddItems { .. }));
 
-    extension.send(ToExtension::RunAction {
+    extension.send(&ToExtension::RunAction {
         invocation: 42,
         action: contributed[0].action.id.clone(),
         item: ItemRef {
@@ -234,7 +234,7 @@ fn the_shell_example_exits_when_the_daemon_hangs_up() {
 /// Starts the example with no bookmarks and returns its timer Item.
 fn timer() -> (Extension, Item) {
     let mut extension = Extension::start();
-    extension.send(bookmarks(&[]));
+    extension.send(&bookmarks(&[]));
     let FromExtension::AddItems { items } = extension.recv() else {
         panic!("expected add_items")
     };
@@ -247,7 +247,7 @@ fn timer() -> (Extension, Item) {
 
 /// Runs the timer's `action`th Action with `arguments`, as invocation 7.
 fn run(extension: &mut Extension, timer: &Item, action: usize, arguments: &[(&str, &str)]) {
-    extension.send(ToExtension::RunAction {
+    extension.send(&ToExtension::RunAction {
         invocation: 7,
         action: timer.actions[action].id.clone(),
         item: ItemRef {
@@ -330,7 +330,7 @@ fn the_shell_examples_timer_is_cancelled_when_the_user_leaves_its_view() {
         panic!("expected a progress View")
     };
 
-    extension.send(ToExtension::ViewPopped { view: view.id });
+    extension.send(&ToExtension::ViewPopped { view: view.id });
     assert_eq!(
         follow(&mut extension, &job, "30 second timer"),
         [(JobState::Running, Some(0.0)), (JobState::Failed, None)]
@@ -371,7 +371,7 @@ fn the_shell_examples_labelled_timer_asks_in_a_form_then_times_what_was_submitte
         }
     );
 
-    extension.send(ToExtension::SubmitForm {
+    extension.send(&ToExtension::SubmitForm {
         view: form.id.clone(),
         values: BTreeMap::from([
             ("label".into(), Value::String("Tea".into())),

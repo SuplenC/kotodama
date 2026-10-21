@@ -1,6 +1,16 @@
 //! The messages a Daemon and a Front end exchange once the handshake is done.
 //! They are tagged like the Extension messages: `{"query": {"text": "fir"}}`, or
 //! just `"closed"` for a variant without fields.
+//!
+//! # Owns
+//!
+//! - [`FromFrontEnd`], [`ToFrontEnd`], and what they carry: [`ShownResult`], [`Scope`] and its
+//!   [`Intro`], [`Problem`], [`ListMatch`], the references to a Result and an Action.
+//! - Where the Daemon's socket is: [`socket_path`].
+//!
+//! # Not here
+//!
+//! - Items and Actions: `item.rs`. Views and jobs: `view.rs`. The Extension messages: `message.rs`.
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -13,6 +23,7 @@ use crate::Item;
 use crate::Job;
 use crate::Table;
 use crate::View;
+use crate::item::ItemError;
 use crate::item::ItemOwned;
 
 /// From a Front end to the Daemon.
@@ -73,7 +84,7 @@ pub enum FromFrontEnd {
         query: String,
         /// A View to open on, as `<extension>/<item id>`: the Daemon runs that
         /// Item's primary Action, and passes the request on only once the
-        /// View it pushes is there, or after a second without it (ADR 0014).
+        /// View it pushes is there, or after a second without it.
         view: Option<String>,
     },
     /// Asks a menu to open if it is closed and close if it is open, as
@@ -113,6 +124,7 @@ pub enum ToFrontEnd {
     /// back, and what the user should fix. Sent when a Front end connects and
     /// whenever either changes, each time whole.
     Status {
+        /// The names of the Extensions that are down.
         down: Vec<String>,
         /// Everything wrong the user can fix: a config file that doesn't
         /// parse, a setting that isn't one or can't be read, a Manifest
@@ -123,11 +135,10 @@ pub enum ToFrontEnd {
     },
     /// Close the menu, then answer [`FromFrontEnd::Closed`].
     Close,
-    /// An Action failed; show `message` and stay open.
-    ActionFailed {
-        message: String,
-    },
-    /// `contributed` holds, for a list View, the Contributed actions on its
+    /// An Action failed: show `message` and stay open.
+    ActionFailed { message: String },
+    /// Show `view`, an Extension's View, on top. `contributed` holds, for a
+    /// list View, the Contributed actions on its
     /// Items by Item kind name, grouped as [`ShownResult::contributed`] has
     /// them; an Item's own Action keeps a shortcut one of them also binds.
     /// Empty for other Views.
@@ -143,10 +154,8 @@ pub enum ToFrontEnd {
         view: View,
         contributed: BTreeMap<String, Vec<OfferedAction>>,
     },
-    PopView {
-        extension: String,
-        view: String,
-    },
+    /// Close the open View `view`.
+    PopView { extension: String, view: String },
     /// Pops the open View `view` and pushes `with`, in one step, so the
     /// search never shows in between.
     ReplaceView {
@@ -163,17 +172,12 @@ pub enum ToFrontEnd {
         text: String,
         matches: Vec<ListMatch>,
     },
-    JobProgress {
-        extension: String,
-        job: Job,
-    },
+    /// A job's whole state, for the progress View that follows it.
+    JobProgress { extension: String, job: Job },
     /// Open the menu, as another Front end asked with [`FromFrontEnd::Open`].
     /// When `view` is given, the View it names is already on top, unless it
     /// failed to open, in which case an [`ToFrontEnd::ActionFailed`] follows.
-    Open {
-        query: String,
-        view: Option<String>,
-    },
+    Open { query: String, view: Option<String> },
     /// Open the menu if it is closed, or close it if it is open.
     Toggle,
     /// The History just changed, as by Forget or "Clear history", and the
@@ -181,29 +185,20 @@ pub enum ToFrontEnd {
     /// the key that sends [`FromFrontEnd::Undo`]. It takes the place of the
     /// offer before it. Shown without taking the keys or the selection, until
     /// [`ToFrontEnd::WithdrawUndo`] names the same `change`.
-    OfferUndo {
-        change: u64,
-        title: String,
-    },
+    OfferUndo { change: u64, title: String },
     /// The change can't be undone any more: it was undone, or its time ran
     /// out. Hide its offer, if it is still shown.
-    WithdrawUndo {
-        change: u64,
-    },
+    WithdrawUndo { change: u64 },
     /// Replace the search text with `text`, as when the user enters an app,
     /// which types its word and a space. The Daemon has taken `text` as the
     /// query already, and its Results follow, so the Front end sends no
     /// [`FromFrontEnd::Query`] for it.
-    SetQuery {
-        text: String,
-    },
+    SetQuery { text: String },
     /// The answer to [`FromFrontEnd::Open`] and [`FromFrontEnd::Toggle`],
     /// sent to the Front end that asked: how many menus the request was
     /// passed to. With none running, the Daemon waits a moment for one to
     /// connect first; `0` means none did, so nothing opened.
-    Reached {
-        menus: u32,
-    },
+    Reached { menus: u32 },
 }
 
 /// One Result as the Front end shows it.
@@ -212,6 +207,7 @@ pub enum ToFrontEnd {
 pub struct ShownResult {
     /// The Extension that owns the Item.
     pub extension: String,
+    /// The Item the Result shows.
     pub item: Item,
     /// Other Extensions' Actions for this Item's kind, grouped by Extension,
     /// then the Daemon's own, under the Extension name `kotodama`, such as
@@ -243,8 +239,8 @@ struct ShownResultOwned {
 }
 
 impl TryFrom<ShownResultOwned> for ShownResult {
-    type Error = String;
-    fn try_from(wire: ShownResultOwned) -> Result<Self, String> {
+    type Error = ItemError;
+    fn try_from(wire: ShownResultOwned) -> Result<Self, ItemError> {
         let item = if wire.unavailable.is_some() {
             wire.item.into_item_without_actions()?
         } else {
@@ -275,6 +271,7 @@ impl Problem {
     /// The Daemon's own Result that opens the list of problems, which a
     /// Front end runs with [`Problem::show`] when the user asks for the
     /// list, as by clicking its count.
+    #[must_use]
     pub fn list() -> ResultRef {
         ResultRef {
             extension: "kotodama".into(),
@@ -283,6 +280,7 @@ impl Problem {
     }
 
     /// The Action of [`Problem::list`] that opens it.
+    #[must_use]
     pub fn show() -> ActionRef {
         ActionRef {
             extension: "kotodama".into(),
@@ -304,6 +302,7 @@ pub struct Scope {
     pub word: String,
     /// The Extension's name as the user reads it, such as `Emoji`.
     pub title: String,
+    /// The app's icon: a freedesktop icon name or a path.
     pub icon: Option<String>,
     /// What the app does, shown above its rows while nothing is typed past
     /// its word. `None` once something is.
@@ -317,8 +316,9 @@ pub struct Scope {
 pub struct Intro {
     /// What the app does and how to use it, in a sentence or two.
     pub about: String,
+    /// Queries to type in the app, under `about`.
     pub examples: Vec<Example>,
-    /// What the Extension says the user should know now, from its
+    /// What the Extension says the user should know at the moment, from its
     /// [`FromExtension::Status`](crate::FromExtension::Status), such as why it
     /// can't do anything.
     #[serde(default)]
@@ -329,7 +329,9 @@ pub struct Intro {
 /// `900 s`.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Example {
+    /// What to type.
     pub query: String,
+    /// What it gives.
     pub result: String,
 }
 
@@ -370,6 +372,7 @@ pub struct ActionRef {
 /// `$XDG_RUNTIME_DIR/kotodama.sock`, or `None` when neither is set. A
 /// Daemon whose config moves its socket needs its Front ends pointed there
 /// with `KOTODAMA_SOCKET`.
+#[must_use]
 pub fn socket_path() -> Option<PathBuf> {
     let set = |var| std::env::var_os(var).filter(|value: &std::ffi::OsString| !value.is_empty());
     set("KOTODAMA_SOCKET")

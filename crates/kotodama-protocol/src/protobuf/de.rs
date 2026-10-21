@@ -4,6 +4,14 @@
 //! expect, which tells a field's type. Fields reach serde by their position,
 //! as the derives accept, in the order they arrive; the ones that never arrive
 //! follow with protobuf's defaults.
+//!
+//! # Owns
+//!
+//! - [`from_slice`] and the deserializers it reads with.
+//!
+//! # Not here
+//!
+//! - The mapping from serde onto protobuf: `protobuf.rs`'s docs. Writing a message: `ser.rs`.
 
 use serde::de;
 use serde::de::DeserializeOwned;

@@ -4,6 +4,14 @@
 //! The Daemon talks to a peer on its own version or an older one, and turns
 //! away a newer peer with an error naming the version the peer needs. A peer
 //! talks to a Daemon on its version or a newer one, which adapts to it.
+//!
+//! # Owns
+//!
+//! - [`Hello`], and which Wire format two hellos agree on.
+//!
+//! # Not here
+//!
+//! - Sending and reading the hellos: `channel.rs`. The version rules: `version.rs`.
 
 use serde::Deserialize;
 use serde::Deserializer;
@@ -109,16 +117,16 @@ impl Hello {
 }
 
 fn known_formats<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Vec<WireFormat>, D::Error> {
-    // Telling a known name from an unknown one needs a self-describing format.
-    // The handshake is always JSON; this keeps `Hello` decodable everywhere else.
-    if !deserializer.is_human_readable() {
-        return Vec::deserialize(deserializer);
-    }
     #[derive(Deserialize)]
     #[serde(untagged)]
     enum MaybeKnown {
         Known(WireFormat),
-        Unknown(#[allow(dead_code)] serde::de::IgnoredAny),
+        Unknown(serde::de::IgnoredAny),
+    }
+    // Telling a known name from an unknown one needs a self-describing format.
+    // The handshake is always JSON; this keeps `Hello` decodable everywhere else.
+    if !deserializer.is_human_readable() {
+        return Vec::deserialize(deserializer);
     }
     let formats = Vec::<MaybeKnown>::deserialize(deserializer)?;
     Ok(formats

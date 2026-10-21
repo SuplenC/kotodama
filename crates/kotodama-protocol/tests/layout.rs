@@ -3,7 +3,7 @@
 //! break a peer on an older one.
 //!
 //! `layouts/<major>.<minor>.txt` holds, for one version, the postcard,
-//! protobuf, MessagePack and JSON encodings of a sample of every message:
+//! protobuf, `MessagePack` and JSON encodings of a sample of every message:
 //! every variant of every enum in one, and every field set to a value that
 //! isn't its default. A file is written once, when its version is new, and
 //! never again. Against the current version's file, the test checks that this
@@ -385,7 +385,7 @@ fn a_message_new_since_an_older_minor_version_must_say_it_is_newer() {
     let pinned: String = layout(&samples, version)
         .lines()
         .filter(|line| !line.starts_with("ToFrontEnd::close "))
-        .map(|line| format!("{line}\n"))
+        .flat_map(|line| [line, "\n"])
         .collect();
     let failures = check_older(version, &pinned, &samples);
     assert_eq!(failures.len(), 1, "{failures:?}");

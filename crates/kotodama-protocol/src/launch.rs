@@ -1,5 +1,15 @@
 //! Starting a program the user picked, such as an app or a Quicklink's
 //! command, so that it outlives the Daemon.
+//!
+//! # Owns
+//!
+//! - The launch prefix ([`LAUNCH_PREFIX`], [`launch_prefix`]) and the [`launch_command`] built with
+//!   it.
+//!
+//! # Not here
+//!
+//! - Running the command, detached and in a scope of its own: `kotodama-extension`'s `launch.rs`
+//!   and `scope.rs`.
 
 use std::env;
 use std::ffi::OsStr;
@@ -42,19 +52,23 @@ pub fn launch_prefix() -> Option<String> {
 }
 
 /// A command that runs `argv` after the launch prefix ([`launch_prefix`]), if
-/// one is in effect. Fails if
-/// `argv` is empty, or if its program isn't found, as starting it without a
-/// prefix would: with one, the prefix itself would start, and the error
-/// would be lost.
+/// one is in effect.
+///
+/// # Errors
+///
+/// [`io::ErrorKind::InvalidInput`] if `argv` is empty. With a prefix,
+/// [`io::ErrorKind::NotFound`] if its program isn't found, as starting it
+/// without a prefix would: otherwise the prefix itself would start, and the
+/// error would be lost.
 pub fn launch_command(argv: &[String]) -> io::Result<Command> {
-    let (program, args) = argv
+    let (program, rest) = argv
         .split_first()
         .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "nothing to run"))?;
     let prefix = launch_prefix().unwrap_or_default();
     let mut words = prefix.split_whitespace();
     let Some(first) = words.next() else {
         let mut command = Command::new(program);
-        command.args(args);
+        command.args(rest);
         return Ok(command);
     };
     if !is_found(program.as_ref()) {

@@ -166,6 +166,10 @@ fn to_extension_messages() -> Vec<ToExtension> {
 }
 
 fn from_extension_messages() -> Vec<FromExtension> {
+    [item_messages(), view_messages(), job_and_status_messages()].concat()
+}
+
+fn item_messages() -> Vec<FromExtension> {
     vec![
         FromExtension::AddItems { items: items() },
         FromExtension::RemoveItems {
@@ -231,6 +235,11 @@ fn from_extension_messages() -> Vec<FromExtension> {
                 arguments: BTreeMap::from([("name".into(), "demo".into())]),
             },
         },
+    ]
+}
+
+fn view_messages() -> Vec<FromExtension> {
+    vec![
         FromExtension::PushView(view(ViewContent::List {
             items: items(),
             filters_itself: false,
@@ -297,6 +306,11 @@ fn from_extension_messages() -> Vec<FromExtension> {
             view: "v".into(),
             with: view(ViewContent::Progress { job: "j".into() }),
         },
+    ]
+}
+
+fn job_and_status_messages() -> Vec<FromExtension> {
+    vec![
         FromExtension::JobProgress(Job {
             id: "install".into(),
             title: "Installing Go 1.23".into(),
@@ -368,6 +382,10 @@ fn from_extension_variant(message: &FromExtension) -> usize {
 const FROM_EXTENSION_VARIANTS: usize = 12;
 
 fn to_front_end_messages() -> Vec<ToFrontEnd> {
+    [results_messages(), menu_and_view_messages()].concat()
+}
+
+fn results_messages() -> Vec<ToFrontEnd> {
     vec![
         ToFrontEnd::Results {
             version: 1,
@@ -406,6 +424,11 @@ fn to_front_end_messages() -> Vec<ToFrontEnd> {
             results: vec![unavailable_row()],
             scope: None,
         },
+    ]
+}
+
+fn menu_and_view_messages() -> Vec<ToFrontEnd> {
+    vec![
         ToFrontEnd::Status {
             down: vec!["calculator".into()],
             problems: vec![Problem {
@@ -662,7 +685,7 @@ fn the_handshake_survives_every_wire_format() {
     round_trip(&Hello::new(&WireFormat::ALL));
 }
 
-/// Other languages read MessagePack with a generic decoder, so it must have the
+/// Other languages read `MessagePack` with a generic decoder, so it must have the
 /// same shape as JSON: named fields, variant names as keys or strings.
 #[test]
 fn messagepack_has_the_same_shape_as_json() {

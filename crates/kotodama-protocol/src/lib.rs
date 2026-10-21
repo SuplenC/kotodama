@@ -24,6 +24,18 @@
 //! for any other. The Daemon talks to every peer on its version or an older
 //! one, and turns away a newer one at the handshake. `tests/layout.rs` keeps
 //! the layout of every version and fails until the version goes up.
+//!
+//! # Owns
+//!
+//! - The protocol's types, re-exported here, and [`Error`], what every fallible operation on a
+//!   connection returns.
+//!
+//! # Not here
+//!
+//! - What the Daemon does with a message: `kotodamad`.
+//! - The runtime a Rust Extension is built on (the reader thread, sending only changed Items):
+//!   `kotodama-extension`.
+//! - The protobuf schema for other languages: `kotodama.proto`, written by `tests/layout.rs`.
 
 #![forbid(unsafe_code)]
 
@@ -64,6 +76,7 @@ pub use item::Argument;
 pub use item::Item;
 pub use item::ItemKind;
 pub use item::ItemRef;
+pub use item::KindError;
 pub use item::KindName;
 pub use item::NamespacedKind;
 pub use item::SHARED_KINDS;
@@ -89,6 +102,7 @@ pub use shortcut::UNDO_SHORTCUT;
 pub use shortcut::is_reserved_shortcut;
 pub use value::Bytes;
 pub use value::Fraction;
+pub use value::FractionError;
 pub use value::Table;
 pub use value::Value;
 pub use version::FIRST_VERSION;
@@ -105,20 +119,27 @@ pub use view::View;
 pub use view::ViewContent;
 pub use wire::WireFormat;
 
+/// Why a connection, a message or a Manifest failed.
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
+    /// Reading or writing the byte stream failed, or it ended inside a frame.
     #[error(transparent)]
-    Io(#[from] std::io::Error),
+    Io(std::io::Error),
+    /// A frame's header isn't a length and a newline.
     #[error("a frame header must be a decimal length followed by a newline")]
     BadFrameHeader,
+    /// A frame announced more than [`frame::MAX_FRAME_LEN`] bytes.
     #[error("a frame of {0} bytes is longer than the limit of {max}", max = frame::MAX_FRAME_LEN)]
     FrameTooLong(usize),
+    /// A message couldn't be written in the agreed Wire format.
     #[error("couldn't encode a message as {format:?}")]
     Encode {
         format: WireFormat,
         #[source]
         source: Box<dyn std::error::Error + Send + Sync>,
     },
+    /// A frame's payload isn't a message in the agreed Wire format. The reader
+    /// is left at the next frame.
     #[error("couldn't decode a message as {format:?}")]
     Decode {
         format: WireFormat,
@@ -136,8 +157,11 @@ pub enum Error {
     /// protocol this side was built for.
     #[error("the Daemon speaks protocol {daemon}, older than the {ours} this side needs: update Kotodama")]
     DaemonTooOld { daemon: Version, ours: Version },
+    /// A side's [`Hello`] leaves out JSON.
     #[error("a side's hello leaves out JSON, which every side must support")]
     JsonNotOffered,
+    /// A `manifest.toml` doesn't parse, or breaks one of its rules. The text
+    /// is the TOML parser's, which points at the line.
     #[error("invalid manifest: {0}")]
     Manifest(String),
 }

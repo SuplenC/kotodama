@@ -179,7 +179,9 @@ impl KindPlaces {
 fn kind_name(value: &Value) -> Result<&str, String> {
     match value {
         Value::String(kind) if kind == OTHERS => Ok(kind),
-        Value::String(kind) => KindName::new(kind.as_str()).map(|_| kind.as_str()),
+        Value::String(kind) => KindName::new(kind.as_str())
+            .map(|_| kind.as_str())
+            .map_err(|err| err.to_string()),
         _ => Err("should be the name of an Item kind, or `*`".to_owned()),
     }
 }
