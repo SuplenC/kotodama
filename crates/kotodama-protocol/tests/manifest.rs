@@ -29,6 +29,7 @@ fn a_manifest_declares_everything_an_extension_contributes() {
         kind = "folder"
         id = "open-suite"
         title = "Open as a suite"
+        confirm = true
         "#,
     )
     .unwrap();
@@ -61,9 +62,11 @@ fn a_manifest_declares_everything_an_extension_contributes() {
                 placeholder: Some("1.23".into()),
                 optional: false
             }],
+            confirm: false,
         }
     );
     assert_eq!(manifest.contributed_actions[1].kind.as_str(), "folder");
+    assert!(manifest.contributed_actions[1].action.confirm);
 }
 
 #[test]

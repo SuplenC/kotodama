@@ -837,6 +837,7 @@ mod tests {
                     title: format!("Action {n}"),
                     shortcut: None,
                     arguments: vec![],
+                    confirm: false,
                 })
                 .collect(),
         }

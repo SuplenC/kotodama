@@ -75,9 +75,10 @@ fn fingerprint(item: &Item) -> u64 {
         title,
         shortcut,
         arguments,
+        confirm,
     } in actions
     {
-        (id, title, shortcut).hash(&mut hasher);
+        (id, title, shortcut, confirm).hash(&mut hasher);
         for Argument {
             name,
             placeholder,
@@ -153,6 +154,16 @@ mod tests {
             optional: false,
         });
         let (_, added) = sent.update([asks]);
+        assert_eq!(ids(&added), ["a"]);
+    }
+
+    #[test]
+    fn asking_to_confirm_sends_the_item_again() {
+        let mut sent = SentItems::default();
+        let mut clear = item("a", "A");
+        sent.update([clear.clone()]);
+        clear.actions[0].confirm = true;
+        let (_, added) = sent.update([clear]);
         assert_eq!(ids(&added), ["a"]);
     }
 }

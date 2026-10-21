@@ -566,6 +566,7 @@ fn action() -> Action {
             placeholder: Some("1.23".into()),
             optional: true,
         }],
+        confirm: true,
     }
 }
 

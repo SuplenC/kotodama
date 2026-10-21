@@ -757,6 +757,7 @@ fn clear_history() -> Item {
             title: "Clear".into(),
             shortcut: None,
             arguments: Vec::new(),
+            confirm: false,
         }],
     }
 }
@@ -802,6 +803,7 @@ fn action_titled(id: &str, title: String) -> Action {
         title,
         shortcut: None,
         arguments: Vec::new(),
+        confirm: false,
     }
 }
 

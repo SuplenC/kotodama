@@ -789,6 +789,7 @@ mod tests {
                     title: format!("{id} it"),
                     shortcut: None,
                     arguments: vec![],
+                    confirm: false,
                 })
                 .collect(),
         }

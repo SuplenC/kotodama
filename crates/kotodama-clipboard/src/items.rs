@@ -114,7 +114,8 @@ pub fn history_item() -> Item {
         app_only: false,
         actions: vec![
             Action::new(OPEN, "Show Clipboard History"),
-            Action::new(CLEAR, "Clear Clipboard History"),
+            // Nothing brings the history back.
+            Action::new(CLEAR, "Clear Clipboard History").confirm(),
         ],
     }
 }

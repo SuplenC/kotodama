@@ -17,6 +17,7 @@ message Action {
   string title = 2;
   optional string shortcut = 3;
   repeated Argument arguments = 4;
+  bool confirm = 5;
 }
 
 message ActionRef {

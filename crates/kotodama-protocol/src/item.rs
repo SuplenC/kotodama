@@ -290,17 +290,38 @@ pub struct Action {
     pub shortcut: Option<String>,
     #[serde(default)]
     pub arguments: Vec<Argument>,
+    /// Whether the Front end asks the user to confirm before it runs, as for
+    /// an Action that can't be undone, such as powering off.
+    #[serde(default)]
+    pub confirm: bool,
 }
 
 impl Action {
-    /// An Action with no shortcut and no Arguments; the setters below add them.
+    /// An Action with no shortcut, no Arguments and no confirm step; the
+    /// setters below add them.
     pub fn new(id: impl Into<String>, title: impl Into<String>) -> Self {
         Action {
             id: id.into(),
             title: title.into(),
             shortcut: None,
             arguments: Vec::new(),
+            confirm: false,
         }
+    }
+
+    /// Has the Front end ask the user to confirm before the Action runs, so
+    /// a stray Enter can't run it.
+    ///
+    /// ```
+    /// use kotodama_protocol::Action;
+    ///
+    /// let clear = Action::new("clear", "Clear History").confirm();
+    /// assert!(clear.confirm);
+    /// ```
+    #[must_use]
+    pub fn confirm(mut self) -> Self {
+        self.confirm = true;
+        self
     }
 
     /// Binds the Action to `shortcut`, such as `ctrl+o`.

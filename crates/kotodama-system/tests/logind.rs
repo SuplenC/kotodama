@@ -217,12 +217,18 @@ fn suspend_hibernate_and_lock_call_logind_at_once_and_close_the_menu() {
 }
 
 #[test]
-fn power_off_reboot_and_log_out_ask_first_and_call_logind_once_confirmed() {
+fn power_off_reboot_and_log_out_ask_the_front_end_to_confirm_and_call_logind_once_run() {
     let bus = PrivateBus::start();
     let calls = bus.logind("no");
     let (mut extension, _runtime) = bus.extension();
-    extension.added();
+    let items = extension.added();
 
+    let confirmed: Vec<&str> = items
+        .iter()
+        .filter(|item| item.actions.iter().all(|action| action.confirm))
+        .map(|item| item.id.as_str())
+        .collect();
+    assert_eq!(confirmed, ["power-off", "reboot", "log-out"]);
     for (invocation, (id, call)) in [
         ("power-off", "PowerOff false"),
         ("reboot", "Reboot false"),
@@ -231,72 +237,25 @@ fn power_off_reboot_and_log_out_ask_first_and_call_logind_once_confirmed() {
     .into_iter()
     .enumerate()
     {
-        extension.start_run(invocation as u64, "run", power(id), BTreeMap::new());
-        let view = match extension.recv() {
-            FromExtension::PushView(view) => view,
-            other => panic!("expected the confirmation, got {other:?}"),
-        };
-        assert_eq!(extension.outcome(invocation as u64, |_| false), Outcome::KeepOpen);
-        assert!(matches!(view.content, ViewContent::Form { .. }), "{view:?}");
-        assert!(
-            calls.recv_timeout(Duration::from_millis(300)).is_err(),
-            "{id} ran before it was confirmed"
-        );
-
-        extension.send(ToExtension::SubmitForm {
-            view: view.id.clone(),
-            values: Table::new(),
-        });
-
+        assert_eq!(run(&mut extension, invocation as u64, id), Outcome::Close, "{id}");
         assert_eq!(next(&calls), call);
-        assert_eq!(extension.recv(), FromExtension::PopView { view: view.id });
     }
 }
 
 #[test]
-fn leaving_the_confirmation_runs_nothing() {
-    let bus = PrivateBus::start();
-    let calls = bus.logind("no");
-    let (mut extension, _runtime) = bus.extension();
-    extension.added();
-
-    extension.start_run(1, "run", power("power-off"), BTreeMap::new());
-    let FromExtension::PushView(view) = extension.recv() else {
-        panic!("expected the confirmation");
-    };
-    extension.outcome(1, |_| false);
-    extension.send(ToExtension::ViewPopped { view: view.id });
-
-    extension.quiet();
-    assert!(calls.try_recv().is_err(), "powered off without a confirmation");
-}
-
-#[test]
-fn a_confirmed_call_logind_turns_down_shows_why_in_place_of_the_form() {
+fn a_call_logind_turns_down_fails_with_why() {
     let bus = PrivateBus::start();
     let (mut extension, _runtime) = bus.extension();
     extension.added();
 
-    extension.start_run(1, "run", power("reboot"), BTreeMap::new());
-    let FromExtension::PushView(view) = extension.recv() else {
-        panic!("expected the confirmation");
-    };
-    extension.outcome(1, |_| false);
-    extension.send(ToExtension::SubmitForm {
-        view: view.id.clone(),
-        values: Table::new(),
-    });
+    let outcome = run(&mut extension, 1, "reboot");
 
-    let FromExtension::ReplaceView { view: replaced, with } = extension.recv() else {
-        panic!("expected the failure in place of the form");
-    };
-    assert_eq!(replaced, view.id);
-    let ViewContent::Detail { markdown, .. } = with.content else {
-        panic!("expected a detail View, got {with:?}");
+    let Outcome::Failed { message } = outcome else {
+        panic!("expected a failure, got {outcome:?}");
     };
     assert!(
-        markdown.starts_with("Couldn't reboot: logind turned it down"),
-        "{markdown}"
+        message.starts_with("Couldn't reboot: logind turned it down"),
+        "{message}"
     );
 }
 

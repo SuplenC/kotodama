@@ -226,6 +226,8 @@ struct ContributedActionToml {
     shortcut: Option<String>,
     #[serde(default)]
     arguments: Vec<Argument>,
+    #[serde(default)]
+    confirm: bool,
 }
 
 impl From<ContributedActionToml> for ContributedAction {
@@ -237,6 +239,7 @@ impl From<ContributedActionToml> for ContributedAction {
                 title: toml.title,
                 shortcut: toml.shortcut,
                 arguments: toml.arguments,
+                confirm: toml.confirm,
             },
         }
     }

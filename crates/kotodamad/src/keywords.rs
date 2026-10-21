@@ -133,6 +133,7 @@ impl Quicklink {
                 } else {
                     Vec::new()
                 },
+                confirm: false,
             }],
         }
     }

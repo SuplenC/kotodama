@@ -1,6 +1,6 @@
 //! The system Bundled extension. Power Off, Reboot, Suspend, Hibernate (when
 //! logind can), Lock Screen and Log Out are Items that call logind; the three
-//! that end the session ask first, in a form View. The open windows of a
+//! that end the session ask the Front end to confirm them. The open windows of a
 //! compositor with wlr-foreign-toplevel-management are Items of the shared
 //! kind `window`, kept up to date as the compositor reports them, sending only
 //! the windows that changed. Without the protocol, or on Hyprland, whose own
@@ -9,7 +9,7 @@
 //!
 //! # Owns
 //!
-//! - The protocol loop, and answering a run, a submitted form and the windows' changes.
+//! - The protocol loop, and answering a run and the windows' changes.
 //!
 //! # Not here
 //!
@@ -33,8 +33,6 @@ use kotodama_protocol::ItemKind;
 use kotodama_protocol::ItemRef;
 use kotodama_protocol::Outcome;
 use kotodama_protocol::ToExtension;
-use kotodama_protocol::View;
-use kotodama_protocol::ViewContent;
 use kotodama_system::logind;
 use kotodama_system::power;
 use kotodama_system::power::Power;
@@ -130,11 +128,6 @@ impl Extension {
                     .unwrap_or_else(|message| Outcome::Failed { message });
                 self.writer.send(&FromExtension::ActionDone { invocation, outcome })?;
             }
-            Event::Message(ToExtension::SubmitForm { view, .. }) => {
-                if let Some(power) = Power::from_confirmation(&view) {
-                    self.confirmed(power, view)?;
-                }
-            }
             Event::Message(_) => {}
             #[cfg(target_os = "linux")]
             Event::Own(change) => self.apply(change),
@@ -154,35 +147,10 @@ impl Extension {
             }
             kind if kind.name() == power::KIND && action == power::RUN => {
                 let power = Power::from_id(&item.id).ok_or_else(|| format!("`{}` isn't a power Item", item.id))?;
-                if power.asks_first() {
-                    self.writer
-                        .send(&FromExtension::PushView(power.confirmation()))
-                        .map_err(|err| err.to_string())?;
-                    return Ok(Outcome::KeepOpen);
-                }
                 logind::run(power).map_err(|err| failure(power, &err))?;
                 Ok(Outcome::Close)
             }
             _ => Err(format!("`{}` has no Action `{action}`", item.id)),
-        }
-    }
-
-    /// The user confirmed `power` in the View `view`: runs it, and takes the
-    /// View away, or shows why it failed in its place.
-    fn confirmed(&mut self, power: Power, view: String) -> Result<(), Error> {
-        match logind::run(power) {
-            Ok(()) => self.writer.send(&FromExtension::PopView { view }),
-            Err(err) => {
-                let with = View {
-                    id: view.clone(),
-                    title: power.title().to_owned(),
-                    content: ViewContent::Detail {
-                        markdown: failure(power, &err),
-                        metadata: Vec::new(),
-                    },
-                };
-                self.writer.send(&FromExtension::ReplaceView { view, with })
-            }
         }
     }
 

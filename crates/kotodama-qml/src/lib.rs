@@ -93,6 +93,10 @@ pub mod qobject {
         /// What the app's Extension says the user should know now, such as
         /// why it can't do anything, shown on the intro card; or empty.
         #[qproperty(QString, intro_note, cxx_name = "introNote", READ, NOTIFY)]
+        /// What the footer asks while an Action that asks first waits for
+        /// Enter again, such as `Power Off? ↵ Confirm · Esc Cancel`; empty
+        /// when none waits.
+        #[qproperty(QString, confirming, READ, NOTIFY)]
         #[qproperty(
             QList_QVariant,
             intro_examples,
@@ -106,9 +110,22 @@ pub mod qobject {
         fn set_highlight_color(self: Pin<&mut KotodamaSearch>, color: QString);
 
         /// Runs the primary Action of the Result in `row`. False if there is
-        /// none, or the Daemon isn't there to run it.
+        /// none, or the Daemon isn't there to run it. One that asks first
+        /// waits for `confirm`, with `confirming` set.
         #[qinvokable]
         fn run(self: Pin<&mut KotodamaSearch>, row: i32) -> bool;
+
+        /// Runs the Action waiting for confirmation. False if none waits, or
+        /// the Daemon isn't there to run it.
+        #[qinvokable]
+        fn confirm(self: Pin<&mut KotodamaSearch>) -> bool;
+
+        /// Drops the Action waiting for confirmation, running nothing. False
+        /// if none waits. Typing, moving the selection, or a View opening or
+        /// closing drops it too.
+        #[qinvokable]
+        #[cxx_name = "cancelConfirm"]
+        fn cancel_confirm(self: Pin<&mut KotodamaSearch>) -> bool;
 
         /// The Action panel of the Result in `row`: the Item's own Actions,
         /// then Contributed actions grouped by Extension. See
@@ -121,7 +138,8 @@ pub mod qobject {
         #[qinvokable]
         fn hints(self: &KotodamaSearch, row: i32) -> QString;
 
-        /// Runs the `n`th Action of the Result in `row`'s Action panel.
+        /// Runs the `n`th Action of the Result in `row`'s Action panel. One
+        /// that asks first waits for `confirm`, with `confirming` set.
         #[qinvokable]
         #[cxx_name = "runAction"]
         fn run_action(self: Pin<&mut KotodamaSearch>, row: i32, n: i32) -> bool;
@@ -382,6 +400,9 @@ pub struct SearchRust {
     intro_about: QString,
     intro_note: QString,
     intro_examples: variant::List,
+    confirming: QString,
+    /// The run of an Action that asks first, sent once the user confirms.
+    unconfirmed: Option<FromFrontEnd>,
     /// The intro card shown, which the two above hold.
     intro: Option<Intro>,
     /// The word of the app the search is in, which `query` follows.
@@ -422,6 +443,8 @@ impl Default for SearchRust {
             intro_about: QString::default(),
             intro_note: QString::default(),
             intro_examples: variant::List::default(),
+            confirming: QString::default(),
+            unconfirmed: None,
             intro: None,
             word: None,
             sent: None,
@@ -452,6 +475,7 @@ impl KotodamaSearch {
     /// have the same text as the box.
     fn set_query(mut self: Pin<&mut Self>, query: QString) {
         if self.query != query {
+            self.as_mut().cancel_confirm();
             self.as_mut().rust_mut().query = query;
             self.as_mut().query_changed();
         }
@@ -592,16 +616,51 @@ impl KotodamaSearch {
         let Some(row) = self.row(row) else {
             return false;
         };
-        let Some(action) = usize::try_from(n).ok().and_then(|n| row.action(n)) else {
+        let Ok(n) = usize::try_from(n) else {
             return false;
         };
+        let Some(action) = row.action(n) else {
+            return false;
+        };
+        let asks = row.confirmation(n);
         let message = FromFrontEnd::RunAction {
             result: row.result.clone(),
             shown: self.on_screen,
             action,
             arguments: Default::default(),
         };
+        match asks {
+            Some(asks) => {
+                let mut this = self.as_mut().rust_mut();
+                this.unconfirmed = Some(message);
+                this.confirming = QString::from(&asks);
+                self.as_mut().confirming_changed();
+                true
+            }
+            None => {
+                self.as_mut().cancel_confirm();
+                self.as_mut().rust_mut().send(&message)
+            }
+        }
+    }
+
+    fn confirm(mut self: Pin<&mut Self>) -> bool {
+        let Some(message) = self.as_mut().rust_mut().unconfirmed.take() else {
+            return false;
+        };
+        self.as_mut().cancel_confirm();
         self.as_mut().rust_mut().send(&message)
+    }
+
+    fn cancel_confirm(mut self: Pin<&mut Self>) -> bool {
+        if self.confirming.is_empty() {
+            return false;
+        }
+        let mut this = self.as_mut().rust_mut();
+        this.unconfirmed = None;
+        this.confirming = QString::default();
+        self.as_mut().confirming_changed();
+        true
     }
 
     fn run_shortcut(self: Pin<&mut Self>, row: i32, key: i32, modifiers: i32) -> bool {
@@ -668,6 +727,9 @@ impl KotodamaSearch {
 
     fn select(mut self: Pin<&mut Self>, row: i32) {
         let selected = self.row(row).map(|row| row.result.clone());
+        if selected != self.selected {
+            self.as_mut().cancel_confirm();
+        }
         let mut this = self.as_mut().rust_mut();
         this.selected = selected;
         if row > 0 && this.listed.is_none() && !this.selection_moved {
@@ -972,6 +1034,7 @@ impl KotodamaSearch {
         this.depth = depth;
         self.as_mut().view_changed();
         if deeper {
+            self.as_mut().cancel_confirm();
             self.as_mut().depth_changed();
         }
         self.as_mut().show_rows();

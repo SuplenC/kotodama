@@ -222,7 +222,7 @@ Some need extras: the shell example Extension for the Views checks (link `exampl
 - [ ] On Hyprland, every window shows once (the Hyprland Extension's), and the Daemon's log says the system Extension leaves the windows to it.
 - [ ] "Lock Screen" locks through hypridle's `lock_cmd`.
 - [ ] "Suspend" suspends, and the menu is closed on wake.
-- [ ] "Reboot" asks first; Esc leaves it, Enter reboots.
+- [ ] "Reboot" asks in the footer first; Esc drops the question and keeps the menu open, a second Enter reboots.
 - [ ] "Hibernate" is listed only where `busctl call org.freedesktop.login1 /org/freedesktop/login1 org.freedesktop.login1.Manager CanHibernate` says `yes`.
 
 ### Apps

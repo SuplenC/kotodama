@@ -29,12 +29,14 @@ fn batch() -> FromExtension {
                     title: "Open".into(),
                     shortcut: None,
                     arguments: vec![],
+                    confirm: false,
                 },
                 Action {
                     id: "new-window".into(),
                     title: "Open a new window".into(),
                     shortcut: Some("ctrl+n".into()),
                     arguments: vec![],
+                    confirm: false,
                 },
             ],
         })
