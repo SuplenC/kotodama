@@ -45,6 +45,21 @@ fn settle(h: &mut Harness, indexed: &Receiver<Event>) {
     }
 }
 
+/// Hands the Daemon the first version of its Extension's Items and the hot
+/// Items planned as the Extension came up. The indexing thread sends them
+/// apart, or from one batch with the version first.
+fn first_version_and_plan(h: &mut Harness, indexed: &Receiver<Event>) {
+    let (mut version, mut plan) = (false, false);
+    while !(version && plan) {
+        let event = indexed
+            .recv_timeout(Duration::from_secs(5))
+            .expect("the indexing thread sent nothing");
+        version |= matches!(event, Event::Indexed(_));
+        plan |= matches!(event, Event::Kept(_));
+        h.event(event);
+    }
+}
+
 /// Hands the Daemon what the indexing thread sends, up to the first event
 /// that is `awaited`.
 fn next(h: &mut Harness, indexed: &Receiver<Event>, awaited: fn(&Event) -> bool) {
@@ -189,10 +204,13 @@ fn routine(hot: usize) -> (Harness, FrontEnd) {
     (h, ui)
 }
 
-/// Waits for `minute` past the next `hour` o'clock.
+/// Waits for the next `hour`:`minute`, in UTC, in one step. Two steps can
+/// plan the hot Items twice, and [`next_hot`] would hand over the plan made
+/// at the first.
 fn advance_to(h: &mut Harness, hour: u64, minute: u64) {
-    h.advance_to(hour);
-    h.advance(Duration::from_secs(minute * 60));
+    let time_of_day = (START + h.elapsed().as_secs()) % DAY_SECS;
+    let wait = (hour * 3600 + minute * 60 + DAY_SECS - time_of_day) % DAY_SECS;
+    h.advance(Duration::from_secs(if wait == 0 { DAY_SECS } else { wait }));
 }
 
 #[test]
@@ -312,7 +330,7 @@ fn a_learned_choice_is_resident_once_planned_and_its_query_reads_nothing_off_its
     cold.daemon.set_hot_capacity(0);
     let titles_added = ["Firefox", "Fire Alarm", "Mail"];
     h.add(&apps, titles_added.map(app).into());
-    settle(&mut h, &indexed);
+    first_version_and_plan(&mut h, &indexed);
     cold.add(&cold_apps, titles_added.map(app).into());
     // Far from eight o'clock, when it was picked: no habit makes it hot.
     advance_to(&mut h, 20, 0);
@@ -375,7 +393,7 @@ impl AheadAndHere {
             &ahead_apps,
             titles.iter().map(|&title| app(title)).collect(),
         );
-        settle(&mut ahead, &indexed);
+        first_version_and_plan(&mut ahead, &indexed);
         here.add(&here_apps, titles.iter().map(|&title| app(title)).collect());
         let mut both = AheadAndHere {
             ahead,
