@@ -5,10 +5,15 @@
 //! away a newer peer with an error naming the version the peer needs. A peer
 //! talks to a Daemon on its version or a newer one, which adapts to it.
 
-use serde::{Deserialize, Deserializer, Serialize};
+use serde::Deserialize;
+use serde::Deserializer;
+use serde::Serialize;
 
-use crate::version::{FIRST_VERSION, PROTOCOL_VERSION, Version};
-use crate::{Error, WireFormat};
+use crate::Error;
+use crate::WireFormat;
+use crate::version::FIRST_VERSION;
+use crate::version::PROTOCOL_VERSION;
+use crate::version::Version;
 
 /// What one side sends to open a connection. Both sides send theirs straight
 /// away, without waiting for the other's. The Daemon then checks the peer's
@@ -75,10 +80,7 @@ impl Hello {
     pub fn accept_daemon(&self, daemon: &Hello) -> Result<WireFormat, Error> {
         let (ours, theirs) = (self.protocol(), daemon.protocol());
         if theirs < ours {
-            return Err(Error::DaemonTooOld {
-                daemon: theirs,
-                ours,
-            });
+            return Err(Error::DaemonTooOld { daemon: theirs, ours });
         }
         self.negotiate(daemon)
     }

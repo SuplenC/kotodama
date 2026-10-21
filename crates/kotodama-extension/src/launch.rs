@@ -8,13 +8,17 @@
 //! Extension carries the protocol; and in a process group of its own, so a
 //! signal to its starter's group doesn't reach it.
 
-use std::io::{self, Read};
+use std::io;
+use std::io::Read;
 use std::os::unix::process::CommandExt;
 use std::path::Path;
-use std::process::{Command, ExitStatus, Stdio};
+use std::process::Command;
+use std::process::ExitStatus;
+use std::process::Stdio;
 use std::sync::mpsc;
 use std::thread;
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use std::time::Instant;
 
 use kotodama_protocol::launch_command;
 
@@ -37,10 +41,7 @@ fn command(argv: &[String], dir: Option<&Path>) -> io::Result<Command> {
     {
         return Err(io::Error::new(
             io::ErrorKind::NotFound,
-            format!(
-                "{program} should start in {}, which doesn't exist",
-                dir.display()
-            ),
+            format!("{program} should start in {}, which doesn't exist", dir.display()),
         ));
     }
     let mut command = launch_command(argv)?;
@@ -134,10 +135,7 @@ fn start(
             // Looked for before the wait, while the process's start time,
             // what came before it, can still be read.
             let watched = !within.is_zero() && !crate::closing::ran_before(&app, pid);
-            if child.wait().is_ok()
-                && watched
-                && crate::closing::ended_by(cgroup.as_deref(), pid, deadline)
-            {
+            if child.wait().is_ok() && watched && crate::closing::ended_by(cgroup.as_deref(), pid, deadline) {
                 closed();
             }
         })
@@ -159,11 +157,7 @@ pub struct Ended {
 /// Starts `argv`, in `dir` if given, with its output read, and calls `ended`
 /// once it exits. Only its last line is kept, so a chatty program costs no
 /// memory.
-pub fn background(
-    argv: &[String],
-    dir: Option<&Path>,
-    ended: impl FnOnce(Ended) + Send + 'static,
-) -> io::Result<()> {
+pub fn background(argv: &[String], dir: Option<&Path>, ended: impl FnOnce(Ended) + Send + 'static) -> io::Result<()> {
     let (reader, writer) = io::pipe()?;
     let mut command = command(argv, dir)?;
     command.stdout(writer.try_clone()?).stderr(writer);
@@ -237,9 +231,6 @@ mod tests {
         assert_eq!(last_line_of(&b"no end"[..]), Some("no end".into()));
         assert_eq!(last_line_of(&b""[..]), None);
         let long = "x".repeat(10_000);
-        assert_eq!(
-            last_line_of(long.as_bytes()).map(|line| line.len()),
-            Some(LAST_LINE)
-        );
+        assert_eq!(last_line_of(long.as_bytes()).map(|line| line.len()), Some(LAST_LINE));
     }
 }

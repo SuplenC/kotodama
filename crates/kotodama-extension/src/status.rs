@@ -2,7 +2,9 @@
 
 use std::io::Write;
 
-use kotodama_protocol::{ChannelWriter, Error, FromExtension};
+use kotodama_protocol::ChannelWriter;
+use kotodama_protocol::Error;
+use kotodama_protocol::FromExtension;
 
 /// What the Daemon was last told of whether the Extension can do anything,
 /// so each change is sent once. The search shows the Extension's app only
@@ -45,11 +47,7 @@ impl SentStatus {
     /// # Errors
     ///
     /// When the message can't be written to the Daemon.
-    pub fn noted<W: Write>(
-        &mut self,
-        writer: &mut ChannelWriter<W>,
-        note: impl AsRef<str>,
-    ) -> Result<(), Error> {
+    pub fn noted<W: Write>(&mut self, writer: &mut ChannelWriter<W>, note: impl AsRef<str>) -> Result<(), Error> {
         self.send(writer, true, Some(note.as_ref()))
     }
 
@@ -59,20 +57,11 @@ impl SentStatus {
     /// # Errors
     ///
     /// When the message can't be written to the Daemon.
-    pub fn unusable<W: Write>(
-        &mut self,
-        writer: &mut ChannelWriter<W>,
-        why: impl AsRef<str>,
-    ) -> Result<(), Error> {
+    pub fn unusable<W: Write>(&mut self, writer: &mut ChannelWriter<W>, why: impl AsRef<str>) -> Result<(), Error> {
         self.send(writer, false, Some(why.as_ref()))
     }
 
-    fn send<W: Write>(
-        &mut self,
-        writer: &mut ChannelWriter<W>,
-        usable: bool,
-        note: Option<&str>,
-    ) -> Result<(), Error> {
+    fn send<W: Write>(&mut self, writer: &mut ChannelWriter<W>, usable: bool, note: Option<&str>) -> Result<(), Error> {
         match self.update(usable, note) {
             Some(message) => writer.send(&message),
             None => Ok(()),

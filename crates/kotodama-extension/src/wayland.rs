@@ -6,7 +6,11 @@
 mod data_control;
 mod display;
 
-pub use data_control::{DataControl, DataControlHandler, Offer, OfferMimes, SourceData};
+pub use data_control::DataControl;
+pub use data_control::DataControlHandler;
+pub use data_control::Offer;
+pub use data_control::OfferMimes;
+pub use data_control::SourceData;
 pub use display::Display;
 
 /// The Wayland crates [`delegate_data_control!`](crate::delegate_data_control)

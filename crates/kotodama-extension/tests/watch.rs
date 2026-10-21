@@ -3,11 +3,14 @@
 #![cfg(feature = "watch")]
 
 use std::fs;
-use std::path::{Path, PathBuf};
-use std::sync::mpsc::{self, Receiver};
+use std::path::Path;
+use std::path::PathBuf;
+use std::sync::mpsc;
+use std::sync::mpsc::Receiver;
 use std::time::Duration;
 
-use kotodama_extension::watch::{RecursiveMode, Watcher};
+use kotodama_extension::watch::RecursiveMode;
+use kotodama_extension::watch::Watcher;
 use tempfile::TempDir;
 
 const SETTLE: Duration = Duration::from_millis(50);
@@ -121,11 +124,7 @@ fn directories_no_longer_asked_for_are_no_longer_watched() {
     let (one, two) = (root.path().join("one"), root.path().join("two"));
     fs::create_dir(&one).unwrap();
     fs::create_dir(&two).unwrap();
-    let (watcher, changes) = watch(
-        vec![one.clone(), two.clone()],
-        RecursiveMode::NonRecursive,
-        |_| true,
-    );
+    let (watcher, changes) = watch(vec![one.clone(), two.clone()], RecursiveMode::NonRecursive, |_| true);
     watcher.watch(vec![two.clone()]);
     fs::write(one.join("file"), "x").unwrap();
     assert!(quiet(&changes));
@@ -274,11 +273,7 @@ fn only_a_watched_link_replaced_counts_in_its_directory() {
     fs::create_dir_all(generation.join("share")).unwrap();
     let system = root.path().join("current-system");
     relink(&generation, &system);
-    let (_watcher, changes) = watch(
-        vec![system.join("share")],
-        RecursiveMode::NonRecursive,
-        |_| false,
-    );
+    let (_watcher, changes) = watch(vec![system.join("share")], RecursiveMode::NonRecursive, |_| false);
     fs::write(root.path().join("unrelated"), "x").unwrap();
     relink(&generation, &root.path().join("booted-system"));
     assert!(quiet(&changes));

@@ -18,7 +18,9 @@
 //! What is called: notifications are `kotodamad`'s `notify`, scopes
 //! `crate::scope`, logind the `system` Extension's.
 
-use std::io::{self, Read, Write};
+use std::io;
+use std::io::Read;
+use std::io::Write;
 use std::os::unix::net::UnixStream;
 use std::path::Path;
 use std::time::Duration;
@@ -75,10 +77,7 @@ impl Error {
     pub fn is_absent(&self) -> bool {
         match self {
             Error::NoAddress => true,
-            Error::Connect(err) => matches!(
-                err.kind(),
-                io::ErrorKind::NotFound | io::ErrorKind::ConnectionRefused
-            ),
+            Error::Connect(err) => matches!(err.kind(), io::ErrorKind::NotFound | io::ErrorKind::ConnectionRefused),
             _ => false,
         }
     }
@@ -168,11 +167,7 @@ impl Bus {
     /// The EXTERNAL mechanism: the peer checks the uid on the socket against
     /// the one claimed. `BEGIN` goes out with the first message.
     fn authenticate(&mut self) -> Result<(), Error> {
-        let uid: String = uid()
-            .to_string()
-            .bytes()
-            .map(|byte| format!("{byte:02x}"))
-            .collect();
+        let uid: String = uid().to_string().bytes().map(|byte| format!("{byte:02x}")).collect();
         self.stream
             .write_all(format!("\0AUTH EXTERNAL {uid}\r\n").as_bytes())
             .map_err(Error::Io)?;
@@ -186,9 +181,7 @@ impl Bus {
             }
         }
         if !line.starts_with(b"OK ") {
-            return Err(Error::Refused(
-                String::from_utf8_lossy(&line).trim().to_owned(),
-            ));
+            return Err(Error::Refused(String::from_utf8_lossy(&line).trim().to_owned()));
         }
         self.stream.write_all(b"BEGIN\r\n").map_err(Error::Io)
     }
@@ -251,11 +244,7 @@ impl Bus {
     ///
     /// When the call can't be made or answered in time, or answers with an
     /// error.
-    pub fn call(
-        &mut self,
-        call: &Call,
-        mut meanwhile: impl FnMut(&Message),
-    ) -> Result<Message, Error> {
+    pub fn call(&mut self, call: &Call, mut meanwhile: impl FnMut(&Message)) -> Result<Message, Error> {
         let serial = self.send(call)?;
         loop {
             let message = self.read()?;
@@ -648,9 +637,7 @@ fn unescape(value: &str) -> String {
     let mut i = 0;
     while i < bytes.len() {
         if bytes[i] == b'%'
-            && let Some(byte) = value
-                .get(i + 1..i + 3)
-                .and_then(|hex| u8::from_str_radix(hex, 16).ok())
+            && let Some(byte) = value.get(i + 1..i + 3).and_then(|hex| u8::from_str_radix(hex, 16).ok())
         {
             out.push(byte);
             i += 3;

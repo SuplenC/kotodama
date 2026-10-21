@@ -5,20 +5,18 @@
 //! describes them for other languages' generated code. serde's data model maps
 //! onto protobuf by position:
 //!
-//! - A struct is a message, and its fields are numbered from 1 in the order
-//!   they are declared. A field is never renumbered, so fields are only ever
-//!   added at the end.
-//! - An enum is a message holding a `oneof` of its variants, numbered from 1
-//!   in declaration order. A unit variant holds an empty message, a newtype
-//!   variant its value, and a struct variant a message of its fields.
-//! - `Option` is a field that is present or absent. A `Vec` is a repeated
-//!   field, packed for numbers. A map is protobuf's `map`, which is a repeated
-//!   message of a key (field 1) and a value (field 2).
-//! - A list or a map where protobuf allows no repeated field (an element of a
-//!   list, a map's value, a variant) is wrapped in a message holding it as
-//!   field 1.
-//! - Unsigned integers are `uint32`/`uint64`, signed ones `sint64` (zigzag),
-//!   `f32` is `float` and `f64` `double`.
+//! - A struct is a message, and its fields are numbered from 1 in the order they are declared. A
+//!   field is never renumbered, so fields are only ever added at the end.
+//! - An enum is a message holding a `oneof` of its variants, numbered from 1 in declaration order.
+//!   A unit variant holds an empty message, a newtype variant its value, and a struct variant a
+//!   message of its fields.
+//! - `Option` is a field that is present or absent. A `Vec` is a repeated field, packed for
+//!   numbers. A map is protobuf's `map`, which is a repeated message of a key (field 1) and a value
+//!   (field 2).
+//! - A list or a map where protobuf allows no repeated field (an element of a list, a map's value,
+//!   a variant) is wrapped in a message holding it as field 1.
+//! - Unsigned integers are `uint32`/`uint64`, signed ones `sint64` (zigzag), `f32` is `float` and
+//!   `f64` `double`.
 //!
 //! Decoding follows proto3: fields may come in any order, unknown fields are
 //! skipped, and a field that is absent takes protobuf's default (zero, false,

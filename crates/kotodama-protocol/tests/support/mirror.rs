@@ -198,9 +198,7 @@ pub mod prost {
         };
         match &item.kind {
             real::ItemKind::App { desktop_id } => mirror.desktop_id = Some(desktop_id.clone()),
-            real::ItemKind::File { path }
-            | real::ItemKind::Folder { path }
-            | real::ItemKind::Project { path } => {
+            real::ItemKind::File { path } | real::ItemKind::Folder { path } | real::ItemKind::Project { path } => {
                 mirror.path = Some(path.display().to_string());
             }
             real::ItemKind::Window { address } => mirror.address = Some(address.clone()),
@@ -272,8 +270,10 @@ pub mod prost {
 
 /// The protocol's types as müsli derives them, for its `wire` format.
 pub mod musli {
-    use ::musli::{Decode, Encode};
-    use serde::{Deserialize, Serialize};
+    use ::musli::Decode;
+    use ::musli::Encode;
+    use serde::Deserialize;
+    use serde::Serialize;
 
     use super::real;
 

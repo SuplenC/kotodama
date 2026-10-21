@@ -1,9 +1,12 @@
 //! Items, Item kinds and the Actions an Item offers.
 
 use std::fmt;
-use std::path::{Path, PathBuf};
+use std::path::Path;
+use std::path::PathBuf;
 
-use serde::{Deserialize, Serialize, Serializer};
+use serde::Deserialize;
+use serde::Serialize;
+use serde::Serializer;
 
 /// One searchable thing an Extension contributes.
 ///
@@ -147,10 +150,7 @@ impl ItemKind {
             "url" => Some("url"),
             _ => None,
         };
-        if let Some((extra, _)) = present
-            .iter()
-            .find(|&&(field, set)| set && Some(field) != needs)
-        {
+        if let Some((extra, _)) = present.iter().find(|&&(field, set)| set && Some(field) != needs) {
             return Err(format!("a `{name}` Item can't have `{extra}`"));
         }
         let missing = || format!("a `{name}` Item needs `{}`", needs.unwrap_or_default());
@@ -204,9 +204,7 @@ impl NamespacedKind {
     pub fn new(kind: impl Into<String>) -> Result<Self, String> {
         let kind = kind.into();
         match kind.split_once('.') {
-            Some((extension, local)) if is_valid_name(extension) && is_valid_name(local) => {
-                Ok(NamespacedKind(kind))
-            }
+            Some((extension, local)) if is_valid_name(extension) && is_valid_name(local) => Ok(NamespacedKind(kind)),
             None if is_valid_name(&kind) => Err(format!(
                 "unknown Item kind `{kind}`; an Extension's own kinds are named `<extension>.{kind}`"
             )),
@@ -221,9 +219,7 @@ impl NamespacedKind {
     }
 
     pub fn extension(&self) -> &str {
-        self.0
-            .split_once('.')
-            .map_or("", |(extension, _)| extension)
+        self.0.split_once('.').map_or("", |(extension, _)| extension)
     }
 }
 

@@ -7,8 +7,14 @@
 
 use std::hint::black_box;
 
-use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
-use kotodama_protocol::{FromExtension, FromFrontEnd, ToFrontEnd, WireFormat};
+use criterion::BenchmarkId;
+use criterion::Criterion;
+use criterion::criterion_group;
+use criterion::criterion_main;
+use kotodama_protocol::FromExtension;
+use kotodama_protocol::FromFrontEnd;
+use kotodama_protocol::ToFrontEnd;
+use kotodama_protocol::WireFormat;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 
@@ -54,8 +60,7 @@ fn prost<T: prost::Message + Default>(c: &mut Criterion, group: &str, message: &
 
 fn musli<T>(c: &mut Criterion, group: &str, message: &T)
 where
-    T: musli::Encode<musli::mode::Binary>
-        + for<'de> musli::Decode<'de, musli::mode::Binary, musli::alloc::Global>,
+    T: musli::Encode<musli::mode::Binary> + for<'de> musli::Decode<'de, musli::mode::Binary, musli::alloc::Global>,
 {
     let mut group = c.benchmark_group(group);
     let mut buf = Vec::new();
@@ -94,11 +99,7 @@ fn serde_on_copies<T: Serialize + DeserializeOwned>(c: &mut Criterion, group: &s
     group.finish();
 }
 
-fn bilrost<T: bilrost::Message + bilrost::OwnedMessage>(
-    c: &mut Criterion,
-    group: &str,
-    message: &T,
-) {
+fn bilrost<T: bilrost::Message + bilrost::OwnedMessage>(c: &mut Criterion, group: &str, message: &T) {
     let mut group = c.benchmark_group(group);
     let mut buf = Vec::new();
     group.bench_function(BenchmarkId::new("encode", "bilrost"), |b| {

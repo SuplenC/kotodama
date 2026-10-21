@@ -1,10 +1,19 @@
 //! Writing a serde value as a protobuf message.
 
-use serde::ser::{self, Impossible, Serialize, Serializer};
+use serde::ser;
+use serde::ser::Impossible;
+use serde::ser::Serialize;
+use serde::ser::Serializer;
 
-use super::{
-    FIXED32, FIXED64, LEN, ProtobufError, VARINT, varint_len, write_key, write_varint, zigzag,
-};
+use super::FIXED32;
+use super::FIXED64;
+use super::LEN;
+use super::ProtobufError;
+use super::VARINT;
+use super::varint_len;
+use super::write_key;
+use super::write_varint;
+use super::zigzag;
 
 type Result<T> = std::result::Result<T, ProtobufError>;
 
@@ -103,11 +112,7 @@ impl<'a> Serializer for Root<'a> {
         Ok(())
     }
 
-    fn serialize_newtype_struct<T: Serialize + ?Sized>(
-        self,
-        _: &'static str,
-        value: &T,
-    ) -> Result<()> {
+    fn serialize_newtype_struct<T: Serialize + ?Sized>(self, _: &'static str, value: &T) -> Result<()> {
         value.serialize(self)
     }
 
@@ -133,11 +138,7 @@ impl<'a> Serializer for Root<'a> {
         Err(no_tuples())
     }
 
-    fn serialize_tuple_struct(
-        self,
-        _: &'static str,
-        _: usize,
-    ) -> Result<Self::SerializeTupleStruct> {
+    fn serialize_tuple_struct(self, _: &'static str, _: usize) -> Result<Self::SerializeTupleStruct> {
         Err(no_tuples())
     }
 
@@ -378,11 +379,7 @@ impl<'a> Serializer for Field<'a> {
         Ok(())
     }
 
-    fn serialize_newtype_struct<T: Serialize + ?Sized>(
-        self,
-        _: &'static str,
-        value: &T,
-    ) -> Result<()> {
+    fn serialize_newtype_struct<T: Serialize + ?Sized>(self, _: &'static str, value: &T) -> Result<()> {
         value.serialize(self)
     }
 
@@ -427,11 +424,7 @@ impl<'a> Serializer for Field<'a> {
         Err(no_tuples())
     }
 
-    fn serialize_tuple_struct(
-        self,
-        _: &'static str,
-        _: usize,
-    ) -> Result<Self::SerializeTupleStruct> {
+    fn serialize_tuple_struct(self, _: &'static str, _: usize) -> Result<Self::SerializeTupleStruct> {
         Err(no_tuples())
     }
 
@@ -470,13 +463,7 @@ impl<'a> Serializer for Field<'a> {
         Ok(Fields::new(self.buf, &[start]))
     }
 
-    fn serialize_struct_variant(
-        self,
-        _: &'static str,
-        index: u32,
-        _: &'static str,
-        _: usize,
-    ) -> Result<Fields<'a>> {
+    fn serialize_struct_variant(self, _: &'static str, index: u32, _: &'static str, _: usize) -> Result<Fields<'a>> {
         write_key(self.buf, self.number, LEN);
         let outer = open(self.buf);
         write_key(self.buf, index + 1, LEN);
@@ -619,9 +606,7 @@ impl<'r> Serializer for Element<'r, '_> {
     }
 
     fn serialize_none(self) -> Result<()> {
-        Err(ProtobufError::new(
-            "protobuf can't hold an empty element in a list",
-        ))
+        Err(ProtobufError::new("protobuf can't hold an empty element in a list"))
     }
 
     fn serialize_some<T: Serialize + ?Sized>(self, value: &T) -> Result<()> {
@@ -636,20 +621,11 @@ impl<'r> Serializer for Element<'r, '_> {
         self.entry().serialize_bytes(&[])
     }
 
-    fn serialize_unit_variant(
-        self,
-        name: &'static str,
-        index: u32,
-        variant: &'static str,
-    ) -> Result<()> {
+    fn serialize_unit_variant(self, name: &'static str, index: u32, variant: &'static str) -> Result<()> {
         self.entry().serialize_unit_variant(name, index, variant)
     }
 
-    fn serialize_newtype_struct<T: Serialize + ?Sized>(
-        self,
-        _: &'static str,
-        value: &T,
-    ) -> Result<()> {
+    fn serialize_newtype_struct<T: Serialize + ?Sized>(self, _: &'static str, value: &T) -> Result<()> {
         value.serialize(self)
     }
 
@@ -660,8 +636,7 @@ impl<'r> Serializer for Element<'r, '_> {
         variant: &'static str,
         value: &T,
     ) -> Result<()> {
-        self.entry()
-            .serialize_newtype_variant(name, index, variant, value)
+        self.entry().serialize_newtype_variant(name, index, variant, value)
     }
 
     fn serialize_seq(self, len: Option<usize>) -> Result<Repeated<'r>> {
@@ -672,11 +647,7 @@ impl<'r> Serializer for Element<'r, '_> {
         Err(no_tuples())
     }
 
-    fn serialize_tuple_struct(
-        self,
-        _: &'static str,
-        _: usize,
-    ) -> Result<Self::SerializeTupleStruct> {
+    fn serialize_tuple_struct(self, _: &'static str, _: usize) -> Result<Self::SerializeTupleStruct> {
         Err(no_tuples())
     }
 
@@ -705,8 +676,7 @@ impl<'r> Serializer for Element<'r, '_> {
         variant: &'static str,
         len: usize,
     ) -> Result<Fields<'r>> {
-        self.entry()
-            .serialize_struct_variant(name, index, variant, len)
+        self.entry().serialize_struct_variant(name, index, variant, len)
     }
 
     fn is_human_readable(&self) -> bool {

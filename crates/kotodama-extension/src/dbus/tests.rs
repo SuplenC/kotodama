@@ -1,4 +1,7 @@
-use std::io::{BufRead, BufReader, Read, Write};
+use std::io::BufRead;
+use std::io::BufReader;
+use std::io::Read;
+use std::io::Write;
 use std::os::unix::net::UnixStream;
 use std::thread;
 
@@ -6,12 +9,7 @@ use super::*;
 
 /// A message from the peer: `kind`, the header fields, then `body` of type
 /// `signature`.
-fn message(
-    kind: u8,
-    fields: impl FnOnce(&mut Marshal),
-    signature: &str,
-    body: &Marshal,
-) -> Vec<u8> {
+fn message(kind: u8, fields: impl FnOnce(&mut Marshal), signature: &str, body: &Marshal) -> Vec<u8> {
     let mut m = Marshal::default();
     m.0.extend_from_slice(&[b'l', kind, 0, 1]);
     m.u32(body.0.len() as u32);
@@ -49,12 +47,7 @@ pub(crate) fn job_removed(unit: &str, result: &str) -> Vec<u8> {
     signal.string("/org/freedesktop/systemd1/job/4");
     signal.string(unit);
     signal.string(result);
-    message(
-        SIGNAL,
-        |m| m.field(MEMBER, "s", "JobRemoved"),
-        "uoss",
-        &signal,
-    )
+    message(SIGNAL, |m| m.field(MEMBER, "s", "JobRemoved"), "uoss", &signal)
 }
 
 /// A connection to the peer at the other end of `stream`.

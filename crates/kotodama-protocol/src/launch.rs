@@ -84,6 +84,5 @@ fn is_found(program: &OsStr) -> bool {
     if path.components().count() > 1 {
         return true;
     }
-    env::var_os("PATH")
-        .is_some_and(|dirs| env::split_paths(&dirs).any(|dir| is_executable(&dir.join(program))))
+    env::var_os("PATH").is_some_and(|dirs| env::split_paths(&dirs).any(|dir| is_executable(&dir.join(program))))
 }

@@ -4,15 +4,12 @@
 //! # Owns
 //!
 //! - [`RESERVED_SHORTCUTS`] and [`is_reserved_shortcut`].
-//! - The keys of the Daemon's own Forget and of undoing a change to the
-//!   History.
+//! - The keys of the Daemon's own Forget and of undoing a change to the History.
 //!
 //! # Not here
 //!
-//! - Matching a binding against a key event: the Front end's (`kotodama-qml`'s
-//!   `shortcut.rs`).
-//! - Dropping reserved bindings from what Extensions send: the Daemon's
-//!   `reserved.rs`.
+//! - Matching a binding against a key event: the Front end's (`kotodama-qml`'s `shortcut.rs`).
+//! - Dropping reserved bindings from what Extensions send: the Daemon's `reserved.rs`.
 
 /// The key of the Daemon's own Forget Action in the Action panel.
 pub const FORGET_SHORTCUT: &str = "ctrl+shift+backspace";
@@ -20,8 +17,7 @@ pub const FORGET_SHORTCUT: &str = "ctrl+shift+backspace";
 pub const UNDO_SHORTCUT: &str = "ctrl+z";
 /// Every binding no Extension's Action may take: the Action panel (Ctrl+K),
 /// moving the selection (Ctrl+N, Ctrl+P), undo, and Forget.
-pub const RESERVED_SHORTCUTS: [&str; 5] =
-    ["ctrl+k", "ctrl+n", "ctrl+p", UNDO_SHORTCUT, FORGET_SHORTCUT];
+pub const RESERVED_SHORTCUTS: [&str; 5] = ["ctrl+k", "ctrl+n", "ctrl+p", UNDO_SHORTCUT, FORGET_SHORTCUT];
 
 /// Whether `shortcut` names one of the [`RESERVED_SHORTCUTS`], however it is
 /// spelled: names are case-insensitive, modifiers go in any order, and

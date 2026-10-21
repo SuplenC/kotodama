@@ -1,23 +1,22 @@
 use std::path::PathBuf;
 
-use kotodama_protocol::{Item, ItemKind, ItemRef, WireFormat};
+use kotodama_protocol::Item;
+use kotodama_protocol::ItemKind;
+use kotodama_protocol::ItemRef;
+use kotodama_protocol::WireFormat;
 
 fn decode(json: &str) -> Result<Item, String> {
-    WireFormat::Json
-        .decode::<Item>(json.as_bytes())
-        .map_err(|err| {
-            let source = std::error::Error::source(&err)
-                .map(ToString::to_string)
-                .unwrap_or_default();
-            format!("{err}: {source}")
-        })
+    WireFormat::Json.decode::<Item>(json.as_bytes()).map_err(|err| {
+        let source = std::error::Error::source(&err)
+            .map(ToString::to_string)
+            .unwrap_or_default();
+        format!("{err}: {source}")
+    })
 }
 
 /// An Item with the given kind and kind fields, and everything else valid.
 fn item_json(kind_and_fields: &str) -> String {
-    format!(
-        r#"{{"id": "x", {kind_and_fields}, "title": "X", "actions": [{{"id": "open", "title": "Open"}}]}}"#
-    )
+    format!(r#"{{"id": "x", {kind_and_fields}, "title": "X", "actions": [{{"id": "open", "title": "Open"}}]}}"#)
 }
 
 #[test]
@@ -76,10 +75,7 @@ fn a_shared_kind_item_without_its_field_is_rejected() {
         ("url", "url"),
     ] {
         let err = decode(&item_json(&format!(r#""kind": "{kind}""#))).unwrap_err();
-        assert!(
-            err.contains(&format!("`{kind}` Item needs `{field}`")),
-            "{kind}: {err}"
-        );
+        assert!(err.contains(&format!("`{kind}` Item needs `{field}`")), "{kind}: {err}");
     }
 }
 
@@ -122,10 +118,8 @@ fn a_malformed_namespaced_kind_is_rejected() {
 
 #[test]
 fn an_item_without_an_action_is_rejected() {
-    let err = decode(
-        r#"{"id": "x", "kind": "url", "url": "https://example.org", "title": "X", "actions": []}"#,
-    )
-    .unwrap_err();
+    let err =
+        decode(r#"{"id": "x", "kind": "url", "url": "https://example.org", "title": "X", "actions": []}"#).unwrap_err();
     assert!(err.contains("primary Action"), "{err}");
 }
 

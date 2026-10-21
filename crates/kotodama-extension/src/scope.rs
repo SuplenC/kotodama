@@ -22,14 +22,17 @@
 //! The D-Bus calls themselves (`crate::dbus`); building the command and the
 //! prefix (`crate::launch`, `kotodama_protocol::launch_command`).
 
+use std::io;
+use std::path::Path;
+use std::path::PathBuf;
+use std::process::Child;
+use std::process::Command;
+
+use kotodama_protocol::LAUNCH_PREFIX;
+use kotodama_protocol::LAUNCH_SCOPED;
+use kotodama_protocol::SCOPE_PREFIX;
 #[cfg(target_os = "linux")]
 pub use linux::spawn;
-
-use std::io;
-use std::path::{Path, PathBuf};
-use std::process::{Child, Command};
-
-use kotodama_protocol::{LAUNCH_PREFIX, LAUNCH_SCOPED, SCOPE_PREFIX};
 
 /// Gives the Extension `command` starts a launch prefix that makes a scope
 /// for each program ([`SCOPE_PREFIX`], marked [`LAUNCH_SCOPED`]), when this
@@ -40,9 +43,7 @@ pub fn pass_scope_prefix(command: &mut Command) {
     pass_scope_prefix_from(
         command,
         std::env::var_os(LAUNCH_PREFIX).is_some(),
-        std::env::var_os("XDG_RUNTIME_DIR")
-            .as_deref()
-            .map(Path::new),
+        std::env::var_os("XDG_RUNTIME_DIR").as_deref().map(Path::new),
     );
 }
 
@@ -53,18 +54,14 @@ fn pass_scope_prefix_from(command: &mut Command, prefixed: bool, runtime_dir: Op
         return;
     };
     if has_user_manager(&dir.join("systemd/private")) {
-        command
-            .env(LAUNCH_PREFIX, SCOPE_PREFIX)
-            .env(LAUNCH_SCOPED, "1");
+        command.env(LAUNCH_PREFIX, SCOPE_PREFIX).env(LAUNCH_SCOPED, "1");
     }
 }
 
 #[cfg(target_os = "linux")]
 fn has_user_manager(socket: &Path) -> bool {
     use std::os::unix::fs::FileTypeExt;
-    socket
-        .metadata()
-        .is_ok_and(|meta| meta.file_type().is_socket())
+    socket.metadata().is_ok_and(|meta| meta.file_type().is_socket())
 }
 
 #[cfg(not(target_os = "linux"))]
@@ -82,10 +79,7 @@ pub struct Launched {
 
 impl Launched {
     fn unscoped(child: Child) -> Launched {
-        Launched {
-            child,
-            cgroup: None,
-        }
+        Launched { child, cgroup: None }
     }
 }
 
@@ -149,19 +143,29 @@ const MAX_NAME: usize = 48;
 
 #[cfg(target_os = "linux")]
 mod linux {
-    use std::io::{self, Read, Write};
-    use std::os::fd::{AsRawFd, RawFd};
+    use std::io;
+    use std::io::Read;
+    use std::io::Write;
+    use std::os::fd::AsRawFd;
+    use std::os::fd::RawFd;
     use std::os::unix::process::CommandExt;
     use std::path::PathBuf;
     use std::process::Command;
     use std::sync::mpsc;
     use std::thread;
-    use std::time::{Duration, Instant};
+    use std::time::Duration;
+    use std::time::Instant;
 
     use kotodama_protocol::launch_prefix;
 
-    use super::{Launched, app_name, unit_name};
-    use crate::dbus::{Bus, Call, Error, Marshal, Message};
+    use super::Launched;
+    use super::app_name;
+    use super::unit_name;
+    use crate::dbus::Bus;
+    use crate::dbus::Call;
+    use crate::dbus::Error;
+    use crate::dbus::Marshal;
+    use crate::dbus::Message;
 
     /// Small: the thread only makes one D-Bus call.
     const SCOPE_STACK: usize = 64 * 1024;
@@ -393,10 +397,7 @@ mod tests {
     fn an_app_is_named_by_its_desktop_id_else_by_its_programs_file_name() {
         let firefox = Command::new("/usr/bin/firefox");
 
-        assert_eq!(
-            app_name(&firefox, Some("org.mozilla.firefox")),
-            "org.mozilla.firefox"
-        );
+        assert_eq!(app_name(&firefox, Some("org.mozilla.firefox")), "org.mozilla.firefox");
         assert_eq!(app_name(&firefox, None), "firefox");
         assert_eq!(app_name(&Command::new("foot"), None), "foot");
     }
@@ -406,9 +407,7 @@ mod tests {
     fn set(command: &Command) -> Vec<(String, String)> {
         command
             .get_envs()
-            .filter_map(|(name, value)| {
-                Some((name.to_str()?.to_owned(), value?.to_str()?.to_owned()))
-            })
+            .filter_map(|(name, value)| Some((name.to_str()?.to_owned(), value?.to_str()?.to_owned())))
             .collect()
     }
 
@@ -421,8 +420,7 @@ mod tests {
         assert_eq!(set(&command), [], "no user manager");
 
         std::fs::create_dir(runtime.path().join("systemd")).unwrap();
-        let _manager =
-            std::os::unix::net::UnixListener::bind(runtime.path().join("systemd/private")).unwrap();
+        let _manager = std::os::unix::net::UnixListener::bind(runtime.path().join("systemd/private")).unwrap();
         let mut command = Command::new("true");
         pass_scope_prefix_from(&mut command, true, Some(runtime.path()));
         assert_eq!(set(&command), [], "a prefix of the Daemon's own");
@@ -441,14 +439,19 @@ mod tests {
     #[cfg(target_os = "linux")]
     mod linux {
         use std::os::unix::net::UnixStream;
-        use std::process::{Command, Stdio};
+        use std::process::Command;
+        use std::process::Stdio;
         use std::sync::mpsc;
         use std::thread;
-        use std::time::{Duration, Instant};
+        use std::time::Duration;
+        use std::time::Instant;
 
         use super::super::linux::spawn_scoped;
         use super::unit_name;
-        use crate::dbus::tests::{bus, job_removed, method_return, peer};
+        use crate::dbus::tests::bus;
+        use crate::dbus::tests::job_removed;
+        use crate::dbus::tests::method_return;
+        use crate::dbus::tests::peer;
 
         /// The unit a `StartTransientUnit` call in `call` asks for.
         fn unit_asked(call: &[u8]) -> String {
@@ -462,10 +465,7 @@ mod tests {
 
         /// A manager that answers after `delay`, and finishes the job with
         /// `result`.
-        fn manager(
-            delay: Duration,
-            result: &'static str,
-        ) -> (UnixStream, thread::JoinHandle<Vec<u8>>) {
+        fn manager(delay: Duration, result: &'static str) -> (UnixStream, thread::JoinHandle<Vec<u8>>) {
             let (ours, theirs) = UnixStream::pair().unwrap();
             let peer = peer(theirs, move |serial, call| {
                 thread::sleep(delay);
@@ -497,10 +497,7 @@ mod tests {
             let pid = child.id();
             let output = child.wait_with_output().unwrap();
             assert!(output.status.success());
-            assert_eq!(
-                String::from_utf8_lossy(&output.stdout).trim(),
-                pid.to_string()
-            );
+            assert_eq!(String::from_utf8_lossy(&output.stdout).trim(), pid.to_string());
 
             let call = peer.join().unwrap();
             assert_eq!(unit_asked(&call), unit_name("sh", pid));
@@ -515,13 +512,7 @@ mod tests {
         fn an_app_launched_by_desktop_id_gets_a_scope_named_for_it() {
             let (ours, peer) = manager(Duration::ZERO, "done");
 
-            let launched = spawn_scoped(
-                &mut echo_pid(),
-                Some("org.example.Sleeper"),
-                bus(ours),
-                |_| {},
-            )
-            .unwrap();
+            let launched = spawn_scoped(&mut echo_pid(), Some("org.example.Sleeper"), bus(ours), |_| {}).unwrap();
             let pid = launched.child.id();
             assert!(launched.child.wait_with_output().unwrap().status.success());
 
@@ -550,12 +541,7 @@ mod tests {
         #[test]
         fn a_program_that_cant_start_fails_without_waiting_forever() {
             let (ours, _peer) = manager(Duration::ZERO, "done");
-            let started = spawn_scoped(
-                &mut Command::new("/nonexistent/program"),
-                None,
-                bus(ours),
-                |_| {},
-            );
+            let started = spawn_scoped(&mut Command::new("/nonexistent/program"), None, bus(ours), |_| {});
             assert!(started.is_err());
         }
     }

@@ -9,7 +9,8 @@
 
 use std::ffi::OsString;
 use std::os::unix::net::UnixStream;
-use std::path::{Path, PathBuf};
+use std::path::Path;
+use std::path::PathBuf;
 
 use wayland_client::Connection;
 
@@ -67,9 +68,7 @@ impl Display {
         Err(last.unwrap_or_else(|| match (&self.name, &self.runtime) {
             (Some(name), _) => format!("no Wayland compositor at {}", name.display()),
             (None, Some(dir)) => format!("no Wayland compositor in {}", dir.display()),
-            (None, None) => {
-                "no Wayland compositor: neither WAYLAND_DISPLAY nor XDG_RUNTIME_DIR is set".into()
-            }
+            (None, None) => "no Wayland compositor: neither WAYLAND_DISPLAY nor XDG_RUNTIME_DIR is set".into(),
         }))
     }
 
@@ -78,20 +77,12 @@ impl Display {
     /// ([`runtime::wait_for`](crate::runtime::wait_for)): it costs nothing
     /// while there is no compositor. `waiting` hears why the first try
     /// failed, so the wait is logged once.
-    pub fn wait<T>(
-        &self,
-        mut attempt: impl FnMut(Connection) -> Result<T, String>,
-        waiting: impl FnOnce(&str),
-    ) -> T {
+    pub fn wait<T>(&self, mut attempt: impl FnMut(Connection) -> Result<T, String>, waiting: impl FnOnce(&str)) -> T {
         let dir = match &self.name {
             Some(name) if Path::new(name).is_absolute() => Path::new(name).parent(),
             _ => self.runtime.as_deref(),
         };
-        crate::runtime::wait_for(
-            dir.as_slice(),
-            || self.connect().and_then(&mut attempt),
-            waiting,
-        )
+        crate::runtime::wait_for(dir.as_slice(), || self.connect().and_then(&mut attempt), waiting)
     }
 }
 
@@ -143,11 +134,7 @@ mod tests {
 
         assert_eq!(
             display(None, dir).sockets(),
-            [
-                dir.join("wayland-2"),
-                dir.join("wayland-7"),
-                dir.join("wayland-10")
-            ]
+            [dir.join("wayland-2"), dir.join("wayland-7"), dir.join("wayland-10")]
         );
     }
 

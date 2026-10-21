@@ -8,14 +8,26 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::os::unix::net::UnixStream;
 use std::path::Path;
-use std::process::{Child, ChildStdin, Command, Stdio};
-use std::sync::mpsc::{self, Receiver, RecvTimeoutError};
+use std::process::Child;
+use std::process::ChildStdin;
+use std::process::Command;
+use std::process::Stdio;
+use std::sync::mpsc;
+use std::sync::mpsc::Receiver;
+use std::sync::mpsc::RecvTimeoutError;
 use std::thread;
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use std::time::Instant;
 
-use kotodama_protocol::{
-    Channel, ChannelWriter, FromExtension, Hello, Item, ItemRef, Outcome, ToExtension, WireFormat,
-};
+use kotodama_protocol::Channel;
+use kotodama_protocol::ChannelWriter;
+use kotodama_protocol::FromExtension;
+use kotodama_protocol::Hello;
+use kotodama_protocol::Item;
+use kotodama_protocol::ItemRef;
+use kotodama_protocol::Outcome;
+use kotodama_protocol::ToExtension;
+use kotodama_protocol::WireFormat;
 
 /// An Extension process the test talks to as the Daemon would. Dropping it
 /// kills the process.
@@ -34,11 +46,7 @@ impl Spawned {
     /// Starts `command` with piped stdio and does the handshake. `wait` is how
     /// long [`Spawned::recv`] waits for a message.
     pub fn start(command: &mut Command, wait: Duration) -> Self {
-        let mut child = command
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .spawn()
-            .unwrap();
+        let mut child = command.stdin(Stdio::piped()).stdout(Stdio::piped()).spawn().unwrap();
         let (stdout, stdin) = (child.stdout.take().unwrap(), child.stdin.take().unwrap());
         let channel = Channel::accept(stdout, stdin, &Hello::new(&WireFormat::ALL)).unwrap();
         let (mut reader, writer) = channel.split();
@@ -84,8 +92,7 @@ impl Spawned {
 
     /// The next message; panics if none comes in time.
     pub fn recv(&self) -> FromExtension {
-        self.recv_timeout(self.wait)
-            .expect("the Extension sent nothing")
+        self.recv_timeout(self.wait).expect("the Extension sent nothing")
     }
 
     /// The Items of the next message, which must be `add_items`.
@@ -123,13 +130,7 @@ impl Spawned {
     }
 
     /// Runs `action` on `item` as `invocation`, without waiting for the outcome.
-    pub fn start_run(
-        &mut self,
-        invocation: u64,
-        action: &str,
-        item: ItemRef,
-        arguments: BTreeMap<String, String>,
-    ) {
+    pub fn start_run(&mut self, invocation: u64, action: &str, item: ItemRef, arguments: BTreeMap<String, String>) {
         self.send(ToExtension::RunAction {
             invocation,
             action: action.into(),
@@ -200,10 +201,5 @@ pub fn connect(socket: &Path, read_timeout: Duration) -> Channel<UnixStream, Uni
 /// with reads timing out after `read_timeout`.
 pub fn front_end(stream: UnixStream, read_timeout: Duration) -> Channel<UnixStream, UnixStream> {
     stream.set_read_timeout(Some(read_timeout)).unwrap();
-    Channel::handshake(
-        stream.try_clone().unwrap(),
-        stream,
-        &Hello::new(&WireFormat::ALL),
-    )
-    .unwrap()
+    Channel::handshake(stream.try_clone().unwrap(), stream, &Hello::new(&WireFormat::ALL)).unwrap()
 }

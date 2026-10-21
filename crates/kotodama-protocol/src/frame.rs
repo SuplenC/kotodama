@@ -5,7 +5,9 @@
 //! `7\n{"a":1}`. The header is text so a shell script can read a frame with
 //! `read -r len` and `read -r -N "$len"`, and write one with `printf '%d\n%s'`.
 
-use std::io::{self, BufRead, Write};
+use std::io;
+use std::io::BufRead;
+use std::io::Write;
 
 use crate::Error;
 

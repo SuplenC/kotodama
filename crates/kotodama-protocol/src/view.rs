@@ -1,9 +1,11 @@
 //! Views an Extension pushes on top of the search, and the jobs a progress View
 //! follows. The Daemon passes them on to the Front end unchanged.
 
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
+use serde::Serialize;
 
-use crate::{Fraction, Item};
+use crate::Fraction;
+use crate::Item;
 
 /// A screen pushed on top of the search. Esc pops it.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

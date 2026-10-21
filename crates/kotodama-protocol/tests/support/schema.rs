@@ -5,12 +5,16 @@
 //! a value in some sample, so every field gets one.
 
 use std::collections::BTreeMap;
-use std::fmt::{self, Write as _};
+use std::fmt;
+use std::fmt::Write as _;
 
 use serde::Serialize;
-use serde::ser::{
-    self, Impossible, SerializeMap, SerializeSeq, SerializeStruct, SerializeStructVariant,
-};
+use serde::ser;
+use serde::ser::Impossible;
+use serde::ser::SerializeMap;
+use serde::ser::SerializeSeq;
+use serde::ser::SerializeStruct;
+use serde::ser::SerializeStructVariant;
 
 /// What a value maps to in protobuf, before deciding how a field declares it.
 #[derive(Clone, Debug, PartialEq)]
@@ -30,13 +34,9 @@ fn merge(a: Shape, b: Shape) -> Result<Shape, String> {
         (Shape::Optional(a), Shape::Optional(b)) => Shape::Optional(Box::new(merge(*a, *b)?)),
         // A field skipped when it holds nothing reads as a plain value
         // elsewhere: it is optional.
-        (Shape::Optional(a), b) | (b, Shape::Optional(a)) => {
-            Shape::Optional(Box::new(merge(*a, b)?))
-        }
+        (Shape::Optional(a), b) | (b, Shape::Optional(a)) => Shape::Optional(Box::new(merge(*a, b)?)),
         (Shape::Repeated(a), Shape::Repeated(b)) => Shape::Repeated(Box::new(merge(*a, *b)?)),
-        (Shape::Map(ak, av), Shape::Map(bk, bv)) => {
-            Shape::Map(Box::new(merge(*ak, *bk)?), Box::new(merge(*av, *bv)?))
-        }
+        (Shape::Map(ak, av), Shape::Map(bk, bv)) => Shape::Map(Box::new(merge(*ak, *bk)?), Box::new(merge(*av, *bv)?)),
         (a, b) if a == b => a,
         (a, b) => return Err(format!("one field is both {a:?} and {b:?}")),
     })
@@ -57,9 +57,7 @@ pub struct Schema {
 
 impl Schema {
     pub fn add<T: Serialize + ?Sized>(&mut self, sample: &T) {
-        sample
-            .serialize(Walk(self))
-            .unwrap_or_else(|err| panic!("{err}"));
+        sample.serialize(Walk(self)).unwrap_or_else(|err| panic!("{err}"));
     }
 
     fn message(&mut self, name: &str, oneof: bool) -> &mut Message {
@@ -68,25 +66,13 @@ impl Schema {
         message
     }
 
-    fn field(
-        &mut self,
-        message: &str,
-        oneof: bool,
-        number: u32,
-        name: &str,
-        shape: Shape,
-    ) -> Result<(), Error> {
+    fn field(&mut self, message: &str, oneof: bool, number: u32, name: &str, shape: Shape) -> Result<(), Error> {
         let fields = &mut self.message(message, oneof).fields;
-        let (known, before) = fields
-            .remove(&number)
-            .unwrap_or((name.to_owned(), Shape::Unknown));
+        let (known, before) = fields.remove(&number).unwrap_or((name.to_owned(), Shape::Unknown));
         if known != name {
-            return Err(Error(format!(
-                "{message} field {number} is both {known} and {name}"
-            )));
+            return Err(Error(format!("{message} field {number} is both {known} and {name}")));
         }
-        let shape =
-            merge(before, shape).map_err(|err| Error(format!("{message}.{name}: {err}")))?;
+        let shape = merge(before, shape).map_err(|err| Error(format!("{message}.{name}: {err}")))?;
         fields.insert(number, (known, shape));
         Ok(())
     }
@@ -143,10 +129,7 @@ impl Schema {
 }
 
 /// How a message field declares `shape`: a label and a type.
-fn declare(
-    shape: &Shape,
-    wrappers: &mut BTreeMap<String, String>,
-) -> Result<(&'static str, String), String> {
+fn declare(shape: &Shape, wrappers: &mut BTreeMap<String, String>) -> Result<(&'static str, String), String> {
     Ok(match shape {
         Shape::Unknown => return Err("no sample shows its type".into()),
         Shape::Scalar(scalar) => ("", (*scalar).to_owned()),
@@ -158,11 +141,7 @@ fn declare(
         Shape::Repeated(element) => ("repeated ", single(element, wrappers)?),
         Shape::Map(key, value) => (
             "",
-            format!(
-                "map<{}, {}>",
-                single(key, wrappers)?,
-                single(value, wrappers)?
-            ),
+            format!("map<{}, {}>", single(key, wrappers)?, single(value, wrappers)?),
         ),
     })
 }
@@ -309,22 +288,13 @@ impl<'s> ser::Serializer for Walk<'s> {
     fn serialize_unit_struct(self, _: &'static str) -> Result<Shape, Error> {
         self.serialize_unit()
     }
-    fn serialize_unit_variant(
-        self,
-        name: &'static str,
-        index: u32,
-        variant: &'static str,
-    ) -> Result<Shape, Error> {
+    fn serialize_unit_variant(self, name: &'static str, index: u32, variant: &'static str) -> Result<Shape, Error> {
         self.0.message(EMPTY, false);
         self.0
             .field(name, true, index + 1, variant, Shape::Message(EMPTY.into()))?;
         Ok(Shape::Message(name.into()))
     }
-    fn serialize_newtype_struct<T: Serialize + ?Sized>(
-        self,
-        _: &'static str,
-        value: &T,
-    ) -> Result<Shape, Error> {
+    fn serialize_newtype_struct<T: Serialize + ?Sized>(self, _: &'static str, value: &T) -> Result<Shape, Error> {
         value.serialize(self)
     }
     fn serialize_newtype_variant<T: Serialize + ?Sized>(
@@ -347,11 +317,7 @@ impl<'s> ser::Serializer for Walk<'s> {
     fn serialize_tuple(self, _: usize) -> Result<Self::SerializeTuple, Error> {
         Err(Error("protobuf has no tuples".into()))
     }
-    fn serialize_tuple_struct(
-        self,
-        _: &'static str,
-        _: usize,
-    ) -> Result<Self::SerializeTupleStruct, Error> {
+    fn serialize_tuple_struct(self, _: &'static str, _: usize) -> Result<Self::SerializeTupleStruct, Error> {
         Err(Error("protobuf has no tuples".into()))
     }
     fn serialize_tuple_variant(
@@ -387,13 +353,8 @@ impl<'s> ser::Serializer for Walk<'s> {
         _: usize,
     ) -> Result<Fields<'s>, Error> {
         let message = format!("{name}.{}", pascal(variant));
-        self.0.field(
-            name,
-            true,
-            index + 1,
-            variant,
-            Shape::Message(message.clone()),
-        )?;
+        self.0
+            .field(name, true, index + 1, variant, Shape::Message(message.clone()))?;
         self.0.message(&message, false);
         Ok(Fields {
             schema: self.0,
@@ -417,8 +378,7 @@ impl SerializeSeq for Seq<'_> {
     type Error = Error;
     fn serialize_element<T: Serialize + ?Sized>(&mut self, value: &T) -> Result<(), Error> {
         let shape = value.serialize(Walk(&mut *self.schema))?;
-        self.element =
-            merge(std::mem::replace(&mut self.element, Shape::Unknown), shape).map_err(Error)?;
+        self.element = merge(std::mem::replace(&mut self.element, Shape::Unknown), shape).map_err(Error)?;
         Ok(())
     }
     fn end(self) -> Result<Shape, Error> {
@@ -442,8 +402,7 @@ impl SerializeMap for Map<'_> {
     }
     fn serialize_value<T: Serialize + ?Sized>(&mut self, value: &T) -> Result<(), Error> {
         let shape = value.serialize(Walk(&mut *self.schema))?;
-        self.value =
-            merge(std::mem::replace(&mut self.value, Shape::Unknown), shape).map_err(Error)?;
+        self.value = merge(std::mem::replace(&mut self.value, Shape::Unknown), shape).map_err(Error)?;
         Ok(())
     }
     fn end(self) -> Result<Shape, Error> {
@@ -462,19 +421,14 @@ struct Fields<'s> {
 impl Fields<'_> {
     fn add(&mut self, name: &str, shape: Shape) -> Result<(), Error> {
         self.number += 1;
-        self.schema
-            .field(&self.message, false, self.number, name, shape)
+        self.schema.field(&self.message, false, self.number, name, shape)
     }
 }
 
 impl SerializeStruct for Fields<'_> {
     type Ok = Shape;
     type Error = Error;
-    fn serialize_field<T: Serialize + ?Sized>(
-        &mut self,
-        name: &'static str,
-        value: &T,
-    ) -> Result<(), Error> {
+    fn serialize_field<T: Serialize + ?Sized>(&mut self, name: &'static str, value: &T) -> Result<(), Error> {
         let shape = value.serialize(Walk(&mut *self.schema))?;
         self.add(name, shape)
     }
@@ -489,11 +443,7 @@ impl SerializeStruct for Fields<'_> {
 impl SerializeStructVariant for Fields<'_> {
     type Ok = Shape;
     type Error = Error;
-    fn serialize_field<T: Serialize + ?Sized>(
-        &mut self,
-        name: &'static str,
-        value: &T,
-    ) -> Result<(), Error> {
+    fn serialize_field<T: Serialize + ?Sized>(&mut self, name: &'static str, value: &T) -> Result<(), Error> {
         SerializeStruct::serialize_field(self, name, value)
     }
     fn skip_field(&mut self, name: &'static str) -> Result<(), Error> {

@@ -5,7 +5,8 @@
 
 use std::fmt::Display;
 
-use kotodama_protocol::{Table, Value};
+use kotodama_protocol::Table;
+use kotodama_protocol::Value;
 
 /// Logs a problem with the config, as `<name>: config: <message>`.
 pub fn warn(message: impl Display) {
@@ -32,9 +33,7 @@ pub fn command(config: &Table, key: &str) -> Option<Vec<String>> {
     match strings(value) {
         Some(command) if !command.is_empty() => Some(command),
         _ => {
-            warn(format_args!(
-                "`{key}` should be a list of strings, the program first"
-            ));
+            warn(format_args!("`{key}` should be a list of strings, the program first"));
             None
         }
     }
@@ -80,21 +79,12 @@ mod tests {
     #[test]
     fn a_command_is_a_list_of_strings_that_isnt_empty() {
         let config = table(&[
-            (
-                "good",
-                Value::Array(vec![string_value("foot"), string_value("-e")]),
-            ),
+            ("good", Value::Array(vec![string_value("foot"), string_value("-e")])),
             ("empty", Value::Array(Vec::new())),
-            (
-                "mixed",
-                Value::Array(vec![string_value("foot"), Value::Integer(1)]),
-            ),
+            ("mixed", Value::Array(vec![string_value("foot"), Value::Integer(1)])),
             ("word", string_value("foot")),
         ]);
-        assert_eq!(
-            command(&config, "good"),
-            Some(vec!["foot".into(), "-e".into()])
-        );
+        assert_eq!(command(&config, "good"), Some(vec!["foot".into(), "-e".into()]));
         assert_eq!(command(&config, "empty"), None);
         assert_eq!(command(&config, "mixed"), None);
         assert_eq!(command(&config, "word"), None);

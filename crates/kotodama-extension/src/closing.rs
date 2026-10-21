@@ -12,7 +12,8 @@
 
 use std::path::Path;
 use std::thread;
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use std::time::Instant;
 
 /// How often a launch is looked at again while what it started runs.
 const POLL: Duration = Duration::from_millis(100);
@@ -57,11 +58,7 @@ pub(crate) fn ran_before(program: &str, launched: u32) -> bool {
         return false;
     };
     entries.flatten().any(|entry| {
-        let Some(pid) = entry
-            .file_name()
-            .to_str()
-            .and_then(|pid| pid.parse::<u32>().ok())
-        else {
+        let Some(pid) = entry.file_name().to_str().and_then(|pid| pid.parse::<u32>().ok()) else {
             return false;
         };
         let dir = entry.path();
@@ -100,11 +97,7 @@ fn runs(dir: &Path, name: &str) -> bool {
 /// Whether an executable's file name `file` is the program `name`'s.
 #[cfg(target_os = "linux")]
 fn is_named(file: &str, name: &str) -> bool {
-    file == name
-        || file
-            .strip_prefix('.')
-            .and_then(|file| file.strip_suffix("-wrapped"))
-            == Some(name)
+    file == name || file.strip_prefix('.').and_then(|file| file.strip_suffix("-wrapped")) == Some(name)
 }
 
 #[cfg(target_os = "linux")]

@@ -2,25 +2,23 @@
 //! does. The Bundled extensions are built on it, and an Extension installed
 //! separately can be too.
 //!
-//! - [`main`] keeps resident memory down, names the Extension in what it logs,
-//!   and turns the run's error into the exit code.
-//! - [`connect`] does the handshake on stdio and starts a thread that reads
-//!   the Daemon's messages into a channel, which the Extension's own threads
-//!   (a scan, a watcher, a finished download) send their [`Event::Own`]s to as
-//!   well. The Extension handles one event at a time, so nothing is shared.
-//! - [`SentItems`] sends Indexed items as changes: only the Items added or
-//!   changed since the last time, and the ids of the ones gone.
-//! - [`SentStatus`] tells the Daemon whether the Extension can do anything
-//!   now, as when it needs a setting the user hasn't made, so the search
-//!   leaves its app out until it can.
-//! - [`config`] reads settings from the Extension's config table, logging the
-//!   ones of the wrong shape.
+//! - [`main`] keeps resident memory down, names the Extension in what it logs, and turns the run's
+//!   error into the exit code.
+//! - [`connect`] does the handshake on stdio and starts a thread that reads the Daemon's messages
+//!   into a channel, which the Extension's own threads (a scan, a watcher, a finished download)
+//!   send their [`Event::Own`]s to as well. The Extension handles one event at a time, so nothing
+//!   is shared.
+//! - [`SentItems`] sends Indexed items as changes: only the Items added or changed since the last
+//!   time, and the ids of the ones gone.
+//! - [`SentStatus`] tells the Daemon whether the Extension can do anything now, as when it needs a
+//!   setting the user hasn't made, so the search leaves its app out until it can.
+//! - [`config`] reads settings from the Extension's config table, logging the ones of the wrong
+//!   shape.
 //! - [`dirs`] finds where the Extension keeps its state and cache.
-//! - [`launch`] starts the programs Actions run, detached from the Extension,
-//!   each in a systemd scope of its own ([`scope`], over [`dbus`]) when
-//!   there is a user manager to make one.
-//! - `watch` (with the `watch` feature) watches directories, and acts once
-//!   they settle after a change.
+//! - [`launch`] starts the programs Actions run, detached from the Extension, each in a systemd
+//!   scope of its own ([`scope`], over [`dbus`]) when there is a user manager to make one.
+//! - `watch` (with the `watch` feature) watches directories, and acts once they settle after a
+//!   change.
 //!
 //! An Extension is installed as a directory of its own in
 //! `$XDG_DATA_DIRS/kotodama/extensions/` or `~/.config/kotodama/extensions/`,
@@ -95,16 +93,23 @@ pub mod watch;
 pub mod wayland;
 
 use std::fmt::Display;
-use std::io::{self, Stdout};
+use std::io;
+use std::io::Stdout;
 use std::path::Path;
 use std::process::ExitCode;
 use std::sync::OnceLock;
-use std::sync::mpsc::{self, Receiver, Sender};
+use std::sync::mpsc;
+use std::sync::mpsc::Receiver;
+use std::sync::mpsc::Sender;
 use std::thread;
 
-use kotodama_protocol::{Channel, ChannelWriter, Error, Hello, ToExtension, WireFormat};
-
 pub use items::SentItems;
+use kotodama_protocol::Channel;
+use kotodama_protocol::ChannelWriter;
+use kotodama_protocol::Error;
+use kotodama_protocol::Hello;
+use kotodama_protocol::ToExtension;
+use kotodama_protocol::WireFormat;
 pub use status::SentStatus;
 
 /// Small, as the threads here only wait, and enough for decoding the deepest
@@ -236,10 +241,7 @@ pub fn name() -> &'static str {
             .next()
             .as_deref()
             .and_then(|program| Path::new(program).file_name())
-            .map_or_else(
-                || "extension".to_owned(),
-                |name| name.to_string_lossy().into_owned(),
-            )
+            .map_or_else(|| "extension".to_owned(), |name| name.to_string_lossy().into_owned())
     })
 }
 

@@ -3,8 +3,16 @@
 
 use std::hint::black_box;
 
-use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
-use kotodama_protocol::{Action, FromExtension, Item, ItemKind, WireFormat};
+use criterion::BenchmarkId;
+use criterion::Criterion;
+use criterion::Throughput;
+use criterion::criterion_group;
+use criterion::criterion_main;
+use kotodama_protocol::Action;
+use kotodama_protocol::FromExtension;
+use kotodama_protocol::Item;
+use kotodama_protocol::ItemKind;
+use kotodama_protocol::WireFormat;
 
 const ITEMS: usize = 10_000;
 

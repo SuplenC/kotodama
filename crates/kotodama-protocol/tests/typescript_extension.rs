@@ -35,10 +35,7 @@ fn titles(example: &mut Example, id: u64, query: &str) -> Vec<String> {
     };
     assert_eq!(live_query, id);
     assert!(done);
-    results
-        .into_iter()
-        .map(|result| result.item.title)
-        .collect()
+    results.into_iter().map(|result| result.item.title).collect()
 }
 
 #[test]

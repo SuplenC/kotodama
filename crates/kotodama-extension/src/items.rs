@@ -1,10 +1,17 @@
 //! Sending Indexed items as changes.
 
 use std::collections::HashMap;
-use std::hash::{DefaultHasher, Hash, Hasher};
+use std::hash::DefaultHasher;
+use std::hash::Hash;
+use std::hash::Hasher;
 use std::io::Write;
 
-use kotodama_protocol::{Action, Argument, ChannelWriter, Error, FromExtension, Item};
+use kotodama_protocol::Action;
+use kotodama_protocol::Argument;
+use kotodama_protocol::ChannelWriter;
+use kotodama_protocol::Error;
+use kotodama_protocol::FromExtension;
+use kotodama_protocol::Item;
 
 /// What the Daemon has of each Item, by id, so only what changed is sent
 /// again. A fingerprint stands in for each Item, so the Items aren't kept

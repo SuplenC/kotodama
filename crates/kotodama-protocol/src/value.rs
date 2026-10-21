@@ -12,8 +12,14 @@ use std::fmt;
 
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64;
-use serde::de::{self, MapAccess, SeqAccess, Visitor};
-use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use serde::Deserialize;
+use serde::Deserializer;
+use serde::Serialize;
+use serde::Serializer;
+use serde::de;
+use serde::de::MapAccess;
+use serde::de::SeqAccess;
+use serde::de::Visitor;
 
 /// A config value: anything a TOML file can hold, except that dates arrive as
 /// strings. There is no null, because TOML has none.
@@ -112,11 +118,9 @@ impl<'de> Visitor<'de> for PlainVisitor {
     }
 
     fn visit_u64<E: de::Error>(self, value: u64) -> Result<Value, E> {
-        i64::try_from(value).map(Value::Integer).map_err(|_| {
-            E::custom(format!(
-                "{value} is too large; integers must fit in 64 signed bits"
-            ))
-        })
+        i64::try_from(value)
+            .map(Value::Integer)
+            .map_err(|_| E::custom(format!("{value} is too large; integers must fit in 64 signed bits")))
     }
 
     fn visit_f64<E>(self, value: f64) -> Result<Value, E> {

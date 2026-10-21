@@ -3,8 +3,8 @@
 //! whole.
 //!
 //! A directory that doesn't exist yet is watched for through the deepest
-//! directory on its path that does, and watched itself once it appears. One that is removed, or replaced by a
-//! rename, is watched again once it is back. Only the directories asked for
+//! directory on its path that does, and watched itself once it appears. One that is removed, or
+//! replaced by a rename, is watched again once it is back. Only the directories asked for
 //! are watched: each [`Watcher::watch`] call replaces the last.
 //!
 //! A watch follows the symlinks on the way to its directory once, when it is
@@ -19,14 +19,23 @@
 use std::collections::HashMap;
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
-use std::path::{Path, PathBuf};
-use std::sync::mpsc::{self, RecvTimeoutError};
-use std::sync::{Arc, Mutex, MutexGuard, Weak};
+use std::path::Path;
+use std::path::PathBuf;
+use std::sync::Arc;
+use std::sync::Mutex;
+use std::sync::MutexGuard;
+use std::sync::Weak;
+use std::sync::mpsc;
+use std::sync::mpsc::RecvTimeoutError;
 use std::thread;
 use std::time::Duration;
 
-pub use notify::{self, Event, EventKind, RecursiveMode};
-use notify::{RecommendedWatcher, Watcher as _};
+pub use notify;
+pub use notify::Event;
+pub use notify::EventKind;
+use notify::RecommendedWatcher;
+pub use notify::RecursiveMode;
+use notify::Watcher as _;
 
 use crate::STACK_SIZE;
 
@@ -182,8 +191,7 @@ fn replaceable(dir: &Path) -> bool {
     } else {
         dir
     };
-    fs::metadata(dir).is_ok_and(|meta| meta.permissions().mode() & 0o222 != 0)
-        && !read_only_mount(dir)
+    fs::metadata(dir).is_ok_and(|meta| meta.permissions().mode() & 0o222 != 0) && !read_only_mount(dir)
 }
 
 #[cfg(target_os = "linux")]
@@ -198,10 +206,7 @@ fn read_only_mount(dir: &Path) -> bool {
     let mut stat = MaybeUninit::<libc::statvfs>::uninit();
     // SAFETY: path is a NUL-terminated string that outlives the call, and
     // statvfs fills `stat` whole when it returns 0.
-    unsafe {
-        libc::statvfs(path.as_ptr(), stat.as_mut_ptr()) == 0
-            && stat.assume_init().f_flag & libc::ST_RDONLY != 0
-    }
+    unsafe { libc::statvfs(path.as_ptr(), stat.as_mut_ptr()) == 0 && stat.assume_init().f_flag & libc::ST_RDONLY != 0 }
 }
 
 #[cfg(not(target_os = "linux"))]
@@ -355,10 +360,8 @@ impl Watcher {
         let mut watched = lock(&self.0.watched);
         // One that went, or whose link was replaced, while this ran is
         // forgotten, to be watched again.
-        dirs_now.retain(|dir, _| {
-            (!old.contains_key(dir) || watched.dirs.contains_key(dir))
-                && !watched.gone.contains(dir)
-        });
+        dirs_now
+            .retain(|dir, _| (!old.contains_key(dir) || watched.dirs.contains_key(dir)) && !watched.gone.contains(dir));
         watched.dirs = dirs_now;
         watched.missing = missing;
         watched.links = links;
@@ -407,7 +410,8 @@ fn watch_beside(
 #[cfg(test)]
 mod tests {
     use std::fs;
-    use std::os::unix::fs::{PermissionsExt, symlink};
+    use std::os::unix::fs::PermissionsExt;
+    use std::os::unix::fs::symlink;
 
     use super::links_to;
 

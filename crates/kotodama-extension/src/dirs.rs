@@ -8,11 +8,7 @@ use std::path::PathBuf;
 /// `$XDG_STATE_HOME/kotodama/<extension>`, or `~/.local/state/kotodama/<extension>`.
 /// `None` if neither is set.
 pub fn state(extension: &str) -> Option<PathBuf> {
-    let base = base(
-        env::var_os("XDG_STATE_HOME"),
-        env::var_os("HOME"),
-        ".local/state",
-    )?;
+    let base = base(env::var_os("XDG_STATE_HOME"), env::var_os("HOME"), ".local/state")?;
     Some(base.join("kotodama").join(extension))
 }
 

@@ -1,13 +1,23 @@
 //! One end of a connection: framing, the handshake and the agreed Wire format
 //! together.
 
-use std::io::{BufRead, BufReader, BufWriter, Read, Write};
+use std::io::BufRead;
+use std::io::BufReader;
+use std::io::BufWriter;
+use std::io::Read;
+use std::io::Write;
 
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 
-use crate::version::{self, PROTOCOL_VERSION};
-use crate::{Error, Hello, Since, Version, WireFormat, frame};
+use crate::Error;
+use crate::Hello;
+use crate::Since;
+use crate::Version;
+use crate::WireFormat;
+use crate::frame;
+use crate::version;
+use crate::version::PROTOCOL_VERSION;
 
 /// Sends and receives whole messages in the Wire format agreed at the handshake.
 /// Works over any byte streams: a Unix socket, or an Extension's stdio.
@@ -94,8 +104,7 @@ impl<R: Read, W: Write> Channel<R, W> {
     /// flushes it.
     pub fn send<T: Serialize + ?Sized>(&mut self, message: &T) -> Result<(), Error> {
         self.buf.clear();
-        self.format
-            .encode_for_into(self.peer, message, &mut self.buf)?;
+        self.format.encode_for_into(self.peer, message, &mut self.buf)?;
         frame::write(&mut self.writer, &self.buf)?;
         Ok(())
     }
@@ -185,8 +194,7 @@ impl<W: Write> ChannelWriter<W> {
     /// flushes it.
     pub fn send<T: Serialize + ?Sized>(&mut self, message: &T) -> Result<(), Error> {
         self.buf.clear();
-        self.format
-            .encode_for_into(self.peer, message, &mut self.buf)?;
+        self.format.encode_for_into(self.peer, message, &mut self.buf)?;
         frame::write(&mut self.writer, &self.buf)?;
         Ok(())
     }

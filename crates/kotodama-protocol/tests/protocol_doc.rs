@@ -101,9 +101,7 @@ fn describe(label: &str) -> Option<&'static str> {
              action, of which `item` is all it sees. `arguments` holds the Arguments by name. Answer with \
              `action_done` and the same `invocation`."
         }
-        "ToExtension::submit_form" => {
-            "The user submitted a form View the Extension pushed: the values by field id."
-        }
+        "ToExtension::submit_form" => "The user submitted a form View the Extension pushed: the values by field id.",
         "ToExtension::view_popped" => {
             "The user left one of the Extension's Views, as with Esc. Closing the menu never sends it, so it may \
              mean \"cancel\"."
@@ -163,22 +161,16 @@ fn describe(label: &str) -> Option<&'static str> {
         }
         "Outcome::close" => "Done; the menu closes.",
         "Outcome::keep_open" => "Done; the menu stays open, as after pushing a View.",
-        "Outcome::type" => {
-            "The menu closes and the Daemon types `text` into the window that had focus."
-        }
+        "Outcome::type" => "The menu closes and the Daemon types `text` into the window that had focus.",
         "Outcome::paste" => "The menu closes and the Daemon pastes into the window that had focus.",
-        "Outcome::copy" => {
-            "The menu closes and the Daemon puts this on the clipboard, without pasting."
-        }
+        "Outcome::copy" => "The menu closes and the Daemon puts this on the clipboard, without pasting.",
         "Outcome::failed" => "The Action failed; the menu stays open and shows `message`.",
         "Outcome::run_catalog_action" => {
             "Runs an Action from the Action catalog, as if the user had picked it; only for an Extension whose \
              Manifest reads the catalog, as the outcome of an Action the user ran."
         }
         "Clipboard::text" => "Text.",
-        "Clipboard::image" => {
-            "An image: its MIME type, and its bytes, base64 in JSON and MessagePack."
-        }
+        "Clipboard::image" => "An image: its MIME type, and its bytes, base64 in JSON and MessagePack.",
         "Item::App" => "An application, by its desktop file id.",
         "Item::File" => "A file, by its absolute path.",
         "Item::Folder" => "A folder, by its absolute path.",
@@ -193,9 +185,7 @@ fn describe(label: &str) -> Option<&'static str> {
             "Items to pick from, whose Actions run like a Result's. Typing filters them in the Daemon, unless \
              `filters_itself` is set: then the Extension gets `filter_view`."
         }
-        "ViewContent::form" => {
-            "Fields to fill in, and the submit button's label; submitting sends `submit_form`."
-        }
+        "ViewContent::form" => "Fields to fill in, and the submit button's label; submitting sends `submit_form`.",
         "ViewContent::detail" => "Markdown, with label and value pairs beside it.",
         "ViewContent::progress" => "Follows the job with this id as the Extension reports it.",
         "FormInput::text" => "A line of text; `secret` hides what is typed. Submitted as a string.",
@@ -219,34 +209,24 @@ fn describe(label: &str) -> Option<&'static str> {
         "FromFrontEnd::submit_form" => "The user submitted a form View.",
         "FromFrontEnd::view_popped" => "The user left a View, as with Esc.",
         "FromFrontEnd::filter_view" => "The user typed into a list View to filter it.",
-        "FromFrontEnd::closed" => {
-            "Answers `close`: the window is gone and focus is back where the user was."
-        }
+        "FromFrontEnd::closed" => "Answers `close`: the window is gone and focus is back where the user was.",
         "FromFrontEnd::open" => "Asks a menu to open, as `kotodama open` does.",
         "FromFrontEnd::toggle" => "Asks a menu to open or close, as `kotodama toggle` does.",
         "FromFrontEnd::undo" => "Undoes the change `offer_undo` offered.",
         "FromFrontEnd::shown" => "The menu became visible.",
-        "ToFrontEnd::results" => {
-            "The whole ranked list for the query, best first, and the app it is in."
-        }
+        "ToFrontEnd::results" => "The whole ranked list for the query, best first, and the app it is in.",
         "ToFrontEnd::status" => "The Extensions that are down, and the problems the user can fix.",
         "ToFrontEnd::close" => "Close the menu, then answer `closed`.",
         "ToFrontEnd::action_failed" => "An Action failed; show `message` and stay open.",
-        "ToFrontEnd::push_view" => {
-            "Push an Extension's View, with the Contributed actions on its Items."
-        }
+        "ToFrontEnd::push_view" => "Push an Extension's View, with the Contributed actions on its Items.",
         "ToFrontEnd::update_view" => "Replace the open View with the same id.",
         "ToFrontEnd::replace_view" => "Pop one View and push another in one step.",
-        "ToFrontEnd::filtered_view" => {
-            "The Items of a list View that match its filter, best first."
-        }
+        "ToFrontEnd::filtered_view" => "The Items of a list View that match its filter, best first.",
         "ToFrontEnd::pop_view" => "Take a View away.",
         "ToFrontEnd::job_progress" => "A job's state, for its progress View.",
         "ToFrontEnd::open" => "Open the menu, as another Front end asked.",
         "ToFrontEnd::toggle" => "Open the menu if it is closed, else close it.",
-        "ToFrontEnd::offer_undo" => {
-            "The History changed and can be undone: show `title` on the Toast."
-        }
+        "ToFrontEnd::offer_undo" => "The History changed and can be undone: show `title` on the Toast.",
         "ToFrontEnd::withdraw_undo" => "The change can't be undone any more: hide its offer.",
         "ToFrontEnd::set_query" => "Replace the search text, as on entering an app.",
         "ToFrontEnd::reached" => "How many menus an `open` or `toggle` reached.",
@@ -302,19 +282,13 @@ fn render(layout: &str) -> Result<String, String> {
     write_intro(&mut out);
     for (group, heading, intro) in SECTIONS {
         writeln!(out, "\n## {heading}: `{group}`\n\n{intro}").unwrap();
-        for (label, json) in samples.iter().filter(|(label, _)| {
-            label
-                .split_once("::")
-                .is_some_and(|(owner, _)| owner == group)
-        }) {
+        for (label, json) in samples
+            .iter()
+            .filter(|(label, _)| label.split_once("::").is_some_and(|(owner, _)| owner == group))
+        {
             let name = label.split_once("::").map_or(*label, |(_, name)| name);
             let description = describe(label).unwrap_or_default();
-            writeln!(
-                out,
-                "\n### `{name}`\n\n{description}\n\n```json\n{}\n```",
-                pretty(json)
-            )
-            .unwrap();
+            writeln!(out, "\n### `{name}`\n\n{description}\n\n```json\n{}\n```", pretty(json)).unwrap();
         }
     }
     Ok(out)

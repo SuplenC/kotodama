@@ -5,10 +5,15 @@
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
+use serde::Serialize;
 
+use crate::Action;
+use crate::Item;
+use crate::Job;
+use crate::Table;
+use crate::View;
 use crate::item::ItemOwned;
-use crate::{Action, Item, Job, Table, View};
 
 /// From a Front end to the Daemon.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

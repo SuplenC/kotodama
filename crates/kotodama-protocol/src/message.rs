@@ -6,9 +6,18 @@
 
 use std::collections::BTreeMap;
 
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
+use serde::Serialize;
 
-use crate::{Action, Bytes, Fraction, Item, ItemRef, Job, KindName, Table, View};
+use crate::Action;
+use crate::Bytes;
+use crate::Fraction;
+use crate::Item;
+use crate::ItemRef;
+use crate::Job;
+use crate::KindName;
+use crate::Table;
+use crate::View;
 
 /// From the Daemon to an Extension.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

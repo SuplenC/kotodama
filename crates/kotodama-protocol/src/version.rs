@@ -18,7 +18,15 @@
 use std::cell::Cell;
 use std::fmt;
 
-use crate::{FormInput, Item, ItemKind, Job, JobState, ToExtension, ToFrontEnd, View, ViewContent};
+use crate::FormInput;
+use crate::Item;
+use crate::ItemKind;
+use crate::Job;
+use crate::JobState;
+use crate::ToExtension;
+use crate::ToFrontEnd;
+use crate::View;
+use crate::ViewContent;
 
 /// A protocol version: `major.minor`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -85,11 +93,7 @@ impl Since for ToExtension {
 impl Since for ToFrontEnd {
     fn since(&self) -> u32 {
         match self {
-            ToFrontEnd::Results { results, .. } => results
-                .iter()
-                .map(|result| result.item.since())
-                .max()
-                .unwrap_or(0),
+            ToFrontEnd::Results { results, .. } => results.iter().map(|result| result.item.since()).max().unwrap_or(0),
             ToFrontEnd::PushView { view, .. } | ToFrontEnd::UpdateView { view, .. } => view.since(),
             ToFrontEnd::ReplaceView { with, .. } => with.since(),
             ToFrontEnd::JobProgress { job, .. } => job.since(),
@@ -138,11 +142,7 @@ impl Since for ViewContent {
     fn since(&self) -> u32 {
         match self {
             ViewContent::List { items, .. } => items.iter().map(Since::since).max().unwrap_or(0),
-            ViewContent::Form { fields, .. } => fields
-                .iter()
-                .map(|field| field.input.since())
-                .max()
-                .unwrap_or(0),
+            ViewContent::Form { fields, .. } => fields.iter().map(|field| field.input.since()).max().unwrap_or(0),
             ViewContent::Detail { .. } | ViewContent::Progress { .. } => 0,
         }
     }

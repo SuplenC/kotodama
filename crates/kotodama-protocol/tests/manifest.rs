@@ -1,4 +1,8 @@
-use kotodama_protocol::{Action, Argument, Example, KindName, Manifest};
+use kotodama_protocol::Action;
+use kotodama_protocol::Argument;
+use kotodama_protocol::Example;
+use kotodama_protocol::KindName;
+use kotodama_protocol::Manifest;
 
 fn parse(toml: &str) -> Result<Manifest, String> {
     Manifest::from_toml(toml).map_err(|err| err.to_string())
@@ -35,10 +39,7 @@ fn a_manifest_declares_everything_an_extension_contributes() {
     .unwrap();
 
     assert_eq!(manifest.name, "kubaos");
-    assert_eq!(
-        manifest.description.as_deref(),
-        Some("KubaOS suites and toolchains")
-    );
+    assert_eq!(manifest.description.as_deref(), Some("KubaOS suites and toolchains"));
     assert_eq!(manifest.command, ["bin/kubaos-kotodama", "--stdio"]);
     assert!(manifest.action_catalog);
 
@@ -250,8 +251,7 @@ fn prefix_is_still_read_as_the_word() {
 
 #[test]
 fn a_manifest_with_both_word_and_prefix_is_refused() {
-    let err =
-        parse("name = \"emoji\"\ncommand = [\"x\"]\nword = \"emo\"\nprefix = \"em\"").unwrap_err();
+    let err = parse("name = \"emoji\"\ncommand = [\"x\"]\nword = \"emo\"\nprefix = \"em\"").unwrap_err();
 
     assert!(err.contains("word"), "{err}");
 }

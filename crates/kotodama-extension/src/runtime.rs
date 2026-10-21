@@ -10,11 +10,16 @@
 //! made: an inotify watch wakes it the moment they are, so waiting costs
 //! nothing.
 
-use std::ffi::{CString, OsStr, OsString};
-use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
+use std::ffi::CString;
+use std::ffi::OsStr;
+use std::ffi::OsString;
+use std::os::fd::AsRawFd;
+use std::os::fd::FromRawFd;
+use std::os::fd::OwnedFd;
 use std::os::unix::ffi::OsStrExt;
 use std::os::unix::fs::FileTypeExt;
-use std::path::{Path, PathBuf};
+use std::path::Path;
+use std::path::PathBuf;
 use std::process::Command;
 use std::time::Duration;
 
@@ -40,12 +45,7 @@ pub fn wayland_sockets(dir: &Path) -> Vec<PathBuf> {
     let mut found: Vec<(u32, PathBuf)> = entries
         .flatten()
         .filter_map(|entry| {
-            let number = entry
-                .file_name()
-                .to_str()?
-                .strip_prefix("wayland-")?
-                .parse()
-                .ok()?;
+            let number = entry.file_name().to_str()?.strip_prefix("wayland-")?.parse().ok()?;
             let path = entry.path();
             // Follows a link.
             path.metadata()
@@ -63,10 +63,7 @@ pub fn wayland_sockets(dir: &Path) -> Vec<PathBuf> {
 /// programs launched from the menu still find the compositor.
 pub fn pass_wayland_display(command: &mut Command) {
     let runtime = dir();
-    if let Some(display) = missing_wayland_display(
-        std::env::var_os("WAYLAND_DISPLAY").as_deref(),
-        runtime.as_deref(),
-    ) {
+    if let Some(display) = missing_wayland_display(std::env::var_os("WAYLAND_DISPLAY").as_deref(), runtime.as_deref()) {
         command.env("WAYLAND_DISPLAY", display);
     }
 }
@@ -85,11 +82,7 @@ fn missing_wayland_display(own: Option<&OsStr>, runtime: Option<&Path>) -> Optio
 /// is made, moved in or changed in one of `watched` (directories that don't
 /// exist are left out), or failing that, a while that doubles each time.
 /// `waiting` hears why the first try failed, so the wait is logged once.
-pub fn wait_for<T>(
-    watched: &[&Path],
-    mut attempt: impl FnMut() -> Result<T, String>,
-    waiting: impl FnOnce(&str),
-) -> T {
+pub fn wait_for<T>(watched: &[&Path], mut attempt: impl FnMut() -> Result<T, String>, waiting: impl FnOnce(&str)) -> T {
     let mut waiting = Some(waiting);
     let mut backoff = MIN_BACKOFF;
     loop {
@@ -161,13 +154,14 @@ impl Changes {
 
 #[cfg(test)]
 mod tests {
+    use std::os::unix::net::UnixListener;
     use std::sync::mpsc;
     use std::thread;
-    use std::time::{Duration, Instant};
+    use std::time::Duration;
+    use std::time::Instant;
 
-    use std::os::unix::net::UnixListener;
-
-    use super::{missing_wayland_display, wait_for};
+    use super::missing_wayland_display;
+    use super::wait_for;
 
     /// A program started before the compositor's environment reached it
     /// passes on the display it would have had.
@@ -179,19 +173,13 @@ mod tests {
 
         let _three = UnixListener::bind(dir.join("wayland-3")).unwrap();
         let _one = UnixListener::bind(dir.join("wayland-1")).unwrap();
-        assert_eq!(
-            missing_wayland_display(None, Some(dir)),
-            Some("wayland-1".into())
-        );
+        assert_eq!(missing_wayland_display(None, Some(dir)), Some("wayland-1".into()));
         assert_eq!(
             missing_wayland_display(Some("".as_ref()), Some(dir)),
             Some("wayland-1".into())
         );
         // One it has already, it passes on as it is.
-        assert_eq!(
-            missing_wayland_display(Some("wayland-3".as_ref()), Some(dir)),
-            None
-        );
+        assert_eq!(missing_wayland_display(Some("wayland-3".as_ref()), Some(dir)), None);
         assert_eq!(missing_wayland_display(None, None), None);
     }
 
@@ -225,11 +213,7 @@ mod tests {
         let made = Instant::now();
         std::fs::write(&socket, "").unwrap();
         let said = waited.recv_timeout(Duration::from_secs(5)).unwrap();
-        assert!(
-            made.elapsed() < Duration::from_millis(500),
-            "{:?}",
-            made.elapsed()
-        );
+        assert!(made.elapsed() < Duration::from_millis(500), "{:?}", made.elapsed());
         assert_eq!(said, ["not there"], "says it waits once");
     }
 
@@ -266,11 +250,7 @@ mod tests {
         let made = Instant::now();
         std::fs::write(&socket, "").unwrap();
         waited.recv_timeout(Duration::from_secs(10)).unwrap();
-        assert!(
-            made.elapsed() < Duration::from_millis(600),
-            "{:?}",
-            made.elapsed()
-        );
+        assert!(made.elapsed() < Duration::from_millis(600), "{:?}", made.elapsed());
     }
 
     #[test]

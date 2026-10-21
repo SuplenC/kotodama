@@ -1,8 +1,13 @@
 use std::collections::BTreeMap;
 
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
+use serde::Serialize;
 
-use super::{from_slice, to_vec, unzigzag, varint_len, zigzag};
+use super::from_slice;
+use super::to_vec;
+use super::unzigzag;
+use super::varint_len;
+use super::zigzag;
 
 fn encode<T: Serialize>(value: &T) -> Vec<u8> {
     let mut buf = Vec::new();
@@ -60,10 +65,7 @@ fn everything() -> Everything {
 
 #[test]
 fn a_struct_is_its_fields_numbered_from_one() {
-    assert_eq!(
-        encode(&Query { text: "fir".into() }),
-        [0x0a, 3, b'f', b'i', b'r']
-    );
+    assert_eq!(encode(&Query { text: "fir".into() }), [0x0a, 3, b'f', b'i', b'r']);
 }
 
 #[test]
@@ -74,10 +76,7 @@ fn an_enum_is_a_oneof_of_its_variants() {
     );
     assert_eq!(encode(&Message::Closed), [0x12, 0]);
     assert_eq!(encode(&Message::Moved(150)), [0x18, 0x96, 0x01]);
-    assert_eq!(
-        encode(&Message::Batch(vec!["a".into()])),
-        [0x22, 3, 0x0a, 1, b'a']
-    );
+    assert_eq!(encode(&Message::Batch(vec!["a".into()])), [0x22, 3, 0x0a, 1, b'a']);
 }
 
 #[test]
@@ -86,19 +85,13 @@ fn numbers_in_a_list_are_packed() {
     struct Highlights {
         at: Vec<u32>,
     }
-    assert_eq!(
-        encode(&Highlights { at: vec![3, 270] }),
-        [0x0a, 3, 3, 0x8e, 0x02]
-    );
+    assert_eq!(encode(&Highlights { at: vec![3, 270] }), [0x0a, 3, 3, 0x8e, 0x02]);
 }
 
 #[test]
 fn every_shape_survives_a_round_trip() {
     let bytes = encode(&everything());
-    assert_eq!(
-        from_slice::<Everything>(&bytes).expect("decode"),
-        everything()
-    );
+    assert_eq!(from_slice::<Everything>(&bytes).expect("decode"), everything());
 }
 
 #[test]
@@ -135,9 +128,7 @@ fn numbers_not_packed_are_read_too() {
         at: Vec<u32>,
     }
     assert_eq!(
-        from_slice::<Highlights>(&[0x08, 3, 0x08, 4])
-            .expect("decode")
-            .at,
+        from_slice::<Highlights>(&[0x08, 3, 0x08, 4]).expect("decode").at,
         [3, 4]
     );
 }
@@ -161,9 +152,7 @@ fn an_unknown_field_is_skipped_and_a_missing_one_takes_its_default() {
             count: 0,
             names: vec![],
             maybe: None,
-            nested: Query {
-                text: String::new()
-            },
+            nested: Query { text: String::new() },
         }
     );
 }

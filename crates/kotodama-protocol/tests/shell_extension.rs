@@ -4,8 +4,13 @@
 //! the dev environment provides.
 
 use std::collections::BTreeMap;
-use std::path::{Path, PathBuf};
-use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
+use std::path::Path;
+use std::path::PathBuf;
+use std::process::Child;
+use std::process::ChildStdin;
+use std::process::ChildStdout;
+use std::process::Command;
+use std::process::Stdio;
 
 use kotodama_protocol::*;
 
@@ -14,8 +19,7 @@ fn example_dir() -> PathBuf {
 }
 
 fn manifest() -> Manifest {
-    Manifest::from_toml(&std::fs::read_to_string(example_dir().join("manifest.toml")).unwrap())
-        .unwrap()
+    Manifest::from_toml(&std::fs::read_to_string(example_dir().join("manifest.toml")).unwrap()).unwrap()
 }
 
 struct Extension {
@@ -120,10 +124,7 @@ fn the_shell_example_turns_its_config_table_into_url_items() {
 #[test]
 fn the_shell_example_replaces_its_items_when_the_config_reloads() {
     let mut extension = Extension::start();
-    extension.send(bookmarks(&[
-        ("A", "https://a.example"),
-        ("B", "https://b.example"),
-    ]));
+    extension.send(bookmarks(&[("A", "https://a.example"), ("B", "https://b.example")]));
     let FromExtension::AddItems { items: first } = extension.recv() else {
         panic!("expected add_items")
     };
@@ -134,20 +135,13 @@ fn the_shell_example_replaces_its_items_when_the_config_reloads() {
     };
     // The timer and the bookmarks list are added again, which replaces them,
     // so they are never removed.
-    assert_eq!(
-        first.len(),
-        4,
-        "the bookmarks, the timer and the bookmarks list"
-    );
+    assert_eq!(first.len(), 4, "the bookmarks, the timer and the bookmarks list");
     assert_eq!(ids, ["https://a.example", "https://b.example"]);
     let FromExtension::AddItems { items } = extension.recv() else {
         panic!("expected add_items")
     };
     assert_eq!(
-        items
-            .iter()
-            .map(|item| item.title.as_str())
-            .collect::<Vec<_>>(),
+        items.iter().map(|item| item.title.as_str()).collect::<Vec<_>>(),
         ["C", "Timer", "Bookmarks"]
     );
 }
@@ -167,11 +161,7 @@ fn the_shell_examples_hidden_bookmarks_item_lists_them_in_a_view_it_leaves_the_d
         .find(|item| item.id == "bookmarks")
         .expect("the bookmarks Item");
     assert!(list.hidden, "only `kotodama open --view` reaches it");
-    assert!(
-        items
-            .iter()
-            .all(|item| item.hidden == (item.id == "bookmarks"))
-    );
+    assert!(items.iter().all(|item| item.hidden == (item.id == "bookmarks")));
 
     extension.send(ToExtension::RunAction {
         invocation: 9,
@@ -404,9 +394,6 @@ fn the_shell_examples_labelled_timer_asks_in_a_form_then_times_what_was_submitte
     };
     assert_eq!(
         follow(&mut extension, &job, "Tea"),
-        [
-            (JobState::Running, Some(0.0)),
-            (JobState::Succeeded, Some(1.0)),
-        ]
+        [(JobState::Running, Some(0.0)), (JobState::Succeeded, Some(1.0)),]
     );
 }

@@ -2,7 +2,12 @@
 
 use serde::Deserialize;
 
-use crate::{Action, Argument, Error, Example, KindName, is_valid_name};
+use crate::Action;
+use crate::Argument;
+use crate::Error;
+use crate::Example;
+use crate::KindName;
+use crate::is_valid_name;
 
 /// What an Extension is, how to start it, and what it contributes.
 ///
