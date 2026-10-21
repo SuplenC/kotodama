@@ -169,19 +169,40 @@ PanelWindow {
     color: "transparent"
     WlrLayershell.layer: WlrLayer.Overlay
     WlrLayershell.namespace: "kotodama"
-    WlrLayershell.keyboardFocus: visible ? WlrKeyboardFocus.Exclusive : WlrKeyboardFocus.None
+    // On demand rather than exclusive, so a window that a keybind opens, or a
+    // click, can take the keys; sway and Hyprland still give them to the menu
+    // the moment it maps.
+    WlrLayershell.keyboardFocus: visible ? WlrKeyboardFocus.OnDemand : WlrKeyboardFocus.None
 
     // The Daemon types or pastes once the window is gone and focus is back
     // where the user came from, so it is told only after the window unmaps.
     property bool closing: false
+    // Whether the window has had the keys since it last showed. Qt may report
+    // the previous showing's loss of them after the window shows again, which
+    // must not close it.
+    property bool hadKeys: false
     // However the window opened, the Daemon is told, so the Empty query it
     // shows is ranked for this time of day.
     onVisibleChanged: {
+        hadKeys = false;
         if (visible)
             search.shown();
         if (!visible && closing) {
             closing = false;
             Qt.callLater(search.closed);
+        }
+    }
+
+    // The keys went to another window, or a click outside: the user has moved
+    // on, so the menu closes as Esc closes it. Moving the keys inside the
+    // window, to a View or the Action panel, leaves the window active.
+    Connections {
+        target: panel.Window.window
+        function onActiveChanged() {
+            if (target.active)
+                menu.hadKeys = menu.visible;
+            else if (menu.visible && menu.hadKeys)
+                menu.hide();
         }
     }
 

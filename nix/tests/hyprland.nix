@@ -6,7 +6,8 @@
 # Item whose focus Action works, that a bind added at runtime is in the
 # Shortcuts View that `kotodama open --view hyprland/shortcuts` opens, and that
 # the module's ready Front end starts with the session, loads the QML module
-# from the Nix output, and shows and hides on `kotodama toggle`.
+# from the Nix output, and shows and hides on `kotodama toggle`, and closes
+# when a window a bind opens takes the keys.
 {
   pkgs,
   self,
@@ -73,6 +74,8 @@ pkgs.testers.runNixOSTest {
           disable_splash_rendering = true
         }
         bindd = SUPER, F1, Show the keyboard shortcuts, exec, kotodama open --view hyprland/shortcuts
+        # A window that writes the first line typed into it.
+        bind = CTRL, Return, exec, foot --title vm-bound sh -c 'head -n 1 >/tmp/typed'
       '';
     };
   };
@@ -177,5 +180,14 @@ pkgs.testers.runNixOSTest {
             machine.wait_until_fails(menu_shown)
         finally:
             print(machine.execute("journalctl --no-pager --user-unit kotodama-menu.service")[1])
+
+    with subtest("the menu closes when a window a bind opens takes the keys"):
+        user("kotodama open")
+        machine.wait_until_succeeds(menu_shown)
+        machine.send_key("ctrl-ret")
+        machine.wait_until_fails(menu_shown)
+        machine.wait_until_succeeds(active_window() + " | grep -q '\"title\": \"vm-bound\"'")
+        machine.send_chars("typed\n")
+        machine.wait_until_succeeds("grep -qx typed /tmp/typed")
   '';
 }

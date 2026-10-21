@@ -25,6 +25,8 @@ In the menu:
 - Ctrl+Shift+Backspace forgets the selected Result.
 - Ctrl+Z, while the Toast shows, puts back what was forgotten.
 - Esc clears a list's filter, pops a View, or closes the menu.
+- Opening a window (Ctrl+Return), or clicking one, closes the menu too, and
+  the window has the keys.
 
 With nothing typed, the menu shows the Results you use most at this time of
 day, then a fixed menu: this guide, the clipboard history and "Clear history".

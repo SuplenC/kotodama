@@ -82,6 +82,18 @@
             ln -s ${pkgs.llvmPackages.bintools}/bin/ld.lld $out/bin/ld.lld
             ln -s ld.lld $out/bin/lld
           '';
+          # sway 1.12 and older take the keys back from an on-demand
+          # layer-shell surface as soon as they give it them, so the menu,
+          # which asks for the keys on demand, would open without them over a
+          # focused window. sway's own fix, until a release has it.
+          swayWithLayerFocus = pkgs.sway-unwrapped.overrideAttrs (old: {
+            patches = (old.patches or [ ]) ++ [
+              (pkgs.fetchpatch {
+                url = "https://github.com/swaywm/sway/commit/33ae5a92d5fa22956abb62bfae5a4e701dc8d497.patch";
+                hash = "sha256-x7UK2OyiShNpnRa4aOq1iFtY4weEA+i44s+lCbV5gME=";
+              })
+            ];
+          });
         in
         rec {
           default = pkgs.mkShell {
@@ -106,7 +118,7 @@
 
               # Front end and headless Wayland for e2e tests
               quickshell
-              sway-unwrapped
+              swayWithLayerFocus
               grim
               imagemagick
               wtype

@@ -176,6 +176,7 @@ Some need extras: the shell example Extension for the Views checks (link `exampl
 - [ ] A bind in a submap.
 - [ ] "Move to Workspace" with a named workspace.
 - [ ] The feel of Views and the Action panel.
+- [ ] The menu has the keys as it opens over a focused window, and closes when a bind opens or focuses a window, or on a click outside it. With `input:follow_mouse = 1`, moving the pointer over a window closes it too: check that this doesn't close it while you type.
 
 ### Views
 
