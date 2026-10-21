@@ -109,6 +109,7 @@ let
         clipboard = {
           maxEntries = 50;
           maxAgeDays = 0.5;
+          ignore = [ "^secret:" ];
           inSearch = true;
         };
         emoji = {
@@ -270,7 +271,12 @@ pkgs.runCommand "kotodama-home-manager-options-test"
         "rates_url": "http://localhost:8080/latest",
         "decimal_separator": "comma",
     })
-    expect("clipboard", extensions["clipboard"], {"max_entries": 50, "max_age_days": 0.5, "in_search": True})
+    expect("clipboard", extensions["clipboard"], {
+        "max_entries": 50,
+        "max_age_days": 0.5,
+        "ignore": ["^secret:"],
+        "in_search": True,
+    })
     expect("emoji", extensions["emoji"], {"skin_tone": "medium-dark", "word": "e"})
     expect("folders", extensions["folders"], {
         "folders": [

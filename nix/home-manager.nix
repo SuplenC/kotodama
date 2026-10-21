@@ -139,6 +139,7 @@ let
           {
             max_entries = ext.clipboard.maxEntries;
             max_age_days = ext.clipboard.maxAgeDays;
+            inherit (ext.clipboard) ignore;
           }
           // appSettings ext.clipboard
         );
@@ -462,6 +463,13 @@ in
       '';
       maxAgeDays = optional lib.types.numbers.positive ''
         `max_age_days`: entries older than this many days go. Unset, 7.
+      '';
+      ignore = optional (lib.types.listOf lib.types.str) ''
+        `ignore`: copied text any of these regular expressions (Rust's `regex`
+        syntax) matches, anywhere in it, is never kept. Unset, one-time codes
+        (six digits alone) and secret tokens (private keys, GitHub, GitLab,
+        Slack, AWS, Stripe, OpenAI and Anthropic keys, JSON Web Tokens);
+        `[ ]` keeps everything.
       '';
     }
     // app "`clipboard`" "false";

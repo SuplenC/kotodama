@@ -70,6 +70,16 @@ if grep -rq hunter2 "$XDG_STATE_HOME"; then
     exit 1
 fi
 
+# A one-time code, which no password manager marks, is left out by the
+# default `ignore` patterns.
+printf '482913' | copy_as code text/plain\;charset=utf-8
+printf 'after the code' | copy_as after-code text/plain\;charset=utf-8
+wait_for_result "after the code" "after the code"
+if [ -n "$(results 482913)" ] || grep -rq 482913 "$XDG_STATE_HOME"; then
+    echo "the one-time code was kept" >&2
+    exit 1
+fi
+
 # An image keeps a thumbnail, which is its icon and its detail View's picture.
 magick -size 320x200 xc:'#1e90ff' png:- | copy_as image image/png
 wait_for_result "image 320" "Image, 320×200"
