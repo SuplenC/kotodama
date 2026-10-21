@@ -198,12 +198,18 @@ jobs:
   # criterion's default times, and this commit's results are saved in the cache
   # as bench-results-<sha>.
   #
-  # On a PR, the base commit's saved results stand in for running it when they
-  # exist, so only this commit builds and runs, with shorter criterion times.
-  # Shared runners differ in speed by up to 2x, so a timing over the limit against
-  # another runner's results is confirmed by running the base commit here and
-  # comparing again. Resident memory doesn't depend on the runner. Without saved
-  # results (an old base, or evicted), both commits run here, as on main.
+  # On a PR, saved results stand in for running the base commit: the base
+  # commit's own, or else main's latest (the base's are often not saved yet,
+  # since main's run for it is still going), so only this commit builds and
+  # runs, with shorter criterion times. Shared runners differ in speed by up to
+  # 2x, so a timing over the limit against saved results is confirmed by running
+  # the base commit here and comparing again. Resident memory doesn't depend on
+  # the runner. Without any saved results, both commits run here, as on main.
+  #
+  # `ci` doesn't wait for this job: criterion timings on shared runners are too
+  # noisy to hold a merge for, and building two commits takes about 25 minutes.
+  # A PR still shows it, main runs it in full, and `instructions`, the
+  # deterministic gate, stays required.
   bench:
     needs: changes
     if: ${{ !cancelled() && (github.event_name == 'push' || needs.changes.outputs.bench == 'true') }}
@@ -224,10 +230,12 @@ jobs:
         with:
           path: bench-saved.txt
           key: bench-results-${{ github.event.pull_request.base.sha }}
+          restore-keys: bench-results-
       - name: Check out the base commit
         id: base
         env:
-          SAVED: ${{ steps.saved.outputs.cache-hit == 'true' }}
+          SAVED: ${{ steps.saved.outputs.cache-matched-key != '' }}
+          MATCHED: ${{ steps.saved.outputs.cache-matched-key }}
         run: |
           # Both checkouts build into one target directory, so dependencies build once.
           echo "CARGO_TARGET_DIR=$RUNNER_TEMP/target" >> "$GITHUB_ENV"
@@ -236,11 +244,11 @@ jobs:
             exit 0
           fi
           if [ "$SAVED" = true ]; then
-            echo "bench: using the saved results of the base commit $BASE; only this commit runs."
+            echo "bench: comparing with the saved $MATCHED (base commit $BASE); only this commit runs."
             echo "bench: they were measured on:$(sed -n 's/^# cpu://p' bench-saved.txt)"
             cp bench-saved.txt bench-base.txt
           else
-            echo "bench: no saved results for the base commit $BASE; both commits run on this runner."
+            echo "bench: no saved results; both commits run on this runner."
           fi
           # Checked out either way: a timing over the limit against saved results reruns it here.
           git fetch --no-tags --depth=1 origin "$BASE"
@@ -262,7 +270,7 @@ jobs:
           key: cargo-bench-${{ hashFiles('Cargo.toml', 'Cargo.lock', 'flake.lock') }}
           restore-keys: cargo-bench-
       - name: Run the base commit's benchmarks
-        if: steps.base.outputs.dir && steps.saved.outputs.cache-hit != 'true'
+        if: steps.base.outputs.dir && steps.saved.outputs.cache-matched-key == ''
         run: scripts/bench-run "${{ steps.base.outputs.dir }}" bench-base.txt
       - name: Run this commit's benchmarks
         id: current
@@ -273,7 +281,7 @@ jobs:
         id: compare
         if: steps.base.outputs.dir
         env:
-          SAVED: ${{ steps.saved.outputs.cache-hit == 'true' }}
+          SAVED: ${{ steps.saved.outputs.cache-matched-key != '' }}
         run: |
           scripts/bench-compare bench-base.txt bench-current.txt 10 bytes
           if scripts/bench-compare bench-base.txt bench-current.txt 50; then
@@ -431,7 +439,7 @@ jobs:
   # The one required check: fails if a job it needs failed or was cancelled, and
   # passes when each succeeded or was skipped as not needed.
   ci:
-    needs: [changes, linear, test, e2e, bench, instructions, nixos-vm, packages]
+    needs: [changes, linear, test, e2e, instructions, nixos-vm, packages]
     if: always()
     runs-on: ubuntu-latest
     steps:
