@@ -17,20 +17,20 @@ use std::time::{Duration, Instant};
 use kotodama_protocol::{
     Action, ActionRef, CatalogEntry, Clipboard, FORGET_SHORTCUT, FromExtension, FromFrontEnd, Item,
     ItemKind, Job, JobState, KindName, LiveResult, NamespacedKind, OfferedAction, Outcome,
-    ResultRef, ShownResult, Table, ToExtension, ToFrontEnd, View, ViewContent,
+    ResultRef, Scope, ShownResult, Table, ToExtension, ToFrontEnd, View, ViewContent,
 };
 use nucleo_matcher::pattern::{CaseMatching, Normalization, Pattern};
 use nucleo_matcher::{Config, Matcher};
 
 use crate::arguments;
 use crate::clock::{Clock, When};
-use crate::config::extension_table;
+use crate::config::extension_settings;
 use crate::discovery::Found;
 use crate::empty_query::EmptyQuery;
 use crate::history::{
     self, Change, Frecent, Habit, History, IDENTITIES, Picks, ResultKey, Settings, Store, query_key,
 };
-use crate::index::{Index, ItemRef, Slot};
+use crate::index::{Index, ItemRef, Reach, Slot};
 use crate::indexer::{Indexed, Indexer, Kept, Plan};
 use crate::keywords::{self, Alias, Keywords};
 use crate::kind_order::{KindOrder, KindPlaces};
@@ -38,6 +38,7 @@ use crate::most_used::{Ahead, Counts, Other, Picked, Usage, Versions};
 use crate::narrowing::Narrowing;
 use crate::open_view::{Opening, ViewName};
 use crate::pick::{self, PICK, Pick};
+use crate::prefix::{Prefix, Prefixes};
 use crate::rank::{self, Haystack, Matched, Text, Tier, Tiers};
 use crate::reserved;
 use crate::segment::Edit;
@@ -445,9 +446,19 @@ struct Session {
     /// Left its channel full: it has stopped reading.
     hung: Cell<bool>,
     query: String,
-    /// The query as Learned choices and Aliases are kept under.
+    /// Which Items the query searches: all but those behind a Prefix, or,
+    /// when it starts with one, that Extension's alone.
+    reach: Reach,
+    /// The Prefix the query starts with, by its place in
+    /// [`Daemon::prefixes`].
+    scope: Option<usize>,
+    /// Where the text searched starts in `query`: past the Prefix and its
+    /// space, if it starts with one.
+    rest: usize,
+    /// The query as Learned choices and Aliases are kept under, the Prefix
+    /// included, so what is learned behind one stays there.
     key: String,
-    /// The query as tiers are worked out from.
+    /// The text searched as tiers are worked out from.
     folded: rank::Query,
     pattern: Pattern,
     /// What a perfect match of the query scores, which Live query scores are
@@ -514,10 +525,27 @@ impl Session {
             .is_some_and(|result| result.answer)
     }
 
-    /// Sends `results`, the rows of `shown`, as the next version. A late
-    /// update notes each Result it adds or moves up a row as risen in that
-    /// version.
-    fn send_results(&mut self, shown: Vec<(Source, bool)>, results: Vec<ShownResult>, fresh: bool) {
+    /// The text searched: the query past its Prefix, if it starts with one.
+    fn searched(&self) -> &str {
+        &self.query[self.rest..]
+    }
+
+    /// Whether the query asks the Extension `id`'s Live queries anything,
+    /// given which Extensions are behind a Prefix.
+    fn asks(&self, id: ExtensionId, scoped: &[bool]) -> bool {
+        self.reach.reads(id.0, scoped) && !self.searched().is_empty()
+    }
+
+    /// Sends `results`, the rows of `shown`, as the next version, for a query
+    /// behind `scope`. A late update notes each Result it adds or moves up a
+    /// row as risen in that version.
+    fn send_results(
+        &mut self,
+        shown: Vec<(Source, bool)>,
+        results: Vec<ShownResult>,
+        scope: Option<Scope>,
+        fresh: bool,
+    ) {
         self.version = self.version.wrapping_add(1);
         if fresh {
             self.risen.clear();
@@ -537,6 +565,7 @@ impl Session {
         self.send(ToFrontEnd::Results {
             version: self.version,
             results,
+            scope,
         });
     }
 
@@ -617,6 +646,8 @@ struct Own {
 enum OwnAction {
     /// Opens the `n`th Quicklink.
     Quicklink(usize),
+    /// Enters the `n`th Prefix: the entry Item of its Extension.
+    Prefix(usize),
     ClearHistory,
     /// Undoes the latest change to the History.
     Undo,
@@ -775,6 +806,45 @@ fn after_keyword<'q>(query: &'q str, keyword: &str) -> Option<&'q str> {
         .then(|| rest.trim())
 }
 
+/// Reads `session.query`: the Prefix it starts with, if any, and the text
+/// searched past it, as the matcher and the tiers take it. A query that
+/// moves behind another Prefix, or out of one, searches other Items, so the
+/// last search can't narrow it.
+fn read_query(prefixes: &Prefixes, matcher: &mut Matcher, session: &mut Session) {
+    let (scope, rest) = match prefixes.scope_of(&session.query) {
+        Some((n, rest)) => (Some(n), rest),
+        None => (None, 0),
+    };
+    let reach = scope
+        .and_then(|n| prefixes.get(n))
+        .map_or(Reach::Root, |prefix| Reach::Scope(prefix.extension));
+    if reach != session.reach {
+        session.last_search.forget();
+    }
+    session.reach = reach;
+    session.scope = scope;
+    session.rest = rest;
+    let searched = &session.query[rest..];
+    // Folded like the haystacks, so neither case nor accents matter.
+    session.pattern = Pattern::parse(
+        &rank::fold_text(searched),
+        CaseMatching::Ignore,
+        Normalization::Never,
+    );
+    session.folded = rank::Query::new(searched);
+    session.max_score = session
+        .pattern
+        .atoms
+        .iter()
+        .filter_map(|atom| {
+            let needle = atom.needle_text();
+            matcher.fuzzy_match(needle, needle)
+        })
+        .map(u32::from)
+        .sum();
+    session.key = query_key(&session.query);
+}
+
 /// What running an Action does when a required Argument is missing.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Missing {
@@ -880,8 +950,11 @@ pub struct Daemon<L, D, S> {
     kinds: KindOrder,
     /// `kinds` for each Segment's kinds, as of the last search.
     kind_places: KindPlaces,
-    /// One per Quicklink, then the clear-history Item, then the Undo Item
-    /// while there is something to undo.
+    /// Each Extension's Prefix, which puts its Items behind it.
+    prefixes: Prefixes,
+    /// One per Quicklink, then one per Prefix (its entry Item), then the
+    /// clear-history Item, then the Undo Item while there is something to
+    /// undo.
     own: Vec<Own>,
     /// The changes to the History that can still be undone, oldest first.
     undos: Vec<Undoable>,
@@ -960,6 +1033,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             empty_query: EmptyQuery::default(),
             kinds: KindOrder::default(),
             kind_places: KindPlaces::default(),
+            prefixes: Prefixes::default(),
             own: Vec::new(),
             undos: Vec::new(),
             frecent: Arc::default(),
@@ -971,6 +1045,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             highlights: Vec::new(),
         };
         daemon.load_keywords();
+        daemon.load_prefixes();
         daemon.load_settings();
         daemon.empty_query = EmptyQuery::from_config(&daemon.config);
         daemon.kinds = KindOrder::from_config(&daemon.config);
@@ -1094,6 +1169,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
                     picked: Arc::default(),
                     others: Vec::new(),
                     wanted: 0,
+                    left_out: Vec::new(),
                 },
                 learned: Arc::new([]),
                 when,
@@ -1337,18 +1413,19 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
         {
             return;
         }
-        let table = extension_table(&self.config, ext.name());
+        let table = extension_settings(&self.config, ext.name());
         ext.state = State::Up { sender, since: now };
         ext.send(ToExtension::Config(table.clone()));
         ext.config = Some(table);
 
         // Whatever is typed already reaches it, as if typed just now.
         if let Some(debounce) = ext.debounce() {
+            let scoped = self.index.scoped();
             for session in self.sessions.values_mut() {
-                if session.query.is_empty() {
+                if !session.asks(id, scoped) {
                     continue;
                 }
-                if let Some((query, prefix)) = ext.route(&session.query) {
+                if let Some((query, prefix)) = ext.route(session.searched()) {
                     session.live[id.0] = Live::asking(query, prefix, now + debounce);
                 }
             }
@@ -2150,6 +2227,9 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             disconnect: Some(disconnect),
             hung: Cell::new(false),
             query: String::new(),
+            reach: Reach::Root,
+            scope: None,
+            rest: 0,
             key: String::new(),
             folded: rank::Query::default(),
             pattern: Pattern::default(),
@@ -2596,6 +2676,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
                 }
             }
         }
+        self.load_prefixes();
     }
 
     /// Ends the current run of an Extension, leaving it removed until started
@@ -2616,29 +2697,13 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
         let Some(session) = self.sessions.get_mut(&id) else {
             return;
         };
-        // Folded like the haystacks, so neither case nor accents matter.
-        session.pattern = Pattern::parse(
-            &rank::fold_text(&text),
-            CaseMatching::Ignore,
-            Normalization::Never,
-        );
-        session.folded = rank::Query::new(&text);
-        session.max_score = session
-            .pattern
-            .atoms
-            .iter()
-            .filter_map(|atom| {
-                let needle = atom.needle_text();
-                self.matcher.fuzzy_match(needle, needle)
-            })
-            .map(u32::from)
-            .sum();
-        session.key = query_key(&text);
         session.query = text;
+        read_query(&self.prefixes, &mut self.matcher, session);
         session.searched = true;
         session.update = Update::Fresh;
         session.typed = now;
         session.selection_moved = false;
+        let scoped = self.index.scoped();
         for (ext_id, ext) in self.extensions.iter().enumerate() {
             let live = &mut session.live[ext_id];
             if let Some(query) = live.sent.take() {
@@ -2646,13 +2711,13 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
                 ext.send(ToExtension::CancelLiveQuery { id: query });
             }
             *live = Live::default();
-            if ext.sender().is_none() || session.query.is_empty() {
+            if ext.sender().is_none() || !session.asks(ExtensionId(ext_id), scoped) {
                 continue;
             }
             if let (Some(debounce), Some((query, prefix))) =
-                (ext.debounce(), ext.route(&session.query))
+                (ext.debounce(), ext.route(session.searched()))
             {
-                *live = Live::asking(query, prefix, now + debounce);
+                session.live[ext_id] = Live::asking(query, prefix, now + debounce);
             }
         }
         if let Some(query) = logged {
@@ -2710,7 +2775,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
         // Arguments are typed in the search, after the Item's keyword.
         if found_searched
             && let Some(keyword) = &item.keyword
-            && let Some(typed) = after_keyword(&session.query, &keyword.to_lowercase())
+            && let Some(typed) = after_keyword(session.searched(), &keyword.to_lowercase())
         {
             arguments::fill(&wanted.arguments, typed, &mut arguments);
         }
@@ -2799,6 +2864,13 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
                 };
                 self.desktop.launch(quicklink.command(query));
                 session.send(ToFrontEnd::Close);
+                self.picked(front_end, result, action, now);
+            }
+            OwnAction::Prefix(n) => {
+                let prefix = self.prefixes.get(n).ok_or_else(gone)?;
+                session.send(ToFrontEnd::SetQuery {
+                    text: format!("{} ", prefix.keyword),
+                });
                 self.picked(front_end, result, action, now);
             }
             OwnAction::ClearHistory => {
@@ -3161,6 +3233,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
     fn set_config(&mut self, config: Table) {
         self.config = config;
         self.load_keywords();
+        self.load_prefixes();
         self.load_settings();
         let empty_query = EmptyQuery::from_config(&self.config);
         if empty_query != self.empty_query {
@@ -3176,7 +3249,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             if ext.sender().is_none() {
                 continue;
             }
-            let table = extension_table(&self.config, ext.name());
+            let table = extension_settings(&self.config, ext.name());
             if ext.config.as_ref() != Some(&table) {
                 ext.send(ToExtension::Config(table.clone()));
                 ext.config = Some(table);
@@ -3209,13 +3282,6 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
         if keywords == self.keywords && !self.own.is_empty() {
             return;
         }
-        self.own = keywords
-            .quicklinks
-            .iter()
-            .enumerate()
-            .map(|(n, quicklink)| Own::new(quicklink.item(), OwnAction::Quicklink(n)))
-            .chain([Own::new(clear_history(), OwnAction::ClearHistory)])
-            .collect();
         self.keywords = keywords;
         let aliases = &self.keywords.aliases;
         self.last_seen.retain(|(extension, id), _| {
@@ -3224,6 +3290,44 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
                 .any(|alias| alias.extension == *extension && alias.item == *id)
         });
         self.repin();
+        self.build_own();
+    }
+
+    /// Reads each installed Extension's Prefix from its Manifest and the
+    /// config. When they changed, the Index skips the new set, every
+    /// session's query is read again, and the entry Items are rebuilt.
+    fn load_prefixes(&mut self) {
+        let installed = self
+            .extensions
+            .iter()
+            .enumerate()
+            .filter(|(_, ext)| !matches!(ext.state, State::Removed))
+            .map(|(n, ext)| (ExtensionId(n), &ext.found.manifest));
+        let prefixes = Prefixes::new(installed, &self.config);
+        if prefixes == self.prefixes {
+            return;
+        }
+        self.prefixes = prefixes;
+        self.index
+            .set_scoped(self.prefixes.scoped(self.extensions.len()));
+        for session in self.sessions.values_mut() {
+            read_query(&self.prefixes, &mut self.matcher, session);
+        }
+        self.build_own();
+    }
+
+    /// Builds the Daemon's own Items from the Quicklinks and the Prefixes.
+    fn build_own(&mut self) {
+        let quicklinks = self.keywords.quicklinks.iter().enumerate();
+        let entries = self.prefixes.iter().enumerate().map(|(n, prefix)| {
+            let name = self.extensions[prefix.extension.0].name();
+            Own::new(prefix.entry(name), OwnAction::Prefix(n))
+        });
+        self.own = quicklinks
+            .map(|(n, quicklink)| Own::new(quicklink.item(), OwnAction::Quicklink(n)))
+            .chain(entries)
+            .chain([Own::new(clear_history(), OwnAction::ClearHistory)])
+            .collect();
         self.load_undo_item();
         // The own Items' positions changed, so rows showing them can't be
         // kept where they are.
@@ -3359,12 +3463,22 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
         let fresh = session.update == Update::Fresh;
         let keep = !fresh && !session.reranks(now);
         session.update = Update::None;
+        let scope = session
+            .scope
+            .and_then(|n| self.prefixes.get(n))
+            .map(Prefix::scope);
 
-        if session.query.is_empty() {
+        let nothing_past_prefix = scope.is_some() && session.searched().trim().is_empty();
+        if session.query.is_empty() || nothing_past_prefix {
             session.last_search.forget();
             let when = self.when(now);
-            session.empty_ranked_in = Some(history::part_of_day(when));
-            let mut ranked = self.empty_query(&session, when);
+            let mut ranked = match session.reach {
+                Reach::Root => {
+                    session.empty_ranked_in = Some(history::part_of_day(when));
+                    self.empty_query(&session, when)
+                }
+                Reach::Scope(extension) => self.empty_scope(extension, when),
+            };
             if keep {
                 // The rows on screen stay put, as for any query.
                 let visible: Vec<Source> = session
@@ -3383,7 +3497,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
                 .filter_map(|&source| self.row(&session, source, None))
                 .collect();
             let shown = ranked.into_iter().map(|source| (source, false)).collect();
-            session.send_results(shown, results, fresh);
+            session.send_results(shown, results, scope, fresh);
             self.sessions.insert(id, session);
             return;
         }
@@ -3391,9 +3505,10 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
         let mut candidates = Vec::new();
         self.scored.clear();
         let version = self.index.version();
-        let within = session
-            .last_search
-            .within(&session.query, &session.folded, version);
+        let within =
+            session
+                .last_search
+                .within(&session.query[session.rest..], &session.folded, version);
         let narrow = within.is_some();
         self.kind_places.update(&self.kinds, self.index.kinds());
         let Daemon {
@@ -3408,6 +3523,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             &session.pattern,
             matcher,
             session.folded.filter(),
+            session.reach,
             within,
             |slot, ranked, score, matched| {
                 scored.push(slot);
@@ -3425,7 +3541,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             },
         );
         session.last_search.found(
-            &session.query,
+            &session.query[session.rest..],
             &session.folded,
             version,
             self.scored.iter().copied(),
@@ -3472,7 +3588,12 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
                 }
             }
         }
-        for (n, own) in self.own.iter().enumerate() {
+        // Behind a Prefix, the Extension's Items alone: none of the Daemon's.
+        let own = match session.reach {
+            Reach::Root => &self.own[..],
+            Reach::Scope(_) => &[],
+        };
+        for (n, own) in own.iter().enumerate() {
             let filter = session.folded.filter();
             if let Some((score, matched)) =
                 own.haystack
@@ -3544,7 +3665,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             .iter()
             .map(|candidate| (candidate.source, candidate.standing == Standing::Answer))
             .collect();
-        session.send_results(shown, results, fresh);
+        session.send_results(shown, results, scope, fresh);
         self.sessions.insert(id, session);
     }
 
@@ -3564,12 +3685,18 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
         if candidates.len() >= session.rows {
             return;
         }
-        for (ext, live) in self.extensions.iter().zip(&mut session.live) {
+        let scoped = self.index.scoped();
+        for (n, ext) in self.extensions.iter().enumerate() {
+            let live = &session.live[n];
             if live.asked || !ext.fallback() || ext.sender().is_none() {
                 continue;
             }
+            if !session.asks(ExtensionId(n), scoped) {
+                continue;
+            }
             if let Some(debounce) = ext.debounce() {
-                *live = Live::asking(session.query.clone(), None, now + debounce);
+                let query = session.searched().to_owned();
+                session.live[n] = Live::asking(query, None, now + debounce);
             }
         }
         if !self.history.is_empty() {
@@ -3656,10 +3783,15 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             let (within, all) = if narrow {
                 (&nearly[..], None)
             } else {
-                (&[][..], Some(index.starting_with(folded.typo_initials())))
+                let initials = folded.typo_initials();
+                (&[][..], Some(index.starting_with(initials, session.reach)))
             };
             let slots = within.iter().copied().chain(all.into_iter().flatten());
-            let own = (0..own.len() as u32).map(Source::Own);
+            let own_reached = match session.reach {
+                Reach::Root => own.len() as u32,
+                Reach::Scope(_) => 0,
+            };
+            let own = (0..own_reached).map(Source::Own);
             found.extend(
                 slots
                     .map(Source::Indexed)
@@ -3748,16 +3880,22 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
         }
 
         // What the query names: an Alias, typed alone or before an Argument,
-        // goes first. A Quicklink's keyword or an Item's own keyword counts as
-        // an exact match, which a Learned choice can beat.
-        let first = session.key.split(' ').next().unwrap_or_default();
+        // goes first. A Quicklink's keyword, a Prefix typed alone or an Item's
+        // own keyword counts as an exact match, which a Learned choice can
+        // beat. Behind a Prefix, only its Extension's Items' keywords count,
+        // typed first past it.
+        let root = session.reach == Reach::Root;
+        let mut words = session.key.split(' ');
+        let first = if root { words.next() } else { words.nth(1) };
+        let first = first.unwrap_or_default();
         let mut named: Vec<Keyword> = Vec::new();
         let mut primary = None;
         let alias = self
             .keywords
             .aliases
             .get_key_value(session.key.as_str())
-            .or_else(|| self.keywords.aliases.get_key_value(first));
+            .or_else(|| self.keywords.aliases.get_key_value(first))
+            .filter(|_| root);
         if let Some((keyword, alias)) = alias
             && let Some(source) = self.alias_source(session, alias)
         {
@@ -3771,11 +3909,11 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             }
             session.via_alias = Some((source, keyword.clone()));
         }
-        if let Some(n) = self
-            .keywords
-            .quicklinks
-            .iter()
-            .position(|quicklink| quicklink.keyword == first)
+        if root
+            && let Some(n) = self
+                .own
+                .iter()
+                .position(|own| own.item.keyword.as_deref() == Some(first))
         {
             named.push(Keyword {
                 source: Source::Own(n as u32),
@@ -3783,7 +3921,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
                 frecency: None,
             });
         }
-        for slot in self.index.keyed(first) {
+        for slot in self.index.keyed(first, session.reach) {
             named.push(Keyword {
                 source: Source::Indexed(slot),
                 alias: false,
@@ -3900,6 +4038,35 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
         shown
     }
 
+    /// What a Prefix with nothing typed past it shows: its Extension's Items
+    /// most used at `when`, then the rest in the order it sent them.
+    fn empty_scope(&mut self, extension: ExtensionId, when: When) -> Vec<Source> {
+        let mut shown = if self.history.is_empty() {
+            Vec::new()
+        } else {
+            self.cache_frecent();
+            let mut left_out = vec![true; self.extensions.len()];
+            left_out[extension.0] = false;
+            let usage = Usage {
+                picked: Arc::clone(&self.frecent),
+                others: Vec::new(),
+                wanted: MAX_RESULTS,
+                left_out,
+            };
+            usage.rank(when, &mut self.habits)
+        };
+        for slot in self.index.first(extension, MAX_RESULTS) {
+            if shown.len() >= MAX_RESULTS {
+                break;
+            }
+            let source = Source::Indexed(slot);
+            if !shown.contains(&source) {
+                shown.push(source);
+            }
+        }
+        shown
+    }
+
     /// The Results most used at `when`, as [`Usage::rank`] ranks them: as
     /// they were ranked ahead, when that ranking stands for `when`, or else
     /// ranked here and now.
@@ -3919,9 +4086,9 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
     }
 
     /// What the Empty query's most used Results rank by now: the picked
-    /// Indexed items, then the Daemon's own Items and the Results the
-    /// Aliases name. A Live query result is never among them: the Empty
-    /// query asks no Live query.
+    /// Indexed items but those behind a Prefix, then the Daemon's own Items
+    /// and the Results the Aliases name. A Live query result is never among
+    /// them: the Empty query asks no Live query.
     fn usage(&mut self) -> Usage {
         self.cache_frecent();
         let mut others = Vec::new();
@@ -3959,6 +4126,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             picked: Arc::clone(&self.frecent),
             others,
             wanted: self.empty_query.most_used,
+            left_out: self.index.scoped().to_vec(),
         }
     }
 

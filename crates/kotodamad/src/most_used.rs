@@ -68,6 +68,9 @@ pub struct Usage {
     pub others: Vec<Other>,
     /// How many to show.
     pub wanted: usize,
+    /// By Extension, whether its Indexed items are left out of the ranking:
+    /// those behind a Prefix, for the Empty query.
+    pub left_out: Vec<bool>,
 }
 
 /// One Result as the most used rank it.
@@ -107,6 +110,9 @@ impl Usage {
         let mut most: Vec<Used> = Vec::with_capacity(picked.slots.len() + self.others.len());
         let entries = picked.slots.iter().zip(&picked.groups).zip(habits.iter());
         for ((&(slot, counts), &group), &used) in entries {
+            if self.left_out.get(slot.segment as usize) == Some(&true) {
+                continue;
+            }
             let source = Source::Indexed(slot);
             if most.last().is_none_or(|last| last.source != source) {
                 most.push(Used::new(source, group));

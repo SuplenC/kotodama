@@ -1353,6 +1353,35 @@ fn a_config_change_reaches_only_the_extensions_whose_table_changed() {
     assert_eq!(configs(&web), []);
 }
 
+#[test]
+fn the_prefix_in_an_extensions_table_is_the_daemons_and_never_reaches_it() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("a.toml"),
+        "[extensions.apps]\nterminal = \"foot\"\nprefix = \"app\"",
+    )
+    .unwrap();
+    let config = kotodamad::config::load(&[dir.path().to_owned()]).unwrap();
+    let mut h = Harness::with_config(vec![plain("apps")], config);
+    let apps = h.up(0);
+
+    let configs: Vec<Table> = apps
+        .drain()
+        .into_iter()
+        .filter_map(|m| match m {
+            ToExtension::Config(table) => Some(table),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        configs,
+        [BTreeMap::from([(
+            "terminal".into(),
+            Value::String("foot".into())
+        )])]
+    );
+}
+
 fn typer() -> Found {
     plain("typer")
 }

@@ -131,10 +131,33 @@ impl Hasher for SlotHasher {
 /// Results of a few keystrokes.
 pub const SHOWN_RESIDENT: usize = 256;
 
+/// Which Segments a search reads.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Reach {
+    /// Every Segment but those behind a Prefix: the search.
+    Root,
+    /// One Extension's Segment alone: the search behind its Prefix.
+    Scope(ExtensionId),
+}
+
+impl Reach {
+    /// Whether a search with this reach reads Segment `segment`, given which
+    /// Segments are behind a Prefix.
+    pub fn reads(self, segment: usize, scoped: &[bool]) -> bool {
+        match self {
+            Reach::Root => !scoped.get(segment).copied().unwrap_or(false),
+            Reach::Scope(extension) => extension.0 == segment,
+        }
+    }
+}
+
 #[derive(Default)]
 pub struct Index {
     /// By Extension.
     segments: Vec<Arc<Segment>>,
+    /// By Extension, whether its Items are behind a Prefix, which the root
+    /// search skips whole.
+    scoped: Vec<bool>,
     /// Bumped on every change, so a search narrowed from an earlier one knows
     /// when it can't be trusted.
     version: u64,
@@ -189,6 +212,37 @@ impl Index {
         self.version
     }
 
+    /// Puts the Items of the Extensions `scoped` marks, by Extension, behind
+    /// their Prefix. A search narrowed from one before this can't be trusted,
+    /// so it counts as a change.
+    pub fn set_scoped(&mut self, scoped: Vec<bool>) {
+        if scoped != self.scoped {
+            self.scoped = scoped;
+            self.version += 1;
+        }
+    }
+
+    /// By Extension, whether its Items are behind a Prefix.
+    pub fn scoped(&self) -> &[bool] {
+        &self.scoped
+    }
+
+    /// Up to `most` of one Extension's Items, in row order: the order they
+    /// were sent in, but for the rows a removed Item left and a later one took.
+    pub fn first(&self, extension: ExtensionId, most: usize) -> Vec<Slot> {
+        let Some(segment) = self.segments.get(extension.0) else {
+            return Vec::new();
+        };
+        (0..segment.every_letter().len() as Row)
+            .filter(|&row| segment.ranked(row).is_some())
+            .take(most)
+            .map(|row| Slot {
+                segment: extension.0 as u32,
+                row,
+            })
+            .collect()
+    }
+
     /// Makes one change to an Extension's Items, here and now.
     pub fn edit(&mut self, extension: ExtensionId, edit: Edit) {
         self.version += 1;
@@ -224,11 +278,13 @@ impl Index {
         })
     }
 
-    /// The Items whose keyword is `keyword`, given in lowercase.
-    pub fn keyed<'a>(&'a self, keyword: &'a str) -> impl Iterator<Item = Slot> + 'a {
+    /// The Items within `reach` whose keyword is `keyword`, given in
+    /// lowercase.
+    pub fn keyed<'a>(&'a self, keyword: &'a str, reach: Reach) -> impl Iterator<Item = Slot> + 'a {
         self.segments
             .iter()
             .enumerate()
+            .filter(move |&(n, _)| reach.reads(n, &self.scoped))
             .flat_map(move |(n, segment)| self.slots(n, segment.keyed(keyword)))
     }
 
@@ -248,12 +304,15 @@ impl Index {
         })
     }
 
-    /// The slots, in order, whose Item has a word starting with one of
-    /// `initials`, as [`Haystack::initials`](crate::rank::Haystack::initials)
-    /// gives them.
-    pub fn starting_with(&self, initials: Letters) -> Vec<Slot> {
+    /// The slots within `reach`, in order, whose Item has a word starting
+    /// with one of `initials`, as
+    /// [`Haystack::initials`](crate::rank::Haystack::initials) gives them.
+    pub fn starting_with(&self, initials: Letters, reach: Reach) -> Vec<Slot> {
         let mut slots = Vec::new();
         for (n, segment) in self.segments.iter().enumerate() {
+            if !reach.reads(n, &self.scoped) {
+                continue;
+            }
             segment.rows_where(
                 |_, starts| Letters::meet_block(starts, initials),
                 |row| {
@@ -500,17 +559,18 @@ impl Index {
             .map(move |row| Slot { segment, row })
     }
 
-    /// Scores every Item against `pattern`, or only the slots in `within` when
-    /// the caller knows nothing else can match. Calls `found` with each
-    /// match's slot, what ranking reads of it, its score and what matched.
-    /// The matches come in slot order if `within` is in it. Ranking takes the
-    /// row from the scan and doesn't look it up again. `filter` is as
-    /// [`Texts::score`] takes it.
+    /// Scores every Item within `reach` against `pattern`, or only the slots
+    /// in `within` when the caller knows nothing else can match: a search of
+    /// the same reach found them. Calls `found` with each match's slot, what
+    /// ranking reads of it, its score and what matched. The matches come in
+    /// slot order if `within` is in it. Ranking takes the row from the scan
+    /// and doesn't look it up again. `filter` is as [`Texts::score`] takes it.
     pub fn search(
         &self,
         pattern: &Pattern,
         matcher: &mut Matcher,
         filter: Filter,
+        reach: Reach,
         within: Option<&[Slot]>,
         mut found: impl FnMut(Slot, Ranked<'_>, u32, Matched),
     ) {
@@ -533,6 +593,10 @@ impl Index {
             }
             None => {
                 for (n, segment) in self.segments.iter().enumerate() {
+                    // A Segment out of reach costs this test, never a row.
+                    if !reach.reads(n, &self.scoped) {
+                        continue;
+                    }
                     // Two passes: the rows' dense letters alone, a block at a
                     // time in one vectorised loop, then only the rows that
                     // pass are scored.
@@ -701,6 +765,7 @@ mod tests {
             &pattern,
             matcher,
             query.filter(),
+            Reach::Root,
             None,
             |slot, _, score, matched| out.push((slot, score, matched)),
         );

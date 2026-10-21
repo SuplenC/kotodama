@@ -50,7 +50,10 @@ pub const START: u64 = 1_792_485_000;
 /// The Extensions every Setup runs: `apps` holds the corpus, `clipboard`
 /// whatever a bench sends it.
 pub const APPS: ExtensionId = ExtensionId(0);
+#[allow(dead_code)] // query.rs alone
 pub const CLIPBOARD: ExtensionId = ExtensionId(1);
+/// The emoji Extension, which `Setup::with_emoji` runs too.
+const EMOJI: ExtensionId = ExtensionId(2);
 /// The menu, and a `kotodama toggle` that only passes commands on.
 pub const MENU: FrontEndId = FrontEndId(0);
 pub const COMMAND: FrontEndId = FrontEndId(1);
@@ -126,7 +129,7 @@ impl Setup {
             History::default(),
             corpus::items(),
         );
-        setup.send(ExtensionId(2), kotodama_emoji::items());
+        setup.send(EMOJI, kotodama_emoji::items());
         setup.settle();
         setup
     }

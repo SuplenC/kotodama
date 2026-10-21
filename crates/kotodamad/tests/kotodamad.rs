@@ -187,7 +187,9 @@ impl Client {
     fn titles(&mut self, query: &str) -> Vec<String> {
         self.send(FromFrontEnd::Query { text: query.into() });
         let (version, titles) = self.until(|message| match message {
-            ToFrontEnd::Results { version, results } => Some((
+            ToFrontEnd::Results {
+                version, results, ..
+            } => Some((
                 version,
                 results.into_iter().map(|row| row.item.title).collect(),
             )),

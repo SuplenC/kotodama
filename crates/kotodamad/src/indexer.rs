@@ -520,6 +520,7 @@ mod tests {
                 }),
                 others: Vec::new(),
                 wanted,
+                left_out: Vec::new(),
             },
             learned: learned.iter().map(|&row| slot(row)).collect(),
             when: EIGHT,

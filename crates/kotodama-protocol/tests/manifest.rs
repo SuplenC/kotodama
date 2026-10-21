@@ -169,3 +169,41 @@ fn invalid_manifests_are_rejected_with_the_reason() {
         assert!(err.contains(reason), "expected {reason:?} in:\n{err}");
     }
 }
+
+#[test]
+fn a_manifest_may_put_its_items_behind_a_prefix_with_an_entry_item() {
+    let manifest = parse(
+        r#"
+        name = "emoji"
+        command = ["kotodama-emoji"]
+        prefix = "emoji"
+        title = "Emoji"
+        icon = "face-smile"
+        "#,
+    )
+    .unwrap();
+
+    assert_eq!(manifest.prefix.as_deref(), Some("emoji"));
+    assert_eq!(manifest.title.as_deref(), Some("Emoji"));
+    assert_eq!(manifest.icon.as_deref(), Some("face-smile"));
+}
+
+#[test]
+fn an_extension_without_a_prefix_shows_its_items_in_the_search() {
+    let manifest = parse("name = \"apps\"\ncommand = [\"x\"]").unwrap();
+
+    assert_eq!(manifest.prefix, None);
+    assert_eq!(manifest.title, None);
+    assert_eq!(manifest.icon, None);
+}
+
+#[test]
+fn a_prefix_is_one_word() {
+    for prefix in ["", "two words", "tab\tbed", " emoji"] {
+        let toml = format!("name = \"emoji\"\ncommand = [\"x\"]\nprefix = {prefix:?}");
+
+        let err = parse(&toml).unwrap_err();
+
+        assert!(err.contains("prefix"), "{prefix:?}: {err}");
+    }
+}

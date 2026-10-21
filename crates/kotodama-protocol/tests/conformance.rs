@@ -371,14 +371,21 @@ fn to_front_end_messages() -> Vec<ToFrontEnd> {
                 alias: Some("code".into()),
                 unavailable: None,
             }],
+            scope: None,
         },
         ToFrontEnd::Results {
             version: 2,
             results: vec![],
+            scope: Some(Scope {
+                prefix: "emoji".into(),
+                title: "Emoji".into(),
+                icon: Some("face-smile".into()),
+            }),
         },
         ToFrontEnd::Results {
             version: 3,
             results: vec![unavailable_row()],
+            scope: None,
         },
         ToFrontEnd::Status {
             down: vec!["calculator".into()],
@@ -457,6 +464,9 @@ fn to_front_end_messages() -> Vec<ToFrontEnd> {
             title: "Forgot “Firefox”".into(),
         },
         ToFrontEnd::WithdrawUndo { change: 3 },
+        ToFrontEnd::SetQuery {
+            text: "emoji ".into(),
+        },
     ]
 }
 
@@ -518,9 +528,10 @@ fn to_front_end_variant(message: &ToFrontEnd) -> usize {
         ToFrontEnd::Toggle => 11,
         ToFrontEnd::OfferUndo { .. } => 12,
         ToFrontEnd::WithdrawUndo { .. } => 13,
+        ToFrontEnd::SetQuery { .. } => 14,
     }
 }
-const TO_FRONT_END_VARIANTS: usize = 14;
+const TO_FRONT_END_VARIANTS: usize = 15;
 
 fn from_front_end_variant(message: &FromFrontEnd) -> usize {
     match message {

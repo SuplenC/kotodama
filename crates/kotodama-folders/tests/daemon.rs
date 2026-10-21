@@ -130,7 +130,10 @@ impl Client {
         loop {
             self.send(FromFrontEnd::Query { text: query.into() });
             let results = loop {
-                if let ToFrontEnd::Results { version, results } = self.recv() {
+                if let ToFrontEnd::Results {
+                    version, results, ..
+                } = self.recv()
+                {
                     self.shown = version;
                     break results;
                 }
