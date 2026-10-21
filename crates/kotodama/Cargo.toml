@@ -8,3 +8,6 @@ repository.workspace = true
 
 [dependencies]
 kotodama-protocol = { path = "../kotodama-protocol" }
+
+[lints]
+workspace = true

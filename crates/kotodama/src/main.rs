@@ -18,7 +18,11 @@ use std::os::unix::net::UnixStream;
 use std::process::ExitCode;
 use std::time::Duration;
 
-use kotodama_protocol::{Channel, FromFrontEnd, Hello, WireFormat, socket_path};
+use kotodama_protocol::Channel;
+use kotodama_protocol::FromFrontEnd;
+use kotodama_protocol::Hello;
+use kotodama_protocol::WireFormat;
+use kotodama_protocol::socket_path;
 
 const USAGE: &str = "usage: kotodama toggle
        kotodama open [--view <extension>/<item>] [--prefix <prefix>] [--query <text>]";
@@ -78,11 +82,10 @@ fn parse(args: &[String]) -> Result<FromFrontEnd, String> {
 
 fn send(message: &FromFrontEnd) -> Result<(), Box<dyn std::error::Error>> {
     let socket = socket_path().ok_or("XDG_RUNTIME_DIR isn't set")?;
-    let stream = UnixStream::connect(&socket)
-        .map_err(|err| format!("{}: {err}; is kotodamad running?", socket.display()))?;
+    let stream =
+        UnixStream::connect(&socket).map_err(|err| format!("{}: {err}; is kotodamad running?", socket.display()))?;
     stream.set_read_timeout(Some(HANDSHAKE_TIMEOUT))?;
-    let mut channel =
-        Channel::handshake(stream.try_clone()?, stream, &Hello::new(&WireFormat::ALL))?;
+    let mut channel = Channel::handshake(stream.try_clone()?, stream, &Hello::new(&WireFormat::ALL))?;
     channel.send(message)?;
     Ok(())
 }
