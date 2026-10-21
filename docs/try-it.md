@@ -228,7 +228,7 @@ Some need extras: the shell example Extension for the Views checks (link `exampl
 
 - [ ] `projects`, then Tab: the chip and the intro card show in the same frame as the projects, with no flicker of the whole search's rows.
 - [ ] In the Hyprland app, `screenshot` finds the bind; in the search it finds no bind, only windows.
-- [ ] Esc in an app goes back to the search and keeps the menu open; a second Esc closes it.
+- [ ] Esc in an app with text typed clears it and stays in the app; the next Esc goes back to the search and keeps the menu open; with text typed there, Esc clears it, and the next closes the menu.
 - [ ] `[extensions.clipboard] in_search = true` puts the clips back in the search after a config reload.
 
 ### Views

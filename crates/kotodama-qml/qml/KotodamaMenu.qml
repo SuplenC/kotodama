@@ -114,10 +114,14 @@ PanelWindow {
         if (menu.undoKey(event))
             return true;
         if (event.key === Qt.Key_Escape) {
-            // Esc clears a list's filter first, then pops the View, then
-            // leaves the app for the whole search, then closes the menu.
+            // One rule everywhere, so Esc never throws away more than the
+            // user can see: it clears the text if there is any, else pops
+            // the View, else leaves the app for the whole search, else
+            // closes the menu.
             if (menu.kind === "list" && filter.text !== "")
                 filter.text = "";
+            else if (menu.kind === "" && input.text !== "")
+                input.text = "";
             else if (search.depth > 0)
                 search.popView();
             else if (search.leaveApp())

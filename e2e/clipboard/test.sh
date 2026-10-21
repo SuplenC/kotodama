@@ -96,8 +96,9 @@ press -M ctrl -k k -m ctrl "actions: Paste, Copy to Clipboard, Show Details, Del
 press -k Down -k Down -k Return "view: detail Copied Image"
 expect_screen detail.png
 press -k Escape "view: search"
-# The first Esc leaves the clipboard's app, the next closes the menu.
-press -k Escape -k Escape "visible: false"
+# The first Esc clears `image 320`, the next leaves the clipboard's app, the
+# last closes the menu.
+press -k Escape -k Escape -k Escape "visible: false"
 
 # The primary Action pastes into the window that has focus.
 spawn quickshell --path ../type-and-paste/client.qml

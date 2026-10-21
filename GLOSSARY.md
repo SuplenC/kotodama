@@ -53,7 +53,7 @@ An Item an Extension sends ahead of time that the search never shows; only `koto
 _Avoid_: Private item, internal item
 
 **App**:
-The search over one Extension's Items alone, which every Extension has. The search shows its entry Item, found by the App's title and its Word; Tab or Enter on it enters the App, where an intro card from the Manifest shows until something is typed, and Esc goes back to the whole search. Each Item is in the search, or in its App only. Unlike a Hidden item, an App only Item is still searched, in its App; unlike a View, the search in an App is the search, with Results. A program installed on the desktop is an application, never an App: its Item kind is `app`, and the `apps` Extension's App is the Applications App.
+The search over one Extension's Items alone, which every Extension has. The search shows its entry Item, found by the App's title and its Word; Tab or Enter on it enters the App, where an intro card from the Manifest shows until something is typed; Esc with nothing typed goes back to the whole search. Each Item is in the search, or in its App only. Unlike a Hidden item, an App only Item is still searched, in its App; unlike a View, the search in an App is the search, with Results. A program installed on the desktop is an application, never an App: its Item kind is `app`, and the `apps` Extension's App is the Applications App.
 _Avoid_: Prefix, scope, mode, namespace, trigger; app for a desktop application
 
 **Word**:
@@ -97,7 +97,7 @@ A short notice the Front end shows after Forget or "Clear history", with the key
 _Avoid_: Snackbar, notification, popup
 
 **View**:
-A screen pushed on top of the search, such as a list, a form, a detail pane or a progress display; Esc pops it. Typing into a list filters it.
+A screen pushed on top of the search, such as a list, a form, a detail pane or a progress display; Esc pops it once the text is cleared. Typing into a list filters it.
 _Avoid_: Page, panel, mode, screen
 
 **Argument**:
