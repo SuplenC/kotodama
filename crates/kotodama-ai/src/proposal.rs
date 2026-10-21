@@ -79,6 +79,7 @@ impl Proposal {
             keywords: Vec::new(),
             actions: vec![Action::new(RUN, format!("Run {}", self.entry.action.title))],
             hidden: false,
+            app_only: false,
         }
     }
 
@@ -137,6 +138,7 @@ pub fn ask_result(query: &str) -> LiveResult {
             keywords: Vec::new(),
             actions: vec![Action::new(ASK, "Ask AI")],
             hidden: false,
+            app_only: false,
         },
         score: Fraction::new(0.0).expect("0 is a fraction"),
         answer: false,

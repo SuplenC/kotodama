@@ -236,6 +236,7 @@ fn item(id: &str, title: &str) -> Item {
         identity: None,
         keywords: vec![],
         hidden: false,
+        app_only: false,
         actions: vec![Action::new("open", "Open")],
     }
 }
@@ -270,7 +271,7 @@ fn a_killed_extension_never_stalls_the_daemon_and_comes_back_on_its_own() {
         ToFrontEnd::Status { down } if down == ["bookmarks"] => Some(()),
         _ => None,
     });
-    assert_eq!(ui.titles("other"), ["Other thing"]);
+    assert_eq!(ui.titles("thing"), ["Other thing"]);
 
     ui.until(|message| match message {
         ToFrontEnd::Status { down } if down.is_empty() => Some(()),

@@ -51,6 +51,12 @@ fn simple_arithmetic_is_answered() {
     assert_eq!(answer("1/3").as_deref(), Some("0.3333333333"));
 }
 
+// The example the Manifest's intro card shows.
+#[test]
+fn a_duration_converts_to_seconds() {
+    assert_eq!(answer("15min in sec").as_deref(), Some("900 secs"));
+}
+
 #[test]
 fn input_that_is_not_math_gives_nothing() {
     for query in ["fi", "firefox", "a", "e", "version", "sin", "hello world", "2 +"] {

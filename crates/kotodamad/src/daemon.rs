@@ -22,6 +22,7 @@ use kotodama_protocol::{
 use nucleo_matcher::pattern::{CaseMatching, Normalization, Pattern};
 use nucleo_matcher::{Config, Matcher};
 
+use crate::apps::Apps;
 use crate::arguments;
 use crate::clock::{Clock, When};
 use crate::config::extension_settings;
@@ -30,7 +31,7 @@ use crate::empty_query::EmptyQuery;
 use crate::history::{
     self, Change, Frecent, Habit, History, IDENTITIES, Picks, ResultKey, Settings, Store, query_key,
 };
-use crate::index::{Index, ItemRef, Reach, Slot};
+use crate::index::{Index, ItemRef, Reach, SIDES, Slot};
 use crate::indexer::{Indexed, Indexer, Kept, Plan};
 use crate::keywords::{self, Alias, Keywords};
 use crate::kind_order::{KindOrder, KindPlaces};
@@ -38,7 +39,6 @@ use crate::most_used::{Ahead, Counts, Other, Picked, Usage, Versions};
 use crate::narrowing::Narrowing;
 use crate::open_view::{Opening, ViewName};
 use crate::pick::{self, PICK, Pick};
-use crate::prefix::{Prefix, Prefixes};
 use crate::rank::{self, Haystack, Matched, Text, Tier, Tiers};
 use crate::reserved;
 use crate::segment::Edit;
@@ -279,6 +279,12 @@ impl Extension {
         self.fallback
     }
 
+    /// The first prefix its Manifest routes Live queries by, if any.
+    fn first_prefix(&self) -> Option<String> {
+        let live = self.found.manifest.live_query.as_ref()?;
+        live.prefixes.first().cloned()
+    }
+
     /// The Live query to send for `query`: the query without its prefix, and
     /// the prefix, if a prefix or trigger routes it here.
     fn route(&self, query: &str) -> Option<(String, Option<String>)> {
@@ -446,16 +452,19 @@ struct Session {
     /// Left its channel full: it has stopped reading.
     hung: Cell<bool>,
     query: String,
-    /// Which Items the query searches: all but those behind a Prefix, or,
+    /// Which Items the query searches: those the whole search shows, or,
     /// when it starts with one, that Extension's alone.
     reach: Reach,
-    /// The Prefix the query starts with, by its place in
-    /// [`Daemon::prefixes`].
+    /// The app the query is in, by its place in [`Daemon::apps`].
     scope: Option<usize>,
-    /// Where the text searched starts in `query`: past the Prefix and its
+    /// The app the user entered, by its place in [`Daemon::apps`], while the
+    /// query keeps its word. Typing the word starts no app of itself, so
+    /// `system monitor` still searches everything.
+    entered: Option<usize>,
+    /// Where the text searched starts in `query`: past the app's word and its
     /// space, if it starts with one.
     rest: usize,
-    /// The query as Learned choices and Aliases are kept under, the Prefix
+    /// The query as Learned choices and Aliases are kept under, the app's word
     /// included, so what is learned behind one stays there.
     key: String,
     /// The text searched as tiers are worked out from.
@@ -525,15 +534,34 @@ impl Session {
             .is_some_and(|result| result.answer)
     }
 
-    /// The text searched: the query past its Prefix, if it starts with one.
+    /// The text searched: the query past its app's word, inside one.
     fn searched(&self) -> &str {
         &self.query[self.rest..]
     }
 
     /// Whether the query asks the Extension `id`'s Live queries anything,
-    /// given which Extensions are behind a Prefix.
-    fn asks(&self, id: ExtensionId, scoped: &[bool]) -> bool {
-        self.reach.reads(id.0, scoped) && !self.searched().is_empty()
+    /// given which Segments the whole search reads: the search asks those
+    /// whose Items it shows, an app its own Extension alone.
+    fn asks(&self, id: ExtensionId, searched: &[bool]) -> bool {
+        self.reach.reads(id.0 * SIDES, searched) && !self.searched().is_empty()
+    }
+
+    /// The Live query to send the Extension `id` for this query, and the
+    /// prefix that routed it: in its app every query, routed by its first
+    /// prefix if no prefix or trigger routes it, so the calculator answers
+    /// whatever is typed in it as it does after `=`.
+    fn live_query(
+        &self,
+        id: ExtensionId,
+        ext: &Extension,
+        searched: &[bool],
+    ) -> Option<(String, Option<String>)> {
+        if !self.asks(id, searched) {
+            return None;
+        }
+        ext.route(self.searched()).or_else(|| {
+            (self.reach == Reach::App(id)).then(|| (self.searched().to_owned(), ext.first_prefix()))
+        })
     }
 
     /// Sends `results`, the rows of `shown`, as the next version, for a query
@@ -646,8 +674,8 @@ struct Own {
 enum OwnAction {
     /// Opens the `n`th Quicklink.
     Quicklink(usize),
-    /// Enters the `n`th Prefix: the entry Item of its Extension.
-    Prefix(usize),
+    /// Enters the `n`th app: the entry Item of its Extension.
+    App(usize),
     ClearHistory,
     /// Undoes the latest change to the History.
     Undo,
@@ -675,6 +703,7 @@ fn clear_history() -> Item {
         identity: None,
         keywords: Vec::new(),
         hidden: false,
+        app_only: false,
         actions: vec![Action {
             id: "run".into(),
             title: "Clear".into(),
@@ -696,6 +725,7 @@ fn undo_item(title: &str) -> Item {
         identity: None,
         keywords: Vec::new(),
         hidden: false,
+        app_only: false,
         actions: vec![action_titled("run", "Undo".into())],
     }
 }
@@ -712,6 +742,7 @@ fn named_only(id: &str) -> Item {
         identity: None,
         keywords: Vec::new(),
         hidden: false,
+        app_only: false,
         actions: Vec::new(),
     }
 }
@@ -806,23 +837,25 @@ fn after_keyword<'q>(query: &'q str, keyword: &str) -> Option<&'q str> {
         .then(|| rest.trim())
 }
 
-/// Reads `session.query`: the Prefix it starts with, if any, and the text
+/// Reads `session.query`: the app it is in, if the user entered one and it
+/// still starts with its word, and the text
 /// searched past it, as the matcher and the tiers take it. A query that
-/// moves behind another Prefix, or out of one, searches other Items, so the
-/// last search can't narrow it.
-fn read_query(prefixes: &Prefixes, matcher: &mut Matcher, session: &mut Session) {
-    let (scope, rest) = match prefixes.scope_of(&session.query) {
-        Some((n, rest)) => (Some(n), rest),
-        None => (None, 0),
+/// moves into another app, or out of one, searches other Items, so the last
+/// search can't narrow it.
+fn read_query(apps: &Apps, matcher: &mut Matcher, session: &mut Session) {
+    let (scope, rest) = match apps.scope_of(&session.query) {
+        Some((n, rest)) if session.entered == Some(n) => (Some(n), rest),
+        _ => (None, 0),
     };
     let reach = scope
-        .and_then(|n| prefixes.get(n))
-        .map_or(Reach::Root, |prefix| Reach::Scope(prefix.extension));
+        .and_then(|n| apps.get(n))
+        .map_or(Reach::Root, |app| Reach::App(app.extension));
     if reach != session.reach {
         session.last_search.forget();
     }
     session.reach = reach;
     session.scope = scope;
+    session.entered = scope;
     session.rest = rest;
     let searched = &session.query[rest..];
     // Folded like the haystacks, so neither case nor accents matter.
@@ -950,9 +983,9 @@ pub struct Daemon<L, D, S> {
     kinds: KindOrder,
     /// `kinds` for each Segment's kinds, as of the last search.
     kind_places: KindPlaces,
-    /// Each Extension's Prefix, which puts its Items behind it.
-    prefixes: Prefixes,
-    /// One per Quicklink, then one per Prefix (its entry Item), then the
+    /// Each Extension's app.
+    apps: Apps,
+    /// One per Quicklink, then one per app (its entry Item), then the
     /// clear-history Item, then the Undo Item while there is something to
     /// undo.
     own: Vec<Own>,
@@ -1033,7 +1066,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             empty_query: EmptyQuery::default(),
             kinds: KindOrder::default(),
             kind_places: KindPlaces::default(),
-            prefixes: Prefixes::default(),
+            apps: Apps::default(),
             own: Vec::new(),
             undos: Vec::new(),
             frecent: Arc::default(),
@@ -1045,7 +1078,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             highlights: Vec::new(),
         };
         daemon.load_keywords();
-        daemon.load_prefixes();
+        daemon.load_apps();
         daemon.load_settings();
         daemon.empty_query = EmptyQuery::from_config(&daemon.config);
         daemon.kinds = KindOrder::from_config(&daemon.config);
@@ -1420,12 +1453,9 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
 
         // Whatever is typed already reaches it, as if typed just now.
         if let Some(debounce) = ext.debounce() {
-            let scoped = self.index.scoped();
+            let searched = self.index.searched();
             for session in self.sessions.values_mut() {
-                if !session.asks(id, scoped) {
-                    continue;
-                }
-                if let Some((query, prefix)) = ext.route(session.searched()) {
+                if let Some((query, prefix)) = session.live_query(id, ext, searched) {
                     session.live[id.0] = Live::asking(query, prefix, now + debounce);
                 }
             }
@@ -1733,13 +1763,15 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
         let Indexed {
             extension,
             change,
-            segment,
+            segments,
             reads,
         } = indexed;
         if change <= self.stale[extension.0] {
             return;
         }
-        self.index.replace(extension, segment);
+        for (at, segment) in segments {
+            self.index.replace(at, segment);
+        }
         self.index.keep(reads);
         self.repin_index();
         self.items_changed();
@@ -2229,6 +2261,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             query: String::new(),
             reach: Reach::Root,
             scope: None,
+            entered: None,
             rest: 0,
             key: String::new(),
             folded: rank::Query::default(),
@@ -2372,6 +2405,13 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             // The menu may open on the Empty query, which may have been
             // ranked hours ago.
             FromFrontEnd::Open { query, view } => {
+                // `kotodama open --prefix <word>` opens on the app: the
+                // query the menus send back starts with its word.
+                if let Some((n, _)) = self.apps.scope_of(&query) {
+                    for session in self.sessions.values_mut() {
+                        session.entered = Some(n);
+                    }
+                }
                 self.warm = true;
                 self.refresh_empty(Update::Fresh, Some(id));
                 match view {
@@ -2676,7 +2716,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
                 }
             }
         }
-        self.load_prefixes();
+        self.load_apps();
     }
 
     /// Ends the current run of an Extension, leaving it removed until started
@@ -2698,12 +2738,12 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             return;
         };
         session.query = text;
-        read_query(&self.prefixes, &mut self.matcher, session);
+        read_query(&self.apps, &mut self.matcher, session);
         session.searched = true;
         session.update = Update::Fresh;
         session.typed = now;
         session.selection_moved = false;
-        let scoped = self.index.scoped();
+        let searched = self.index.searched();
         for (ext_id, ext) in self.extensions.iter().enumerate() {
             let live = &mut session.live[ext_id];
             if let Some(query) = live.sent.take() {
@@ -2711,12 +2751,13 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
                 ext.send(ToExtension::CancelLiveQuery { id: query });
             }
             *live = Live::default();
-            if ext.sender().is_none() || !session.asks(ExtensionId(ext_id), scoped) {
+            if ext.sender().is_none() {
                 continue;
             }
-            if let (Some(debounce), Some((query, prefix))) =
-                (ext.debounce(), ext.route(session.searched()))
-            {
+            if let (Some(debounce), Some((query, prefix))) = (
+                ext.debounce(),
+                session.live_query(ExtensionId(ext_id), ext, searched),
+            ) {
                 session.live[ext_id] = Live::asking(query, prefix, now + debounce);
             }
         }
@@ -2866,12 +2907,17 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
                 session.send(ToFrontEnd::Close);
                 self.picked(front_end, result, action, now);
             }
-            OwnAction::Prefix(n) => {
-                let prefix = self.prefixes.get(n).ok_or_else(gone)?;
-                session.send(ToFrontEnd::SetQuery {
-                    text: format!("{} ", prefix.keyword),
-                });
+            OwnAction::App(n) => {
+                let text = format!("{} ", self.apps.get(n).ok_or_else(gone)?.word);
+                // The Front end takes the query from here, so the app, its
+                // intro card included, is in the Results that follow, with
+                // no query back first.
+                session.send(ToFrontEnd::SetQuery { text: text.clone() });
                 self.picked(front_end, result, action, now);
+                if let Some(session) = self.sessions.get_mut(&front_end) {
+                    session.entered = Some(n);
+                }
+                self.query(front_end, text, now);
             }
             OwnAction::ClearHistory => {
                 session.send(ToFrontEnd::Close);
@@ -3233,7 +3279,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
     fn set_config(&mut self, config: Table) {
         self.config = config;
         self.load_keywords();
-        self.load_prefixes();
+        self.load_apps();
         self.load_settings();
         let empty_query = EmptyQuery::from_config(&self.config);
         if empty_query != self.empty_query {
@@ -3293,35 +3339,48 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
         self.build_own();
     }
 
-    /// Reads each installed Extension's Prefix from its Manifest and the
-    /// config. When they changed, the Index skips the new set, every
-    /// session's query is read again, and the entry Items are rebuilt.
-    fn load_prefixes(&mut self) {
+    /// Reads each installed Extension's app from its Manifest and the
+    /// config. When they changed, the Index reads the Segments the search
+    /// now shows, every session's query is read again, and the entry Items
+    /// are rebuilt.
+    fn load_apps(&mut self) {
         let installed = self
             .extensions
             .iter()
             .enumerate()
             .filter(|(_, ext)| !matches!(ext.state, State::Removed))
             .map(|(n, ext)| (ExtensionId(n), &ext.found.manifest));
-        let prefixes = Prefixes::new(installed, &self.config);
-        if prefixes == self.prefixes {
+        let apps = Apps::new(installed, &self.config);
+        if apps == self.apps {
             return;
         }
-        self.prefixes = prefixes;
+        // The same app may sit at another place now.
+        let entered: Vec<(FrontEndId, Option<usize>)> = self
+            .sessions
+            .iter()
+            .map(|(&id, session)| {
+                let extension = session.entered.and_then(|n| self.apps.get(n));
+                (id, extension.and_then(|app| apps.of(app.extension)))
+            })
+            .collect();
+        self.apps = apps;
         self.index
-            .set_scoped(self.prefixes.scoped(self.extensions.len()));
-        for session in self.sessions.values_mut() {
-            read_query(&self.prefixes, &mut self.matcher, session);
+            .set_searched(self.apps.searched(self.extensions.len()));
+        for (id, entered) in entered {
+            if let Some(session) = self.sessions.get_mut(&id) {
+                session.entered = entered;
+                read_query(&self.apps, &mut self.matcher, session);
+            }
         }
         self.build_own();
     }
 
-    /// Builds the Daemon's own Items from the Quicklinks and the Prefixes.
+    /// Builds the Daemon's own Items from the Quicklinks and the apps.
     fn build_own(&mut self) {
         let quicklinks = self.keywords.quicklinks.iter().enumerate();
-        let entries = self.prefixes.iter().enumerate().map(|(n, prefix)| {
-            let name = self.extensions[prefix.extension.0].name();
-            Own::new(prefix.entry(name), OwnAction::Prefix(n))
+        let entries = self.apps.iter().enumerate().map(|(n, app)| {
+            let name = self.extensions[app.extension.0].name();
+            Own::new(app.entry(name), OwnAction::App(n))
         });
         self.own = quicklinks
             .map(|(n, quicklink)| Own::new(quicklink.item(), OwnAction::Quicklink(n)))
@@ -3463,13 +3522,11 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
         let fresh = session.update == Update::Fresh;
         let keep = !fresh && !session.reranks(now);
         session.update = Update::None;
-        let scope = session
-            .scope
-            .and_then(|n| self.prefixes.get(n))
-            .map(Prefix::scope);
+        let typed = !session.searched().trim().is_empty();
+        let app = session.scope.and_then(|n| self.apps.get(n));
+        let scope = app.map(|app| app.scope(typed));
 
-        let nothing_past_prefix = scope.is_some() && session.searched().trim().is_empty();
-        if session.query.is_empty() || nothing_past_prefix {
+        if session.query.is_empty() || (scope.is_some() && !typed) {
             session.last_search.forget();
             let when = self.when(now);
             let mut ranked = match session.reach {
@@ -3477,7 +3534,10 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
                     session.empty_ranked_in = Some(history::part_of_day(when));
                     self.empty_query(&session, when)
                 }
-                Reach::Scope(extension) => self.empty_scope(extension, when),
+                Reach::App(_) => match session.scope {
+                    Some(n) => self.empty_app(n, when),
+                    None => Vec::new(),
+                },
             };
             if keep {
                 // The rows on screen stay put, as for any query.
@@ -3588,10 +3648,10 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
                 }
             }
         }
-        // Behind a Prefix, the Extension's Items alone: none of the Daemon's.
+        // In an app, the Extension's Items alone: none of the Daemon's.
         let own = match session.reach {
             Reach::Root => &self.own[..],
-            Reach::Scope(_) => &[],
+            Reach::App(_) => &[],
         };
         for (n, own) in own.iter().enumerate() {
             let filter = session.folded.filter();
@@ -3685,13 +3745,13 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
         if candidates.len() >= session.rows {
             return;
         }
-        let scoped = self.index.scoped();
+        let searched = self.index.searched();
         for (n, ext) in self.extensions.iter().enumerate() {
             let live = &session.live[n];
             if live.asked || !ext.fallback() || ext.sender().is_none() {
                 continue;
             }
-            if !session.asks(ExtensionId(n), scoped) {
+            if !session.asks(ExtensionId(n), searched) {
                 continue;
             }
             if let Some(debounce) = ext.debounce() {
@@ -3789,7 +3849,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             let slots = within.iter().copied().chain(all.into_iter().flatten());
             let own_reached = match session.reach {
                 Reach::Root => own.len() as u32,
-                Reach::Scope(_) => 0,
+                Reach::App(_) => 0,
             };
             let own = (0..own_reached).map(Source::Own);
             found.extend(
@@ -3880,10 +3940,10 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
         }
 
         // What the query names: an Alias, typed alone or before an Argument,
-        // goes first. A Quicklink's keyword, a Prefix typed alone or an Item's
-        // own keyword counts as an exact match, which a Learned choice can
-        // beat. Behind a Prefix, only its Extension's Items' keywords count,
-        // typed first past it.
+        // goes first. A Quicklink's keyword, an app's word typed alone or an
+        // Item's own keyword counts as an exact match, which a Learned choice
+        // can beat. In an app, only its Extension's Items' keywords count,
+        // typed first past its word.
         let root = session.reach == Reach::Root;
         let mut words = session.key.split(' ');
         let first = if root { words.next() } else { words.nth(1) };
@@ -4038,23 +4098,37 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
         shown
     }
 
-    /// What a Prefix with nothing typed past it shows: its Extension's Items
-    /// most used at `when`, then the rest in the order it sent them.
-    fn empty_scope(&mut self, extension: ExtensionId, when: When) -> Vec<Source> {
-        let mut shown = if self.history.is_empty() {
-            Vec::new()
-        } else {
+    /// What the `n`th app shows with nothing typed in it, under its intro
+    /// card: the commands its Manifest names, then its Extension's Items most
+    /// used at `when`, then the rest in the order it sent them.
+    fn empty_app(&mut self, n: usize, when: When) -> Vec<Source> {
+        let Some(app) = self.apps.get(n) else {
+            return Vec::new();
+        };
+        let extension = app.extension;
+        let mut shown: Vec<Source> = app
+            .commands
+            .iter()
+            .filter_map(|id| self.index.find(extension, id))
+            .map(Source::Indexed)
+            .collect();
+        if !self.history.is_empty() {
             self.cache_frecent();
-            let mut left_out = vec![true; self.extensions.len()];
-            left_out[extension.0] = false;
+            let mut left_out = vec![true; self.index.searched().len()];
+            left_out[Index::segments_of(extension)].fill(false);
             let usage = Usage {
                 picked: Arc::clone(&self.frecent),
                 others: Vec::new(),
                 wanted: MAX_RESULTS,
                 left_out,
             };
-            usage.rank(when, &mut self.habits)
-        };
+            for source in usage.rank(when, &mut self.habits) {
+                if !shown.contains(&source) {
+                    shown.push(source);
+                }
+            }
+        }
+        shown.truncate(MAX_RESULTS);
         for slot in self.index.first(extension, MAX_RESULTS) {
             if shown.len() >= MAX_RESULTS {
                 break;
@@ -4086,7 +4160,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
     }
 
     /// What the Empty query's most used Results rank by now: the picked
-    /// Indexed items but those behind a Prefix, then the Daemon's own Items
+    /// Indexed items the whole search shows, then the Daemon's own Items
     /// and the Results the Aliases name. A Live query result is never among
     /// them: the Empty query asks no Live query.
     fn usage(&mut self) -> Usage {
@@ -4126,7 +4200,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             picked: Arc::clone(&self.frecent),
             others,
             wanted: self.empty_query.most_used,
-            left_out: self.index.scoped().to_vec(),
+            left_out: self.index.searched().iter().map(|&read| !read).collect(),
         }
     }
 

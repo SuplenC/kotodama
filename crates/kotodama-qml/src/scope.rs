@@ -1,6 +1,6 @@
-//! The search box behind a Prefix: once the Daemon says a query is one
+//! The search box in an app: once the Daemon says a query is one
 //! Extension's search, the box shows the rest of the query, after a chip for
-//! the Extension, and the full query sent is the Prefix, a space and the box.
+//! the app, and the full query sent is the app's word, a space and the box.
 
 /// What `query` has after `prefix`, as the Daemon reads a query behind one:
 /// the first word, in any case, then one whitespace character. `None` if

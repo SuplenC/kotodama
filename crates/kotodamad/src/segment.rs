@@ -781,6 +781,7 @@ mod tests {
             keyword: None,
             keywords: vec![],
             hidden: false,
+            app_only: false,
             actions: actions
                 .iter()
                 .map(|&id| Action {

@@ -1,15 +1,17 @@
 //! Every Indexed item, searched with nucleo on each keystroke, with no IPC
-//! to Extensions: one [`Segment`] per Extension, each replaced whole when its
-//! Items change.
+//! to Extensions: two [`Segment`]s per Extension, each replaced whole when its
+//! Items change. The first holds the Items the search shows, the second those
+//! only the Extension's app shows, so the search skips the second whole and
+//! never tests a row for it.
 //!
 //! What a search reads is all in memory. The rest of an Item is read back
 //! off its Shelf when a Result shows it, and stays resident while it is hot
 //! or was shown lately (ADR 0017).
 
 use std::cell::{Cell, RefCell};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::hash::{BuildHasherDefault, Hasher};
-use std::ops::Deref;
+use std::ops::{Deref, Range};
 use std::path::Path;
 use std::sync::Arc;
 
@@ -21,8 +23,12 @@ use crate::daemon::ExtensionId;
 use crate::rank::{Filter, Letters, Matched, Texts};
 use crate::segment::{Edit, Ranked, Row, Segment};
 
-/// Where an Indexed item lives: its Extension's Segment and its row there.
-/// Slots order by Extension, then by row.
+/// How many Segments each Extension has: the Items the search shows, then
+/// those its app alone shows.
+pub const SIDES: usize = 2;
+
+/// Where an Indexed item lives: one of its Extension's Segments and its row
+/// there. Slots order by Extension, then by Segment and row.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Slot {
     pub segment: u32,
@@ -31,8 +37,80 @@ pub struct Slot {
 
 impl Slot {
     pub fn extension(self) -> ExtensionId {
-        ExtensionId(self.segment as usize)
+        ExtensionId(self.segment as usize / SIDES)
     }
+}
+
+/// One Extension's change as a change to each of its Segments, given what
+/// they hold: an Item goes to the Segment its `app_only` names, and leaves
+/// the other one if it was there. A Segment the change doesn't touch gets no
+/// edit, so it is never copied for nothing.
+pub fn split(edit: Edit, segments: [&Segment; SIDES]) -> [Vec<Edit>; SIDES] {
+    let mut split: [Vec<Edit>; SIDES] = Default::default();
+    match edit {
+        Edit::Add(items) => {
+            let app_only = items.iter().filter(|item| item.app_only).count();
+            // A batch for one side, nearly every batch, goes on as it came: a
+            // copy of a large first batch would stay in the Daemon's resident
+            // memory after it is freed.
+            let added: [Vec<Item>; SIDES] = if app_only == 0 {
+                [items, Vec::new()]
+            } else if app_only == items.len() {
+                [Vec::new(), items]
+            } else {
+                // Within one Segment a later Item replaces an earlier one
+                // with its id. Across the two, only the last may stay.
+                let (searched, app_only) = last_of_each(items)
+                    .into_iter()
+                    .partition(|item| !item.app_only);
+                [searched, app_only]
+            };
+            let moved: [Vec<String>; SIDES] = std::array::from_fn(|side| {
+                let other = SIDES - 1 - side;
+                if segments[side].is_empty() {
+                    return Vec::new();
+                }
+                added[other]
+                    .iter()
+                    .filter(|item| segments[side].find(&item.id).is_some())
+                    .map(|item| item.id.clone())
+                    .collect()
+            });
+            for (side, (moved, added)) in moved.into_iter().zip(added).enumerate() {
+                if !moved.is_empty() {
+                    split[side].push(Edit::Remove(moved));
+                }
+                if !added.is_empty() {
+                    split[side].push(Edit::Add(added));
+                }
+            }
+        }
+        Edit::Remove(ids) => {
+            for (side, segment) in segments.into_iter().enumerate() {
+                let held: Vec<String> = ids
+                    .iter()
+                    .filter(|id| segment.find(id).is_some())
+                    .cloned()
+                    .collect();
+                if !held.is_empty() {
+                    split[side].push(Edit::Remove(held));
+                }
+            }
+        }
+    }
+    split
+}
+
+/// `items` with only the last of those that share an id, in order.
+fn last_of_each(items: Vec<Item>) -> Vec<Item> {
+    let mut seen = HashSet::with_capacity(items.len());
+    let mut kept: Vec<Item> = items
+        .into_iter()
+        .rev()
+        .filter(|item| seen.insert(item.id.clone()))
+        .collect();
+    kept.reverse();
+    kept
 }
 
 /// An Item, read back off its Shelf or borrowed from where it is kept.
@@ -134,30 +212,35 @@ pub const SHOWN_RESIDENT: usize = 256;
 /// Which Segments a search reads.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Reach {
-    /// Every Segment but those behind a Prefix: the search.
+    /// The Segments the whole search reads.
     Root,
-    /// One Extension's Segment alone: the search behind its Prefix.
-    Scope(ExtensionId),
+    /// Both of one Extension's Segments: the search in its app.
+    App(ExtensionId),
 }
 
 impl Reach {
     /// Whether a search with this reach reads Segment `segment`, given which
-    /// Segments are behind a Prefix.
-    pub fn reads(self, segment: usize, scoped: &[bool]) -> bool {
+    /// Segments the whole search reads.
+    pub fn reads(self, segment: usize, searched: &[bool]) -> bool {
         match self {
-            Reach::Root => !scoped.get(segment).copied().unwrap_or(false),
-            Reach::Scope(extension) => extension.0 == segment,
+            Reach::Root => searched.get(segment).copied().unwrap_or(false),
+            Reach::App(extension) => segment / SIDES == extension.0,
         }
     }
 }
 
+/// Which of an Extension's Segments the whole search reads until told
+/// otherwise: the Items it shows, and not those only the app shows.
+const SEARCHED_BY_DEFAULT: [bool; SIDES] = [true, false];
+
 #[derive(Default)]
 pub struct Index {
-    /// By Extension.
+    /// [`SIDES`] per Extension, in Extension order: the Items the search
+    /// shows, then those only its app shows.
     segments: Vec<Arc<Segment>>,
-    /// By Extension, whether its Items are behind a Prefix, which the root
-    /// search skips whole.
-    scoped: Vec<bool>,
+    /// By Segment, whether the whole search reads it. It skips the rest
+    /// whole.
+    searched: Vec<bool>,
     /// Bumped on every change, so a search narrowed from an earlier one knows
     /// when it can't be trusted.
     version: u64,
@@ -183,7 +266,8 @@ pub struct Index {
 impl Index {
     pub fn new(extensions: usize) -> Self {
         Index {
-            segments: (0..extensions).map(|_| Arc::default()).collect(),
+            segments: (0..extensions * SIDES).map(|_| Arc::default()).collect(),
+            searched: SEARCHED_BY_DEFAULT.repeat(extensions),
             ..Index::default()
         }
     }
@@ -205,66 +289,91 @@ impl Index {
 
     /// Makes room for one more Extension's Items.
     pub fn add_extension(&mut self) {
-        self.segments.push(Arc::new(Segment::new(self.dir.clone())));
+        for searched in SEARCHED_BY_DEFAULT {
+            self.segments.push(Arc::new(Segment::new(self.dir.clone())));
+            self.searched.push(searched);
+        }
     }
 
     pub fn version(&self) -> u64 {
         self.version
     }
 
-    /// Puts the Items of the Extensions `scoped` marks, by Extension, behind
-    /// their Prefix. A search narrowed from one before this can't be trusted,
-    /// so it counts as a change.
-    pub fn set_scoped(&mut self, scoped: Vec<bool>) {
-        if scoped != self.scoped {
-            self.scoped = scoped;
+    /// Makes the whole search read the Segments `searched` marks, by
+    /// Segment, and skip the rest. A search narrowed from one before this
+    /// can't be trusted, so it counts as a change.
+    pub fn set_searched(&mut self, searched: Vec<bool>) {
+        if searched != self.searched {
+            self.searched = searched;
             self.version += 1;
         }
     }
 
-    /// By Extension, whether its Items are behind a Prefix.
-    pub fn scoped(&self) -> &[bool] {
-        &self.scoped
+    /// By Segment, whether the whole search reads it.
+    pub fn searched(&self) -> &[bool] {
+        &self.searched
     }
 
-    /// Up to `most` of one Extension's Items, in row order: the order they
-    /// were sent in, but for the rows a removed Item left and a later one took.
+    /// Where one Extension's Segments are.
+    pub fn segments_of(extension: ExtensionId) -> Range<usize> {
+        extension.0 * SIDES..(extension.0 + 1) * SIDES
+    }
+
+    /// Up to `most` of one Extension's Items, in row order: those the search
+    /// shows, then those only its app shows, each in the order they were
+    /// sent, but for the rows a removed Item left and a later one took.
     pub fn first(&self, extension: ExtensionId, most: usize) -> Vec<Slot> {
-        let Some(segment) = self.segments.get(extension.0) else {
-            return Vec::new();
-        };
-        (0..segment.every_letter().len() as Row)
-            .filter(|&row| segment.ranked(row).is_some())
-            .take(most)
-            .map(|row| Slot {
-                segment: extension.0 as u32,
+        let mut first = Vec::new();
+        for n in Self::segments_of(extension) {
+            let Some(segment) = self.segments.get(n) else {
+                break;
+            };
+            let rows = (0..segment.every_letter().len() as Row)
+                .filter(|&row| segment.ranked(row).is_some())
+                .take(most - first.len());
+            first.extend(rows.map(|row| Slot {
+                segment: n as u32,
                 row,
-            })
-            .collect()
+            }));
+        }
+        first
     }
 
     /// Makes one change to an Extension's Items, here and now.
     pub fn edit(&mut self, extension: ExtensionId, edit: Edit) {
         self.version += 1;
-        let segment = Arc::make_mut(&mut self.segments[extension.0]);
-        segment.next_version();
-        segment.edit(edit);
+        let at = Self::segments_of(extension).start;
+        let edits = split(edit, [&self.segments[at], &self.segments[at + 1]]);
+        for (side, edits) in edits.into_iter().enumerate() {
+            if edits.is_empty() {
+                continue;
+            }
+            let segment = Arc::make_mut(&mut self.segments[at + side]);
+            segment.next_version();
+            for edit in edits {
+                segment.edit(edit);
+            }
+        }
     }
 
-    /// Puts in an Extension's Segment, built elsewhere.
-    pub fn replace(&mut self, extension: ExtensionId, segment: Arc<Segment>) {
+    /// Puts in the Segment at `at`, built elsewhere.
+    pub fn replace(&mut self, at: usize, segment: Arc<Segment>) {
         self.version += 1;
-        self.segments[extension.0] = segment;
+        self.segments[at] = segment;
     }
 
     /// Removes every Item of one Extension. Returns whether there were any.
     pub fn clear(&mut self, extension: ExtensionId) -> bool {
-        if self.segments[extension.0].is_empty() {
-            return false;
+        let mut cleared = false;
+        for at in Self::segments_of(extension) {
+            if self.segments[at].is_empty() {
+                continue;
+            }
+            let empty = self.segments[at].emptied();
+            self.replace(at, Arc::new(empty));
+            cleared = true;
         }
-        let empty = self.segments[extension.0].emptied();
-        self.replace(extension, Arc::new(empty));
-        true
+        cleared
     }
 
     fn slots<'a>(
@@ -284,7 +393,7 @@ impl Index {
         self.segments
             .iter()
             .enumerate()
-            .filter(move |&(n, _)| reach.reads(n, &self.scoped))
+            .filter(move |&(n, _)| reach.reads(n, &self.searched))
             .flat_map(move |(n, segment)| self.slots(n, segment.keyed(keyword)))
     }
 
@@ -296,11 +405,14 @@ impl Index {
             .flat_map(move |(n, segment)| self.slots(n, segment.identified(identity)))
     }
 
+    /// Where one Extension's Item is, in whichever of its Segments.
     pub fn find(&self, extension: ExtensionId, id: &str) -> Option<Slot> {
-        let row = self.segments[extension.0].find(id)?;
-        Some(Slot {
-            segment: extension.0 as u32,
-            row,
+        Self::segments_of(extension).find_map(|at| {
+            let row = self.segments.get(at)?.find(id)?;
+            Some(Slot {
+                segment: at as u32,
+                row,
+            })
         })
     }
 
@@ -310,7 +422,7 @@ impl Index {
     pub fn starting_with(&self, initials: Letters, reach: Reach) -> Vec<Slot> {
         let mut slots = Vec::new();
         for (n, segment) in self.segments.iter().enumerate() {
-            if !reach.reads(n, &self.scoped) {
+            if !reach.reads(n, &self.searched) {
                 continue;
             }
             segment.rows_where(
@@ -529,34 +641,39 @@ impl Index {
 
     /// Every Identity one Extension's Items have.
     pub fn identities(&self, extension: ExtensionId) -> impl Iterator<Item = &str> {
-        self.segments[extension.0].identities()
+        self.segments[Self::segments_of(extension)]
+            .iter()
+            .flat_map(|segment| segment.identities())
     }
 
     /// Each Action one Extension's Items offer, by Item kind and Action id,
-    /// as the first Item in slot order with it has it.
+    /// as the first Item in slot order with it in each Segment has it.
     pub fn offered(&self, extension: ExtensionId) -> Vec<(String, Action)> {
-        let segment = extension.0 as u32;
-        self.segments[extension.0]
-            .offered()
-            .filter_map(|(kind, id, row)| {
+        let mut offered = Vec::new();
+        for at in Self::segments_of(extension) {
+            let segment = at as u32;
+            offered.extend(self.segments[at].offered().filter_map(|(kind, id, row)| {
                 let item = self.item(Slot { segment, row })?;
                 let action = item.actions.iter().find(|action| action.id == id)?;
                 Some((kind.to_owned(), action.clone()))
-            })
-            .collect()
+            }));
+        }
+        offered
     }
 
     /// The slots of one Extension's Items of kind `kind` that offer the Action `action`.
     pub fn offering<'a>(
         &'a self,
         extension: ExtensionId,
-        kind: &str,
-        action: &str,
+        kind: &'a str,
+        action: &'a str,
     ) -> impl Iterator<Item = Slot> + 'a {
-        let segment = extension.0 as u32;
-        self.segments[extension.0]
-            .offering(kind, action)
-            .map(move |row| Slot { segment, row })
+        Self::segments_of(extension).flat_map(move |at| {
+            let segment = at as u32;
+            self.segments[at]
+                .offering(kind, action)
+                .map(move |row| Slot { segment, row })
+        })
     }
 
     /// Scores every Item within `reach` against `pattern`, or only the slots
@@ -594,7 +711,7 @@ impl Index {
             None => {
                 for (n, segment) in self.segments.iter().enumerate() {
                     // A Segment out of reach costs this test, never a row.
-                    if !reach.reads(n, &self.scoped) {
+                    if !reach.reads(n, &self.searched) {
                         continue;
                     }
                     // Two passes: the rows' dense letters alone, a block at a
@@ -713,6 +830,7 @@ mod tests {
             keyword: (random.below(5) == 0).then(|| random.pick(WORDS).to_lowercase()),
             keywords: (0..random.below(3)).map(|_| words(random, 2)).collect(),
             hidden: random.below(10) == 0,
+            app_only: random.below(4) == 0,
             actions: (0..1 + random.below(2))
                 .map(|n| Action {
                     id: ["open", "copy"][n].into(),
@@ -749,11 +867,17 @@ mod tests {
     }
 
     /// What the search finds of each Item: nucleo's score, its tier, and
-    /// whether it is a near miss, by Extension and id.
+    /// whether it is a near miss, by Segment and id.
     type Found = BTreeMap<(usize, String), (Option<(u32, Option<Tier>)>, bool)>;
 
     /// Matched, as on a keystroke: the Index's dense layout.
-    fn search(index: &Index, text: &str, matcher: &mut Matcher, tiers: &mut Tiers) -> Found {
+    fn search(
+        index: &Index,
+        reach: Reach,
+        text: &str,
+        matcher: &mut Matcher,
+        tiers: &mut Tiers,
+    ) -> Found {
         let pattern = Pattern::parse(
             &rank::fold_text(text),
             CaseMatching::Ignore,
@@ -765,12 +889,15 @@ mod tests {
             &pattern,
             matcher,
             query.filter(),
-            Reach::Root,
+            reach,
             None,
             |slot, _, score, matched| out.push((slot, score, matched)),
         );
         let mut found = Found::new();
         for (n, segment) in index.segments.iter().enumerate() {
+            if !reach.reads(n, &index.searched) {
+                continue;
+            }
             for row in 0..segment.every_letter().len() as Row {
                 let slot = Slot {
                     segment: n as u32,
@@ -792,9 +919,15 @@ mod tests {
         found
     }
 
-    /// Matched the naive way: each Item folded afresh, whole.
+    /// The Segment an Item of `extension` goes to.
+    fn segment_of(extension: usize, app_only: bool) -> usize {
+        extension * SIDES + usize::from(app_only)
+    }
+
+    /// Matched the naive way: each Item in reach folded afresh, whole.
     fn naive(
         items: &BTreeMap<(usize, String), Item>,
+        reach: Reach,
         text: &str,
         matcher: &mut Matcher,
         tiers: &mut Tiers,
@@ -807,6 +940,7 @@ mod tests {
         let query = Query::new(text);
         items
             .iter()
+            .filter(|((n, _), _)| reach.reads(*n, &SEARCHED_BY_DEFAULT.repeat(2)))
             .map(|(key, item)| {
                 let haystack = Haystack::new(item);
                 let scored = haystack
@@ -833,7 +967,9 @@ mod tests {
                         .map(|_| format!("item-{}", random.below(40)))
                         .collect();
                     for id in &ids {
-                        items.remove(&(extension, id.clone()));
+                        for app_only in [false, true] {
+                            items.remove(&(segment_of(extension, app_only), id.clone()));
+                        }
                     }
                     index.edit(ExtensionId(extension), Edit::Remove(ids));
                 } else {
@@ -841,7 +977,9 @@ mod tests {
                         .map(|_| item(&mut random))
                         .collect();
                     for item in &batch {
-                        let key = (extension, item.id.clone());
+                        let other = segment_of(extension, !item.app_only);
+                        items.remove(&(other, item.id.clone()));
+                        let key = (segment_of(extension, item.app_only), item.id.clone());
                         if item.hidden {
                             items.remove(&key);
                         } else {
@@ -851,13 +989,17 @@ mod tests {
                     index.edit(ExtensionId(extension), Edit::Add(batch));
                 }
                 let text = query(&mut random);
+                let reach = match random.below(3) {
+                    0 => Reach::Root,
+                    n => Reach::App(ExtensionId(n - 1)),
+                };
                 assert_eq!(
-                    search(&index, &text, &mut matcher, &mut tiers),
-                    naive(&items, &text, &mut matcher, &mut tiers),
-                    "seed {seed}, query {text:?}"
+                    search(&index, reach, &text, &mut matcher, &mut tiers),
+                    naive(&items, reach, &text, &mut matcher, &mut tiers),
+                    "seed {seed}, {reach:?}, query {text:?}"
                 );
             }
-            let indexed: BTreeSet<(usize, String)> = (0..2)
+            let indexed: BTreeSet<(usize, String)> = (0..2 * SIDES)
                 .flat_map(|n| {
                     let segment = &index.segments[n];
                     (0..segment.every_letter().len() as Row)
@@ -865,8 +1007,9 @@ mod tests {
                 })
                 .collect();
             assert_eq!(indexed, items.keys().cloned().collect(), "seed {seed}");
-            for ((extension, id), item) in &items {
-                let slot = index.find(ExtensionId(*extension), id).unwrap();
+            for ((n, id), item) in &items {
+                let slot = index.find(ExtensionId(n / SIDES), id).unwrap();
+                assert_eq!(slot.segment as usize, *n, "seed {seed}");
                 assert_eq!(index.item(slot).as_deref(), Some(item), "seed {seed}");
                 assert_eq!(index.identity(slot), item.identity.as_deref());
             }

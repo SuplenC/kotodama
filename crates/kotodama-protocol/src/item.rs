@@ -40,6 +40,11 @@ pub struct Item {
     /// such as one with only Live queries (ADR 0015). Ignored outside
     /// `add_items`.
     pub hidden: bool,
+    /// Shown inside its Extension's app alone, never by the whole search,
+    /// such as a keyboard shortcut among windows. Ignored outside
+    /// `add_items`, and when the user puts the whole Extension in the search
+    /// or behind its app.
+    pub app_only: bool,
 }
 
 /// An Item's id and kind, without anything shown on screen. This is how the
@@ -360,6 +365,7 @@ struct ItemWire<'a> {
     keywords: &'a [String],
     actions: &'a [Action],
     hidden: bool,
+    app_only: bool,
 }
 
 /// An Item as it arrives, before its kind's field and its Actions are checked.
@@ -389,6 +395,8 @@ pub(crate) struct ItemOwned {
     actions: Vec<Action>,
     #[serde(default)]
     hidden: bool,
+    #[serde(default)]
+    app_only: bool,
 }
 
 impl Serialize for Item {
@@ -409,6 +417,7 @@ impl Serialize for Item {
             keywords: &self.keywords,
             actions: &self.actions,
             hidden: self.hidden,
+            app_only: self.app_only,
         }
         .serialize(serializer)
     }
@@ -455,6 +464,7 @@ impl ItemOwned {
             keywords: self.keywords,
             actions: self.actions,
             hidden: self.hidden,
+            app_only: self.app_only,
         })
     }
 }

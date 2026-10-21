@@ -5,6 +5,18 @@
 name = "calculator"
 description = "Arithmetic, units, currency, dates and time zones, answered as you type"
 command = ["./kotodama-calculator"]
+# Its app answers every query, math-looking or not; the search only those
+# the triggers below pick.
+prefix = "calc"
+title = "Calculator"
+icon = "accessories-calculator"
+about = "Arithmetic, units, currency, dates and time zones. Enter copies the answer."
+examples = [
+    { query = "15min in sec", result = "900 secs" },
+    { query = "$100 to eur", result = "€ at today's rate" },
+    { query = "days until dec 25", result = "The days left" },
+    { query = "now in Tokyo", result = "The time there" },
+]
 
 # Every keystroke that looks like math is sent at once: an answer must land in
 # the same frame as the keystroke, and only a debounce of 0 may mark one.

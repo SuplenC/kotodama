@@ -37,6 +37,7 @@ fn item(n: u32) -> Item {
         keyword: None,
         keywords: Vec::new(),
         hidden: false,
+        app_only: false,
         actions: vec![
             Action::new("paste", "Paste"),
             Action::new("copy", "Copy").shortcut("ctrl+c"),

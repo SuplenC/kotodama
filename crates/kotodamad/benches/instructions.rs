@@ -61,22 +61,27 @@ fn empty_query(mut setup: Setup) -> Setup {
     setup
 }
 
-/// The emoji Extension's Items beside the corpus, behind the Prefix
-/// `prefix` (`""` for none), and the query the next keystroke makes.
-fn emoji_then(prefix: &str, query: &'static str) -> (Setup, &'static str) {
-    let emoji = Table::from([("prefix".to_owned(), Value::String(prefix.into()))]);
+/// The emoji Extension's Items beside the corpus, in the search or behind
+/// their app as `in_search` says, the menu opened in the app when `query`
+/// starts with its word, and the query the next keystroke makes.
+fn emoji_then(in_search: bool, query: &'static str) -> (Setup, &'static str) {
+    let emoji = Table::from([("in_search".to_owned(), Value::Bool(in_search))]);
     let extensions = Table::from([("emoji".to_owned(), Value::Table(emoji))]);
     let config = Table::from([("extensions".to_owned(), Value::Table(extensions))]);
-    (Setup::with_emoji(config), query)
+    let mut setup = Setup::with_emoji(config);
+    if query.starts_with("emoji ") {
+        setup.open("emoji ");
+    }
+    (setup, query)
 }
 
 #[library_benchmark(setup = emoji_then, teardown = drop_setup)]
-// The emoji in the root search, as `prefix = ""` puts them back.
-#[bench::emoji_in_root("", "f")]
-// The emoji behind their Prefix: the root search skips them.
-#[bench::emoji_scoped_out("emoji", "f")]
-// Typed behind the Prefix: only the emoji are searched.
-#[bench::emoji_scope_searched("emoji", "emoji f")]
+// The emoji in the search, as `in_search = true` puts them.
+#[bench::emoji_in_root(true, "f")]
+// The emoji behind their app: the search skips their Segments whole.
+#[bench::emoji_scoped_out(false, "f")]
+// Typed in the app: only the emoji are searched.
+#[bench::emoji_scope_searched(false, "emoji f")]
 fn emoji_keystroke((mut setup, query): (Setup, &'static str)) -> Setup {
     black_box(setup.query(black_box(query)));
     setup

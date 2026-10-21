@@ -5,6 +5,15 @@
 name = "web-search"
 description = "Searches the web for what nothing else matches, and opens what looks like an address"
 command = ["./kotodama-web-search"]
+# Its app sends every query to the engines, matches or not.
+prefix = "web"
+title = "Web Search"
+icon = "web-browser"
+about = "Searches the web with each engine in the config, or opens what looks like an address."
+examples = [
+    { query = "rust nucleo", result = "Search the web for it" },
+    { query = "example.org", result = "Open https://example.org" },
+]
 
 # A fallback: the Daemon asks it only what real matches leave rows on screen
 # empty for, and ranks its searches below every real match. The triggers send

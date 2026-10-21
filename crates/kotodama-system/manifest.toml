@@ -4,3 +4,11 @@
 name = "system"
 description = "Power off, reboot, suspend, hibernate, lock and log out through logind, and the open windows of any compositor with wlr-foreign-toplevel-management"
 command = ["./kotodama-system"]
+prefix = "system"
+title = "System"
+icon = "system-shutdown"
+about = "Power off, reboot, suspend, lock and log out, and the open windows to switch to."
+examples = [
+    { query = "lock", result = "Lock the screen" },
+    { query = "reboot", result = "Restart, once confirmed" },
+]

@@ -116,6 +116,7 @@ impl Quicklink {
             identity: None,
             keywords: Vec::new(),
             hidden: false,
+            app_only: false,
             actions: vec![Action {
                 id: "open".into(),
                 title: "Open".into(),

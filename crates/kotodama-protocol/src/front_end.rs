@@ -96,9 +96,9 @@ pub enum ToFrontEnd {
         /// on screen in [`FromFrontEnd::RunAction`]'s `shown`.
         version: u32,
         results: Vec<ShownResult>,
-        /// The Prefix the query starts with, when it is one Extension's
-        /// search: `emoji fire` searches the emoji alone. A Front end shows
-        /// it apart from the rest of the query, as a chip.
+        /// The app the query is in, when it starts with an Extension's word:
+        /// `emoji fire` searches the emoji alone. A Front end shows it apart
+        /// from the rest of the query, as a chip.
         scope: Option<Scope>,
     },
     /// The Extensions that are down. Their Results are gone until they come back.
@@ -174,9 +174,10 @@ pub enum ToFrontEnd {
     WithdrawUndo {
         change: u64,
     },
-    /// Replace the search text with `text`, and send it as a
-    /// [`FromFrontEnd::Query`], as when the user runs the entry Item of a
-    /// Prefix, which types the Prefix and a space.
+    /// Replace the search text with `text`, as when the user enters an app,
+    /// which types its word and a space. The Daemon has taken `text` as the
+    /// query already, and its Results follow, so the Front end sends no
+    /// [`FromFrontEnd::Query`] for it.
     SetQuery {
         text: String,
     },
@@ -237,14 +238,41 @@ impl TryFrom<ShownResultOwned> for ShownResult {
     }
 }
 
-/// The Prefix a query starts with, and the Extension it searches.
+/// The kind of the Daemon's entry Item for an Extension's app: running it
+/// enters the app, and a Front end runs it on Tab too.
+pub const APP_ENTRY_KIND: &str = "kotodama.app";
+
+/// The app a query is in: the word it starts with, and the Extension whose
+/// app it is.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Scope {
-    /// The Prefix, in lowercase, as the query starts with it before a space.
+    /// The app's word, in lowercase, as the query starts with it before a
+    /// space.
     pub prefix: String,
     /// The Extension's name as the user reads it, such as `Emoji`.
     pub title: String,
     pub icon: Option<String>,
+    /// What the app does, shown above its rows while nothing is typed past
+    /// its word. `None` once something is.
+    #[serde(default)]
+    pub intro: Option<Intro>,
+}
+
+/// The card an app shows before anything is typed in it, from its
+/// Extension's Manifest.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Intro {
+    /// What the app does and how to use it, in a sentence or two.
+    pub about: String,
+    pub examples: Vec<Example>,
+}
+
+/// A query to type in an app, and what it gives, such as `15min in sec` and
+/// `900 s`.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Example {
+    pub query: String,
+    pub result: String,
 }
 
 /// One Item of a filtered list View.

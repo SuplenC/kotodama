@@ -24,7 +24,7 @@ use std::time::Instant;
 
 use cxx_qt::{CxxQtType, Initialize, Threading};
 use cxx_qt_lib::{QByteArray, QHash, QHashPair_i32_QByteArray, QModelIndex, QString, QVariant};
-use kotodama_protocol::{FromFrontEnd, ResultRef, Scope, UNDO_SHORTCUT, Value};
+use kotodama_protocol::{FromFrontEnd, Intro, ResultRef, Scope, UNDO_SHORTCUT, Value};
 
 use connection::{Update, Writer};
 use rows::{Model, Row, Rows};
@@ -83,10 +83,20 @@ pub mod qobject {
         /// The Toast: what the change to the History that can be undone did,
         /// such as `Forgot “Firefox”`, or empty when there is none.
         #[qproperty(QString, toast, READ, NOTIFY)]
-        /// The Extension whose Items alone the search searches, behind its
-        /// Prefix, by the title a chip shows; empty for the whole search.
-        /// `query` is then what follows the Prefix.
+        /// The app the search is in, by the title a chip shows; empty for
+        /// the whole search. `query` is then what follows the app's word.
         #[qproperty(QString, scope, READ, NOTIFY)]
+        /// The app's intro card, shown while nothing is typed in it: what
+        /// it does, and `introExamples`, each `{query, result}`. Empty
+        /// elsewhere, and once something is typed.
+        #[qproperty(QString, intro_about, cxx_name = "introAbout", READ, NOTIFY)]
+        #[qproperty(
+            QList_QVariant,
+            intro_examples,
+            cxx_name = "introExamples",
+            READ,
+            NOTIFY
+        )]
         type KotodamaSearch = super::SearchRust;
 
         fn set_query(self: Pin<&mut KotodamaSearch>, query: QString);
@@ -185,12 +195,23 @@ pub mod qobject {
         #[qinvokable]
         fn shown(self: Pin<&mut KotodamaSearch>);
 
-        /// Leaves the scope, as Backspace on an empty search box does: the
-        /// whole search again, with the Prefix alone typed. False if the
-        /// search isn't behind a Prefix.
+        /// Leaves the app, as Backspace on an empty search box does: the
+        /// whole search again, with the app's word alone typed. False if the
+        /// search isn't in an app.
         #[qinvokable]
         #[cxx_name = "leaveScope"]
         fn leave_scope(self: Pin<&mut KotodamaSearch>) -> bool;
+
+        /// Leaves the app for the whole search with nothing typed, as Esc in
+        /// one does. False if the search isn't in an app.
+        #[qinvokable]
+        #[cxx_name = "leaveApp"]
+        fn leave_app(self: Pin<&mut KotodamaSearch>) -> bool;
+
+        /// Enters the app whose entry Item is in `row`, as Tab on it does.
+        /// False if the row isn't one.
+        #[qinvokable]
+        fn enter(self: Pin<&mut KotodamaSearch>, row: i32) -> bool;
 
         /// The Daemon asks the window to close, before it types or pastes into
         /// the window underneath. Hide it, then call `closed()`.
@@ -221,7 +242,7 @@ pub mod qobject {
         fn action_failed(self: Pin<&mut KotodamaSearch>, message: QString);
 
         /// The search box shows `text` in place of what it shows: the rest of
-        /// the query once it is behind a Prefix, or a query the Daemon typed.
+        /// the query once it is in an app, or a query the Daemon typed.
         /// `query` is `text` already.
         #[qsignal]
         #[cxx_name = "queryReplaced"]
@@ -350,9 +371,13 @@ pub struct SearchRust {
     /// The change to the History the Toast offers to undo.
     offered: Option<u64>,
     scope: QString,
-    /// The Prefix the search is behind, which `query` follows.
+    intro_about: QString,
+    intro_examples: variant::List,
+    /// The intro card shown, which the two above hold.
+    intro: Option<Intro>,
+    /// The word of the app the search is in, which `query` follows.
     prefix: Option<String>,
-    /// The query last sent, Prefix and all.
+    /// The query last sent, the app's word and all.
     sent: Option<String>,
     writer: Option<Writer>,
     /// When the oldest query still waiting for its Results was sent. Results
@@ -385,6 +410,9 @@ impl Default for SearchRust {
             toast: QString::default(),
             offered: None,
             scope: QString::default(),
+            intro_about: QString::default(),
+            intro_examples: variant::List::default(),
+            intro: None,
             prefix: None,
             sent: None,
             writer: None,
@@ -423,9 +451,9 @@ impl KotodamaSearch {
         }
     }
 
-    /// Shows the search behind the Prefix of `scope` when the box starts
-    /// with it, as the Daemon read the query: the box keeps the rest, which
-    /// is the query already. Nothing is sent: the Daemon has the query.
+    /// Shows the search in the app of `scope` when the box starts with its
+    /// word, as the Daemon read the query: the box keeps the rest, which is
+    /// the query already. Nothing is sent: the Daemon has the query.
     fn enter_scope(mut self: Pin<&mut Self>, scope: Option<Scope>) {
         let Some(scope) = scope else {
             return;
@@ -449,15 +477,50 @@ impl KotodamaSearch {
 
     /// Forgets the scope, without sending anything: what is typed next
     /// searches everything, and is sent even if the Daemon has it, so its
-    /// Results come back to say whether it is behind a Prefix. Returns the
-    /// Prefix it was behind.
+    /// Results come back to say whether it is in an app. Returns the word
+    /// of the app it was in.
     fn drop_scope(mut self: Pin<&mut Self>) -> Option<String> {
         let prefix = self.as_mut().rust_mut().prefix.take()?;
         let mut this = self.as_mut().rust_mut();
         this.scope = QString::default();
         this.sent = None;
         self.as_mut().scope_changed();
+        self.as_mut().set_intro(None);
         Some(prefix)
+    }
+
+    /// Shows `intro` as the intro card, or none.
+    fn set_intro(mut self: Pin<&mut Self>, intro: Option<Intro>) {
+        if self.intro == intro {
+            return;
+        }
+        let about = intro.as_ref().map(|intro| QString::from(&intro.about));
+        let examples = intro
+            .as_ref()
+            .map(|intro| variant::examples(&intro.examples));
+        let mut this = self.as_mut().rust_mut();
+        this.intro = intro;
+        this.intro_about = about.unwrap_or_default();
+        this.intro_examples = examples.unwrap_or_default();
+        self.as_mut().intro_about_changed();
+        self.as_mut().intro_examples_changed();
+    }
+
+    fn leave_app(mut self: Pin<&mut Self>) -> bool {
+        if self.as_mut().drop_scope().is_none() {
+            return false;
+        }
+        let text = QString::default();
+        self.as_mut().set_query(text.clone());
+        self.as_mut().query_replaced(text);
+        true
+    }
+
+    fn enter(self: Pin<&mut Self>, row: i32) -> bool {
+        if !self.row(row).is_some_and(|row| row.enters) {
+            return false;
+        }
+        self.run(row)
     }
 
     fn leave_scope(mut self: Pin<&mut Self>) -> bool {
@@ -740,7 +803,9 @@ impl KotodamaSearch {
                     self.as_mut().rust_mut().latency = micros;
                     self.as_mut().latency_changed();
                 }
+                let intro = scope.as_ref().and_then(|scope| scope.intro.clone());
                 self.as_mut().enter_scope(scope);
+                self.as_mut().set_intro(intro);
                 Shown::Same
             }
             Update::Down(down) => {
@@ -770,6 +835,10 @@ impl KotodamaSearch {
             }
             Update::SetQuery(text) => {
                 self.as_mut().drop_scope();
+                // The Daemon took the text as the query, and its Results,
+                // the app and its intro card, follow: sending it would only
+                // ask again.
+                self.as_mut().rust_mut().sent = Some(text.clone());
                 let text = QString::from(&text);
                 self.as_mut().set_query(text.clone());
                 self.as_mut().query_replaced(text);

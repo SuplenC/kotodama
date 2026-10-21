@@ -1,12 +1,14 @@
 //! A bare Front end for trying the Daemon from a terminal: it prints the Results
 //! for a query, and with `--run` runs the top Result's primary Action, or with
 //! `--action <id>` its Action `id`, answering the Daemon's Close as a real menu
-//! would.
+//! would. With `--app` first, the query's first word names an app, which it
+//! enters first, as `kotodama open --prefix` does.
 //!
 //! ```sh
 //! cargo run -p kotodamad --example front-end -- firefox
 //! cargo run -p kotodamad --example front-end -- --run firefox
 //! cargo run -p kotodamad --example front-end -- --action close firefox
+//! cargo run -p kotodamad --example front-end -- --app --run emoji thumbs
 //! ```
 
 use std::env;
@@ -21,6 +23,10 @@ use kotodama_protocol::{
 
 fn main() -> ExitCode {
     let mut args: Vec<String> = env::args().skip(1).collect();
+    let app = args.first().is_some_and(|arg| arg == "--app");
+    if app {
+        args.remove(0);
+    }
     // `None` prints the Results; `Some(None)` runs the primary Action.
     let mut run = None;
     if args.first().is_some_and(|arg| arg == "--run") {
@@ -31,7 +37,7 @@ fn main() -> ExitCode {
         run = Some(Some(args.remove(0)));
     }
     let query = args.join(" ");
-    match front_end(&query, run) {
+    match front_end(&query, app, run) {
         Ok(()) => ExitCode::SUCCESS,
         Err(err) => {
             eprintln!("front-end: {err}");
@@ -40,7 +46,11 @@ fn main() -> ExitCode {
     }
 }
 
-fn front_end(query: &str, run: Option<Option<String>>) -> Result<(), Box<dyn std::error::Error>> {
+fn front_end(
+    query: &str,
+    app: bool,
+    run: Option<Option<String>>,
+) -> Result<(), Box<dyn std::error::Error>> {
     let socket = PathBuf::from(env::var_os("XDG_RUNTIME_DIR").ok_or("XDG_RUNTIME_DIR isn't set")?)
         .join("kotodama.sock");
     let stream = UnixStream::connect(&socket)?;
@@ -48,6 +58,13 @@ fn front_end(query: &str, run: Option<Option<String>>) -> Result<(), Box<dyn std
     let mut channel =
         Channel::handshake(stream.try_clone()?, stream, &Hello::new(&WireFormat::ALL))?;
 
+    if app {
+        let word = query.split_whitespace().next().unwrap_or_default();
+        channel.send(&FromFrontEnd::Open {
+            query: format!("{word} "),
+            view: None,
+        })?;
+    }
     channel.send(&FromFrontEnd::Query { text: query.into() })?;
     let (shown, results) = loop {
         match channel.recv()?.ok_or("the Daemon hung up")? {

@@ -140,6 +140,7 @@ pub fn extension_table(config: &Table, name: &str) -> Table {
 pub fn extension_settings(config: &Table, name: &str) -> Table {
     let mut table = extension_table(config, name);
     table.remove("prefix");
+    table.remove("in_search");
     table
 }
 

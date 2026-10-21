@@ -44,8 +44,8 @@ mod wire;
 
 pub use channel::{Channel, ChannelReader, ChannelWriter};
 pub use front_end::{
-    ActionRef, FromFrontEnd, ListMatch, OfferedAction, ResultRef, Scope, ShownResult, ToFrontEnd,
-    socket_path,
+    APP_ENTRY_KIND, ActionRef, Example, FromFrontEnd, Intro, ListMatch, OfferedAction, ResultRef,
+    Scope, ShownResult, ToFrontEnd, socket_path,
 };
 pub use handshake::Hello;
 pub use item::{

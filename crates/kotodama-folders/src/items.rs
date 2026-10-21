@@ -70,6 +70,7 @@ pub fn project(project: &Project, home: Option<&Path>, settings: &Settings) -> I
         keyword: None,
         keywords: Vec::new(),
         hidden: false,
+        app_only: false,
         actions,
     }
 }
@@ -105,6 +106,7 @@ pub fn script(script: &Script, home: Option<&Path>) -> Item {
         icon: Some("utilities-terminal".to_owned()),
         keyword: None,
         hidden: false,
+        app_only: false,
         // Found by its file's name when its header renames it.
         keywords: if script.header.name.is_some() {
             vec![script.stem.clone()]

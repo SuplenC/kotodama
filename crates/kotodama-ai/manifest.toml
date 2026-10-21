@@ -6,6 +6,15 @@ description = "Proposes Actions other Extensions offer for what you ask after `?
 command = ["./kotodama-ai"]
 # The catalog is all it knows of what can be done: it never sees Items.
 action_catalog = true
+# Its app asks about whatever is typed in it, `?` or not.
+prefix = "ai"
+title = "Ask AI"
+icon = "dialog-question"
+about = "Say what to do; the model proposes Actions other Extensions offer, and each one waits for you to confirm it."
+examples = [
+    { query = "open my kotodama project", result = "Open kotodama" },
+    { query = "lock the screen", result = "Lock, once confirmed" },
+]
 
 # `?` asks the model, once the query is still (the Extension's own
 # `debounce_ms`). A fallback query gets only the "Ask AI" Result, which asks

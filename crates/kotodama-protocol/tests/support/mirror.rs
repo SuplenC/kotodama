@@ -62,6 +62,8 @@ pub mod prost {
         pub actions: Vec<Action>,
         #[prost(bool, tag = "14")]
         pub hidden: bool,
+        #[prost(bool, tag = "15")]
+        pub app_only: bool,
     }
 
     #[derive(Clone, PartialEq, ::prost::Message)]
@@ -188,6 +190,7 @@ pub mod prost {
             keywords: item.keywords.clone(),
             actions: item.actions.iter().map(action).collect(),
             hidden: item.hidden,
+            app_only: item.app_only,
             ..Item::default()
         };
         match &item.kind {
@@ -302,6 +305,7 @@ pub mod musli {
         pub keywords: Vec<String>,
         pub actions: Vec<Action>,
         pub hidden: bool,
+        pub app_only: bool,
     }
 
     #[derive(Clone, Debug, PartialEq, Encode, Decode, Serialize, Deserialize)]
@@ -380,6 +384,7 @@ pub mod musli {
             keywords: mirror.keywords,
             actions: item.actions.iter().map(action).collect(),
             hidden: mirror.hidden,
+            app_only: mirror.app_only,
         }
     }
 
@@ -472,6 +477,7 @@ pub mod bilrost {
         pub keywords: Vec<String>,
         pub actions: Vec<Action>,
         pub hidden: bool,
+        pub app_only: bool,
     }
 
     #[derive(Clone, Debug, PartialEq, ::bilrost::Message)]
@@ -585,6 +591,7 @@ pub mod bilrost {
             keywords: mirror.keywords,
             actions: item.actions.iter().map(action).collect(),
             hidden: mirror.hidden,
+            app_only: mirror.app_only,
         }
     }
 

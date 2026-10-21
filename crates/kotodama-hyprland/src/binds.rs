@@ -147,7 +147,8 @@ fn kind(name: &str) -> ItemKind {
     ItemKind::Namespaced(NamespacedKind::new(name).expect("the Extension's kinds are valid"))
 }
 
-/// A bind's Item, which runs it.
+/// A bind's Item, which runs it. Binds stay in the Hyprland app, out of the
+/// search, where hundreds of them would crowd out what is looked for.
 fn bind_item(id: String, title: String, subtitle: String, keywords: Vec<String>) -> Item {
     Item {
         id,
@@ -159,12 +160,13 @@ fn bind_item(id: String, title: String, subtitle: String, keywords: Vec<String>)
         keyword: None,
         keywords,
         hidden: false,
+        app_only: true,
         actions: vec![Action::new(RUN, "Run")],
     }
 }
 
 /// The Item that opens the Shortcuts View, which `kotodama open --view
-/// hyprland/shortcuts` names. The search finds it too.
+/// hyprland/shortcuts` names: the app's command, listed first in it.
 pub fn shortcuts_item() -> Item {
     Item {
         id: SHORTCUTS.to_owned(),
@@ -176,6 +178,7 @@ pub fn shortcuts_item() -> Item {
         keyword: None,
         keywords: ["keybinds", "hotkeys", "hyprland"].map(str::to_owned).to_vec(),
         hidden: false,
+        app_only: true,
         actions: vec![Action::new(OPEN, "Show Keyboard Shortcuts")],
     }
 }

@@ -150,6 +150,7 @@ fn item(number: u64, window: &Window) -> Item {
         keyword: None,
         keywords: vec![window.app_id.clone()],
         hidden: false,
+        app_only: false,
         actions: vec![
             Action::new(FOCUS, "Focus Window"),
             Action::new(CLOSE, "Close Window"),

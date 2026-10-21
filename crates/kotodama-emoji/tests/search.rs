@@ -58,7 +58,7 @@ fn the_emoji_picked_most_ranks_first() {
 }
 
 #[test]
-fn the_emoji_are_searched_behind_their_prefix() {
+fn the_emoji_are_searched_in_their_app_alone() {
     let mut menu = Menu::start("");
 
     assert!(!menu.ids("fire").contains(&"🔥".to_owned()));
@@ -66,8 +66,8 @@ fn the_emoji_are_searched_behind_their_prefix() {
 }
 
 #[test]
-fn an_empty_prefix_puts_the_emoji_back_in_the_search() {
-    let mut menu = Menu::start_with("[extensions.emoji]\nprefix = \"\"\n", "thumbs");
+fn in_search_puts_the_emoji_in_the_search() {
+    let mut menu = Menu::start_with("[extensions.emoji]\nin_search = true\n", "thumbs");
 
     assert_eq!(menu.ids("fire")[0], "🔥");
 }

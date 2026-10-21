@@ -36,6 +36,7 @@ pub fn item(n: usize) -> Item {
             Action::new("new-window", "Open a new window").shortcut("ctrl+n"),
         ],
         hidden: false,
+        app_only: false,
     }
 }
 
@@ -69,6 +70,7 @@ pub fn results() -> ToFrontEnd {
             prefix: "apps".into(),
             title: "Apps".into(),
             icon: None,
+            intro: None,
         }),
     }
 }

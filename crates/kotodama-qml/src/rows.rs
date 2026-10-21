@@ -7,7 +7,9 @@ use std::fmt::Write;
 use std::ops::Range;
 use std::sync::Arc;
 
-use kotodama_protocol::{Action, ActionRef, Item, OfferedAction, ResultRef, ShownResult};
+use kotodama_protocol::{
+    APP_ENTRY_KIND, Action, ActionRef, Item, ItemKind, OfferedAction, ResultRef, ShownResult,
+};
 
 /// One row of the list model.
 #[derive(Clone, Debug, PartialEq)]
@@ -27,6 +29,8 @@ pub struct Row {
     pub alias: Option<Box<str>>,
     /// Why the Result can't run, shown greyed out in place of the subtitle.
     pub unavailable: Option<Box<str>>,
+    /// Whether it is an app's entry Item, which Tab enters.
+    pub enters: bool,
 }
 
 /// One entry of the Action panel.
@@ -47,6 +51,8 @@ impl From<ShownResult> for Row {
         let mut highlights = shown.highlights;
         highlights.sort_unstable();
         highlights.dedup();
+        let enters =
+            matches!(&item.kind, ItemKind::Namespaced(kind) if kind.as_str() == APP_ENTRY_KIND);
         Row {
             result: ResultRef {
                 extension: shown.extension,
@@ -60,6 +66,7 @@ impl From<ShownResult> for Row {
             highlights,
             alias: shown.alias.map(String::into_boxed_str),
             unavailable: shown.unavailable.map(String::into_boxed_str),
+            enters,
         }
     }
 }
@@ -86,6 +93,7 @@ impl Row {
             highlights,
             alias: None,
             unavailable: None,
+            enters: false,
         }
     }
 
@@ -522,6 +530,7 @@ mod tests {
             highlights: highlights.to_vec(),
             alias: None,
             unavailable: None,
+            enters: false,
         }
     }
 
@@ -547,6 +556,7 @@ mod tests {
                 keyword: None,
                 keywords: Vec::new(),
                 hidden: false,
+                app_only: false,
                 identity: None,
                 actions: vec![
                     Action::new("open", "Open"),
@@ -604,6 +614,7 @@ mod tests {
                 keyword: None,
                 keywords: Vec::new(),
                 hidden: false,
+                app_only: false,
                 identity: None,
                 actions: vec![Action::new("open", "Open")],
             },
@@ -634,6 +645,7 @@ mod tests {
             keyword: None,
             keywords: Vec::new(),
             hidden: false,
+            app_only: false,
             identity: None,
             actions: vec![open],
         };
@@ -1009,6 +1021,7 @@ mod tests {
             keyword: None,
             keywords: Vec::new(),
             hidden: false,
+            app_only: false,
             identity: None,
             actions: vec![Action::new("open", "Open")],
         };
