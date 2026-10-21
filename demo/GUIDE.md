@@ -43,8 +43,8 @@ day, then a fixed menu: this guide, the clipboard history and "Clear history".
 
 Every desktop app is a Result. Try `fea` (FeatherPad), `foot`, and `htop`,
 which runs in a terminal since its desktop file asks for one. On an equal
-match an app ranks before other kinds; `feather` itself puts the 🪶 emoji
-first, since its whole title is the query.
+match an app ranks before other kinds. Emoji stay out of the search, so
+`feather` shows FeatherPad and no 🪶.
 Ctrl+K on an app shows its desktop actions, if it has any.
 
 ## Projects and scripts (the folders Extension)
@@ -93,11 +93,14 @@ Results down.
 
 ## Emoji and symbols
 
-Every emoji and the common symbols, found by their names and keywords: `fire`,
-`thumbs`, `like`, `arrow right`, `command` (⌘). Enter types the character into
-the window the menu was opened from; Ctrl+K offers "Copy" and a "Type" Action
-for each skin tone. Open FeatherPad, then the menu, and pick one to see it
-typed.
+Every emoji and the common symbols, behind the Prefix `emoji`: the search
+leaves them out and shows one "Emoji" Result instead. Type `emoji` and a
+space, or press Enter on "Emoji", and a chip shows the search is the emoji
+alone: `emoji fire`, `emoji thumbs`, `emoji like`, `emoji arrow right`,
+`emoji command` (⌘). Backspace on the empty box leaves it. Enter types the
+character into the window the menu was opened from; Ctrl+K offers "Copy" and a
+"Type" Action for each skin tone. Open FeatherPad, then the menu, and pick one
+to see it typed.
 
 ## Clipboard history
 

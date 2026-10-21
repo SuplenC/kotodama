@@ -22,6 +22,7 @@ mod open_view;
 pub mod paths;
 mod payload;
 mod pick;
+mod prefix;
 pub mod rank;
 mod reserved;
 mod segment;

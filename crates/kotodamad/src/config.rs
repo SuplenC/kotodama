@@ -134,6 +134,15 @@ pub fn extension_table(config: &Table, name: &str) -> Table {
     }
 }
 
+/// The `[extensions.<name>]` table as the Extension gets it: without the
+/// keys the Daemon reads itself, which the Extension would warn are no
+/// setting of its own.
+pub fn extension_settings(config: &Table, name: &str) -> Table {
+    let mut table = extension_table(config, name);
+    table.remove("prefix");
+    table
+}
+
 fn from_toml_table(table: toml::Table) -> Table {
     table
         .into_iter()

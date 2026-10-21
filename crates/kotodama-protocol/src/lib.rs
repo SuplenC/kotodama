@@ -38,7 +38,7 @@ mod wire;
 
 pub use channel::{Channel, ChannelReader, ChannelWriter};
 pub use front_end::{
-    ActionRef, FromFrontEnd, ListMatch, OfferedAction, ResultRef, ShownResult, ToFrontEnd,
+    ActionRef, FromFrontEnd, ListMatch, OfferedAction, ResultRef, Scope, ShownResult, ToFrontEnd,
     socket_path,
 };
 pub use handshake::{Hello, PROTOCOL_VERSION};
@@ -47,7 +47,7 @@ pub use item::{
     is_valid_name,
 };
 pub use launch::{LAUNCH_PREFIX, LAUNCH_SCOPED, SCOPE_PREFIX, launch_command, launch_prefix};
-pub use manifest::{ContributedAction, LiveQueries, Manifest};
+pub use manifest::{ContributedAction, LiveQueries, Manifest, is_valid_prefix};
 pub use message::{CatalogEntry, Clipboard, FromExtension, LiveResult, Outcome, ToExtension};
 pub use shortcut::{FORGET_SHORTCUT, RESERVED_SHORTCUTS, UNDO_SHORTCUT, is_reserved_shortcut};
 pub use value::{Bytes, Fraction, Table, Value};

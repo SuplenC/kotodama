@@ -16,14 +16,14 @@ mod menu;
 const QUERIES: usize = 2_000;
 /// One frame at 120 Hz.
 const BUDGET: Duration = Duration::from_millis(8);
-/// Typed one letter at a time, as a user would.
-const TYPED: [&str; 3] = ["thumbs up", "arrow right", "smiling face"];
+/// Typed one letter at a time behind the emoji's Prefix, as a user would.
+const TYPED: [&str; 3] = ["emoji thumbs up", "emoji arrow right", "emoji smiling face"];
 
 fn main() {
     let mut menu = menu::Menu::start("");
     let typed: Vec<&str> = TYPED
         .iter()
-        .flat_map(|word| (1..=word.len()).map(move |len| &word[..len]))
+        .flat_map(|word| ("emoji ".len() + 1..=word.len()).map(move |len| &word[..len]))
         .collect();
     let mut times: Vec<Duration> = (0..QUERIES)
         .map(|n| {

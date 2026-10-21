@@ -96,6 +96,10 @@ pub enum ToFrontEnd {
         /// on screen in [`FromFrontEnd::RunAction`]'s `shown`.
         version: u32,
         results: Vec<ShownResult>,
+        /// The Prefix the query starts with, when it is one Extension's
+        /// search: `emoji fire` searches the emoji alone. A Front end shows
+        /// it apart from the rest of the query, as a chip.
+        scope: Option<Scope>,
     },
     /// The Extensions that are down. Their Results are gone until they come back.
     Status {
@@ -170,6 +174,12 @@ pub enum ToFrontEnd {
     WithdrawUndo {
         change: u64,
     },
+    /// Replace the search text with `text`, and send it as a
+    /// [`FromFrontEnd::Query`], as when the user runs the entry Item of a
+    /// Prefix, which types the Prefix and a space.
+    SetQuery {
+        text: String,
+    },
 }
 
 /// One Result as the Front end shows it.
@@ -225,6 +235,16 @@ impl TryFrom<ShownResultOwned> for ShownResult {
             unavailable: wire.unavailable,
         })
     }
+}
+
+/// The Prefix a query starts with, and the Extension it searches.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Scope {
+    /// The Prefix, in lowercase, as the query starts with it before a space.
+    pub prefix: String,
+    /// The Extension's name as the user reads it, such as `Emoji`.
+    pub title: String,
+    pub icon: Option<String>,
 }
 
 /// One Item of a filtered list View.

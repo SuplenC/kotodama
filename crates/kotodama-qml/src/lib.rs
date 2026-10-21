@@ -13,6 +13,7 @@
 mod connection;
 mod plugin;
 mod rows;
+mod scope;
 mod shortcut;
 mod variant;
 mod views;
@@ -23,7 +24,7 @@ use std::time::Instant;
 
 use cxx_qt::{CxxQtType, Initialize, Threading};
 use cxx_qt_lib::{QByteArray, QHash, QHashPair_i32_QByteArray, QModelIndex, QString, QVariant};
-use kotodama_protocol::{FromFrontEnd, ResultRef, UNDO_SHORTCUT, Value};
+use kotodama_protocol::{FromFrontEnd, ResultRef, Scope, UNDO_SHORTCUT, Value};
 
 use connection::{Update, Writer};
 use rows::{Model, Row, Rows};
@@ -82,6 +83,10 @@ pub mod qobject {
         /// The Toast: what the change to the History that can be undone did,
         /// such as `Forgot “Firefox”`, or empty when there is none.
         #[qproperty(QString, toast, READ, NOTIFY)]
+        /// The Extension whose Items alone the search searches, behind its
+        /// Prefix, by the title a chip shows; empty for the whole search.
+        /// `query` is then what follows the Prefix.
+        #[qproperty(QString, scope, READ, NOTIFY)]
         type KotodamaSearch = super::SearchRust;
 
         fn set_query(self: Pin<&mut KotodamaSearch>, query: QString);
@@ -180,6 +185,13 @@ pub mod qobject {
         #[qinvokable]
         fn shown(self: Pin<&mut KotodamaSearch>);
 
+        /// Leaves the scope, as Backspace on an empty search box does: the
+        /// whole search again, with the Prefix alone typed. False if the
+        /// search isn't behind a Prefix.
+        #[qinvokable]
+        #[cxx_name = "leaveScope"]
+        fn leave_scope(self: Pin<&mut KotodamaSearch>) -> bool;
+
         /// The Daemon asks the window to close, before it types or pastes into
         /// the window underneath. Hide it, then call `closed()`.
         #[qsignal]
@@ -207,6 +219,13 @@ pub mod qobject {
         #[qsignal]
         #[cxx_name = "actionFailed"]
         fn action_failed(self: Pin<&mut KotodamaSearch>, message: QString);
+
+        /// The search box shows `text` in place of what it shows: the rest of
+        /// the query once it is behind a Prefix, or a query the Daemon typed.
+        /// `query` is `text` already.
+        #[qsignal]
+        #[cxx_name = "queryReplaced"]
+        fn query_replaced(self: Pin<&mut KotodamaSearch>, text: QString);
     }
 
     impl cxx_qt::Threading for KotodamaSearch {}
@@ -330,6 +349,11 @@ pub struct SearchRust {
     toast: QString,
     /// The change to the History the Toast offers to undo.
     offered: Option<u64>,
+    scope: QString,
+    /// The Prefix the search is behind, which `query` follows.
+    prefix: Option<String>,
+    /// The query last sent, Prefix and all.
+    sent: Option<String>,
     writer: Option<Writer>,
     /// When the oldest query still waiting for its Results was sent. Results
     /// for a later query are measured from it too, so typing faster than the
@@ -360,6 +384,9 @@ impl Default for SearchRust {
             jobs: variant::List::default(),
             toast: QString::default(),
             offered: None,
+            scope: QString::default(),
+            prefix: None,
+            sent: None,
             writer: None,
             asked: None,
         }
@@ -382,14 +409,65 @@ fn debug() -> bool {
 }
 
 impl KotodamaSearch {
+    /// Sends the query unless the Daemon has it already: one the scope was
+    /// left for, such as the menu opening on what it showed before, may
+    /// have the same text as the box.
     fn set_query(mut self: Pin<&mut Self>, query: QString) {
-        if self.query == query {
+        if self.query != query {
+            self.as_mut().rust_mut().query = query;
+            self.as_mut().query_changed();
+        }
+        let text = scope::full(self.prefix.as_deref(), &String::from(&self.query));
+        if self.sent.as_deref() != Some(text.as_str()) {
+            self.as_mut().send_query(text);
+        }
+    }
+
+    /// Shows the search behind the Prefix of `scope` when the box starts
+    /// with it, as the Daemon read the query: the box keeps the rest, which
+    /// is the query already. Nothing is sent: the Daemon has the query.
+    fn enter_scope(mut self: Pin<&mut Self>, scope: Option<Scope>) {
+        let Some(scope) = scope else {
+            return;
+        };
+        if self.prefix.is_some() {
             return;
         }
-        let text = String::from(&query);
-        self.as_mut().rust_mut().query = query;
+        let query = String::from(&self.query);
+        let Some(rest) = scope::behind(&query, &scope.prefix) else {
+            return;
+        };
+        let rest = QString::from(rest);
+        let mut this = self.as_mut().rust_mut();
+        this.prefix = Some(scope.prefix);
+        this.scope = QString::from(&scope.title);
+        this.query = rest.clone();
+        self.as_mut().scope_changed();
         self.as_mut().query_changed();
-        self.as_mut().send_query(text);
+        self.as_mut().query_replaced(rest);
+    }
+
+    /// Forgets the scope, without sending anything: what is typed next
+    /// searches everything, and is sent even if the Daemon has it, so its
+    /// Results come back to say whether it is behind a Prefix. Returns the
+    /// Prefix it was behind.
+    fn drop_scope(mut self: Pin<&mut Self>) -> Option<String> {
+        let prefix = self.as_mut().rust_mut().prefix.take()?;
+        let mut this = self.as_mut().rust_mut();
+        this.scope = QString::default();
+        this.sent = None;
+        self.as_mut().scope_changed();
+        Some(prefix)
+    }
+
+    fn leave_scope(mut self: Pin<&mut Self>) -> bool {
+        let Some(prefix) = self.as_mut().drop_scope() else {
+            return false;
+        };
+        let text = QString::from(&prefix);
+        self.as_mut().set_query(text.clone());
+        self.as_mut().query_replaced(text);
+        true
     }
 
     fn set_highlight_color(mut self: Pin<&mut Self>, color: QString) {
@@ -406,9 +484,11 @@ impl KotodamaSearch {
         let now = Instant::now();
         let mut this = self.as_mut().rust_mut();
         this.selection_moved = false;
-        if this.send(&FromFrontEnd::Query { text }) {
+        let sent = this.send(&FromFrontEnd::Query { text: text.clone() });
+        if sent {
             this.asked.get_or_insert(now);
         }
+        this.sent = sent.then_some(text);
     }
 
     fn row(&self, row: i32) -> Option<&Row> {
@@ -639,11 +719,11 @@ impl KotodamaSearch {
                 self.as_mut().set_connected(true);
                 // A Daemon that restarted has no idea what is typed. Even
                 // nothing typed has Results: those of the Empty query.
-                let text = String::from(&self.query);
+                let text = scope::full(self.prefix.as_deref(), &String::from(&self.query));
                 self.as_mut().send_query(text);
                 Shown::Same
             }
-            Update::Rows(version, rows) => {
+            Update::Rows(version, rows, scope) => {
                 if self.results.is_some() {
                     let mut this = self.as_mut().rust_mut();
                     this.results = Some(rows);
@@ -660,6 +740,7 @@ impl KotodamaSearch {
                     self.as_mut().rust_mut().latency = micros;
                     self.as_mut().latency_changed();
                 }
+                self.as_mut().enter_scope(scope);
                 Shown::Same
             }
             Update::Down(down) => {
@@ -672,16 +753,26 @@ impl KotodamaSearch {
                 Shown::Same
             }
             Update::Open { query, view } => {
+                // The menu opens on `query` itself, whatever it showed before.
+                self.as_mut().drop_scope();
                 let view = view.as_deref().map(QString::from).unwrap_or_default();
                 self.as_mut().open_requested(QString::from(&query), view);
                 Shown::Same
             }
             Update::Toggle => {
+                self.as_mut().drop_scope();
                 self.as_mut().toggle_requested();
                 Shown::Same
             }
             Update::ActionFailed(message) => {
                 self.as_mut().action_failed(QString::from(&message));
+                Shown::Same
+            }
+            Update::SetQuery(text) => {
+                self.as_mut().drop_scope();
+                let text = QString::from(&text);
+                self.as_mut().set_query(text.clone());
+                self.as_mut().query_replaced(text);
                 Shown::Same
             }
             Update::PushView {
@@ -766,6 +857,7 @@ impl KotodamaSearch {
                 let mut this = self.as_mut().rust_mut();
                 this.writer = None;
                 this.asked = None;
+                this.sent = None;
                 this.views.reset();
                 // The Results of a Daemon that is gone, kept under a list
                 // View, go too.

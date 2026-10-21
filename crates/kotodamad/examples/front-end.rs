@@ -44,7 +44,9 @@ fn front_end(query: &str, run: bool) -> Result<(), Box<dyn std::error::Error>> {
     channel.send(&FromFrontEnd::Query { text: query.into() })?;
     let (shown, results) = loop {
         match channel.recv()?.ok_or("the Daemon hung up")? {
-            ToFrontEnd::Results { version, results } => break (version, results),
+            ToFrontEnd::Results {
+                version, results, ..
+            } => break (version, results),
             ToFrontEnd::Status { down } if !down.is_empty() => {
                 eprintln!("down: {}", down.join(", "))
             }

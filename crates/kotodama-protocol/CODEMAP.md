@@ -4,12 +4,12 @@ The shared protocol. Maintained by hand: fix stale lines when you find them, and
 
 - `lib.rs`: re-exports; `Error`.
 - `message.rs`: Daemon and Extension messages, `ToExtension`, `FromExtension`, `LiveResult`, `Outcome` (with `RunCatalogAction`, a confirmed Proposal the Daemon runs), `Clipboard`, `CatalogEntry`.
-- `front_end.rs`: Daemon and Front end messages, `FromFrontEnd` (incl. `Query`, `Viewport`, `SelectionMoved`, `RunAction` with the `shown` Results version, `Open`, `Toggle`, `Undo`, `Shown`: the menu became visible), `ToFrontEnd` (incl. `Results` and its `version`, `ReplaceView`, `FilteredView`, `OfferUndo`/`WithdrawUndo` for the Toast), `ShownResult` (with its `alias` badge and why it is `unavailable`; an unavailable one decodes without Actions), `ListMatch`, `socket_path`.
+- `front_end.rs`: Daemon and Front end messages, `FromFrontEnd` (incl. `Query`, `Viewport`, `SelectionMoved`, `RunAction` with the `shown` Results version, `Open`, `Toggle`, `Undo`, `Shown`: the menu became visible), `ToFrontEnd` (incl. `Results` and its `version` and `Scope`, the Prefix the query is behind; `SetQuery`; `ReplaceView`, `FilteredView`, `OfferUndo`/`WithdrawUndo` for the Toast), `ShownResult` (with its `alias` badge and why it is `unavailable`; an unavailable one decodes without Actions), `ListMatch`, `socket_path`.
 - `shortcut.rs`: Reserved keys, `RESERVED_SHORTCUTS`, `is_reserved_shortcut` (however a binding is spelled), `FORGET_SHORTCUT`, `UNDO_SHORTCUT`.
 - `item.rs`: `Item` (incl. `hidden`, ADR 0015), `ItemRef`, `Action` (`Action::new` with `shortcut` and `arguments` setters), `ItemKind` (`ItemKind::shared_index`, its place in `SHARED_KINDS`), `SHARED_KINDS`, `NamespacedKind`, `KindName`.
 - `view.rs`: `View`, `ViewContent` (a list's `filters_itself`), forms (`FormField`, `FormInput`), `Job`, `JobState`.
 - `value.rs`: `Value`, `Table`, `Bytes`, `Fraction`.
-- `manifest.rs`: `Manifest::from_toml`, `LiveQueries` (`fallback`), `ContributedAction` (ADR 0002).
+- `manifest.rs`: `Manifest::from_toml`, `LiveQueries` (`fallback`), `ContributedAction` (ADR 0002); `prefix`, `title` and `icon` (ADR 0024), `is_valid_prefix`.
 - `handshake.rs`: `PROTOCOL_VERSION`, `Hello::negotiate` (ADR 0012).
 - `frame.rs`: length-prefixed frames, `MAX_FRAME_LEN` (ADR 0004).
 - `wire.rs`: `WireFormat` (postcard, JSON, MessagePack) `encode`/`decode`.

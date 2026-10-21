@@ -8,7 +8,7 @@ use std::os::unix::net::UnixStream;
 use std::time::Duration;
 
 use kotodama_protocol::{
-    Channel, ChannelWriter, Error, FromFrontEnd, Hello, Job, ListMatch, ToFrontEnd, View,
+    Channel, ChannelWriter, Error, FromFrontEnd, Hello, Job, ListMatch, Scope, ToFrontEnd, View,
     WireFormat, socket_path,
 };
 
@@ -30,8 +30,8 @@ const PUSH_AFTER_POP: Duration = Duration::from_millis(16);
 /// What the connection hands the Qt thread.
 pub enum Update {
     Connected(Writer),
-    /// The Results, and their version.
-    Rows(u32, Vec<Row>),
+    /// The Results, their version, and the Prefix the query is behind.
+    Rows(u32, Vec<Row>, Option<Scope>),
     Down(Vec<String>),
     Close,
     Open {
@@ -40,6 +40,8 @@ pub enum Update {
     },
     Toggle,
     ActionFailed(String),
+    /// The Daemon replaces the query, as running a Prefix's entry Item does.
+    SetQuery(String),
     PushView {
         extension: String,
         view: View,
@@ -91,7 +93,11 @@ impl Update {
     pub fn signals(&self) -> bool {
         matches!(
             self,
-            Update::Close | Update::Open { .. } | Update::Toggle | Update::ActionFailed(_)
+            Update::Close
+                | Update::Open { .. }
+                | Update::Toggle
+                | Update::ActionFailed(_)
+                | Update::SetQuery(_)
         )
     }
 }
@@ -228,9 +234,11 @@ fn read(
 
 fn update(message: ToFrontEnd) -> Update {
     match message {
-        ToFrontEnd::Results { version, results } => {
-            Update::Rows(version, results.into_iter().map(Row::from).collect())
-        }
+        ToFrontEnd::Results {
+            version,
+            results,
+            scope,
+        } => Update::Rows(version, results.into_iter().map(Row::from).collect(), scope),
         ToFrontEnd::Status { down } => Update::Down(down),
         ToFrontEnd::Close => Update::Close,
         ToFrontEnd::ActionFailed { message } => Update::ActionFailed(message),
@@ -280,6 +288,7 @@ fn update(message: ToFrontEnd) -> Update {
         ToFrontEnd::JobProgress { extension, job } => Update::JobProgress { extension, job },
         ToFrontEnd::OfferUndo { change, title } => Update::OfferUndo { change, title },
         ToFrontEnd::WithdrawUndo { change } => Update::WithdrawUndo { change },
+        ToFrontEnd::SetQuery { text } => Update::SetQuery(text),
     }
 }
 

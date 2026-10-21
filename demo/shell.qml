@@ -299,7 +299,7 @@ ShellRoot {
                     does: "a progress View"
                 }
                 Example {
-                    query: "fire"
+                    query: "emoji fire"
                     does: "types 🔥 where you were"
                 }
                 Example {

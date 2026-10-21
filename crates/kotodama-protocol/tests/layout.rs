@@ -515,6 +515,11 @@ fn to_front_end() -> Vec<ToFrontEnd> {
                 alias: Some("ff".into()),
                 unavailable: Some("apps isn't running".into()),
             }],
+            scope: Some(Scope {
+                prefix: "emoji".into(),
+                title: "Emoji".into(),
+                icon: Some("face-smile".into()),
+            }),
         },
         ToFrontEnd::Status {
             down: vec!["shell".into()],
@@ -566,6 +571,9 @@ fn to_front_end() -> Vec<ToFrontEnd> {
             title: "Forgot “Firefox”".into(),
         },
         ToFrontEnd::WithdrawUndo { change: 7 },
+        ToFrontEnd::SetQuery {
+            text: "emoji ".into(),
+        },
     ]
 }
 

@@ -10,6 +10,9 @@ use crate::{Action, Argument, Error, KindName, is_valid_name};
 /// name = "kubaos"
 /// command = ["bin/kubaos-kotodama"]
 /// action_catalog = true
+/// # Its Items are searched only behind `suite`, as in `suite go`.
+/// prefix = "suite"
+/// title = "KubaOS suites"
 ///
 /// [live_query]
 /// prefixes = ["suite "]
@@ -36,12 +39,28 @@ pub struct Manifest {
     pub contributed_actions: Vec<ContributedAction>,
     /// Whether the Extension may read the Action catalog.
     pub action_catalog: bool,
+    /// The Prefix its Items are searched behind, unless the user's config
+    /// says otherwise: one word, such as `emoji`. The search leaves them out
+    /// and shows an entry Item instead; `emoji fire` searches them alone.
+    pub prefix: Option<String>,
+    /// The Extension's name as the user reads it, such as `Emoji`: the title
+    /// of its entry Item and of the chip that shows a search is behind its
+    /// Prefix. The `name` stands in without one.
+    pub title: Option<String>,
+    /// The entry Item's icon: a freedesktop icon name or a path.
+    pub icon: Option<String>,
 }
 
 impl Manifest {
     pub fn from_toml(toml: &str) -> Result<Self, Error> {
         toml::from_str(toml).map_err(|err| Error::Manifest(err.to_string()))
     }
+}
+
+/// Whether `prefix` can be a Prefix: one word, with no whitespace in it or
+/// around it.
+pub fn is_valid_prefix(prefix: &str) -> bool {
+    !prefix.is_empty() && !prefix.contains(char::is_whitespace)
 }
 
 /// Which queries are sent to the Extension as Live queries.
@@ -92,6 +111,12 @@ struct ManifestToml {
     contributed_actions: Vec<ContributedAction>,
     #[serde(default)]
     action_catalog: bool,
+    #[serde(default)]
+    prefix: Option<String>,
+    #[serde(default)]
+    title: Option<String>,
+    #[serde(default)]
+    icon: Option<String>,
 }
 
 impl TryFrom<ManifestToml> for Manifest {
@@ -106,6 +131,13 @@ impl TryFrom<ManifestToml> for Manifest {
         if toml.command.is_empty() {
             return Err("`command` is empty; it needs at least the program to run".into());
         }
+        if let Some(prefix) = &toml.prefix
+            && !is_valid_prefix(prefix)
+        {
+            return Err(format!(
+                "`prefix = {prefix:?}` isn't one word; leave `prefix` out for none"
+            ));
+        }
         Ok(Manifest {
             name: toml.name,
             description: toml.description,
@@ -113,6 +145,9 @@ impl TryFrom<ManifestToml> for Manifest {
             live_query: toml.live_query,
             contributed_actions: toml.contributed_actions,
             action_catalog: toml.action_catalog,
+            prefix: toml.prefix,
+            title: toml.title,
+            icon: toml.icon,
         })
     }
 }

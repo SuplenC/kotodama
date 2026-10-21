@@ -3,6 +3,11 @@
 name = "shell-example"
 description = "Bookmarks from the config, and \"Paste path\" on every project"
 command = ["./extension.sh"]
+# Uncommented, these put every Item behind the word `shell`: the search shows
+# one "Shell example" Item in their place, and `shell timer 5` searches them
+# alone. The user's `[extensions.shell-example] prefix` wins over it.
+# prefix = "shell"
+# title = "Shell example"
 
 # Offered on every `project` Item, whichever Extension added it.
 [[contributed_actions]]

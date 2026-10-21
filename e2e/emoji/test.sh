@@ -23,13 +23,13 @@ wait_for_log quickshell.log "ready"
 spawn "$target/debug/kotodamad"
 front_end="$target/debug/examples/front-end"
 for _ in $(seq 50); do
-    if "$front_end" thumbs 2>/dev/null | grep -q Thumbs; then
+    if "$front_end" emoji thumbs 2>/dev/null | grep -q Thumbs; then
         break
     fi
     sleep 0.1
 done
 
-"$front_end" --run thumbs
+"$front_end" --run emoji thumbs
 wait_for_log quickshell.log "typed: 👍🏿"
-"$front_end" --run not equal
+"$front_end" --run emoji not equal
 wait_for_log quickshell.log "typed: 👍🏿≠"

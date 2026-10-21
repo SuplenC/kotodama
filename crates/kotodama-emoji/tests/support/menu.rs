@@ -31,6 +31,13 @@ impl Menu {
     /// Starts the Daemon and waits until the emoji Extension's Items are
     /// indexed. `config` is written as the Daemon's config file.
     pub fn start(config: &str) -> Self {
+        Self::start_with(config, "emoji thumbs")
+    }
+
+    /// As [`Menu::start`], knowing the emoji are indexed once `ready` finds
+    /// any: a config that moves them out from behind their Prefix needs
+    /// another query.
+    pub fn start_with(config: &str, ready: &str) -> Self {
         let dir = tempfile::tempdir().expect("make the Daemon's dir");
         let path = |sub: &str| dir.path().join(sub);
         fs::create_dir_all(path("config")).expect("make the config dir");
@@ -65,7 +72,7 @@ impl Menu {
         // The Results change once the Items are indexed; from then on each
         // query has one answer.
         let started = Instant::now();
-        let mut results = menu.search("thumbs");
+        let mut results = menu.search(ready);
         while results.is_empty() {
             assert!(
                 started.elapsed() < Duration::from_secs(10),
@@ -88,7 +95,7 @@ impl Menu {
     fn results(&mut self) -> Vec<ShownResult> {
         loop {
             match self.ui.recv::<ToFrontEnd>() {
-                Ok(Some(ToFrontEnd::Results { version, results })) => {
+                Ok(Some(ToFrontEnd::Results { version, results, .. })) => {
                     self.shown = version;
                     return results;
                 }

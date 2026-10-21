@@ -20,7 +20,7 @@ let
       export LC_ALL=C
       send() { printf '%d\n%s' "''${#1}" "$1"; }
       read_frame() { IFS= read -r len && IFS= read -r -N "$len" frame; }
-      send '{"version":9,"formats":["json"]}'
+      send '{"version":10,"formats":["json"]}'
       read_frame # the Daemon's hello
       read_frame # the config
       send '{"job_progress":{"id":"${name}","title":"${title}","state":"succeeded"}}'
@@ -174,7 +174,7 @@ pkgs.testers.runNixOSTest {
             as_alice(f"{front_end} --wait 6\\*7") + " | grep -P '^calculator\t6\\*7\t42$'"
         )
         machine.wait_until_succeeds(
-            as_alice(f"{front_end} thumbs") + " | grep -P '^emoji\t👍\t👍 Thumbs up$'"
+            as_alice(f"{front_end} emoji thumbs") + " | grep -P '^emoji\t👍\t👍 Thumbs up$'"
         )
 
     with subtest("the Folder source lists the configured projects and scripts"):

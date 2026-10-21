@@ -87,8 +87,12 @@ let
         clipboard = {
           maxEntries = 50;
           maxAgeDays = 0.5;
+          prefix = "";
         };
-        emoji.skinTone = "medium-dark";
+        emoji = {
+          skinTone = "medium-dark";
+          prefix = "e";
+        };
         folders = {
           folders = [
             {
@@ -221,8 +225,8 @@ pkgs.runCommand "kotodama-home-manager-options-test"
         "rates_url": "http://localhost:8080/latest",
         "decimal_separator": "comma",
     })
-    expect("clipboard", extensions["clipboard"], {"max_entries": 50, "max_age_days": 0.5})
-    expect("emoji", extensions["emoji"], {"skin_tone": "medium-dark"})
+    expect("clipboard", extensions["clipboard"], {"max_entries": 50, "max_age_days": 0.5, "prefix": ""})
+    expect("emoji", extensions["emoji"], {"skin_tone": "medium-dark", "prefix": "e"})
     expect("folders", extensions["folders"], {
         "folders": [
             {"path": "~/Projects", "kind": "projects", "depth": 2},

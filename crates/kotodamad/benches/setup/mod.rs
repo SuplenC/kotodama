@@ -50,7 +50,10 @@ pub const START: u64 = 1_792_485_000;
 /// The Extensions every Setup runs: `apps` holds the corpus, `clipboard`
 /// whatever a bench sends it.
 pub const APPS: ExtensionId = ExtensionId(0);
+#[allow(dead_code)] // query.rs alone
 pub const CLIPBOARD: ExtensionId = ExtensionId(1);
+/// The emoji Extension, which `Setup::with_emoji` runs too.
+const EMOJI: ExtensionId = ExtensionId(2);
 /// The menu, and a `kotodama toggle` that only passes commands on.
 pub const MENU: FrontEndId = FrontEndId(0);
 pub const COMMAND: FrontEndId = FrontEndId(1);
@@ -113,23 +116,37 @@ impl Setup {
     }
 
     pub fn with(history: History, items: Vec<Item>) -> Self {
-        let found = ["apps", "clipboard"].map(|name| {
-            let manifest =
-                Manifest::from_toml(&format!("name = \"{name}\"\ncommand = [\"x\"]")).unwrap();
-            Found::new(manifest, PathBuf::from("/")).unwrap()
-        });
-        let now = Instant::now();
-        let mut daemon = Daemon::new(
-            found.into(),
-            Table::new(),
-            history,
-            Nothing,
-            Nothing,
-            Nothing,
-            now,
+        Self::running(&["apps", "clipboard"], Table::new(), history, items)
+    }
+
+    /// The corpus, and the emoji Extension's Items beside it, as the Daemon
+    /// with `config` holds them.
+    #[allow(dead_code)] // instructions.rs alone
+    pub fn with_emoji(config: Table) -> Self {
+        let mut setup = Self::running(
+            &["apps", "clipboard", "emoji"],
+            config,
+            History::default(),
+            corpus::items(),
         );
+        setup.send(EMOJI, kotodama_emoji::items());
+        setup.settle();
+        setup
+    }
+
+    /// The Extensions `names` up, with `items` sent to the first.
+    fn running(names: &[&str], config: Table, history: History, items: Vec<Item>) -> Self {
+        let found: Vec<Found> = names
+            .iter()
+            .map(|name| {
+                let toml = format!("name = \"{name}\"\ncommand = [\"x\"]");
+                Found::new(Manifest::from_toml(&toml).unwrap(), PathBuf::from("/")).unwrap()
+            })
+            .collect();
+        let now = Instant::now();
+        let mut daemon = Daemon::new(found, config, history, Nothing, Nothing, Nothing, now);
         daemon.set_clock(Clock::starting_at(START));
-        for extension in [APPS, CLIPBOARD] {
+        for extension in (0..names.len()).map(ExtensionId) {
             let (sender, _) = mpsc::sync_channel(64);
             daemon.handle(
                 Event::ExtensionUp {
