@@ -11,16 +11,17 @@ imports=$("$root/scripts/qml-module")
 home=$(mktemp -d)
 export XDG_CONFIG_HOME="$home/config" XDG_CONFIG_DIRS="$home/etc" XDG_DATA_DIRS="$home/share" XDG_STATE_HOME="$home/state" XDG_CACHE_HOME="$home/cache"
 
-ext="$XDG_CONFIG_HOME/kotodama/extensions/notes"
+ext="$XDG_CONFIG_HOME/kotodama/extensions/jotter"
 mkdir -p "$ext"
 cp "$root/crates/kotodamad/tests/fixtures/recorder/extension.sh" "$ext/"
-printf 'name = "notes"\ncommand = ["extension.sh"]\n' >"$ext/manifest.toml"
+# Named so that "note" doesn't find its app's entry Item.
+printf 'name = "jotter"\ncommand = ["extension.sh"]\n' >"$ext/manifest.toml"
 # Two notes that match "note" equally well: until one is picked, Note A ranks
 # first. Each Action names its note, so the Action panel tells which is first.
 cat >"$ext/items.json" <<'JSON'
 [
-  {"id":"a","kind":"notes.note","title":"Note A","actions":[{"id":"open","title":"Open A"}]},
-  {"id":"b","kind":"notes.note","title":"Note B","actions":[{"id":"open","title":"Open B"}]}
+  {"id":"a","kind":"jotter.note","title":"Note A","actions":[{"id":"open","title":"Open A"}]},
+  {"id":"b","kind":"jotter.note","title":"Note B","actions":[{"id":"open","title":"Open B"}]}
 ]
 JSON
 echo '"keep_open"' >"$ext/outcome.json"

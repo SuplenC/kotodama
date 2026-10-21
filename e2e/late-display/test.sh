@@ -26,10 +26,11 @@ WAYLAND_DISPLAY='' XDG_RUNTIME_DIR="$runtime" spawn "$target/debug/kotodamad"
 front_end() {
     XDG_RUNTIME_DIR="$runtime" "$target/debug/examples/front-end" "$@"
 }
-# wait_for_result <query> <title>: waits until the query finds the title.
+# wait_for_result <query> <title>: waits until the query finds the title in
+# the clipboard's app.
 wait_for_result() {
     for _ in $(seq 50); do
-        if front_end "$1" 2>/dev/null | awk -F'\t' '$1 == "clipboard" { print $3 }' | grep -qxF -- "$2"; then
+        if front_end --app "clipboard $1" 2>/dev/null | awk -F'\t' '$1 == "clipboard" { print $3 }' | grep -qxF -- "$2"; then
             return 0
         fi
         sleep 0.1
@@ -54,5 +55,5 @@ wait_for_result "copied late" "copied late"
 # The Daemon finds the compositor the same way to paste.
 spawn quickshell --path ../type-and-paste/client.qml
 wait_for_log quickshell.log "ready"
-front_end --run "copied late"
+front_end --app --run "clipboard copied late"
 wait_for_log quickshell.log "typed: copied late"
