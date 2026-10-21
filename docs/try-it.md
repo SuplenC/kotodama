@@ -17,7 +17,7 @@ What's on the desktop: headless sway with the Daemon, the Bundled extensions, th
 
 - **Alt+Space** or **Ctrl+Space** opens and closes the menu. Super doesn't make it through Screen Sharing, and macOS may keep Ctrl+Space for switching input sources.
 - **Alt+V** opens the clipboard history; **Alt+B** the shell example's bookmarks View.
-- **Alt+Return** opens a terminal (foot); **Alt+Shift+Q** closes a window.
+- **Alt+Return** opens a terminal (foot); **Alt+Shift+Q** closes a window. Alt is the Option key on a Mac keyboard.
 
 Type `guide` in the menu for the whole list: the "Kotodama demo guide" Quicklink opens [demo/GUIDE.md](../demo/GUIDE.md) in FeatherPad, with every feature and something to try for each.
 

@@ -159,7 +159,7 @@ fi
 mkdir -p "$home/bin"
 cat >"$home/bin/xdg-open" <<'SH'
 #!/bin/sh
-exec env LC_ALL=C.UTF-8 foot --hold sh -c 'printf "The demo has no browser or file manager.\nKotodama asked to open:\n\n  %s\n" "$1"' xdg-open "$1"
+exec env LC_ALL=C.UTF-8 foot sh -c 'printf "The demo has no browser or file manager.\nKotodama asked to open:\n\n  %s\n\nPress Enter to close.\n" "$1"; read -r _' xdg-open "$1"
 SH
 chmod +x "$home/bin/xdg-open"
 export PATH="$home/bin:$PATH"
