@@ -24,8 +24,8 @@
 //!
 //! # Owns
 //!
-//! - The protocol loop: the debounce of `?` queries, the one request in
-//!   flight and its cancelling, the answer View, and confirming Proposals.
+//! - The protocol loop: the debounce of `?` queries, the one request in flight and its cancelling,
+//!   the answer View, and confirming Proposals.
 //!
 //! # Not here
 //!
@@ -85,8 +85,7 @@ const KEPT_ANSWERS: usize = 4;
 const NOT_CONFIGURED: &str = "the AI isn't configured";
 
 /// What the app's intro card says with neither a key nor an endpoint set.
-const NOT_CONFIGURED_NOTE: &str =
-    "Not set up yet: set `api_key_command` or `url` in `[extensions.ai]`";
+const NOT_CONFIGURED_NOTE: &str = "Not set up yet: set `api_key_command` or `url` in `[extensions.ai]`";
 
 type Error = kotodama_protocol::Error;
 
@@ -116,8 +115,7 @@ fn run() -> Result<(), Error> {
     };
     loop {
         let event = match extension.pending.as_ref().map(|pending| pending.due) {
-            Some(due) => match received.recv_timeout(due.saturating_duration_since(Instant::now()))
-            {
+            Some(due) => match received.recv_timeout(due.saturating_duration_since(Instant::now())) {
                 Ok(event) => event,
                 Err(RecvTimeoutError::Timeout) => {
                     extension.ask_pending();
@@ -206,8 +204,7 @@ impl Extension {
                 self.cancel();
                 if !self.settings.enabled() {
                     self.pending = None;
-                    self.status
-                        .unusable(&mut self.writer, NOT_CONFIGURED_NOTE)?;
+                    self.status.unusable(&mut self.writer, NOT_CONFIGURED_NOTE)?;
                 } else {
                     self.status.usable(&mut self.writer)?;
                     if !self.asked_catalog {
@@ -258,11 +255,7 @@ impl Extension {
                 if self.pending.as_ref().is_some_and(|p| p.live == id) {
                     self.pending = None;
                 }
-                if self
-                    .request
-                    .as_ref()
-                    .is_some_and(|r| r.purpose == Purpose::Live(id))
-                {
+                if self.request.as_ref().is_some_and(|r| r.purpose == Purpose::Live(id)) {
                     self.cancel();
                 }
                 Ok(())
@@ -291,10 +284,7 @@ impl Extension {
                         message: format!("ai has no Action `{action}`"),
                     },
                 };
-                self.writer.send(&FromExtension::ActionDone {
-                    invocation,
-                    outcome,
-                })
+                self.writer.send(&FromExtension::ActionDone { invocation, outcome })
             }
             _ => Ok(()),
         }
@@ -359,11 +349,7 @@ impl Extension {
 
     fn cancel(&mut self) {
         if let Some(request) = self.request.take() {
-            request
-                .in_flight
-                .lock()
-                .expect("request state mutex poisoned")
-                .cancel();
+            request.in_flight.lock().expect("request state mutex poisoned").cancel();
         }
     }
 
@@ -398,10 +384,7 @@ impl Extension {
             .spawn(move || {
                 let result = ask(&cache, command.as_deref(), &url, &body, &in_flight)
                     .and_then(|answer| parse_response(&answer, &catalog).map_err(Failure::Answer));
-                let _ = events.send(Event::Own(Answered {
-                    request: id,
-                    result,
-                }));
+                let _ = events.send(Event::Own(Answered { request: id, result }));
             });
         if spawned.is_err() {
             kotodama_extension::log!("couldn't start a request");
@@ -428,9 +411,7 @@ impl Extension {
             Purpose::View(_) if self.view_open => {
                 let content = match failure {
                     Some(message) => detail(message),
-                    None if proposals.is_empty() => {
-                        detail("No Action in the catalog does that.".into())
-                    }
+                    None if proposals.is_empty() => detail("No Action in the catalog does that.".into()),
                     None => ViewContent::List {
                         items: proposals
                             .iter()

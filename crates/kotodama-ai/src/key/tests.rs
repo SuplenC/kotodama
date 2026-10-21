@@ -18,13 +18,7 @@ fn the_key_is_the_first_line_the_command_prints() {
 
 #[test]
 fn a_command_that_fails_or_prints_nothing_gives_no_key() {
-    assert!(matches!(
-        read_key(&command(&["false"])),
-        Err(KeyError::Failed(_))
-    ));
-    assert!(matches!(
-        read_key(&command(&["true"])),
-        Err(KeyError::NoKey)
-    ));
+    assert!(matches!(read_key(&command(&["false"])), Err(KeyError::Failed(_))));
+    assert!(matches!(read_key(&command(&["true"])), Err(KeyError::NoKey)));
     assert!(matches!(read_key(&[]), Err(KeyError::Empty)));
 }

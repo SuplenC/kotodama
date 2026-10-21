@@ -66,8 +66,7 @@ fn a_request_without_effort_leaves_output_config_out() {
         ..Settings::default()
     };
 
-    let body: serde_json::Value =
-        serde_json::from_str(&request_body(&settings, "go", &[])).expect("parse the body");
+    let body: serde_json::Value = serde_json::from_str(&request_body(&settings, "go", &[])).expect("parse the body");
 
     assert!(body.get("output_config").is_none());
 }
@@ -85,13 +84,7 @@ fn a_request_cancelled_before_it_starts_never_runs_curl() {
     let in_flight = Mutex::new(InFlight::default());
     in_flight.lock().expect("lock").cancel();
 
-    let posted = post(
-        "/nonexistent/curl",
-        "http://localhost",
-        None,
-        "{}",
-        &in_flight,
-    );
+    let posted = post("/nonexistent/curl", "http://localhost", None, "{}", &in_flight);
 
     assert!(matches!(posted, Err(Failure::Cancelled)));
 }

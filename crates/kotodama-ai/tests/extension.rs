@@ -61,10 +61,7 @@ fn configured() -> Table {
     Table::from([
         (
             "api_key_command".into(),
-            Value::Array(vec![
-                Value::String("echo".into()),
-                Value::String(KEY.into()),
-            ]),
+            Value::Array(vec![Value::String("echo".into()), Value::String(KEY.into())]),
         ),
         ("debounce_ms".into(), Value::Integer(0)),
     ])
@@ -196,10 +193,7 @@ fn a_question_proposes_catalog_actions_and_nothing_runs_until_the_user_confirms(
 
     live(&mut ai, 1, QUERY, Some("?"));
     let proposed = results(&ai, 1);
-    assert_eq!(
-        titles(&proposed),
-        ["Install Go Suite", "New Go project (name: demo)"]
-    );
+    assert_eq!(titles(&proposed), ["Install Go Suite", "New Go project (name: demo)"]);
     assert!(proposed.iter().all(|r| r.item.actions[0].id == RUN));
     // Proposing ran nothing: no message but the results.
     ai.quiet();
@@ -240,16 +234,10 @@ fn the_request_holds_only_the_query_and_the_catalog_and_the_key_stays_off_the_co
     assert!(headers.contains(&format!("x-api-key: {KEY}")));
     // The body is made from the query and the catalog alone.
     let settings = Settings::from_config(&configured());
-    assert_eq!(
-        body.expect("a body"),
-        request_body(&settings, QUERY, &catalog())
-    );
+    assert_eq!(body.expect("a body"), request_body(&settings, QUERY, &catalog()));
 
     let args = fs::read_to_string(dir.path().join("args")).expect("read the arguments");
-    assert!(
-        !args.contains(KEY),
-        "the key is in curl's arguments: {args}"
-    );
+    assert!(!args.contains(KEY), "the key is in curl's arguments: {args}");
     assert!(args.contains("https://api.anthropic.com/v1/messages"));
 }
 
@@ -286,12 +274,7 @@ fn the_key_command_runs_once_and_again_after_a_new_config() {
     let mut ai = start(dir.path(), table.clone());
     assert_eq!(ai.recv(), FromExtension::RequestActionCatalog);
     ai.send(ToExtension::ActionCatalog { entries: catalog() });
-    let count = || {
-        fs::read_to_string(&reads)
-            .expect("read the key reads")
-            .lines()
-            .count()
-    };
+    let count = || fs::read_to_string(&reads).expect("read the key reads").lines().count();
 
     live(&mut ai, 1, QUERY, Some("?"));
     results(&ai, 1);

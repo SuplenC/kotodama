@@ -2,8 +2,8 @@
 //!
 //! # Owns
 //!
-//! - The request body: fixed instructions and tool, plus the user's query and
-//!   the Action catalog, and nothing else.
+//! - The request body: fixed instructions and tool, plus the user's query and the Action catalog,
+//!   and nothing else.
 //! - Running `curl` with the key and body on its stdin, and cancelling it.
 //!
 //! # Not here
@@ -224,21 +224,8 @@ pub fn post(
             return Err(Failure::Cancelled);
         }
         let mut child = Command::new(curl)
-            .args([
-                "--silent",
-                "--show-error",
-                "--fail",
-                "--max-time",
-                TIMEOUT_SECS,
-            ])
-            .args([
-                "--max-filesize",
-                MAX_ANSWER_BYTES,
-                "--config",
-                "-",
-                "--",
-                url,
-            ])
+            .args(["--silent", "--show-error", "--fail", "--max-time", TIMEOUT_SECS])
+            .args(["--max-filesize", MAX_ANSWER_BYTES, "--config", "-", "--", url])
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
@@ -247,8 +234,7 @@ pub fn post(
                 program: curl.to_owned(),
                 source,
             })?;
-        let (Some(stdin), Some(stdout), Some(stderr)) =
-            (child.stdin.take(), child.stdout.take(), child.stderr.take())
+        let (Some(stdin), Some(stdout), Some(stderr)) = (child.stdin.take(), child.stdout.take(), child.stderr.take())
         else {
             let _ = child.kill();
             return Err(Failure::Start {

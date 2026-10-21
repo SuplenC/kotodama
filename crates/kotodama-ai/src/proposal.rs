@@ -2,14 +2,13 @@
 //!
 //! # Owns
 //!
-//! - Reading the model's answer, and checking every Proposal against the
-//!   catalog.
+//! - Reading the model's answer, and checking every Proposal against the catalog.
 //! - The Results: the Proposals, and the "Ask AI" Result.
 //!
 //! # Not here
 //!
-//! - Running a confirmed Proposal: the Daemon, from the `run_catalog_action`
-//!   outcome [`Proposal::outcome`] builds.
+//! - Running a confirmed Proposal: the Daemon, from the `run_catalog_action` outcome
+//!   [`Proposal::outcome`] builds.
 
 use std::collections::BTreeMap;
 
@@ -70,10 +69,7 @@ impl Proposal {
             kind: kind("ai.proposal"),
             identity: None,
             title,
-            subtitle: Some(format!(
-                "Proposed by AI, from {}; Enter runs it",
-                self.entry.extension
-            )),
+            subtitle: Some(format!("Proposed by AI, from {}; Enter runs it", self.entry.extension)),
             icon: None,
             keyword: None,
             keywords: Vec::new(),
@@ -149,8 +145,7 @@ pub fn ask_result(query: &str) -> LiveResult {
 fn arguments(entry: &CatalogEntry, proposed: &serde_json::Value) -> BTreeMap<String, String> {
     let mut arguments = BTreeMap::new();
     for argument in proposed["arguments"].as_array().into_iter().flatten() {
-        let (Some(name), Some(value)) = (argument["name"].as_str(), argument["value"].as_str())
-        else {
+        let (Some(name), Some(value)) = (argument["name"].as_str(), argument["value"].as_str()) else {
             continue;
         };
         let value = value.trim();
