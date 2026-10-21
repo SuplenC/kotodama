@@ -76,7 +76,8 @@ impl Since for ToExtension {
             | ToExtension::SubmitForm { .. }
             | ToExtension::ViewPopped { .. }
             | ToExtension::FilterView { .. }
-            | ToExtension::ActionCatalog { .. } => 0,
+            | ToExtension::ActionCatalog { .. }
+            | ToExtension::Rejected { .. } => 0,
         }
     }
 }

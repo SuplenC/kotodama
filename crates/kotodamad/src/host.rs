@@ -8,7 +8,7 @@ use std::sync::mpsc::Sender;
 use std::sync::{Arc, Mutex};
 use std::thread;
 
-use kotodama_protocol::{Channel, Error, FromExtension, Hello, WireFormat};
+use kotodama_protocol::{Channel, Error, FromExtension, Hello, ToExtension, WireFormat};
 
 use crate::daemon::{Event, ExtensionId, Launcher};
 use crate::discovery::Found;
@@ -157,5 +157,6 @@ fn speak(
                 message,
             });
         },
+        Some(|reason| ToExtension::Rejected { reason }),
     )
 }

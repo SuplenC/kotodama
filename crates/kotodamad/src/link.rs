@@ -18,12 +18,14 @@ pub(crate) const OUTBOX: usize = 1024;
 /// Starts the writing thread and hands `up` the bounded sender that feeds it,
 /// then passes each message read to `received` until the peer hangs up. A
 /// message that doesn't decode is logged and skipped: its frame was read
-/// whole, so the next one is intact.
+/// whole, so the next one is intact. With `rejected`, the peer is also sent
+/// the message it makes of the reason, so its author reads it too.
 pub(crate) fn pump<R, W, In, Out>(
     name: &str,
     channel: Channel<R, W>,
     up: impl FnOnce(SyncSender<Out>),
     mut received: impl FnMut(In),
+    rejected: Option<fn(String) -> Out>,
 ) -> Result<(), Error>
 where
     R: Read,
@@ -46,15 +48,24 @@ where
             }
         }
     });
+    let reply = rejected.map(|rejected| (rejected, sender.clone()));
     up(sender);
     loop {
         match reader.recv::<In>() {
             Ok(Some(message)) => received(message),
             Ok(None) => return Ok(()),
-            Err(err @ Error::Decode { .. }) => log::warn!(
-                "{name}: rejected a message: {err}: {}",
-                std::error::Error::source(&err).map_or(String::new(), ToString::to_string)
-            ),
+            Err(err @ Error::Decode { .. }) => {
+                let reason = format!(
+                    "{err}: {}",
+                    std::error::Error::source(&err).map_or(String::new(), ToString::to_string)
+                );
+                log::warn!("{name}: rejected a message: {reason}");
+                // A peer too slow to read its outbox misses the reason rather
+                // than holding up what it sends.
+                if let Some((rejected, sender)) = &reply {
+                    let _ = sender.try_send(rejected(reason));
+                }
+            }
             Err(err) => return Err(err),
         }
     }

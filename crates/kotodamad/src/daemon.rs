@@ -1721,14 +1721,17 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
         }
         match message {
             FromExtension::AddItems { mut items } => {
+                let ext = &self.extensions[id.0];
                 items.retain(|item| {
                     let theirs = item.kind.extension().is_some_and(|owner| owner != name);
                     if theirs {
-                        log::warn!(
-                            "{name}: Item `{}` has another Extension's kind `{}`",
+                        let reason = format!(
+                            "Item `{}` has another Extension's kind `{}`; name your own kinds `{name}.<kind>`",
                             item.id,
                             item.kind.name()
                         );
+                        log::warn!("{name}: {reason}");
+                        ext.send(ToExtension::Rejected { reason });
                     }
                     !theirs
                 });
@@ -1807,6 +1810,10 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
                 let ext = &mut self.extensions[id.0];
                 if !ext.found.manifest.action_catalog {
                     log::warn!("{name} asked for the Action catalog, but its Manifest doesn't");
+                    ext.send(ToExtension::Rejected {
+                        reason: "asked for the Action catalog without `action_catalog = true` in the Manifest"
+                            .into(),
+                    });
                     return;
                 }
                 ext.catalog = true;

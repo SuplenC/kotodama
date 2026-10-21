@@ -130,5 +130,6 @@ fn connection(id: FrontEndId, stream: UnixStream, events: &Sender<Event>) -> Res
                 message,
             });
         },
+        None,
     )
 }
