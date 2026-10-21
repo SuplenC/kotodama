@@ -183,3 +183,4 @@ Comments and rustdoc are written for a human: the developer reading the code to 
 ## Benchmarks
 
 - **Hot paths are measured by instruction counts** (`gungraun`, `crates/kotodamad/benches/instructions.rs`), which CI compares against the base commit. Wall-clock benches (`criterion`) are for local exploration and the CI timing gate. Source: castello; kotodama.
+- **Benchmarks build with the profile that ships**: `[profile.release]` in the root `Cargo.toml` (fat LTO, one codegen unit), which `bench` inherits. Don't give them a profile of their own: they would measure code nobody runs. Source: kotodama (#137).

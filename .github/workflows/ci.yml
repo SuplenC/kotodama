@@ -156,8 +156,9 @@ jobs:
         with:
           cachix-auth-token: ${{ secrets.CACHIX_AUTH_TOKEN }}
       # The lockfiles pin every dependency and, through the flake, the toolchain,
-      # so an exact hit rebuilds only the workspace's own crates. A miss falls
-      # back to the newest cache of the same job.
+      # so an exact hit rebuilds only the workspace's own crates. The release
+      # profile in Cargo.toml decides how the dependencies build, so it keys the
+      # cache too. A miss falls back to the newest cache of the same job.
       - id: cargo-cache
         uses: actions/cache/restore@v6
         with:
@@ -166,7 +167,7 @@ jobs:
             ~/.cargo/registry/cache
             ~/.cargo/git/db
             target
-          key: cargo-e2e-${{ matrix.runner }}-${{ hashFiles('Cargo.lock', 'flake.lock') }}
+          key: cargo-e2e-${{ matrix.runner }}-${{ hashFiles('Cargo.toml', 'Cargo.lock', 'flake.lock') }}
           restore-keys: cargo-e2e-${{ matrix.runner }}-
       # The latency test builds the workspace in release. Main's cache holds the
       # dependencies' release build, so only the workspace's crates rebuild.
@@ -247,7 +248,9 @@ jobs:
           echo "dir=$RUNNER_TEMP/base" >> "$GITHUB_OUTPUT"
       # Restored after the base checkout, so both builds start from main's
       # dependencies; bench-run touches each checkout's sources, so the
-      # workspace's own crates always rebuild.
+      # workspace's own crates always rebuild. Keyed on Cargo.toml as well as
+      # the lockfiles: its release profile, which benchmarks build with,
+      # decides how the dependencies build.
       - id: cargo-cache
         uses: actions/cache/restore@v6
         with:
@@ -256,7 +259,7 @@ jobs:
             ~/.cargo/registry/cache
             ~/.cargo/git/db
             ${{ runner.temp }}/target
-          key: cargo-bench-${{ hashFiles('Cargo.lock', 'flake.lock') }}
+          key: cargo-bench-${{ hashFiles('Cargo.toml', 'Cargo.lock', 'flake.lock') }}
           restore-keys: cargo-bench-
       - name: Run the base commit's benchmarks
         if: steps.base.outputs.dir && steps.saved.outputs.cache-hit != 'true'
@@ -364,7 +367,7 @@ jobs:
             ~/.cargo/registry/cache
             ~/.cargo/git/db
             ${{ runner.temp }}/target
-          key: cargo-bench-${{ hashFiles('Cargo.lock', 'flake.lock') }}
+          key: cargo-bench-${{ hashFiles('Cargo.toml', 'Cargo.lock', 'flake.lock') }}
           restore-keys: cargo-bench-
       - name: Count the base commit's instructions
         if: steps.base.outputs.dir
