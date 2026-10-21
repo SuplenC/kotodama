@@ -18,6 +18,8 @@ root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 port=5900
 # Screen Sharing on macOS refuses a VNC server without a password. The server
 # listens on localhost only, so a fixed one keeps nothing out but costs nothing.
+# Screen Sharing logs in with plain VNC authentication, which has a password
+# and no username, so the address carries the password and it asks nothing.
 user=kotodama
 password=kotodama
 
@@ -43,7 +45,7 @@ if [ -z "${KOTODAMA_DEMO_SHELL:-}" ]; then
         (
             for _ in $(seq 1800); do
                 if [ "$(nc 127.0.0.1 "$port" </dev/null 2>/dev/null | head -c 3)" = RFB ]; then
-                    open "vnc://$user@localhost:$port"
+                    open "vnc://:$password@localhost:$port"
                     exit 0
                 fi
                 sleep 1
@@ -267,7 +269,7 @@ done
 
 cat <<EOF
 
-Kotodama is running on vnc://localhost:$port (user $user, password $password).
+Kotodama is running on vnc://localhost:$port (password $password).
   Alt+Space or Ctrl+Space  open or close the menu
   Alt+V                    clipboard history
   Alt+B                    the shell example's bookmarks
