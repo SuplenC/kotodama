@@ -1,7 +1,9 @@
 //! The Daemon's state machine, driven through its events: Extensions and Front ends are
 //! channels here, and starting a process or typing is recorded instead of done.
 
-mod common;
+#[path = "support/harness.rs"]
+#[expect(dead_code, reason = "each test uses part of the harness")]
+mod harness;
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -9,7 +11,7 @@ use std::sync::atomic::Ordering;
 use std::sync::mpsc;
 use std::time::Duration;
 
-use common::*;
+use harness::*;
 use kotodama_protocol::*;
 use kotodamad::daemon::Ended;
 use kotodamad::daemon::Event;

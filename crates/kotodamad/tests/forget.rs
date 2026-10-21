@@ -2,11 +2,13 @@
 //! or everything, and undoing each for a short while after; and an
 //! Extension withdrawing the pick a run of its Action made.
 
-mod common;
+#[path = "support/harness.rs"]
+#[expect(dead_code, reason = "each test uses part of the harness")]
+mod harness;
 
 use std::time::Duration;
 
-use common::*;
+use harness::*;
 use kotodama_protocol::*;
 use kotodamad::clock::Clock;
 use kotodamad::daemon::CLEAR_EXTENSION_HISTORY;

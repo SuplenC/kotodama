@@ -14,7 +14,10 @@ use criterion::criterion_group;
 use criterion::criterion_main;
 use kotodamad::history::History;
 
+#[path = "support/corpus.rs"]
 mod corpus;
+#[path = "support/setup.rs"]
+#[expect(dead_code, reason = "the emoji and opening on a query are for `instructions.rs`")]
 mod setup;
 
 use setup::APPS;

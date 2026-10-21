@@ -2,12 +2,14 @@
 //! primary Action and opens the menus only once the View it pushes is there,
 //! so their first frame shows it (ADR 0014).
 
-mod common;
+#[path = "support/harness.rs"]
+#[expect(dead_code, reason = "each test uses part of the harness")]
+mod harness;
 
 use std::collections::BTreeMap;
 use std::time::Duration;
 
-use common::*;
+use harness::*;
 use kotodama_protocol::*;
 
 /// The git Extension's `branches` Item, whose primary Action lists them.

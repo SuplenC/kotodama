@@ -2,9 +2,11 @@
 //! query searches that Extension's Items alone, those it keeps out of the
 //! search included.
 
-mod common;
+#[path = "support/harness.rs"]
+#[expect(dead_code, reason = "each test uses part of the harness")]
+mod harness;
 
-use common::*;
+use harness::*;
 use kotodama_protocol::*;
 use kotodamad::discovery::Found;
 

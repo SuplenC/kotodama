@@ -1,12 +1,14 @@
 //! The problems: what is wrong that the user can fix, as Front ends hear of
 //! it in `ToFrontEnd::Status` and find it in the Daemon's own View.
 
-mod common;
+#[path = "support/harness.rs"]
+#[expect(dead_code, reason = "each test uses part of the harness")]
+mod harness;
 
 use std::path::PathBuf;
 use std::time::Duration;
 
-use common::*;
+use harness::*;
 use kotodama_protocol::*;
 use kotodamad::config;
 use kotodamad::daemon::Ended;

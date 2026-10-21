@@ -3,14 +3,16 @@
 //! replacing one View with the next, and the Views a Front end that connects
 //! is shown.
 
-mod common;
+#[path = "support/harness.rs"]
+#[expect(dead_code, reason = "each test uses part of the harness")]
+mod harness;
 
 use std::cell::Cell;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::sync::mpsc;
 
-use common::*;
+use harness::*;
 use kotodama_protocol::*;
 use kotodamad::daemon::Event;
 use kotodamad::daemon::FrontEndId;

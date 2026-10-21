@@ -4,11 +4,13 @@
 //! questionnaire (M1, L3, ...) in its doc comment. The invariants at the end
 //! hold for any query.
 
-mod common;
+#[path = "support/harness.rs"]
+#[expect(dead_code, reason = "each test uses part of the harness")]
+mod harness;
 
 use std::time::Duration;
 
-use common::*;
+use harness::*;
 use kotodama_protocol::*;
 use kotodamad::daemon::Event;
 use kotodamad::rank::Haystack;

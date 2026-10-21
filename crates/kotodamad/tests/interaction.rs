@@ -2,14 +2,16 @@
 //! Item's keyword, the form that asks for the ones left out, the Views
 //! Extensions push, and the jobs they report.
 
-mod common;
+#[path = "support/harness.rs"]
+#[expect(dead_code, reason = "each test uses part of the harness")]
+mod harness;
 
 use std::cell::Cell;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::sync::mpsc;
 
-use common::*;
+use harness::*;
 use kotodama_protocol::*;
 use kotodamad::daemon::Event;
 use kotodamad::daemon::FrontEndId;

@@ -68,7 +68,6 @@ pub const START: u64 = 1_792_485_000;
 /// The Extensions every Setup runs: `apps` holds the corpus, `clipboard`
 /// whatever a bench sends it.
 pub const APPS: ExtensionId = ExtensionId(0);
-#[allow(dead_code)] // query.rs alone
 pub const CLIPBOARD: ExtensionId = ExtensionId(1);
 /// The emoji Extension, which `Setup::with_emoji` runs too.
 const EMOJI: ExtensionId = ExtensionId(2);
@@ -139,7 +138,6 @@ impl Setup {
 
     /// The corpus, and the emoji Extension's Items beside it, as the Daemon
     /// with `config` holds them.
-    #[allow(dead_code)] // instructions.rs alone
     pub fn with_emoji(config: Table) -> Self {
         let mut setup = Self::running(
             &["apps", "clipboard", "emoji"],
@@ -265,7 +263,6 @@ impl Setup {
     }
 
     /// Pushes the corpus as a list View, as `apps/all`.
-    #[allow(dead_code)] // query.rs alone
     pub fn push_list(&mut self) {
         self.daemon.handle(
             Event::FromExtension {
@@ -286,7 +283,6 @@ impl Setup {
     }
 
     /// Types `text` into the list View and encodes the Daemon's matches.
-    #[allow(dead_code)] // query.rs alone
     pub fn filter(&mut self, text: &str) -> usize {
         self.daemon.handle(
             Event::FromFrontEnd {
@@ -309,7 +305,6 @@ impl Setup {
 
     /// `kotodama open --query <query>`: the menu opens on it, in the app
     /// whose word it starts with.
-    #[allow(dead_code)] // instructions.rs alone
     pub fn open(&mut self, query: &str) {
         self.daemon.handle(
             Event::FromFrontEnd {
@@ -325,7 +320,6 @@ impl Setup {
     }
 
     /// `kotodama toggle`: the menu opens on the Empty query.
-    #[allow(dead_code)] // query.rs alone
     pub fn toggle(&mut self) {
         self.daemon.handle(
             Event::FromFrontEnd {

@@ -2,7 +2,9 @@
 //! search never sees half of a change. The Items expected at a time of day
 //! are hot ahead of it: read back off their Shelf before they are shown.
 
-mod common;
+#[path = "support/harness.rs"]
+#[expect(dead_code, reason = "each test uses part of the harness")]
+mod harness;
 
 use std::sync::mpsc;
 use std::sync::mpsc::Receiver;
@@ -10,7 +12,7 @@ use std::sync::mpsc::Sender;
 use std::time::Duration;
 use std::time::Instant;
 
-use common::*;
+use harness::*;
 use kotodama_protocol::*;
 use kotodamad::clock::DAY_SECS;
 use kotodamad::clock::When;

@@ -2,8 +2,6 @@
 //! are channels here, and starting a process or typing is recorded instead of
 //! done.
 
-#![allow(dead_code)]
-
 use std::cell::Cell;
 use std::cell::RefCell;
 use std::collections::BTreeMap;

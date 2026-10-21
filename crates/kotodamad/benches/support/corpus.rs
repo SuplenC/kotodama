@@ -53,7 +53,6 @@ pub fn items() -> Vec<Item> {
 /// `n` made-up clipboard entries, `clip-0` on, whose titles are `chars`
 /// characters of words: what the clipboard Extension would send if it didn't
 /// cut its searchable text short. `seed` varies the words.
-#[allow(dead_code)]
 pub fn long_titles(n: usize, chars: usize, seed: u32) -> Vec<Item> {
     let mut seed = seed | 1;
     let mut next = move || {

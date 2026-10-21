@@ -2,12 +2,14 @@
 //! search fills its rows, how crashed Extensions restart, and how text goes
 //! into windows.
 
-mod common;
+#[path = "support/harness.rs"]
+#[expect(dead_code, reason = "each test uses part of the harness")]
+mod harness;
 
 use std::collections::BTreeMap;
 use std::time::Duration;
 
-use common::*;
+use harness::*;
 use kotodama_protocol::*;
 use kotodamad::daemon::Event;
 use kotodamad::daemon::ExtensionId;

@@ -24,6 +24,8 @@ use kotodama_protocol::ToExtension;
 use kotodama_protocol::ToFrontEnd;
 use kotodama_protocol::WireFormat;
 
+#[path = "support/corpus.rs"]
+#[expect(dead_code, reason = "the long titles are for `query.rs`")]
 mod corpus;
 
 const QUERIES: usize = 2_000;

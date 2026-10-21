@@ -32,6 +32,8 @@ use kotodamad::history::History;
 use kotodamad::history::Store;
 use kotodamad::usage::Entry;
 
+#[path = "support/corpus.rs"]
+#[expect(dead_code, reason = "the long titles are for `query.rs`")]
 mod corpus;
 
 /// The system's allocator, counting the bytes in use.
@@ -126,9 +128,9 @@ fn kept(name: &str, items: impl FnOnce() -> Vec<Item>) -> (usize, usize) {
 }
 
 fn main() {
+    type Corpus = fn() -> Vec<Item>;
     // `cargo bench` passes `--bench`; a filter that names neither skips them.
     let filter = std::env::args().skip(1).find(|arg| !arg.starts_with('-'));
-    type Corpus = fn() -> Vec<Item>;
     let corpora: [(&str, &str, Corpus); 2] = [
         ("index/10k_items/heap", "apps", corpus::items),
         ("index/emoji/heap", "emoji", kotodama_emoji::items),
@@ -140,7 +142,7 @@ fn main() {
         let (bytes, count) = kept(name, items);
         println!(
             "{bench}: {count} Items, {:.1} MiB, {} bytes per Item",
-            bytes as f64 / (1 << 20) as f64,
+            bytes as f64 / f64::from(1 << 20),
             bytes / count
         );
         println!("test {bench} ... bench: {bytes} bytes (+/- 0)");

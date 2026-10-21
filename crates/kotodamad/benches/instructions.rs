@@ -19,7 +19,11 @@ use gungraun::main;
 use kotodama_protocol::Table;
 use kotodama_protocol::Value;
 
+#[path = "support/corpus.rs"]
+#[expect(dead_code, reason = "the long titles are for `query.rs`")]
 mod corpus;
+#[path = "support/setup.rs"]
+#[expect(dead_code, reason = "the clipboard, the list View and the toggle are for `query.rs`")]
 mod setup;
 
 use setup::Setup;
