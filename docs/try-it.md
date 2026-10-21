@@ -15,9 +15,11 @@ The first run fetches the toolchain and builds a release, which takes a while. T
 
 What's on the desktop: headless sway with the Daemon, the Bundled extensions, the [shell example Extension](../examples/shell-extension/README.md) and the shipped menu. The menu is open at the start, over a background that explains how Kotodama works and lists queries to try for each feature, each one written to work in the demo.
 
-- **Alt+Space** or **Ctrl+Space** opens and closes the menu. Super doesn't make it through Screen Sharing, and macOS may keep Ctrl+Space for switching input sources.
-- **Alt+V** opens the clipboard history; **Alt+B** the shell example's bookmarks View.
-- **Alt+Return** opens a terminal (foot); **Alt+Shift+Q** closes a window. Alt is the Option key on a Mac keyboard.
+- **Ctrl+Space** opens and closes the menu. If macOS keeps Ctrl+Space for switching input sources, turn that shortcut off in System Settings > Keyboard > Keyboard Shortcuts > Input Sources while you try the demo.
+- **Ctrl+Shift+H** opens the clipboard history; **Ctrl+Shift+B** the shell example's bookmarks View.
+- **Ctrl+Return** opens a terminal (foot); **Ctrl+Shift+Q** closes a window.
+
+The keys are on Ctrl because Super doesn't make it through Screen Sharing, and Screen Sharing sends Option with a key as the character macOS makes of it (Option+V is √), which matches no binding. The Alt versions (Alt+Space, Alt+V, Alt+B, Alt+Return, Alt+Shift+Q) work from VNC clients that send Alt as it is.
 
 Type `guide` in the menu for the whole list: the "Kotodama demo guide" Quicklink opens [demo/GUIDE.md](../demo/GUIDE.md) in FeatherPad, with every feature and something to try for each.
 

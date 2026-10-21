@@ -71,14 +71,6 @@ ShellRoot {
                 anchors.horizontalCenter: parent.horizontalCenter
                 spacing: desk.gap / 3
                 KeyCaps {
-                    keys: "Alt+Space"
-                    big: true
-                }
-                Note {
-                    text: "or"
-                    anchors.verticalCenter: parent.verticalCenter
-                }
-                KeyCaps {
                     keys: "Ctrl+Space"
                     big: true
                 }
@@ -118,19 +110,19 @@ ShellRoot {
                 anchors.horizontalCenter: parent.horizontalCenter
                 spacing: desk.gap * 0.6
                 Hint {
-                    keys: "Alt+Space"
+                    keys: "Ctrl+Space"
                     what: "menu"
                 }
                 Hint {
-                    keys: "Alt+V"
+                    keys: "Ctrl+Shift+H"
                     what: "clipboard"
                 }
                 Hint {
-                    keys: "Alt+B"
+                    keys: "Ctrl+Shift+B"
                     what: "bookmarks"
                 }
                 Hint {
-                    keys: "Alt+Return"
+                    keys: "Ctrl+Return"
                     what: "terminal"
                 }
             }

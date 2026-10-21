@@ -4,16 +4,16 @@ Kotodama is a command menu: you type, and it finds and does things. This
 desktop is a demo, with a few projects, scripts, clipboard entries, Aliases and
 Quicklinks made up for it. Everything here starts from the menu.
 
-Close this window with Alt+Shift+Q, or keep it open beside the menu.
+Close this window with Ctrl+Shift+Q, or keep it open beside the menu.
 
 ## Keys
 
 On the desktop:
 
-- Alt+Space or Ctrl+Space: open or close the menu.
-- Alt+V: the clipboard history.
-- Alt+B: the bookmarks View (the shell example Extension's).
-- Alt+Return: a terminal (foot). Alt+Shift+Q closes a window.
+- Ctrl+Space: open or close the menu.
+- Ctrl+Shift+H: the clipboard history.
+- Ctrl+Shift+B: the bookmarks View (the shell example Extension's).
+- Ctrl+Return: a terminal (foot). Ctrl+Shift+Q closes a window.
 
 In the menu:
 
@@ -101,7 +101,7 @@ typed.
 
 ## Clipboard history
 
-Alt+V, or `clipboard` in the search, lists what was copied, newest first; a
+Ctrl+Shift+H, or `clipboard` in the search, lists what was copied, newest first; a
 few entries are there from the start. Typing filters the list. Enter pastes
 into the window the menu came from; Ctrl+K offers "Copy to Clipboard", "Show
 Details" and "Delete from History". Copy something in foot or FeatherPad and it
@@ -129,12 +129,12 @@ Extensions push Views on top of the search: lists, forms, details and
 progress. Esc pops one at a time, and closing the menu keeps them, so it opens
 again where it was.
 
-- Alt+B lists the shell example's bookmarks; typing filters them.
+- Ctrl+Shift+B lists the shell example's bookmarks; typing filters them.
 - `timer 5` counts down five seconds in a progress View. Enter on plain
   `timer` asks for the seconds in a form. Its second Action, "Start a labelled
   timer" (Ctrl+L, or Ctrl+K), asks for a label in the Extension's own form:
   Tab moves between fields, Enter submits.
-- Alt+V is the clipboard's list View; "Show Details" on an entry is a detail
+- Ctrl+Shift+H is the clipboard's list View; "Show Details" on an entry is a detail
   View.
 
 ## The web

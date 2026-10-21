@@ -168,13 +168,19 @@ kotodama="$bin/kotodama"
 cat >"$home/sway.conf" <<CONF
 output HEADLESS-1 resolution 1920x1080 position 0 0 scale 1 bg #11111b solid_color
 xwayland disable
-# Super is often taken by macOS before the VNC client sees it, so the menu is
-# on Alt+Space and Ctrl+Space.
-bindsym Mod1+space exec $kotodama toggle
+# Super is often taken by macOS before the VNC client sees it, and Screen
+# Sharing sends Option with a key as the character macOS makes of it (Option+V
+# is √), which matches no binding. So every binding is on Ctrl, and on Alt for
+# VNC clients that send Alt as it is.
 bindsym Ctrl+space exec $kotodama toggle
+bindsym Mod1+space exec $kotodama toggle
+bindsym Ctrl+Shift+h exec $kotodama open --view clipboard/history
 bindsym Mod1+v exec $kotodama open --view clipboard/history
+bindsym Ctrl+Shift+b exec $kotodama open --view shell-example/bookmarks
 bindsym Mod1+b exec $kotodama open --view shell-example/bookmarks
+bindsym Ctrl+Return exec foot
 bindsym Mod1+Return exec foot
+bindsym Ctrl+Shift+q kill
 bindsym Mod1+Shift+q kill
 CONF
 
@@ -269,10 +275,11 @@ done
 cat <<EOF
 
 Kotodama is running on vnc://localhost:$port (password $password).
-  Alt+Space or Ctrl+Space  open or close the menu
-  Alt+V                    clipboard history
-  Alt+B                    the shell example's bookmarks
-  Alt+Return               a terminal (foot)
+  Ctrl+Space               open or close the menu
+  Ctrl+Shift+H             clipboard history
+  Ctrl+Shift+B             the shell example's bookmarks
+  Ctrl+Return              a terminal (foot)
+  Ctrl+Shift+Q             close a window
 The desktop shows what to try; type "guide" in the menu for everything.
 Logs: $logs
 Ctrl+C stops it.
