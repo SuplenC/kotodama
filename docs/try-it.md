@@ -11,7 +11,7 @@ just demo           # state starts fresh every run
 just demo --keep    # History, clipboard history and the made-up folders kept between runs
 ```
 
-The first run fetches the toolchain and builds a release, which takes a while. Then Screen Sharing opens `vnc://localhost:5900`; log in as `kotodama`, password `kotodama`. The server listens on localhost only. Ctrl+C in the terminal stops everything.
+The first run fetches the toolchain and builds a release, which takes a while. Then Screen Sharing opens `vnc://localhost:5900` and logs in by itself; if it asks, the password is `kotodama` (it asks for no username). The server listens on localhost only. Ctrl+C in the terminal stops everything.
 
 What's on the desktop: headless sway with the Daemon, the Bundled extensions, the [shell example Extension](../examples/shell-extension/README.md) and the shipped menu. The menu is open at the start, over a background that explains how Kotodama works and lists queries to try for each feature, each one written to work in the demo.
 
