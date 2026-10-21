@@ -15,6 +15,16 @@
 //!   as tell them apart (`to/proj2/test`).
 //! - A checked-out submodule is `<repository>>`, then its folder's name.
 //! - The tmux session is the name with every `.` made `_`.
+//!
+//! # Owns
+//!
+//! - The search of the projects folders, and the folders whose changes can add or remove a project.
+//! - Repositories, worktrees and submodules, and their names.
+//!
+//! # Not here
+//!
+//! - Watching the folders and searching again: `scan.rs`.
+//! - Opening a project: `main.rs`, with the commands from `settings.rs`.
 
 use std::collections::BTreeMap;
 use std::collections::HashSet;
@@ -63,9 +73,28 @@ pub struct Found {
 /// apart.
 pub fn find(folders: &[ProjectFolder]) -> Found {
     let mut found = Found::default();
+    for (name, mut repositories) in search(folders, &mut found) {
+        let named: Vec<Project> = if repositories.len() == 1 {
+            vec![Project {
+                name,
+                path: repositories.pop().unwrap_or_default(),
+            }]
+        } else {
+            tell_apart(repositories)
+        };
+        for project in named {
+            submodules(&project, &mut found);
+            found.projects.push(project);
+        }
+    }
+    found
+}
+
+/// Searches `folders` breadth first for repositories and their worktrees, adding the folders it
+/// goes through to `found`. Returns their paths by name, in the order found, as `tms` groups them
+/// before telling equal names apart.
+fn search(folders: &[ProjectFolder], found: &mut Found) -> BTreeMap<String, Vec<PathBuf>> {
     let mut seen = HashSet::new();
-    // By name, in the order found, as `tms` groups them before telling
-    // equal names apart.
     let mut by_name: BTreeMap<String, Vec<PathBuf>> = BTreeMap::new();
     let mut queue: VecDeque<(PathBuf, usize)> = folders
         .iter()
@@ -116,24 +145,10 @@ pub fn find(folders: &[ProjectFolder]) -> Found {
             }
         }
     }
-
-    for (name, mut repositories) in by_name {
-        let named: Vec<Project> = if repositories.len() == 1 {
-            vec![Project {
-                name,
-                path: repositories.pop().unwrap_or_default(),
-            }]
-        } else {
-            tell_apart(repositories)
-        };
-        for project in named {
-            submodules(&project, &mut found);
-            found.projects.push(project);
-        }
-    }
-    found
+    by_name
 }
 
+/// What a folder entry is, without following a link.
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 enum Kind {
     Dir,
@@ -182,10 +197,10 @@ fn worktrees(git_dir: &Path) -> Vec<(String, PathBuf)> {
         .flatten()
         .filter_map(|entry| {
             let private = entry.path();
-            let gitdir = fs::read_to_string(private.join("gitdir")).ok()?;
+            let named = fs::read_to_string(private.join("gitdir")).ok()?;
             // `gitdir` names the worktree's `.git` file, absolute or relative
             // to the worktree's private git dir.
-            let dot_git = normalize(&private.join(gitdir.trim()));
+            let dot_git = normalize(&private.join(named.trim()));
             let worktree = dot_git.parent()?.to_owned();
             worktree
                 .join(".git")
@@ -309,13 +324,4 @@ fn normalize(path: &Path) -> PathBuf {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn gitmodules_paths_are_read_from_submodule_sections_only() {
-        let text = "[core]\n\tpath = no\n[submodule \"a\"]\n\tpath = vendor/a\n\turl = x\n\
-                    [submodule \"b\"]\n  Path = \"b c\"\n";
-        assert_eq!(submodule_paths(text), ["vendor/a", "b c"]);
-    }
-}
+mod tests;

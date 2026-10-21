@@ -1,5 +1,16 @@
-//! Finding scripts: every executable file in a scripts folder and the
-//! folders in it, with the options its header comment sets.
+//! Finding scripts: every executable file in a scripts folder and the folders in it, with the
+//! options its header comment sets.
+//!
+//! # Owns
+//!
+//! - The search of a scripts folder, down to [`MAX_DEPTH`], and the folders it went through.
+//! - The `# kotodama:` header and its options.
+//! - A script's title.
+//!
+//! # Not here
+//!
+//! - Watching the folders and searching again: `scan.rs`.
+//! - Running a script: `main.rs`.
 
 use std::fs;
 use std::fs::File;
@@ -122,6 +133,7 @@ impl Header {
     }
 }
 
+/// `value` without the double or single quotes around it, if it has a pair.
 fn unquote(value: &str) -> &str {
     for quote in ['"', '\''] {
         if let Some(inner) = value.strip_prefix(quote).and_then(|value| value.strip_suffix(quote)) {
@@ -147,6 +159,8 @@ pub fn find(folder: &Path, found: &mut Found) {
     search(folder, &mut Vec::new(), found);
 }
 
+/// Adds the scripts in `dir`, and in its subfolders, to `found`. `folders` holds the subfolders
+/// `dir` is in, below the scripts folder.
 fn search(dir: &Path, folders: &mut Vec<String>, found: &mut Found) {
     let Ok(entries) = fs::read_dir(dir) else {
         return;
@@ -156,7 +170,7 @@ fn search(dir: &Path, folders: &mut Vec<String>, found: &mut Found) {
         .flatten()
         .filter(|entry| !entry.file_name().to_string_lossy().starts_with('.'))
         .collect();
-    entries.sort_by_key(|entry| entry.file_name());
+    entries.sort_by_key(fs::DirEntry::file_name);
     for entry in entries {
         let Ok(kind) = entry.file_type() else {
             continue;
@@ -197,48 +211,4 @@ fn warn(message: &str) {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn a_header_sets_a_name_with_spaces_the_terminal_and_a_prompt() {
-        let header =
-            Header::parse("#!/usr/bin/env bash\n# kotodama: name=Deploy staging terminal=false args=prompt\necho\n");
-        assert_eq!(
-            header,
-            Header {
-                name: Some("Deploy staging".into()),
-                terminal: false,
-                prompt: true,
-            }
-        );
-    }
-
-    #[test]
-    fn without_a_header_a_script_runs_in_a_terminal_without_asking() {
-        assert_eq!(Header::parse("#!/bin/sh\necho kotodama: name=x\n"), Header::default());
-    }
-
-    #[test]
-    fn other_comment_styles_and_quotes_work_too() {
-        assert_eq!(
-            Header::parse("#!/usr/bin/env node\n// kotodama: name=\"Say hi\"\n").name,
-            Some("Say hi".into())
-        );
-        assert!(!Header::parse("-- kotodama: terminal=false\n").terminal);
-        assert!(Header::parse("## kotodama: args=prompt").prompt);
-    }
-
-    #[test]
-    fn unknown_options_are_skipped_and_the_rest_apply() {
-        let header = Header::parse("# kotodama: colour=red terminal=false name=x");
-        assert!(!header.terminal);
-        assert_eq!(header.name.as_deref(), Some("x"));
-    }
-
-    #[test]
-    fn a_header_past_the_first_lines_is_not_one() {
-        let text = format!("{}# kotodama: name=late\n", "#\n".repeat(HEADER_LINES));
-        assert_eq!(Header::parse(&text).name, None);
-    }
-}
+mod tests;

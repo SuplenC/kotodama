@@ -3,7 +3,11 @@
 //! small scripts that write down how they were started. Needs `git`, which
 //! the dev environment provides.
 
+#[path = "support/git.rs"]
+mod git;
+
 use std::collections::BTreeMap;
+use std::fmt::Write;
 use std::fs;
 use std::ops::Deref;
 use std::ops::DerefMut;
@@ -18,6 +22,8 @@ use std::time::Instant;
 use kotodama_extension::testing::Spawned;
 use kotodama_protocol::*;
 use tempfile::TempDir;
+
+use crate::git::repo;
 
 /// Long enough for a change on disk to be noticed and settle.
 const WAIT: Duration = Duration::from_secs(5);
@@ -122,27 +128,6 @@ fn home() -> TempDir {
     tempfile::tempdir_in(fs::canonicalize(std::env::temp_dir()).unwrap()).unwrap()
 }
 
-/// A repository with one commit at `dir`.
-fn repo(dir: &Path) {
-    fs::create_dir_all(dir).unwrap();
-    for args in [
-        &["init", "-q", "-b", "main"][..],
-        &["commit", "-q", "--allow-empty", "-m", "init"],
-    ] {
-        let output = Command::new("git")
-            .args(args)
-            .current_dir(dir)
-            .env("GIT_AUTHOR_NAME", "test")
-            .env("GIT_AUTHOR_EMAIL", "test@example.com")
-            .env("GIT_COMMITTER_NAME", "test")
-            .env("GIT_COMMITTER_EMAIL", "test@example.com")
-            .env("GIT_CONFIG_GLOBAL", "/dev/null")
-            .output()
-            .unwrap();
-        assert!(output.status.success());
-    }
-}
-
 fn executable(path: &Path, text: &str) {
     fs::create_dir_all(path.parent().unwrap()).unwrap();
     fs::write(path, text).unwrap();
@@ -242,10 +227,12 @@ fn each_project_action_runs_its_own_command() {
     let mut config = String::from(r#"folders = [{ path = "~/Projects", kind = "projects" }]"#);
     for key in ["shell", "lazygit", "file_manager", "copy_path"] {
         let recorder = recorder(&home.path().join(key), &home.path().join(format!("{key}.out")));
-        config.push_str(&format!(
+        write!(
+            config,
             "\n{key} = [\"{}\", \"{key}\", \"{{path}}\"]",
             recorder.display()
-        ));
+        )
+        .unwrap();
     }
     let mut folders = Folders::configured(home, &config);
     let project = folders.added()["app"].clone();

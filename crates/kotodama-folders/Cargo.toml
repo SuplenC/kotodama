@@ -10,6 +10,7 @@ repository.workspace = true
 kotodama-extension = { path = "../kotodama-extension", features = ["watch"] }
 kotodama-protocol = { path = "../kotodama-protocol" }
 shlex = "2"
+thiserror = "2.0.21"
 
 [dev-dependencies]
 kotodama-extension = { path = "../kotodama-extension", features = ["testing"] }

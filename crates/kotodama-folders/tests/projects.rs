@@ -4,40 +4,19 @@
 //! `src/session.rs`), with `list_worktrees` and `search_submodules` on. Needs
 //! `git`, which the dev environment provides.
 
+#[path = "support/git.rs"]
+mod git;
+
 use std::fs;
 use std::path::Path;
 use std::path::PathBuf;
-use std::process::Command;
 
 use kotodama_folders::projects;
 use kotodama_folders::projects::Project;
 use kotodama_folders::projects::ProjectFolder;
 
-fn git(dir: &Path, args: &[&str]) {
-    let status = Command::new("git")
-        .args(args)
-        .current_dir(dir)
-        .env("GIT_AUTHOR_NAME", "test")
-        .env("GIT_AUTHOR_EMAIL", "test@example.com")
-        .env("GIT_COMMITTER_NAME", "test")
-        .env("GIT_COMMITTER_EMAIL", "test@example.com")
-        .env("GIT_CONFIG_GLOBAL", "/dev/null")
-        .env("GIT_CONFIG_NOSYSTEM", "1")
-        .output()
-        .unwrap();
-    assert!(
-        status.status.success(),
-        "git {args:?}: {}",
-        String::from_utf8_lossy(&status.stderr)
-    );
-}
-
-/// A repository with one commit at `dir`.
-fn repo(dir: &Path) {
-    fs::create_dir_all(dir).unwrap();
-    git(dir, &["init", "-q", "-b", "main"]);
-    git(dir, &["commit", "-q", "--allow-empty", "-m", "init"]);
-}
+use crate::git::git;
+use crate::git::repo;
 
 /// A folder to search, canonical so paths compare equal.
 fn search() -> (tempfile::TempDir, PathBuf) {
