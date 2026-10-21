@@ -22,7 +22,7 @@ A Rust Extension builds on the `kotodama-extension` crate, as the Bundled extens
 
 ## Where it lives, and how it runs
 
-An Extension is a directory holding a `manifest.toml` and whatever it runs. The Daemon looks in `$XDG_DATA_DIRS/kotodama/extensions/*/`, which is where a package installs one, and in `~/.config/kotodama/extensions/*/`, where you put your own. An Extension in the second place replaces one of the same name in the first.
+An Extension is a directory holding a `manifest.toml` and whatever it runs. The Daemon looks in `$XDG_DATA_DIRS/kotodama/extensions/*/`, which is where a package installs one, and in `~/.config/kotodama/extensions/*/`, where you put your own. An Extension in the second place replaces one of the same name in the first. The user's config can add directories (`[paths] extension_dirs`), switch an Extension off, or override its `command`, `env` and Live query in `[extensions.<name>]`; `kotodama config --schema` lists those keys.
 
 The lifecycle:
 
@@ -240,7 +240,7 @@ folder = "~/Notes"
 word = "n"
 ```
 
-The Daemon sends the table right after the handshake, and again whenever it changes, as `{"config": {"folder": "~/Notes"}}`. It leaves out the keys it reads itself: `word` and `in_search`. Never read config files yourself. A missing table arrives as `{}`, so give every setting a default. Log a setting of the wrong shape, and say what's missing with `status`.
+The Daemon sends the table right after the handshake, and again whenever it changes, as `{"config": {"folder": "~/Notes"}}`. It leaves out the keys it reads itself: `enable`, `command`, `env`, `live_query`, `word`, `prefix` and `in_search`. Never read config files yourself. A missing table arrives as `{}`, so give every setting a default. Log a setting of the wrong shape, and say what's missing with `status`.
 
 ## Compatibility
 

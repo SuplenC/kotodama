@@ -198,7 +198,7 @@ word = "note"
 folder = "/home/me/notes"     # a setting the Extension gets
 ```
 
-A changed `command`, `env` or `live_query` restarts the Extension.
+A bare program name in a `command` from the config is looked up on `PATH`, which a Manifest's never is. A changed `command`, `env` or `live_query` restarts the Extension.
 
 ### Ranking that learns
 

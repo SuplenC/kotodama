@@ -32,6 +32,9 @@ pub struct Found {
     pub env: BTreeMap<String, String>,
     /// Defined in the config rather than by a `manifest.toml`.
     pub inline: bool,
+    /// Whether `command` came from the config, where a bare program name is
+    /// looked up on `PATH`.
+    pub command_from_config: bool,
 }
 
 impl Found {
@@ -53,20 +56,21 @@ impl Found {
             triggers,
             env: BTreeMap::new(),
             inline: false,
+            command_from_config: false,
         })
     }
 
-    /// The program to run. A relative path is resolved against the
-    /// Extension's directory; a bare name not there is looked for on `PATH`,
-    /// so a packaged program needs no path.
+    /// The program to run. A Manifest's relative path is resolved against
+    /// the Extension's directory and never looked up on `PATH`, so what runs
+    /// doesn't depend on the Daemon's environment. A bare name from the
+    /// config is looked up on `PATH`, so a packaged program needs no path.
     pub fn program(&self) -> PathBuf {
         let program = Path::new(&self.manifest.command[0]);
         let bare = program.components().count() == 1 && !program.is_absolute();
-        let here = self.dir.join(program);
-        if !bare || (!self.dir.as_os_str().is_empty() && here.exists()) {
-            return here;
+        if bare && self.command_from_config {
+            return on_path(program).unwrap_or_else(|| program.to_owned());
         }
-        on_path(program).unwrap_or(here)
+        self.dir.join(program)
     }
 
     /// What the program file is like now, to tell when it changes; `None`

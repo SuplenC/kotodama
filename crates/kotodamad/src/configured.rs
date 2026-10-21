@@ -108,9 +108,13 @@ fn enabled(table: &Table, name: &str, report: &mut Report) -> bool {
 fn overridden(found: &Found, table: &Table, report: &mut Report) -> Found {
     let name = &found.manifest.name;
     let mut manifest = found.manifest.clone();
+    let mut command_from_config = found.command_from_config;
     if let Some(value) = table.get("command") {
         match command(value) {
-            Ok(command) => manifest.command = command,
+            Ok(command) => {
+                manifest.command = command;
+                command_from_config = true;
+            }
             Err(err) => report.add(format!("extensions.{name}.command"), err),
         }
     }
@@ -138,6 +142,7 @@ fn overridden(found: &Found, table: &Table, report: &mut Report) -> Found {
         }
     };
     configured.env = env;
+    configured.command_from_config = command_from_config;
     configured
 }
 
@@ -166,6 +171,7 @@ fn inline(name: &str, table: &Table) -> Result<Found, String> {
     let mut found = Found::new(manifest, PathBuf::new())?;
     found.env = env;
     found.inline = true;
+    found.command_from_config = true;
     Ok(found)
 }
 
@@ -279,6 +285,21 @@ mod tests {
         installed(
             "name = \"calculator\"\ncommand = [\"bin/calc\"]\n[live_query]\ntriggers = ['^\\d']\ndebounce_ms = 60\n",
         )
+    }
+
+    #[test]
+    fn a_bare_program_is_looked_up_on_path_only_when_the_config_names_it() {
+        let shell = installed("name = \"calculator\"\ncommand = [\"sh\"]\n");
+        assert_eq!(shell.program(), PathBuf::from("/ext/calc/sh"));
+
+        let (configured, _) = configure_with(
+            &[shell],
+            "[extensions.calculator]\ncommand = [\"sh\", \"-c\", \"true\"]\n",
+        );
+
+        let program = configured[0].program();
+        assert!(program.is_absolute(), "{}", program.display());
+        assert!(program.is_file(), "{}", program.display());
     }
 
     #[test]

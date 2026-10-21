@@ -118,7 +118,7 @@ pub const KEYS: &[Key] = &[
         None,
         "The program and its arguments, replacing the Manifest's. With no Extension of that name \
          installed, defines one: its table then takes the Manifest's keys too (`title`, `word`, \
-         `live_query`, ...). The program is an absolute path or found on PATH.",
+         `live_query`, ...). A bare program name is looked up on PATH, unlike a Manifest's.",
     ),
     key(
         "extensions.<name>.env",
