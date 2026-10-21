@@ -8,8 +8,8 @@ New code follows every rule here. Code written before this guide is being brough
 
 Three tools check what can be checked mechanically. Each runs only on the crates that have opted in, so `just check` stays green on a crate until its restyle:
 
-- **Lints**: `[workspace.lints]` in the root `Cargo.toml` (clippy `pedantic` and the rules below, each opt-out with its reason), with `clippy.toml`. `just check` runs clippy with `-D warnings`.
-- **Formatting**: `.config/rustfmt.toml` (width 120, imports grouped `std`/external/crate with one item per `use`, comments wrapped at 100). Its options are unstable, so `just fmt` and `just check` use the flake's `rustfmt-nightly`, fetched on first use; the build toolchain stays stable. The crates not yet opted in are checked against stable rustfmt's defaults, as before, and `just fmt` leaves them alone. The file sits in `.config/` so that stable rustfmt in an editor does not find it.
+- **Lints**: `[workspace.lints]` in the root `Cargo.toml` (clippy `pedantic` and the rules below, each opt-out with its reason), with `clippy.toml`. `just check` runs clippy with `-D warnings` in two passes: the libraries, binaries and examples with every lint, then the tests and benches with `unwrap_used` off (see [Tests](#tests)). A target cannot carry lints of its own, and clippy's `allow-unwrap-in-tests` spares only `#[test]` functions and `#[cfg(test)]` modules, not an integration test's helpers or a benchmark. A one-pass `cargo clippy --all-targets`, as an editor runs it, still flags an `unwrap()` there; `just check` is the reference.
+- **Formatting**: `.config/rustfmt.toml` (width 120, imports grouped `std`/external/crate with one item per `use`, comments wrapped at 100). Its options are unstable, so `just fmt` and `just check` use the flake's `rustfmt-nightly`, fetched on first use; the build toolchain stays stable. The crates not yet opted in are checked against stable rustfmt's defaults, as before, and `just fmt` leaves them alone. The file sits in `.config/` so that stable rustfmt in an editor does not find it. One import per `use` makes rustfmt split `use std::io::{self, Read};` into `use std::io::Read;` and `use std::io::{self};`, and no option writes the second as `use std::io;`: `just fmt` rewrites it (`scripts/self-imports`), and `just check` fails on one left in.
 - **Comments**: `just comments` (`scripts/comments`, run by `just check`) fails on `FIXME`/`XXX`, a `TODO` not written `TODO(#n):`, a trailing comment or a label on a closing brace, `/* */`, and change narration ("now", "previously", "no longer"; text in backticks is skipped).
 
 A crate opts in with one line in its `Cargo.toml`:
@@ -24,7 +24,7 @@ workspace = true
 1. Adds `[lints] workspace = true` to the crate's `Cargo.toml`.
 2. Runs `just fmt`, which formats that crate only.
 3. Fixes what `just check` reports: the lints (or an `#[expect(…, reason = "…")]` where the rule must give way, such as on the hot path), and the comments.
-4. Rewrites the rest by hand: the comments and rustdoc, `# Owns`/`# Not here`, unit tests in sibling `tests.rs` files, `thiserror` enums with named constructors.
+4. Rewrites the rest by hand: the comments and rustdoc, `# Owns`/`# Not here`, unit tests in sibling `tests.rs` files, test and bench helpers in `support/`, `thiserror` errors with named constructors.
 5. Ticks the crate off in #108.
 
 A crate with no FFI boundary already carries `#![forbid(unsafe_code)]`.
@@ -50,10 +50,11 @@ Hot loops are written so the compiler can turn them into SIMD on its own: SSE2 o
 
 ## Formatting and layout
 
-- **Imports: three blocks, one item per `use`.** `std`, then external crates, then `crate`/`super`/`self`, a blank line between; one item per line. Source: kotodama (from castello F1, F2).
+- **Imports: three blocks, one item per `use`.** `std`, then external crates, then `crate`/`super`/`self`, a blank line between; one item per line. A module is imported as `use std::io;`, never `use std::io::{self};`. Source: kotodama (from castello F1, F2).
 - **`std::` paths everywhere.** No crate is `no_std`, so `core::`/`alloc::` paths buy nothing. Source: kotodama.
 - **Line width 120.** Source: kotodama.
 - **A module with children is `foo.rs` beside `foo/`**, never `foo/mod.rs`. Clippy `mod_module_files`. Source: kotodama.
+- **A helper module under `tests/` or `benches/` is `support/<name>.rs`**, included by each target that uses it with `#[path]`. Every file directly in `tests/` or `benches/` is a target of its own, so a helper cannot sit there, and `tests/<name>/mod.rs` is the `mod.rs` the rule above rules out. A test includes it with `#[path = "support/menu.rs"] mod menu;`; a bench that shares a test's helper names it from there, `#[path = "../tests/support/menu.rs"]`; a helper only benches use lives in `benches/support/`. A target that uses part of the helper carries `#[expect(dead_code, reason = "…")]` on its `mod` line. Source: kotodama.
 - **`unsafe` only where a boundary needs it**: FFI (cxx-qt, `libc`), and nothing else. A crate with no such boundary opens with `#![forbid(unsafe_code)]`. Each `unsafe` block carries a `// SAFETY:` comment saying why every requirement of the call holds. Source: M-UNSAFE.
 
 ## Lints
@@ -64,6 +65,7 @@ Hot loops are written so the compiler can turn them into SIMD on its own: SSE2 o
 ## Errors
 
 - **A fallible public operation returns a public enum, one variant per cause.** Callers match on the cause; a stringly error cannot be matched. Source: kotodama.
+- **An operation that can fail for one cause only returns a struct**, not a one-variant enum: there is nothing to match on. It is a tuple struct with a private field, so no caller builds or destructures it, and `thiserror` derives it like an enum: `#[error("couldn't read Hyprland's binds")] pub struct ParseError(#[source] serde_json::Error);`, made by a named constructor (`.map_err(ParseError::json)`). A cause without an underlying error is a unit struct. When a second cause appears, the struct becomes an enum, which breaks its callers as a new cause should. Source: kotodama.
 - **`Display` is this layer's message only; the cause is `source()`.** Write `#[error("reading the History")] Read(#[source] io::Error)`, never `#[error("reading the History: {0}")]` on a variant whose `source()` returns the same error. A reporter that walks the chain prints each cause once. Source: `std::error::Error` docs.
 - **`thiserror` writes `Display` and `Error`.** Source: kotodama.
 - **Convert at the call site with an explicit, named constructor** (`.map_err(Error::read)?`), not a blanket `From`: the call site is where the meaning of the failure is known. Source: kotodama.
@@ -73,7 +75,7 @@ Hot loops are written so the compiler can turn them into SIMD on its own: SSE2 o
 
 - **Return an error or restructure so the case cannot arise.** That is always the first choice. A Daemon that panics takes every open menu with it. Source: M-PANIC-IS-STOP.
 - **A panic is acceptable at startup**, while the process is being assembled, where the developer sees it at once.
-- **At runtime, a panic only for a broken process**: a poisoned mutex is the example. Write `.expect("history mutex poisoned")`, naming what broke. Avoid `unwrap()` outside tests. Source: M-PANIC-MESSAGE.
+- **At runtime, a panic only for a broken process**: a poisoned mutex is the example. Write `.expect("history mutex poisoned")`, naming what broke. Avoid `unwrap()` outside tests and benches. Source: M-PANIC-MESSAGE.
 
 ## Control flow
 
@@ -171,7 +173,9 @@ Comments and rustdoc are written for a human: the developer reading the code to 
 ## Tests
 
 - **Unit tests in a sibling file**: `#[cfg(test)] mod tests;` at the bottom of `index.rs`, the tests in `index/tests.rs`. Behaviour across processes is tested in `crates/*/tests/` and `e2e/`. Source: castello T1.
-- **A fallible test step is `.expect("the step")`**, naming what was being done: `.expect("start the Daemon")`. Source: castello T2.
+- **Tests and benches may `unwrap()`.** A panic there is the failure report, and the run is a developer's, so `just check` lints them with clippy's `unwrap_used` off, helpers included. Source: kotodama.
+- **A fallible test step whose line does not say what failed is `.expect("the step")`**, naming what was being done: `.expect("start the Daemon")`. Source: castello T2.
+- **Shared test and bench helpers live in `support/`**, included with `#[path]` (see [Formatting and layout](#formatting-and-layout)). Source: kotodama.
 - **A ranking test never changes to make a PR pass.** If a ranking test must change, the PR says which expectation changed and why.
 
 ## Logging
