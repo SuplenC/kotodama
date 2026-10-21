@@ -1,0 +1,18 @@
+# The Manifest. The Daemon finds it in an `extensions/<anything>/` directory and
+# starts `command` from that directory. The program is a path in this
+# directory, never looked up on PATH: extension.py starts with a shebang.
+name = "text-case"
+description = "Rewrites what you type in UPPER, lower, Title, snake_case, kebab-case or camelCase"
+command = ["./extension.py"]
+# Its app: `case` and Tab enters it, where everything typed is a Live query.
+word = "case"
+title = "Text case"
+icon = "format-text-uppercase"
+about = "Type some text; Enter copies it in the case you pick, Ctrl+T types it instead."
+examples = [{ query = "case hello world", result = "HELLO WORLD, hello_world, helloWorld…" }]
+
+# Queries that start with `case ` come here as Live queries, without the
+# prefix. The work is quick, so every keystroke is sent at once.
+[live_query]
+prefixes = ["case "]
+debounce_ms = 0

@@ -1,0 +1,20 @@
+# The Manifest. The Daemon finds it in an `extensions/<anything>/` directory and
+# starts `command` from that directory. The program is a path in this
+# directory, never looked up on PATH: extension.ts starts with a shebang that
+# runs it with Node.
+name = "timestamp"
+description = "Unix timestamps and dates, each shown as the others"
+command = ["./extension.ts"]
+# Its app: `ts` and Tab enters it, where everything typed is a Live query.
+word = "ts"
+title = "Timestamps"
+icon = "x-office-calendar"
+about = "Type a Unix timestamp or a date, or nothing for now. Enter copies the form you pick."
+examples = [
+    { query = "ts 1700000000", result = "2023-11-14T22:13:20.000Z" },
+    { query = "ts 2024-02-29", result = "1709164800" },
+]
+
+[live_query]
+prefixes = ["ts "]
+debounce_ms = 0
