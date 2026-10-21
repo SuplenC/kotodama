@@ -126,6 +126,17 @@ impl Overrides {
     }
 }
 
+/// Why a path the Daemon needs has no place.
+#[derive(Debug, thiserror::Error)]
+pub enum Error {
+    /// Nothing names the socket.
+    #[error("XDG_RUNTIME_DIR isn't set, nor `[paths] socket`")]
+    NoSocket,
+    /// A path falls back on the home directory, and there is none.
+    #[error("HOME isn't set")]
+    NoHome,
+}
+
 /// The config directories, least important first: `dir`, as `--config`
 /// names it, else `KOTODAMA_CONFIG_DIR`, else `$XDG_CONFIG_DIRS/kotodama`
 /// and then `$XDG_CONFIG_HOME/kotodama`. One named directory is the whole
@@ -134,7 +145,7 @@ impl Overrides {
 /// # Errors
 ///
 /// When neither `XDG_CONFIG_HOME` nor `HOME` is set.
-pub fn config_dirs(dir: Option<PathBuf>) -> Result<Vec<PathBuf>, String> {
+pub fn config_dirs(dir: Option<PathBuf>) -> Result<Vec<PathBuf>, Error> {
     let named = dir.or_else(|| {
         env::var_os(CONFIG_DIR_VAR)
             .filter(|dir| !dir.is_empty())
@@ -156,12 +167,12 @@ impl Paths {
     /// When the socket has no place: neither `KOTODAMA_SOCKET`, `[paths]
     /// socket` nor `XDG_RUNTIME_DIR` is set; or when `HOME` is needed and
     /// isn't set.
-    pub fn new(config_dirs: Vec<PathBuf>, overrides: &Overrides) -> Result<Self, String> {
+    pub fn new(config_dirs: Vec<PathBuf>, overrides: &Overrides) -> Result<Self, Error> {
         let socket = match env::var_os("KOTODAMA_SOCKET").filter(|socket| !socket.is_empty()) {
             Some(socket) => PathBuf::from(socket),
             None => match &overrides.socket {
                 Some(socket) => socket.clone(),
-                None => kotodama_protocol::socket_path().ok_or("XDG_RUNTIME_DIR isn't set, nor `[paths] socket`")?,
+                None => kotodama_protocol::socket_path().ok_or(Error::NoSocket)?,
             },
         };
         let state = match &overrides.state_dir {
@@ -215,10 +226,10 @@ fn path(value: &Value) -> Result<PathBuf, &'static str> {
 }
 
 /// `$var`, or `fallback` in the home directory when it is unset or empty.
-fn xdg_home(var: &str, fallback: &str) -> Result<PathBuf, String> {
+fn xdg_home(var: &str, fallback: &str) -> Result<PathBuf, Error> {
     match env::var_os(var).filter(|dir| !dir.is_empty()) {
         Some(dir) => Ok(PathBuf::from(dir)),
-        None => Ok(PathBuf::from(env::var_os("HOME").ok_or("HOME isn't set")?).join(fallback)),
+        None => Ok(PathBuf::from(env::var_os("HOME").ok_or(Error::NoHome)?).join(fallback)),
     }
 }
 

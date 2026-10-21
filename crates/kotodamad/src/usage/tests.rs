@@ -1,4 +1,3 @@
-
 use super::*;
 
 fn query(at: u64, query: &str) -> Entry {

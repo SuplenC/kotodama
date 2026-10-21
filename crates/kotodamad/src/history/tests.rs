@@ -1,4 +1,3 @@
-
 use super::*;
 
 const HOUR: u32 = 3600;

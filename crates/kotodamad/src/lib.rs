@@ -36,6 +36,7 @@ pub mod usage;
 mod views;
 
 use std::io::Write;
+use std::path::Path;
 use std::path::PathBuf;
 use std::sync::mpsc;
 use std::sync::mpsc::RecvTimeoutError;
@@ -56,6 +57,50 @@ use problem::Report;
 /// files is tried once, whole.
 const PROGRAMS_SETTLE: Duration = Duration::from_millis(500);
 
+/// Why the Daemon couldn't start, or couldn't print its config.
+#[derive(Debug, thiserror::Error)]
+pub enum Error {
+    /// A path it needs has no place.
+    #[error(transparent)]
+    Paths(paths::Error),
+    /// It can't serve on its socket.
+    #[error("{}", path.display())]
+    Listen {
+        path: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
+    /// The config to print can't be loaded.
+    #[error(transparent)]
+    Config(config::Error),
+    /// Stdout can't be written.
+    #[error(transparent)]
+    Print(std::io::Error),
+}
+
+impl Error {
+    /// The error of a path with no place.
+    #[must_use]
+    pub fn paths(err: paths::Error) -> Self {
+        Error::Paths(err)
+    }
+
+    fn listen(path: &Path, source: std::io::Error) -> Self {
+        Error::Listen {
+            path: path.to_owned(),
+            source,
+        }
+    }
+
+    fn config(err: config::Error) -> Self {
+        Error::Config(err)
+    }
+
+    fn print(err: std::io::Error) -> Self {
+        Error::Print(err)
+    }
+}
+
 /// Runs the Daemon with its config in `config_dirs` (see
 /// [`paths::config_dirs`]) and the paths it sets, until it fails to start.
 ///
@@ -63,13 +108,13 @@ const PROGRAMS_SETTLE: Duration = Duration::from_millis(500);
 ///
 /// When it can't start: a path it needs has no place, or it can't serve on
 /// its socket.
-pub fn start(config_dirs: Vec<PathBuf>) -> Result<(), String> {
+pub fn start(config_dirs: Vec<PathBuf>) -> Result<(), Error> {
     // The Daemon reports what is wrong with `[paths]` once it is there.
     let overrides = match config::load(&config_dirs) {
         Ok(config) => Overrides::from_config(&config, &mut Report::silent()),
         Err(_) => Overrides::default(),
     };
-    run(&Paths::new(config_dirs, &overrides)?)
+    run(&Paths::new(config_dirs, &overrides).map_err(Error::paths)?)
 }
 
 /// Runs the Daemon on `paths` until it fails to start. The Extension
@@ -78,7 +123,7 @@ pub fn start(config_dirs: Vec<PathBuf>) -> Result<(), String> {
 /// # Errors
 ///
 /// When it can't serve on its socket.
-pub fn run(paths: &Paths) -> Result<(), String> {
+pub fn run(paths: &Paths) -> Result<(), Error> {
     let log_pinned = engine::log_from_env().is_some();
     let config = config::load(&paths.config_dirs);
     let started_with = match &config {
@@ -107,7 +152,7 @@ pub fn run(paths: &Paths) -> Result<(), String> {
             .join(", ")
     );
 
-    let listener = server::listen(&paths.socket).map_err(|err| format!("{}: {err}", paths.socket.display()))?;
+    let listener = server::listen(&paths.socket).map_err(|err| Error::listen(&paths.socket, err))?;
     let (events_tx, events) = mpsc::channel();
     let _watcher = config::watch(paths.config_dirs.clone(), events_tx.clone())
         .map_err(|err| log::error!("not watching the config directory: {err}"))
@@ -225,15 +270,16 @@ fn joined(dirs: &[PathBuf]) -> String {
 ///
 /// When the config can't be loaded, its paths have no place, or stdout
 /// can't be written.
-pub fn print_config(config_dirs: Vec<PathBuf>, schema: bool) -> Result<(), String> {
+pub fn print_config(config_dirs: Vec<PathBuf>, schema: bool) -> Result<(), Error> {
     let mut out = std::io::stdout().lock();
     if schema {
-        return schema::print_schema(&mut out).map_err(|err| err.to_string());
+        return schema::print_schema(&mut out).map_err(Error::print);
     }
-    let (config, sources) = config::load_with_sources(&config_dirs).map_err(|err| err.to_string())?;
-    let paths = Paths::new(config_dirs, &Overrides::from_config(&config, &mut Report::silent()))?;
-    schema::print_config(&config, &sources, &paths, &mut out).map_err(|err| err.to_string())?;
-    out.flush().map_err(|err| err.to_string())
+    let (config, sources) = config::load_with_sources(&config_dirs).map_err(Error::config)?;
+    let paths =
+        Paths::new(config_dirs, &Overrides::from_config(&config, &mut Report::silent())).map_err(Error::paths)?;
+    schema::print_config(&config, &sources, &paths, &mut out).map_err(Error::print)?;
+    out.flush().map_err(Error::print)
 }
 
 /// A watcher, watching nothing until told, that sends

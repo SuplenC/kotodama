@@ -8,7 +8,6 @@
 //! meaning, and subdirectories (such as `extensions/`) are ignored.
 
 use std::collections::BTreeMap;
-use std::fmt;
 use std::fs;
 use std::io;
 use std::path::Path;
@@ -29,19 +28,26 @@ use crate::daemon::Event;
 const SETTLE: Duration = Duration::from_millis(50);
 
 /// Why the config couldn't be loaded. The caller keeps the last good config.
-#[derive(Debug)]
+///
+/// The file and the reason are fields, not a cause to match on: the Daemon
+/// shows the user both, apart, as a problem with that file.
+#[derive(Debug, thiserror::Error)]
+#[error("{}: {reason}", path.display())]
 pub struct Error {
     pub path: PathBuf,
     pub reason: String,
 }
 
-impl fmt::Display for Error {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}: {}", self.path.display(), self.reason)
+/// Why a config file's text isn't TOML.
+#[derive(Debug, thiserror::Error)]
+#[error("{}", .0.message())]
+pub struct ParseError(toml::de::Error);
+
+impl ParseError {
+    fn toml(err: toml::de::Error) -> Self {
+        ParseError(err)
     }
 }
-
-impl std::error::Error for Error {}
 
 /// The file each value of the merged config came from, by its dotted key,
 /// such as `history.half_life_days`. A list is one value.
@@ -78,7 +84,7 @@ fn load_from(dirs: &[PathBuf], mut sources: Option<&mut Sources>) -> Result<Tabl
                 reason,
             };
             let text = fs::read_to_string(&path).map_err(|err| error(err.to_string()))?;
-            let table = parse(&text).map_err(error)?;
+            let table = parse(&text).map_err(|err| error(err.to_string()))?;
             if let Some(sources) = sources.as_deref_mut() {
                 note_sources(&table, "", &path, sources);
             }
@@ -93,8 +99,8 @@ fn load_from(dirs: &[PathBuf], mut sources: Option<&mut Sources>) -> Result<Tabl
 /// # Errors
 ///
 /// When `text` isn't TOML.
-pub fn parse(text: &str) -> Result<Table, String> {
-    let table: toml::Table = text.parse().map_err(|err: toml::de::Error| err.message().to_owned())?;
+pub fn parse(text: &str) -> Result<Table, ParseError> {
+    let table: toml::Table = text.parse().map_err(ParseError::toml)?;
     Ok(from_toml_table(table))
 }
 

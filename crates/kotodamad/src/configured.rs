@@ -36,6 +36,7 @@
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
+use kotodama_extension::Chain;
 use kotodama_protocol::LiveQueries;
 use kotodama_protocol::Manifest;
 use kotodama_protocol::Table;
@@ -135,7 +136,7 @@ fn overridden(found: &Found, table: &Table, report: &mut Report) -> Found {
     let mut configured = match Found::new(manifest, found.dir.clone()) {
         Ok(configured) => configured,
         Err(err) => {
-            report.add(format!("extensions.{name}.live_query"), err);
+            report.add(format!("extensions.{name}.live_query"), Chain(&err).to_string());
             found.clone()
         }
     };
@@ -165,7 +166,7 @@ fn inline(name: &str, table: &Table) -> Result<Found, String> {
         Some(value) => env(value)?,
         None => BTreeMap::new(),
     };
-    let mut found = Found::new(manifest, PathBuf::new())?;
+    let mut found = Found::new(manifest, PathBuf::new()).map_err(|err| Chain(&err).to_string())?;
     found.env = env;
     found.inline = true;
     found.command_from_config = true;

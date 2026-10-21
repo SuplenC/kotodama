@@ -9,6 +9,7 @@ use std::sync::mpsc::Sender;
 use std::time::Duration;
 use std::time::SystemTime;
 
+use kotodama_extension::Chain;
 use kotodama_extension::watch::RecursiveMode;
 use kotodama_extension::watch::Watcher;
 use kotodama_extension::watch::notify;
@@ -23,6 +24,30 @@ use crate::problem::Report;
 /// How long the Extension directories must stay still before they are read
 /// again, so a package install that writes many files is read once, whole.
 const SETTLE: Duration = Duration::from_millis(200);
+
+/// Why a Manifest is refused.
+#[derive(Debug, thiserror::Error)]
+pub enum Error {
+    /// It takes the name the Daemon's own Results go by.
+    #[error("the name `{OWN}` is reserved for the Daemon")]
+    ReservedName,
+    /// A Live query trigger isn't a regex.
+    #[error("trigger `{trigger}`")]
+    Trigger {
+        trigger: String,
+        #[source]
+        source: regex::Error,
+    },
+}
+
+impl Error {
+    fn trigger(trigger: &str, source: regex::Error) -> Self {
+        Error::Trigger {
+            trigger: trigger.to_owned(),
+            source,
+        }
+    }
+}
 
 /// An Extension found on disk or defined in the config, with its Live query
 /// triggers compiled.
@@ -51,15 +76,15 @@ impl Found {
     ///
     /// When the Manifest takes the Daemon's own name, or a Live query trigger
     /// isn't a regex.
-    pub fn new(manifest: Manifest, dir: PathBuf) -> Result<Self, String> {
+    pub fn new(manifest: Manifest, dir: PathBuf) -> Result<Self, Error> {
         if manifest.name == OWN {
-            return Err(format!("the name `{OWN}` is reserved for the Daemon"));
+            return Err(Error::ReservedName);
         }
         let triggers = manifest
             .live_query
             .iter()
             .flat_map(|live| &live.triggers)
-            .map(|trigger| Regex::new(trigger).map_err(|err| format!("trigger `{trigger}`: {err}")))
+            .map(|trigger| Regex::new(trigger).map_err(|err| Error::trigger(trigger, err)))
             .collect::<Result<_, _>>()?;
         Ok(Found {
             manifest,
@@ -174,7 +199,7 @@ fn load(dir: &Path, manifest_path: &Path, report: &mut Report) -> Result<Found, 
             "`prefix` is the old name of `word`; call it `word`",
         );
     }
-    Found::new(manifest, dir.to_owned())
+    Found::new(manifest, dir.to_owned()).map_err(|err| Chain(&err).to_string())
 }
 
 /// Watches the Extension directories and sends [`Event::Extensions`] after each
