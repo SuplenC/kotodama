@@ -49,6 +49,7 @@ PanelWindow {
         input.cursorPosition = query.length;
         // The box may show `query` already, behind a Prefix it has left.
         search.query = query;
+        list.pointer = null;
         visible = true;
         menu.focusView();
     }
@@ -440,6 +441,23 @@ PanelWindow {
                 readonly property int firstRow: Math.floor(contentY / menu.rowHeight)
                 onFirstRowChanged: search.viewport(firstRow, menu.maxRows)
 
+                // Where the pointer last was in the window, or null before it
+                // has been over a row since the menu opened.
+                property var pointer: null
+
+                // Only a pointer that moved picks a row. A window that maps
+                // under a resting pointer gets a pointer-enter, and Qt resends
+                // hover when rows move under a still pointer: either would
+                // otherwise take the selection off the top row the user is
+                // typing for.
+                function hover(index, area, x, y) {
+                    const at = area.mapToItem(null, x, y);
+                    const moved = list.pointer !== null && (at.x !== list.pointer.x || at.y !== list.pointer.y);
+                    list.pointer = at;
+                    if (moved)
+                        list.currentIndex = index;
+                }
+
                 // A run names the Results of the last frame on screen, so the
                 // Daemon refuses a Late Result the user hasn't seen yet.
                 // afterAnimating comes on this thread just before the frame
@@ -542,9 +560,11 @@ PanelWindow {
                     }
 
                     MouseArea {
+                        id: area
                         anchors.fill: parent
                         hoverEnabled: true
-                        onEntered: list.currentIndex = row.index
+                        onEntered: list.hover(row.index, area, area.mouseX, area.mouseY)
+                        onPositionChanged: mouse => list.hover(row.index, area, mouse.x, mouse.y)
                         onClicked: search.run(row.index)
                     }
                 }
