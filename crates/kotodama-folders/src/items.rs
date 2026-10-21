@@ -1,17 +1,33 @@
-//! The Items projects and scripts become.
+//! The Items projects and scripts become, and the ids of their Actions.
+//!
+//! # Owns
+//!
+//! - Each Item's id, identity, title, subtitle, keywords and Actions.
+//!
+//! # Not here
+//!
+//! - What an Action runs: `main.rs`, with the commands from `settings.rs`.
+//! - Finding the projects and scripts: `projects.rs` and `scripts.rs`.
 
 use std::path::Path;
 
-use kotodama_protocol::{Action, Argument, Item, ItemKind};
+use kotodama_protocol::Action;
+use kotodama_protocol::Argument;
+use kotodama_protocol::Item;
+use kotodama_protocol::ItemKind;
 
 use crate::projects::Project;
 use crate::scripts::Script;
 
 /// A project's primary Action: its tmux session, with the editor.
 pub const OPEN: &str = "open";
+/// A terminal in a project's folder.
 pub const SHELL: &str = "shell";
+/// Lazygit on a project.
 pub const LAZYGIT: &str = "lazygit";
+/// The file manager on a project's folder.
 pub const FILE_MANAGER: &str = "file-manager";
+/// A project's or a script's path to the clipboard.
 pub const COPY_PATH: &str = "copy-path";
 /// A script's primary Action.
 pub const RUN: &str = "run";
@@ -32,13 +48,14 @@ fn shown(path: &Path, home: Option<&Path>) -> String {
     }
 }
 
+/// The Item of a project, `home` shown as `~` in its subtitle.
 pub fn project(project: &Project, home: Option<&Path>) -> Item {
     Item {
         id: id(&project.path),
         kind: ItemKind::Project {
             path: project.path.clone(),
         },
-        // The folder, as any Extension that lists it names it (ADR 0008).
+        // The folder, as any Extension that lists it names it.
         identity: Some(format!("folder:{}", project.path.to_string_lossy())),
         title: project.name.clone(),
         subtitle: Some(shown(&project.path, home)),
@@ -56,9 +73,11 @@ pub fn project(project: &Project, home: Option<&Path>) -> Item {
     }
 }
 
+/// The Item of a script, `home` shown as `~` in its subtitle. It asks for arguments when its
+/// header says so.
 pub fn script(script: &Script, home: Option<&Path>) -> Item {
-    // A `.desktop` file is a file here too: the app the apps Extension offers
-    // is a different thing (ADR 0008).
+    // A `.desktop` file is a file here too: the app the apps Extension offers is a different
+    // thing.
     let identity = format!("file:{}", script.path.to_string_lossy());
     let arguments = if script.header.prompt {
         vec![Argument {

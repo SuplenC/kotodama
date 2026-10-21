@@ -1,23 +1,48 @@
-//! Searching the folders, and searching them again when they change, on a
-//! thread of its own, so an Action never waits for a search.
+//! Searching the folders, and searching them again when they change, on a thread of its own, so an
+//! Action never waits for a search.
 //!
-//! Only the folders a search went through are watched, each on its own and
-//! not what is below it: a project's files are never watched, however many
-//! there are, and neither is anything below the depth.
+//! Only the folders a search went through are watched, each on its own and not what is below it: a
+//! project's files are never watched, however many there are, and neither is anything below the
+//! depth.
+//!
+//! # Owns
+//!
+//! - The `scan` thread, and waiting for the folders to settle before it searches again.
+//! - Which changes on disk can change what a search finds.
+//!
+//! # Not here
+//!
+//! - What a search of each kind of folder finds: `projects.rs` and `scripts.rs`.
+//! - The file watcher itself: `kotodama_extension::watch`.
 
 use std::io;
-use std::path::{Path, PathBuf};
-use std::sync::mpsc::{self, RecvTimeoutError, Sender};
-use std::sync::{Arc, Mutex};
+use std::path::Path;
+use std::path::PathBuf;
+use std::sync::Arc;
+use std::sync::Mutex;
+use std::sync::PoisonError;
+use std::sync::mpsc;
+use std::sync::mpsc::Receiver;
+use std::sync::mpsc::RecvTimeoutError;
+use std::sync::mpsc::Sender;
 use std::thread;
 use std::time::Duration;
 
 use kotodama_extension::STACK_SIZE;
-use kotodama_extension::watch::notify::event::{CreateKind, EventKind, ModifyKind, RemoveKind};
-use kotodama_extension::watch::{Event, RecursiveMode, Watched, Watcher};
+use kotodama_extension::watch::Event;
+use kotodama_extension::watch::RecursiveMode;
+use kotodama_extension::watch::Watched;
+use kotodama_extension::watch::Watcher;
+use kotodama_extension::watch::notify::event::CreateKind;
+use kotodama_extension::watch::notify::event::EventKind;
+use kotodama_extension::watch::notify::event::ModifyKind;
+use kotodama_extension::watch::notify::event::RemoveKind;
 
-use crate::projects::{self, Project, ProjectFolder};
-use crate::scripts::{self, Script};
+use crate::projects;
+use crate::projects::Project;
+use crate::projects::ProjectFolder;
+use crate::scripts;
+use crate::scripts::Script;
 
 /// How long the folders must stay still before they are searched again, so a
 /// `git clone` or a copy of many scripts is searched once, whole.
@@ -55,31 +80,35 @@ pub fn scan(folders: &Folders) -> (Scan, Vec<PathBuf>) {
     )
 }
 
+/// What the `scan` thread is asked to do.
 enum Request {
+    /// Search these folders from here on.
     Folders(Folders),
     /// The folders changed.
     Touched,
 }
 
 /// Searches folders on a thread of its own, and again whenever they change.
+#[derive(Debug)]
 pub struct Scanner(Sender<Request>);
 
 impl Scanner {
     /// Starts the thread. It calls `scanned` with each search's results.
+    ///
+    /// # Errors
+    ///
+    /// Fails if the thread can't be spawned. A watcher that can't start is logged instead, and the
+    /// folders are then searched only when [`Scanner::search`] names them.
     pub fn start(scanned: impl Fn(Scan) + Send + 'static) -> io::Result<Self> {
         let (requests, received) = mpsc::channel();
         let touched = requests.clone();
-        // The folders searched, for telling which changes matter.
         let searched = Arc::new(Mutex::new(Folders::default()));
         let filtering = Arc::clone(&searched);
-        // No thread of the watcher's own: this one waits for the folders to
-        // settle.
+        // No thread of the watcher's own: the `scan` thread waits for the folders to settle.
         let watcher = Watcher::new(
             RecursiveMode::NonRecursive,
             move |event, watched| {
-                let folders = filtering
-                    .lock()
-                    .unwrap_or_else(|poison| poison.into_inner());
+                let folders = filtering.lock().unwrap_or_else(PoisonError::into_inner);
                 matters(&folders, watched, event)
             },
             move || {
@@ -91,47 +120,50 @@ impl Scanner {
         thread::Builder::new()
             .name("scan".into())
             .stack_size(STACK_SIZE)
-            .spawn(move || {
-                let mut folders = Folders::default();
-                while let Ok(request) = received.recv() {
-                    match request {
-                        Request::Folders(new) => folders = new,
-                        Request::Touched => loop {
-                            match received.recv_timeout(SETTLE) {
-                                Ok(Request::Folders(new)) => folders = new,
-                                Ok(Request::Touched) => {}
-                                Err(RecvTimeoutError::Timeout) => break,
-                                Err(RecvTimeoutError::Disconnected) => return,
-                            }
-                        },
-                    }
-                    let (scan, mut dirs) = scan(&folders);
-                    // A folder that isn't there yet is watched for through
-                    // its parent.
-                    dirs.extend(
-                        folders
-                            .projects
-                            .iter()
-                            .map(|folder| &folder.path)
-                            .chain(&folders.scripts)
-                            .filter(|folder| !folder.is_dir())
-                            .cloned(),
-                    );
-                    if let Some(watcher) = &watcher {
-                        watcher.watch(dirs);
-                    }
-                    folders.clone_into(
-                        &mut searched.lock().unwrap_or_else(|poison| poison.into_inner()),
-                    );
-                    scanned(scan);
-                }
-            })?;
+            .spawn(move || serve(&received, watcher.as_ref(), &searched, &scanned))?;
         Ok(Scanner(requests))
     }
 
-    /// Searches `folders` now, and watches them from now on.
+    /// Searches `folders` at once, and again whenever they change, until the next call.
     pub fn search(&self, folders: Folders) {
         let _ = self.0.send(Request::Folders(folders));
+    }
+}
+
+/// The `scan` thread: searches on each request, after a change only once the folders have been
+/// still for [`SETTLE`], and watches what each search went through. `searched` holds the folders
+/// of the last search, for the watcher's filter to tell which changes matter. Returns when the
+/// [`Scanner`] is dropped.
+fn serve(received: &Receiver<Request>, watcher: Option<&Watcher>, searched: &Mutex<Folders>, scanned: &impl Fn(Scan)) {
+    let mut folders = Folders::default();
+    while let Ok(request) = received.recv() {
+        match request {
+            Request::Folders(new) => folders = new,
+            Request::Touched => loop {
+                match received.recv_timeout(SETTLE) {
+                    Ok(Request::Folders(new)) => folders = new,
+                    Ok(Request::Touched) => {}
+                    Err(RecvTimeoutError::Timeout) => break,
+                    Err(RecvTimeoutError::Disconnected) => return,
+                }
+            },
+        }
+        let (scan, mut dirs) = scan(&folders);
+        // A folder that isn't there yet is watched for through its parent.
+        dirs.extend(
+            folders
+                .projects
+                .iter()
+                .map(|folder| &folder.path)
+                .chain(&folders.scripts)
+                .filter(|folder| !folder.is_dir())
+                .cloned(),
+        );
+        if let Some(watcher) = watcher {
+            watcher.watch(dirs);
+        }
+        folders.clone_into(&mut searched.lock().unwrap_or_else(PoisonError::into_inner));
+        scanned(scan);
     }
 }
 
@@ -145,18 +177,10 @@ fn matters(folders: &Folders, watched: &Watched, event: &Event) -> bool {
         return false;
     }
     event.paths.iter().any(|path| {
-        if folders
-            .scripts
-            .iter()
-            .any(|folder| path.starts_with(folder))
-        {
+        if folders.scripts.iter().any(|folder| path.starts_with(folder)) {
             return true;
         }
-        if !folders
-            .projects
-            .iter()
-            .any(|folder| path.starts_with(&folder.path))
-        {
+        if !folders.projects.iter().any(|folder| path.starts_with(&folder.path)) {
             return false;
         }
         let telling = path
@@ -166,13 +190,9 @@ fn matters(folders: &Folders, watched: &Watched, event: &Event) -> bool {
         let folder = || watched.contains(path) || Path::is_dir(path);
         telling
             || match event.kind {
-                EventKind::Create(CreateKind::Folder) | EventKind::Remove(RemoveKind::Folder) => {
-                    true
-                }
+                EventKind::Create(CreateKind::Folder) | EventKind::Remove(RemoveKind::Folder) => true,
                 EventKind::Create(CreateKind::File) | EventKind::Remove(RemoveKind::File) => false,
-                EventKind::Create(_)
-                | EventKind::Remove(_)
-                | EventKind::Modify(ModifyKind::Name(_)) => folder(),
+                EventKind::Create(_) | EventKind::Remove(_) | EventKind::Modify(ModifyKind::Name(_)) => folder(),
                 EventKind::Modify(_) => false,
                 _ => true,
             }

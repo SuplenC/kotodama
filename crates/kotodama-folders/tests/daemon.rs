@@ -4,44 +4,30 @@
 //! which needs bash 4+ and jq, as the dev environment provides; `tee` records
 //! what the Daemon sends it.
 
+#[path = "support/git.rs"]
+mod git;
+
+use std::collections::BTreeMap;
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::os::unix::net::UnixStream;
-use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::path::Path;
+use std::path::PathBuf;
 use std::thread;
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use std::time::Instant;
 
 use kotodama_extension::testing;
 use kotodama_protocol::*;
 use kotodamad::paths::Paths;
 use tempfile::TempDir;
 
+use crate::git::repo;
+
 const TIMEOUT: Duration = Duration::from_secs(10);
 
 fn example_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/shell-extension")
-}
-
-/// A repository with one commit at `dir`.
-fn repo(dir: &Path) {
-    fs::create_dir_all(dir).unwrap();
-    for args in [
-        &["init", "-q", "-b", "main"][..],
-        &["commit", "-q", "--allow-empty", "-m", "init"],
-    ] {
-        let output = Command::new("git")
-            .args(args)
-            .current_dir(dir)
-            .env("GIT_AUTHOR_NAME", "test")
-            .env("GIT_AUTHOR_EMAIL", "test@example.com")
-            .env("GIT_COMMITTER_NAME", "test")
-            .env("GIT_COMMITTER_EMAIL", "test@example.com")
-            .env("GIT_CONFIG_GLOBAL", "/dev/null")
-            .output()
-            .unwrap();
-        assert!(output.status.success());
-    }
 }
 
 /// Starts the Daemon in this process on a home in `root`, with the Folder
@@ -61,12 +47,10 @@ fn start(root: &Path) -> Client {
     for file in ["extension.sh", "manifest.toml"] {
         fs::copy(example_dir().join(file), shell.join(file)).unwrap();
     }
-    let manifest = fs::read_to_string(shell.join("manifest.toml"))
-        .unwrap()
-        .replace(
-            r#"command = ["./extension.sh"]"#,
-            r#"command = ["/bin/sh", "-c", "tee -a received | ./extension.sh"]"#,
-        );
+    let manifest = fs::read_to_string(shell.join("manifest.toml")).unwrap().replace(
+        r#"command = ["./extension.sh"]"#,
+        r#"command = ["/bin/sh", "-c", "tee -a received | ./extension.sh"]"#,
+    );
     fs::write(shell.join("manifest.toml"), manifest).unwrap();
 
     let config = root.join("config");
@@ -111,8 +95,8 @@ struct Client {
 }
 
 impl Client {
-    fn send(&mut self, message: FromFrontEnd) {
-        self.channel.send(&message).unwrap();
+    fn send(&mut self, message: &FromFrontEnd) {
+        self.channel.send(message).unwrap();
     }
 
     fn recv(&mut self) -> ToFrontEnd {
@@ -128,12 +112,9 @@ impl Client {
     fn search(&mut self, query: &str, done: impl Fn(&[ShownResult]) -> bool) -> Vec<ShownResult> {
         let start = Instant::now();
         loop {
-            self.send(FromFrontEnd::Query { text: query.into() });
+            self.send(&FromFrontEnd::Query { text: query.into() });
             let results = loop {
-                if let ToFrontEnd::Results {
-                    version, results, ..
-                } = self.recv()
-                {
+                if let ToFrontEnd::Results { version, results, .. } = self.recv() {
                     self.shown = version;
                     break results;
                 }
@@ -174,7 +155,7 @@ impl Client {
     /// Runs `action` of `extension` on the Folder source's Item `id`, and
     /// waits for the menu to close.
     fn run(&mut self, id: &str, extension: &str, action: &str) {
-        self.send(FromFrontEnd::RunAction {
+        self.send(&FromFrontEnd::RunAction {
             result: ResultRef {
                 extension: "folders".into(),
                 id: id.into(),
@@ -184,7 +165,7 @@ impl Client {
                 extension: extension.into(),
                 id: action.into(),
             },
-            arguments: Default::default(),
+            arguments: BTreeMap::default(),
         });
         loop {
             match self.recv() {
@@ -211,9 +192,11 @@ fn the_shell_examples_contributed_action_shows_on_a_project_and_gets_its_path() 
     let start = Instant::now();
     let result = loop {
         let result = ui.projects("kotodama", 1).remove(0);
-        if result.contributed.iter().any(|offered| {
-            offered.extension == "shell-example" && offered.action.id == "paste-path"
-        }) {
+        if result
+            .contributed
+            .iter()
+            .any(|offered| offered.extension == "shell-example" && offered.action.id == "paste-path")
+        {
             break result;
         }
         assert!(start.elapsed() < TIMEOUT, "{:?}", result.contributed);
@@ -222,16 +205,12 @@ fn the_shell_examples_contributed_action_shows_on_a_project_and_gets_its_path() 
     assert_eq!(result.item.title, "kotodama");
 
     ui.run(&result.item.id, "shell-example", "paste-path");
-    let received =
-        fs::read_to_string(root.path().join("extensions/shell-example/received")).unwrap();
+    let received = fs::read_to_string(root.path().join("extensions/shell-example/received")).unwrap();
     let run = received
         .lines()
         .find(|line| line.contains("\"run_action\""))
         .expect("the shell example got no run_action");
-    assert!(
-        run.contains(&format!("\"path\":\"{}\"", project.display())),
-        "{run}"
-    );
+    assert!(run.contains(&format!("\"path\":\"{}\"", project.display())), "{run}");
 }
 
 #[test]

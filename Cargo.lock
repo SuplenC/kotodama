@@ -919,6 +919,7 @@ dependencies = [
  "kotodamad",
  "shlex",
  "tempfile",
+ "thiserror 2.0.21",
  "toml",
 ]
 

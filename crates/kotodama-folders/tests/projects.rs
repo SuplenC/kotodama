@@ -4,37 +4,19 @@
 //! `src/session.rs`), with `list_worktrees` and `search_submodules` on. Needs
 //! `git`, which the dev environment provides.
 
+#[path = "support/git.rs"]
+mod git;
+
 use std::fs;
-use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::path::Path;
+use std::path::PathBuf;
 
-use kotodama_folders::projects::{self, Project, ProjectFolder};
+use kotodama_folders::projects;
+use kotodama_folders::projects::Project;
+use kotodama_folders::projects::ProjectFolder;
 
-fn git(dir: &Path, args: &[&str]) {
-    let status = Command::new("git")
-        .args(args)
-        .current_dir(dir)
-        .env("GIT_AUTHOR_NAME", "test")
-        .env("GIT_AUTHOR_EMAIL", "test@example.com")
-        .env("GIT_COMMITTER_NAME", "test")
-        .env("GIT_COMMITTER_EMAIL", "test@example.com")
-        .env("GIT_CONFIG_GLOBAL", "/dev/null")
-        .env("GIT_CONFIG_NOSYSTEM", "1")
-        .output()
-        .unwrap();
-    assert!(
-        status.status.success(),
-        "git {args:?}: {}",
-        String::from_utf8_lossy(&status.stderr)
-    );
-}
-
-/// A repository with one commit at `dir`.
-fn repo(dir: &Path) {
-    fs::create_dir_all(dir).unwrap();
-    git(dir, &["init", "-q", "-b", "main"]);
-    git(dir, &["commit", "-q", "--allow-empty", "-m", "init"]);
-}
+use crate::git::git;
+use crate::git::repo;
 
 /// A folder to search, canonical so paths compare equal.
 fn search() -> (tempfile::TempDir, PathBuf) {
@@ -140,10 +122,7 @@ fn worktrees_of_a_bare_repository_are_named_after_it() {
     git(&project, &["worktree", "add", "-q", "test"]);
 
     let found = find(&search, 2);
-    assert_eq!(
-        names(&found),
-        ["my-project", "my-project#main", "my-project#test"]
-    );
+    assert_eq!(names(&found), ["my-project", "my-project#main", "my-project#test"]);
     assert_eq!(named(&found, "my-project#main").path, project.join("main"));
 }
 
@@ -166,17 +145,11 @@ fn a_linked_worktree_shows_only_under_its_repository() {
     let (_dir, search) = search();
     let main = search.join("main-repo");
     repo(&main);
-    git(
-        &main,
-        &["worktree", "add", "-q", "-b", "linked", "../linked"],
-    );
+    git(&main, &["worktree", "add", "-q", "-b", "linked", "../linked"]);
 
     let found = find(&search, 2);
     assert_eq!(names(&found), ["main-repo", "main-repo#linked"]);
-    assert_eq!(
-        named(&found, "main-repo#linked").path,
-        search.join("linked")
-    );
+    assert_eq!(named(&found, "main-repo#linked").path, search.join("linked"));
 }
 
 #[test]
@@ -199,10 +172,7 @@ fn the_same_name_twice_takes_as_many_parent_folders_as_tell_them_apart() {
     repo(&search.join("other/path/to/projects/proj2/test"));
 
     let found = find(&search, 6);
-    assert_eq!(
-        names(&found),
-        ["projects/proj2/test", "to/proj1/test", "to/proj2/test"]
-    );
+    assert_eq!(names(&found), ["projects/proj2/test", "to/proj1/test", "to/proj2/test"]);
     assert_eq!(
         named(&found, "to/proj1/test").path,
         search.join("search/path/to/proj1/test")

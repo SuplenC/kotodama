@@ -10,9 +10,13 @@ repository.workspace = true
 kotodama-extension = { path = "../kotodama-extension", features = ["watch"] }
 kotodama-protocol = { path = "../kotodama-protocol" }
 shlex = "2"
+thiserror = "2.0.21"
 
 [dev-dependencies]
 kotodama-extension = { path = "../kotodama-extension", features = ["testing"] }
 kotodamad = { path = "../kotodamad" }
 tempfile = "3.27.0"
 toml = { version = "1.1.8", default-features = false, features = ["parse", "serde", "std"] }
+
+[lints]
+workspace = true

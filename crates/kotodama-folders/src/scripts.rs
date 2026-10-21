@@ -1,10 +1,23 @@
-//! Finding scripts: every executable file in a scripts folder and the
-//! folders in it, with the options its header comment sets.
+//! Finding scripts: every executable file in a scripts folder and the folders in it, with the
+//! options its header comment sets.
+//!
+//! # Owns
+//!
+//! - The search of a scripts folder, down to [`MAX_DEPTH`], and the folders it went through.
+//! - The `# kotodama:` header and its options.
+//! - A script's title.
+//!
+//! # Not here
+//!
+//! - Watching the folders and searching again: `scan.rs`.
+//! - Running a script: `main.rs`.
 
-use std::fs::{self, File};
+use std::fs;
+use std::fs::File;
 use std::io::Read;
 use std::os::unix::fs::PermissionsExt;
-use std::path::{Path, PathBuf};
+use std::path::Path;
+use std::path::PathBuf;
 
 /// How much of a script is read for its header.
 const HEADER_BYTES: usize = 1024;
@@ -83,9 +96,7 @@ impl Header {
         let mut pairs: Vec<(&str, String)> = Vec::new();
         for word in options.split_whitespace() {
             match word.split_once('=') {
-                Some((key, value))
-                    if !key.is_empty() && key.bytes().all(|b| b.is_ascii_lowercase()) =>
-                {
+                Some((key, value)) if !key.is_empty() && key.bytes().all(|b| b.is_ascii_lowercase()) => {
                     pairs.push((key, value.to_owned()));
                 }
                 _ => match pairs.last_mut() {
@@ -106,9 +117,7 @@ impl Header {
                 ("terminal", "false") => header.terminal = false,
                 ("args", "prompt") => header.prompt = true,
                 ("args", "none") => header.prompt = false,
-                _ => warn(&format!(
-                    "header: skipped the unknown option `{key}={value}`"
-                )),
+                _ => warn(&format!("header: skipped the unknown option `{key}={value}`")),
             }
         }
         header
@@ -117,21 +126,17 @@ impl Header {
     /// Reads the header of the script at `path`, from its first bytes only.
     fn read(path: &Path) -> Header {
         let mut start = Vec::with_capacity(HEADER_BYTES);
-        match File::open(path)
-            .and_then(|file| file.take(HEADER_BYTES as u64).read_to_end(&mut start))
-        {
+        match File::open(path).and_then(|file| file.take(HEADER_BYTES as u64).read_to_end(&mut start)) {
             Ok(_) => Header::parse(&String::from_utf8_lossy(&start)),
             Err(_) => Header::default(),
         }
     }
 }
 
+/// `value` without the double or single quotes around it, if it has a pair.
 fn unquote(value: &str) -> &str {
     for quote in ['"', '\''] {
-        if let Some(inner) = value
-            .strip_prefix(quote)
-            .and_then(|value| value.strip_suffix(quote))
-        {
+        if let Some(inner) = value.strip_prefix(quote).and_then(|value| value.strip_suffix(quote)) {
             return inner;
         }
     }
@@ -154,6 +159,8 @@ pub fn find(folder: &Path, found: &mut Found) {
     search(folder, &mut Vec::new(), found);
 }
 
+/// Adds the scripts in `dir`, and in its subfolders, to `found`. `folders` holds the subfolders
+/// `dir` is in, below the scripts folder.
 fn search(dir: &Path, folders: &mut Vec<String>, found: &mut Found) {
     let Ok(entries) = fs::read_dir(dir) else {
         return;
@@ -163,7 +170,7 @@ fn search(dir: &Path, folders: &mut Vec<String>, found: &mut Found) {
         .flatten()
         .filter(|entry| !entry.file_name().to_string_lossy().starts_with('.'))
         .collect();
-    entries.sort_by_key(|entry| entry.file_name());
+    entries.sort_by_key(fs::DirEntry::file_name);
     for entry in entries {
         let Ok(kind) = entry.file_type() else {
             continue;
@@ -180,8 +187,8 @@ fn search(dir: &Path, folders: &mut Vec<String>, found: &mut Found) {
             continue;
         }
         // Follows a link, to see what it points at.
-        let is_executable = fs::metadata(&path)
-            .is_ok_and(|meta| meta.is_file() && meta.permissions().mode() & 0o111 != 0);
+        let is_executable =
+            fs::metadata(&path).is_ok_and(|meta| meta.is_file() && meta.permissions().mode() & 0o111 != 0);
         if !is_executable {
             continue;
         }
@@ -204,52 +211,4 @@ fn warn(message: &str) {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn a_header_sets_a_name_with_spaces_the_terminal_and_a_prompt() {
-        let header = Header::parse(
-            "#!/usr/bin/env bash\n# kotodama: name=Deploy staging terminal=false args=prompt\necho\n",
-        );
-        assert_eq!(
-            header,
-            Header {
-                name: Some("Deploy staging".into()),
-                terminal: false,
-                prompt: true,
-            }
-        );
-    }
-
-    #[test]
-    fn without_a_header_a_script_runs_in_a_terminal_without_asking() {
-        assert_eq!(
-            Header::parse("#!/bin/sh\necho kotodama: name=x\n"),
-            Header::default()
-        );
-    }
-
-    #[test]
-    fn other_comment_styles_and_quotes_work_too() {
-        assert_eq!(
-            Header::parse("#!/usr/bin/env node\n// kotodama: name=\"Say hi\"\n").name,
-            Some("Say hi".into())
-        );
-        assert!(!Header::parse("-- kotodama: terminal=false\n").terminal);
-        assert!(Header::parse("## kotodama: args=prompt").prompt);
-    }
-
-    #[test]
-    fn unknown_options_are_skipped_and_the_rest_apply() {
-        let header = Header::parse("# kotodama: colour=red terminal=false name=x");
-        assert!(!header.terminal);
-        assert_eq!(header.name.as_deref(), Some("x"));
-    }
-
-    #[test]
-    fn a_header_past_the_first_lines_is_not_one() {
-        let text = format!("{}# kotodama: name=late\n", "#\n".repeat(HEADER_LINES));
-        assert_eq!(Header::parse(&text).name, None);
-    }
-}
+mod tests;
