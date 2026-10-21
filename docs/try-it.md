@@ -42,7 +42,8 @@ Then type `?` and a request in plain words, such as `? open a terminal`.
 
 What doesn't work in the demo:
 
-- The Hyprland Extension: the desktop is sway, so there are no windows or Hyprland shortcuts to find.
+- The Hyprland Extension: the desktop is sway, so there are no Hyprland shortcuts to find. Windows come from the system Extension instead.
+- Power and session: the container runs no logind, so Power Off, Lock Screen and the rest are listed but fail, saying why.
 - Anything that leaves the desktop: there's no browser, so a web search, a bookmark or a URL Quicklink opens a terminal that names the page it would have opened, and there's no notification daemon.
 - Your own desktop: apps, files and clipboard are the demo's, not your Mac's.
 - The feel: the menu is drawn in software and sent over VNC, so it is slower than on real hardware.
@@ -176,6 +177,14 @@ Some need extras: the shell example Extension for the Views checks (link `exampl
 - [ ] A bind in a submap.
 - [ ] "Move to Workspace" with a named workspace.
 - [ ] The feel of Views and the Action panel.
+
+### System
+
+- [ ] On Hyprland, every window shows once (the Hyprland Extension's), and the Daemon's log says the system Extension leaves the windows to it.
+- [ ] "Lock Screen" locks through hypridle's `lock_cmd`.
+- [ ] "Suspend" suspends, and the menu is closed on wake.
+- [ ] "Reboot" asks first; Esc leaves it, Enter reboots.
+- [ ] "Hibernate" is listed only where `busctl call org.freedesktop.login1 /org/freedesktop/login1 org.freedesktop.login1.Manager CanHibernate` says `yes`.
 
 ### Views
 

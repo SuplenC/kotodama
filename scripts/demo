@@ -67,7 +67,7 @@ if [ -z "${KOTODAMA_DEMO_SHELL:-}" ]; then
 fi
 
 echo "demo: building Kotodama (release)..."
-extensions=(ai apps calculator clipboard emoji folders web-search)
+extensions=(ai apps calculator clipboard emoji folders system web-search)
 packages=(-p kotodamad -p kotodama)
 for name in "${extensions[@]}"; do
     packages+=(-p "kotodama-$name")
