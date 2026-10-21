@@ -52,7 +52,6 @@ use crate::history::IDENTITIES;
 use crate::history::ResultKey;
 use crate::history::Store;
 use crate::index::ItemRef;
-use crate::index::SIDES;
 use crate::index::Slot;
 use crate::pick;
 use crate::pick::Pick;
@@ -552,7 +551,9 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
     /// running `action`. A Result an Alias named counts for the Alias alone.
     /// An answer goes in the Usage log only: neither Frecency nor Learned
     /// choices count it, and a Result picked below one isn't learned as
-    /// picked over it. Returns the change to the History, to undo it.
+    /// picked over it. A pick in an app kept out of the search is never a
+    /// Learned choice, and goes in the Usage log without its query.
+    /// Returns the change to the History, to undo it.
     pub(super) fn picked(
         &mut self,
         front_end: FrontEndId,
@@ -567,11 +568,12 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
         };
         let source = self.source_of(session, &result.extension, &result.id);
         let row = session.shown.iter().position(|(shown, _)| Some(*shown) == source);
+        let private = session.in_private_app(&self.apps);
         if self.history.settings().usage_log {
             self.store.log(Entry {
                 at,
                 used: Used::Pick {
-                    query: session.query.clone(),
+                    query: if private { String::new() } else { session.query.clone() },
                     extension: result.extension.clone(),
                     id: result.id.clone(),
                     action: action.id.clone(),
@@ -593,13 +595,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             // is never a Learned choice, which would take over from the one
             // among the real matches.
             self.history.touch(&result.extension, &result.id, when)
-        } else if session
-            .scope
-            .and_then(|n| self.apps.get(n))
-            .is_some_and(|app| app.searched == [false; SIDES])
-        {
-            // An app kept out of the search, as the clipboard's, holds what
-            // may be private: what is typed in it is never kept.
+        } else if private {
             self.history.touch(&result.extension, &result.id, when)
         } else {
             let key = source

@@ -77,6 +77,13 @@ fn configured_word<'t>(table: &'t Table, name: &str, report: &mut Report) -> Opt
 }
 
 impl App {
+    /// Whether the whole search reads none of the Extension's Items, so
+    /// what is typed in the app may be private.
+    #[must_use]
+    pub fn is_private(&self) -> bool {
+        self.searched == [false; SIDES]
+    }
+
     /// The Item the search shows for the Extension, found by its title and
     /// its word. Running it enters the app.
     pub fn entry(&self, extension: &str) -> Item {

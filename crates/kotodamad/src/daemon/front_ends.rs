@@ -452,12 +452,15 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
     }
 
     pub(super) fn query(&mut self, id: FrontEndId, text: String, now: Instant) {
-        let logged = (self.history.settings().usage_log && !text.is_empty()).then(|| text.clone());
         let Some(session) = self.sessions.get_mut(&id) else {
             return;
         };
         session.query = text;
         read_query(&self.apps, &mut self.matcher, session);
+        let logged = (self.history.settings().usage_log
+            && !session.query.is_empty()
+            && !session.in_private_app(&self.apps))
+        .then(|| session.query.clone());
         session.searched = true;
         session.update = Update::Fresh;
         session.typed = now;

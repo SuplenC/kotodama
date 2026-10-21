@@ -62,6 +62,7 @@ use nucleo_matcher::pattern::CaseMatching;
 use nucleo_matcher::pattern::Normalization;
 use nucleo_matcher::pattern::Pattern;
 
+use crate::apps::App;
 use crate::apps::Apps;
 use crate::clock::Clock;
 use crate::clock::When;
@@ -754,6 +755,13 @@ impl Session {
             .results
             .get(n as usize)
             .is_some_and(|result| result.answer)
+    }
+
+    /// Whether the session is in an app kept out of the search, as the
+    /// clipboard's and the emoji's: what is typed there may be private, so
+    /// neither the History nor the Usage log keeps it.
+    fn in_private_app(&self, apps: &Apps) -> bool {
+        self.scope.and_then(|n| apps.get(n)).is_some_and(App::is_private)
     }
 
     /// The text searched: the query past its app's word, inside one.

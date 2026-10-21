@@ -9,6 +9,7 @@ mod harness;
 use harness::*;
 use kotodama_protocol::*;
 use kotodamad::discovery::Found;
+use kotodamad::usage::Used;
 
 /// The emoji Extension as its Manifest declares it: every Item app only.
 fn emoji() -> Found {
@@ -662,5 +663,42 @@ fn what_is_typed_in_an_app_kept_out_of_the_search_is_never_a_learned_choice() {
     assert!(
         history.picked().any(|(_, id, _)| id == "fire"),
         "Frecency still counts the pick"
+    );
+}
+
+/// What the Daemon put in the usage log: each query, and for a pick, the id
+/// of the Result picked.
+fn logged(desk: &Desk) -> Vec<(String, Option<String>)> {
+    desk.h
+        .saved
+        .1
+        .borrow()
+        .iter()
+        .map(|entry| match &entry.used {
+            Used::Query { query } => (query.clone(), None),
+            Used::Pick { query, id, .. } => (query.clone(), Some(id.clone())),
+        })
+        .collect()
+}
+
+#[test]
+fn what_is_typed_in_an_app_kept_out_of_the_search_never_reaches_the_usage_log() {
+    let mut desk = Desk::new("[history]\nusage_log = true");
+
+    desk.enter("emoji", "Emoji");
+    desk.pick("emoji fire", "🔥 Fire");
+    desk.pick("fire", "Firefox");
+
+    let typed = |query: &str| (query.to_owned(), None);
+    let picked = |query: &str, id: &str| (query.to_owned(), Some(id.to_owned()));
+    assert_eq!(
+        logged(&desk),
+        [
+            typed("emoji"),
+            picked("emoji", "app:emoji"),
+            picked("", "fire"),
+            typed("fire"),
+            picked("fire", "firefox"),
+        ]
     );
 }
