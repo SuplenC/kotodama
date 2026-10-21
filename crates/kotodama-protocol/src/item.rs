@@ -359,8 +359,9 @@ struct ItemWire<'a> {
     hidden: bool,
 }
 
+/// An Item as it arrives, before its kind's field and its Actions are checked.
 #[derive(Deserialize)]
-struct ItemOwned {
+pub(crate) struct ItemOwned {
     id: String,
     kind: String,
     #[serde(default)]
@@ -413,36 +414,44 @@ impl Serialize for Item {
 impl TryFrom<ItemOwned> for Item {
     type Error = String;
     fn try_from(wire: ItemOwned) -> Result<Self, String> {
-        let fields = KindFields {
-            desktop_id: wire.desktop_id,
-            path: wire.path,
-            address: wire.address,
-            url: wire.url,
-        };
-        let kind = ItemKind::from_wire(wire.kind, fields)?;
         if wire.actions.is_empty() {
             return Err(format!(
                 "Item `{}` has no Actions; it needs at least its primary Action",
                 wire.id
             ));
         }
-        if wire.identity.as_deref() == Some("") {
+        wire.into_item_without_actions()
+    }
+}
+
+impl ItemOwned {
+    /// The Item, checked for everything but having an Action: a Result the
+    /// Daemon shows as unavailable carries none.
+    pub(crate) fn into_item_without_actions(self) -> Result<Item, String> {
+        let fields = KindFields {
+            desktop_id: self.desktop_id,
+            path: self.path,
+            address: self.address,
+            url: self.url,
+        };
+        let kind = ItemKind::from_wire(self.kind, fields)?;
+        if self.identity.as_deref() == Some("") {
             return Err(format!(
                 "Item `{}` has an empty identity; leave it out instead",
-                wire.id
+                self.id
             ));
         }
         Ok(Item {
-            id: wire.id,
+            id: self.id,
             kind,
-            identity: wire.identity,
-            title: wire.title,
-            subtitle: wire.subtitle,
-            icon: wire.icon,
-            keyword: wire.keyword,
-            keywords: wire.keywords,
-            actions: wire.actions,
-            hidden: wire.hidden,
+            identity: self.identity,
+            title: self.title,
+            subtitle: self.subtitle,
+            icon: self.icon,
+            keyword: self.keyword,
+            keywords: self.keywords,
+            actions: self.actions,
+            hidden: self.hidden,
         })
     }
 }

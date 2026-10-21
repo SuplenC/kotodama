@@ -376,6 +376,10 @@ fn to_front_end_messages() -> Vec<ToFrontEnd> {
             version: 2,
             results: vec![],
         },
+        ToFrontEnd::Results {
+            version: 3,
+            results: vec![unavailable_row()],
+        },
         ToFrontEnd::Status {
             down: vec!["calculator".into()],
         },
@@ -535,6 +539,37 @@ fn from_front_end_variant(message: &FromFrontEnd) -> usize {
     }
 }
 const FROM_FRONT_END_VARIANTS: usize = 12;
+
+/// The row the Daemon shows for an Alias whose Item it can't run: the Item
+/// as last seen, with its Actions taken off.
+fn unavailable_row() -> ShownResult {
+    let mut item = items()[0].clone();
+    item.actions.clear();
+    ShownResult {
+        extension: "apps".into(),
+        item,
+        contributed: vec![],
+        highlights: vec![],
+        alias: Some("ff".into()),
+        unavailable: Some("apps isn't running".into()),
+    }
+}
+
+#[test]
+fn a_result_that_can_run_still_needs_an_action() {
+    let row = ShownResult {
+        unavailable: None,
+        ..unavailable_row()
+    };
+
+    for format in WireFormat::ALL {
+        let bytes = format.encode(&row).unwrap();
+        assert!(
+            format.decode::<ShownResult>(&bytes).is_err(),
+            "{format:?} took a runnable Result without Actions"
+        );
+    }
+}
 
 #[test]
 fn every_message_to_a_front_end_survives_every_wire_format() {

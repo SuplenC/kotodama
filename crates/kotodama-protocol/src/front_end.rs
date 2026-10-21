@@ -7,6 +7,7 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
+use crate::item::ItemOwned;
 use crate::{Action, Item, Job, Table, View};
 
 /// From a Front end to the Daemon.
@@ -173,6 +174,7 @@ pub enum ToFrontEnd {
 
 /// One Result as the Front end shows it.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(try_from = "ShownResultOwned")]
 pub struct ShownResult {
     /// The Extension that owns the Item.
     pub extension: String,
@@ -193,6 +195,36 @@ pub struct ShownResult {
     /// its subtitle: the Item an Alias names is gone, or its Extension is
     /// down. Such a Result carries no Actions.
     pub unavailable: Option<String>,
+}
+
+/// A [`ShownResult`] as it arrives, before its Item is checked.
+#[derive(Deserialize)]
+struct ShownResultOwned {
+    extension: String,
+    item: ItemOwned,
+    contributed: Vec<OfferedAction>,
+    highlights: Vec<u32>,
+    alias: Option<String>,
+    unavailable: Option<String>,
+}
+
+impl TryFrom<ShownResultOwned> for ShownResult {
+    type Error = String;
+    fn try_from(wire: ShownResultOwned) -> Result<Self, String> {
+        let item = if wire.unavailable.is_some() {
+            wire.item.into_item_without_actions()?
+        } else {
+            Item::try_from(wire.item)?
+        };
+        Ok(ShownResult {
+            extension: wire.extension,
+            item,
+            contributed: wire.contributed,
+            highlights: wire.highlights,
+            alias: wire.alias,
+            unavailable: wire.unavailable,
+        })
+    }
 }
 
 /// One Item of a filtered list View.
