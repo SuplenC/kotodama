@@ -442,7 +442,9 @@ What goes to the model is the query and the Action catalog (each Action's title,
 
 `kotodama-folders` (`crates/kotodama-folders`, Extension name `folders`) turns the contents of the folders named in its config into Items, in two kinds of folder: projects and scripts. It watches them, so a project cloned or a script added, renamed or removed while it runs shows up or goes within a moment. It watches only the folders it searched, each on its own, never the files inside a project, so a large projects folder costs no more than its repositories. Saving files inside a project searches nothing again.
 
-**Projects** are the git repositories found down to the folder's `depth` (3 if not given), with their worktrees and checked-out submodules. A repository stops the search: nothing inside it is searched. Each is an Item of kind `project` with its path, titled with the name `tms` (tmux-sessionizer) gives it, so the menu and `tms` land in the same tmux sessions: the folder's name; `<repository>#<worktree>` for a worktree; `<repository>>`, then the folder's name, for a submodule; and, for a name found more than once, as many parent folders as tell them apart (`work/api`, `home/api`). The tmux session is that name with every `.` made `_`. Its primary Action, "Open", opens the session in a terminal, with the editor in it. "Open Terminal Here", "Open in Lazygit", "Open in File Manager" and "Copy Path" follow, then other Extensions' Contributed actions for `project`.
+**Projects** are the git repositories found down to the folder's `depth` (3 if not given), with their worktrees and checked-out submodules. A repository stops the search: nothing inside it is searched. Each is an Item of kind `project` with its path, titled with the name `tms` (tmux-sessionizer) gives it, so the menu and `tms` land in the same tmux sessions: the folder's name; `<repository>#<worktree>` for a worktree; `<repository>>`, then the folder's name, for a submodule; and, for a name found more than once, as many parent folders as tell them apart (`work/api`, `home/api`). The tmux session is that name with every `.` made `_`, for an `open` command that uses it (the example config below). Its primary Action, "Open", opens a terminal in the project's folder. "Open Terminal Here", "Open in Lazygit", "Open in File Manager" and "Copy Path" follow, then other Extensions' Contributed actions for `project`. "Open in Lazygit" is there only when the config sets `lazygit` or `lazygit` is on the Extension's `PATH`, checked when the config is read.
+
+The terminal commands go through `xdg-terminal-exec`, which starts the user's preferred terminal, as the apps Extension does. A script runs in it under `sh`, which shows its exit status and waits for Enter, so the window stays open in any terminal.
 
 **Scripts** are every executable file in the folder and its subfolders, down to 4 deep, except hidden ones. Each is an Item of kind `file` with its path, titled with its name without the extension, after its subfolders (`work/backup.sh` shows as "work › backup"). Its primary Action runs it in a terminal that stays open after it exits. A comment among its first 10 lines can change that:
 
@@ -461,16 +463,26 @@ folders = [
   { path = "~/Projects", kind = "projects", depth = 2 },
   { path = "~/Scripts", kind = "scripts" },
 ]
+# The commands a project's Actions run, in the project's folder: `{path}` is
+# the folder and `{session}` its tmux session. These are the defaults.
+open = ["xdg-terminal-exec", "--dir={path}"]
+shell = ["xdg-terminal-exec", "--dir={path}"]
+lazygit = ["xdg-terminal-exec", "lazygit", "--path", "{path}"]
+file_manager = ["xdg-open", "{path}"]
+copy_path = ["wl-copy", "{path}"]
+```
+
+An example config for Ghostty, with each project in its tmux session and Neovim in it, the session `tms` opens:
+
+```toml
+[extensions.folders]
+folders = [{ path = "~/Projects", kind = "projects" }]
 # What a script runs in; the script and its arguments follow. It should keep
 # the window open once the script exits.
 terminal = ["ghostty", "--wait-after-command=true", "-e"]
-# The commands a project's Actions run, in the project's folder: `{path}` is
-# the folder and `{session}` its tmux session. These are the defaults.
 open = ["ghostty", "-e", "tmux", "new-session", "-A", "-s", "{session}", "-c", "{path}", "nvim"]
 shell = ["ghostty", "--working-directory={path}"]
 lazygit = ["ghostty", "-e", "lazygit", "--path", "{path}"]
-file_manager = ["xdg-open", "{path}"]
-copy_path = ["wl-copy", "{path}"]
 ```
 
 Its `manifest.toml` runs `./kotodama-folders`, so a package installs the binary next to it in `$XDG_DATA_DIRS/kotodama/extensions/folders/`.

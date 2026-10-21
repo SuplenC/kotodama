@@ -18,12 +18,13 @@ use kotodama_protocol::ItemKind;
 
 use crate::projects::Project;
 use crate::scripts::Script;
+use crate::settings::Settings;
 
-/// A project's primary Action: its tmux session, with the editor.
+/// A project's primary Action: a terminal in its folder, or what the config opens instead.
 pub const OPEN: &str = "open";
 /// A terminal in a project's folder.
 pub const SHELL: &str = "shell";
-/// Lazygit on a project.
+/// Lazygit on a project, offered when lazygit is there to run.
 pub const LAZYGIT: &str = "lazygit";
 /// The file manager on a project's folder.
 pub const FILE_MANAGER: &str = "file-manager";
@@ -48,8 +49,14 @@ fn shown(path: &Path, home: Option<&Path>) -> String {
     }
 }
 
-/// The Item of a project, `home` shown as `~` in its subtitle.
-pub fn project(project: &Project, home: Option<&Path>) -> Item {
+/// The Item of a project, `home` shown as `~` in its subtitle, with the Actions `settings` offer.
+pub fn project(project: &Project, home: Option<&Path>, settings: &Settings) -> Item {
+    let mut actions = vec![Action::new(OPEN, "Open"), Action::new(SHELL, "Open Terminal Here")];
+    if settings.lazygit.is_some() {
+        actions.push(Action::new(LAZYGIT, "Open in Lazygit"));
+    }
+    actions.push(Action::new(FILE_MANAGER, "Open in File Manager"));
+    actions.push(Action::new(COPY_PATH, "Copy Path"));
     Item {
         id: id(&project.path),
         kind: ItemKind::Project {
@@ -63,13 +70,7 @@ pub fn project(project: &Project, home: Option<&Path>) -> Item {
         keyword: None,
         keywords: Vec::new(),
         hidden: false,
-        actions: vec![
-            Action::new(OPEN, "Open"),
-            Action::new(SHELL, "Open Terminal Here"),
-            Action::new(LAZYGIT, "Open in Lazygit"),
-            Action::new(FILE_MANAGER, "Open in File Manager"),
-            Action::new(COPY_PATH, "Copy Path"),
-        ],
+        actions,
     }
 }
 

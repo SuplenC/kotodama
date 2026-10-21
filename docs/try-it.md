@@ -249,4 +249,4 @@ Some need extras: the shell example Extension for the Views checks (link `exampl
 
 ### Folders
 
-- [ ] Ghostty, tmux and lazygit openers.
+- [ ] The default openers through `xdg-terminal-exec` in a terminal other than Ghostty (a script window stays open until Enter), "Open in Lazygit" gone without lazygit, and the Ghostty, tmux and lazygit openers from the README's example config.

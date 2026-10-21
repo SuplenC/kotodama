@@ -10,12 +10,12 @@
 //! ]
 //! # What a script runs in; the script and its arguments follow. It should keep
 //! # the window open once the script exits.
-//! terminal = ["ghostty", "--wait-after-command=true", "-e"]
+//! terminal = ["foot", "--hold"]
 //! # The commands a project's Actions run, in the project's folder. `{path}` is
 //! # the folder and `{session}` its tmux session name.
-//! open = ["ghostty", "-e", "tmux", "new-session", "-A", "-s", "{session}", "-c", "{path}", "nvim"]
-//! shell = ["ghostty", "--working-directory={path}"]
-//! lazygit = ["ghostty", "-e", "lazygit", "--path", "{path}"]
+//! open = ["foot", "tmux", "new-session", "-A", "-s", "{session}", "-c", "{path}", "nvim"]
+//! shell = ["foot", "--working-directory={path}"]
+//! lazygit = ["foot", "lazygit", "--path", "{path}"]
 //! file_manager = ["xdg-open", "{path}"]
 //! copy_path = ["wl-copy", "{path}"]
 //! ```
@@ -24,12 +24,18 @@
 //!
 //! - Reading the table, with a `~` made the home folder, and logging what is wrong in it.
 //! - The default commands, and filling `{path}` and `{session}` into a command.
+//! - Whether "Open in Lazygit" is offered: when the table sets `lazygit`, or `lazygit` is on
+//!   `PATH`.
 //!
 //! # Not here
 //!
 //! - Running a command: `main.rs`, through `kotodama_extension::launch`.
 //! - Reading a command's list of strings: `kotodama_extension::config`.
 
+use std::env;
+use std::ffi::OsStr;
+use std::fs;
+use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 use std::path::PathBuf;
 
@@ -43,26 +49,25 @@ use crate::scan::Folders;
 /// How deep projects are looked for when a folder doesn't say.
 pub const DEFAULT_DEPTH: usize = 3;
 
-/// Ghostty, the terminal the defaults are written for, kept open once the script exits so its
-/// output can be read.
-pub const DEFAULT_TERMINAL: &[&str] = &["ghostty", "--wait-after-command=true", "-e"];
-/// The project's tmux session, attached or made, with the editor in it: the session `tms` opens.
-pub const DEFAULT_OPEN: &[&str] = &[
-    "ghostty",
-    "-e",
-    "tmux",
-    "new-session",
-    "-A",
-    "-s",
-    "{session}",
+/// The user's preferred terminal, through the freedesktop proposal's launcher, as the apps
+/// Extension starts terminal apps. The launcher drops its `--hold` for a terminal whose desktop
+/// entry has no hold argument, so a POSIX shell keeps the window open instead, so the output can
+/// be read: it runs the script, which is `$0`, with its arguments, then waits for Enter.
+pub const DEFAULT_TERMINAL: &[&str] = &[
+    "xdg-terminal-exec",
+    "sh",
     "-c",
-    "{path}",
-    "nvim",
+    r#""$0" "$@"; printf '\n[Exited with status %s. Press Enter to close.]' "$?"; read -r _"#,
 ];
-/// A terminal in the project's folder.
-pub const DEFAULT_SHELL: &[&str] = &["ghostty", "--working-directory={path}"];
+/// A terminal in the project's folder. The launcher's `--dir` falls back to starting the terminal
+/// there when the terminal has no argument for it.
+pub const DEFAULT_OPEN: &[&str] = &["xdg-terminal-exec", "--dir={path}"];
+/// A terminal in the project's folder, as [`DEFAULT_OPEN`].
+pub const DEFAULT_SHELL: &[&str] = &["xdg-terminal-exec", "--dir={path}"];
 /// Lazygit on the project, in a terminal.
-pub const DEFAULT_LAZYGIT: &[&str] = &["ghostty", "-e", "lazygit", "--path", "{path}"];
+pub const DEFAULT_LAZYGIT: &[&str] = &["xdg-terminal-exec", "lazygit", "--path", "{path}"];
+/// The program [`DEFAULT_LAZYGIT`] runs, looked for on `PATH`.
+const LAZYGIT_PROGRAM: &str = "lazygit";
 /// Whichever file manager the desktop opens folders with.
 pub const DEFAULT_FILE_MANAGER: &[&str] = &["xdg-open", "{path}"];
 /// The Wayland clipboard.
@@ -78,8 +83,8 @@ pub struct Settings {
     pub open: Vec<String>,
     /// A project's [`SHELL`](crate::items::SHELL) Action.
     pub shell: Vec<String>,
-    /// A project's [`LAZYGIT`](crate::items::LAZYGIT) Action.
-    pub lazygit: Vec<String>,
+    /// A project's [`LAZYGIT`](crate::items::LAZYGIT) Action, `None` when it isn't offered.
+    pub lazygit: Option<Vec<String>>,
     /// A project's [`FILE_MANAGER`](crate::items::FILE_MANAGER) Action.
     pub file_manager: Vec<String>,
     /// The [`COPY_PATH`](crate::items::COPY_PATH) Action, of a project or a script.
@@ -97,7 +102,7 @@ impl Default for Settings {
             terminal: words(DEFAULT_TERMINAL),
             open: words(DEFAULT_OPEN),
             shell: words(DEFAULT_SHELL),
-            lazygit: words(DEFAULT_LAZYGIT),
+            lazygit: Some(words(DEFAULT_LAZYGIT)),
             file_manager: words(DEFAULT_FILE_MANAGER),
             copy_path: words(DEFAULT_COPY_PATH),
         }
@@ -107,9 +112,11 @@ impl Default for Settings {
 impl Settings {
     /// Reads the config table. A setting of the wrong shape is logged and left
     /// at its default, and a folder that is wrong is left out; the rest still
-    /// apply. `home` stands for a leading `~`.
+    /// apply. `home` stands for a leading `~`. Without a `lazygit` command in
+    /// the table, "Open in Lazygit" is offered only when `lazygit` is in one of
+    /// the `path` folders, looked for once here rather than per Item.
     #[must_use]
-    pub fn from_config(config: &Table, home: Option<&Path>) -> Self {
+    pub fn from_config(config: &Table, home: Option<&Path>, path: Option<&OsStr>) -> Self {
         let mut settings = Settings::default();
         match config.get("folders") {
             Some(Value::Array(folders)) => {
@@ -126,7 +133,6 @@ impl Settings {
             ("terminal", &mut settings.terminal),
             ("open", &mut settings.open),
             ("shell", &mut settings.shell),
-            ("lazygit", &mut settings.lazygit),
             ("file_manager", &mut settings.file_manager),
             ("copy_path", &mut settings.copy_path),
         ] {
@@ -134,6 +140,11 @@ impl Settings {
                 *setting = command;
             }
         }
+        settings.lazygit = match config::command(config, "lazygit") {
+            Some(command) => Some(command),
+            None if on_path(LAZYGIT_PROGRAM, path) => settings.lazygit,
+            None => None,
+        };
         settings
     }
 
@@ -165,6 +176,15 @@ impl Settings {
         }
         Ok(())
     }
+}
+
+/// Whether `program` is an executable file in one of the `path` folders.
+fn on_path(program: &str, path: Option<&OsStr>) -> bool {
+    path.is_some_and(|path| env::split_paths(path).any(|dir| executable(&dir.join(program))))
+}
+
+fn executable(path: &Path) -> bool {
+    fs::metadata(path).is_ok_and(|meta| meta.is_file() && meta.permissions().mode() & 0o111 != 0)
 }
 
 /// `path` with a leading `~` made the home folder. It must be absolute.

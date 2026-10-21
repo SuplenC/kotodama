@@ -2,7 +2,7 @@
 
 A Bundled extension. Maintained by hand: fix stale lines when you find them, and update this map in the PR that adds, moves or renames a module here. Paths are relative to `src/`. `manifest.toml` declares it; `src/main.rs` runs the protocol loop on `kotodama-extension`. See also the [root map](../../CODEMAP.md) and [GLOSSARY.md](../../GLOSSARY.md).
 
-- `settings.rs` (`Settings`, the `DEFAULT_…` commands, `fill`; `FolderError` is why a `folders` entry is left out), with its unit tests in `settings/tests.rs`
+- `settings.rs` (`Settings`, the `DEFAULT_…` commands, whether lazygit is on `PATH`, `fill`; `FolderError` is why a `folders` entry is left out), with its unit tests in `settings/tests.rs`
 - `projects.rs` (git repos, tms names), with its unit tests in `projects/tests.rs`
 - `scripts.rs` (executables and header options), with its unit tests in `scripts/tests.rs`
 - `scan.rs` (`Scanner` thread, settling changes from a thread-less `Watcher::new`)
