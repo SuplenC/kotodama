@@ -139,7 +139,11 @@ fn a_call_is_answered_by_the_return_with_its_serial_after_the_signals_before_it(
     let mut fields = Message {
         kind: 1,
         little: true,
+        serial: 0,
         reply_serial: None,
+        path: None,
+        interface: None,
+        sender: None,
         member: None,
         error_name: None,
         signature: String::new(),
@@ -182,6 +186,34 @@ fn a_call_answered_with_an_error_fails_with_its_name_and_message() {
         "the call failed: org.freedesktop.systemd1.UnitExists: Unit app-x.scope already exists."
     );
     peer.join().unwrap();
+}
+
+#[test]
+fn a_call_read_by_a_service_is_answered_to_its_serial() {
+    let (ours, theirs) = UnixStream::pair().unwrap();
+    let mut caller = Bus {
+        stream: ours,
+        serial: 0,
+    };
+    let mut service = Bus {
+        stream: theirs,
+        serial: 40,
+    };
+
+    let serial = caller.send(&call()).unwrap();
+    let received = service.read().unwrap();
+    assert!(received.is_call("/org/example", "org.example.Thing", "Do"));
+    assert!(!received.is_call("/org/example", "org.example.Thing", "Undo"));
+    let mut read = received.body();
+    assert_eq!(read.string(), Some("hello"));
+    assert_eq!(read.u32(), Some(7));
+    let mut answer = Marshal::default();
+    answer.string("done");
+    service.reply(&received, "s", answer).unwrap();
+
+    let returned = caller.read().unwrap();
+    assert_eq!(returned.reply_serial, Some(serial));
+    assert_eq!(returned.body().string(), Some("done"));
 }
 
 #[test]
