@@ -185,6 +185,7 @@ fn without_logind_every_power_item_but_hibernate_is_listed_and_running_one_says_
     let items = extension.added();
     let outcome = run(&mut extension, 1, "suspend");
 
+    assert_eq!(extension.status(), (true, None));
     assert_eq!(ids(&items), ["power-off", "reboot", "suspend", "lock", "log-out"]);
     let Outcome::Failed { message } = outcome else {
         panic!("expected a failure, got {outcome:?}");

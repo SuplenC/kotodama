@@ -267,9 +267,21 @@ fn the_intro_falls_back_to_the_description_and_shows_only_before_typing() {
     );
     let app = apps.get(0).unwrap();
 
-    let intro = app.scope(false).intro.unwrap();
+    let intro = app.scope(false, None).intro.unwrap();
 
     assert_eq!(intro.about, "Emoji and symbols");
     assert!(intro.examples.is_empty());
-    assert_eq!(app.scope(true).intro, None);
+    assert_eq!(intro.note, None);
+    assert_eq!(app.scope(true, None).intro, None);
+}
+
+#[test]
+fn the_intro_carries_the_extensions_note() {
+    let apps = apps(&["name = \"clipboard\"\ncommand = [\"x\"]"], Table::new());
+    let app = apps.get(0).unwrap();
+
+    let intro = app.scope(false, Some("Paused")).intro.unwrap();
+
+    assert_eq!(intro.note.as_deref(), Some("Paused"));
+    assert_eq!(app.scope(true, Some("Paused")).intro, None);
 }

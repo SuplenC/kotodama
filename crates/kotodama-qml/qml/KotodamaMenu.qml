@@ -454,6 +454,22 @@ PanelWindow {
                 bottomPadding: 10
                 spacing: 4
 
+                // What the Extension says now, such as that it is paused or
+                // why it can't do anything, above what it always says.
+                Text {
+                    x: 18
+                    width: intro.width - 36
+                    visible: search.introNote !== ""
+                    wrapMode: Text.Wrap
+                    maximumLineCount: 2
+                    elide: Text.ElideRight
+                    textFormat: Text.PlainText
+                    text: search.introNote
+                    color: menu.accent
+                    font.family: menu.fontFamily
+                    font.pixelSize: menu.fontSize - 1
+                }
+
                 Text {
                     x: 18
                     width: intro.width - 36

@@ -322,6 +322,14 @@ fn from_extension_messages() -> Vec<FromExtension> {
         }),
         FromExtension::RequestActionCatalog,
         FromExtension::WithdrawPick { invocation: 7 },
+        FromExtension::Status {
+            usable: false,
+            note: Some("Hyprland isn't running".into()),
+        },
+        FromExtension::Status {
+            usable: true,
+            note: None,
+        },
     ]
 }
 
@@ -355,9 +363,10 @@ fn from_extension_variant(message: &FromExtension) -> usize {
         FromExtension::JobProgress(_) => 8,
         FromExtension::RequestActionCatalog => 9,
         FromExtension::WithdrawPick { .. } => 10,
+        FromExtension::Status { .. } => 11,
     }
 }
-const FROM_EXTENSION_VARIANTS: usize = 11;
+const FROM_EXTENSION_VARIANTS: usize = 12;
 
 fn to_front_end_messages() -> Vec<ToFrontEnd> {
     vec![
@@ -389,6 +398,7 @@ fn to_front_end_messages() -> Vec<ToFrontEnd> {
                         query: "fire".into(),
                         result: "🔥".into(),
                     }],
+                    note: None,
                 }),
             }),
         },

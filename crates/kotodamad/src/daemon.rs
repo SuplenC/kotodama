@@ -214,6 +214,18 @@ struct Extension {
     /// The Manifest's `live_query.fallback`, read once per Manifest: every
     /// refresh asks it.
     fallback: bool,
+    /// What this run last said of whether it can do anything; `None` until
+    /// it says.
+    status: Option<Status>,
+    /// Whether Items of this run have reached the search, or are hidden.
+    has_items: bool,
+}
+
+/// What an Extension said of itself in its last `FromExtension::Status`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct Status {
+    usable: bool,
+    note: Option<String>,
 }
 
 /// Whether `found`'s Manifest makes it a fallback, such as web search.
@@ -237,7 +249,24 @@ impl Extension {
             catalog: false,
             hung: Cell::new(false),
             stopping: false,
+            status: None,
+            has_items: false,
         }
+    }
+
+    /// Whether the search shows its app's entry Item: as it last said, else
+    /// once its Items are in, or always if it asks for Live queries, so an
+    /// Extension that never says keeps its entry Item.
+    fn usable(&self) -> bool {
+        match &self.status {
+            Some(status) => status.usable,
+            None => self.has_items || self.found.manifest.live_query.is_some(),
+        }
+    }
+
+    /// What it last said the user should know, for its app's intro card.
+    fn note(&self) -> Option<&str> {
+        self.status.as_ref()?.note.as_deref()
     }
 
     fn name(&self) -> &str {
@@ -1543,6 +1572,10 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
 
     fn forget_run(&mut self, id: ExtensionId) {
         let name = self.extensions[id.0].name().to_owned();
+        self.said(id, |ext| {
+            ext.status = None;
+            ext.has_items = false;
+        });
         for alias in self.keywords.aliases.values() {
             if alias.extension == name
                 && let Some(slot) = self.index.find(id, &alias.item)
@@ -1727,6 +1760,14 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
                 outcome,
             } => self.action_done(id, invocation, outcome, now),
             FromExtension::WithdrawPick { invocation } => self.withdraw_pick(id, invocation),
+            FromExtension::Status { usable, note } => {
+                match (usable, &note) {
+                    (true, _) => log::debug!("{name} can do something"),
+                    (false, Some(note)) => log::info!("{name} can't do anything now: {note}"),
+                    (false, None) => log::info!("{name} can't do anything now"),
+                }
+                self.said(id, |ext| ext.status = Some(Status { usable, note }));
+            }
             FromExtension::PushView(view) => {
                 let contributed = self.view_contributed(id, &view);
                 self.forget_filters(id, &view.id);
@@ -1776,6 +1817,21 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
         }
     }
 
+    /// Applies `change` to what the Extension `id` said of itself. The
+    /// search shows its app's entry Item from then on only if it is usable,
+    /// decided here rather than per keystroke, and the app's intro card
+    /// shows its note.
+    fn said(&mut self, id: ExtensionId, change: impl FnOnce(&mut Extension)) {
+        let ext = &mut self.extensions[id.0];
+        let (usable, note) = (ext.usable(), ext.note().map(str::to_owned));
+        change(ext);
+        if ext.usable() != usable {
+            self.build_own();
+        } else if ext.note() != note.as_deref() {
+            self.mark_late();
+        }
+    }
+
     /// Changes an Extension's Items: here and now, or on the indexing
     /// thread, whose new version comes back as an [`Event::Indexed`].
     fn edit_items(&mut self, id: ExtensionId, edit: Edit, now: Instant) {
@@ -1787,6 +1843,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
                 self.index.edit(id, edit);
                 self.repin_index();
                 self.items_changed();
+                self.items_landed(id);
                 self.run_openings(now);
             }
         }
@@ -1810,7 +1867,25 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
         self.index.keep(reads);
         self.repin_index();
         self.items_changed();
+        self.items_landed(extension);
         self.run_openings(now);
+    }
+
+    /// Notes that an Extension's Items are in, as its app's entry Item shows
+    /// from then on, in the same Results as they do. A hidden Item counts:
+    /// it names a View the app opens.
+    fn items_landed(&mut self, id: ExtensionId) {
+        if self.extensions[id.0].has_items {
+            return;
+        }
+        let has_items = !self.index.first(id, 1).is_empty()
+            || self
+                .hidden
+                .get(&id)
+                .is_some_and(|hidden| !hidden.is_empty());
+        if has_items {
+            self.said(id, |ext| ext.has_items = true);
+        }
     }
 
     /// Replaces an open View. Each menu filtering a list View is sent the
@@ -3506,10 +3581,13 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
     /// Builds the Daemon's own Items from the Quicklinks and the apps.
     fn build_own(&mut self) {
         let quicklinks = self.keywords.quicklinks.iter().enumerate();
-        let entries = self.apps.iter().enumerate().map(|(n, app)| {
-            let name = self.extensions[app.extension.0].name();
-            Own::new(app.entry(name), OwnAction::App(n))
-        });
+        let extensions = &self.extensions;
+        let entries = (self.apps.iter().enumerate())
+            .filter(|(_, app)| extensions[app.extension.0].usable())
+            .map(|(n, app)| {
+                let name = extensions[app.extension.0].name();
+                Own::new(app.entry(name), OwnAction::App(n))
+            });
         self.own = quicklinks
             .map(|(n, quicklink)| Own::new(quicklink.item(), OwnAction::Quicklink(n)))
             .chain(entries)
@@ -3652,7 +3730,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
         session.update = Update::None;
         let typed = !session.searched().trim().is_empty();
         let app = session.scope.and_then(|n| self.apps.get(n));
-        let scope = app.map(|app| app.scope(typed));
+        let scope = app.map(|app| app.scope(typed, self.extensions[app.extension.0].note()));
 
         if session.query.is_empty() || (scope.is_some() && !typed) {
             session.last_search.forget();

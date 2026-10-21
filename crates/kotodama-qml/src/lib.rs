@@ -90,6 +90,9 @@ pub mod qobject {
         /// it does, and `introExamples`, each `{query, result}`. Empty
         /// elsewhere, and once something is typed.
         #[qproperty(QString, intro_about, cxx_name = "introAbout", READ, NOTIFY)]
+        /// What the app's Extension says the user should know now, such as
+        /// why it can't do anything, shown on the intro card; or empty.
+        #[qproperty(QString, intro_note, cxx_name = "introNote", READ, NOTIFY)]
         #[qproperty(
             QList_QVariant,
             intro_examples,
@@ -377,6 +380,7 @@ pub struct SearchRust {
     offered: Option<u64>,
     scope: QString,
     intro_about: QString,
+    intro_note: QString,
     intro_examples: variant::List,
     /// The intro card shown, which the two above hold.
     intro: Option<Intro>,
@@ -416,6 +420,7 @@ impl Default for SearchRust {
             offered: None,
             scope: QString::default(),
             intro_about: QString::default(),
+            intro_note: QString::default(),
             intro_examples: variant::List::default(),
             intro: None,
             word: None,
@@ -500,14 +505,20 @@ impl KotodamaSearch {
             return;
         }
         let about = intro.as_ref().map(|intro| QString::from(&intro.about));
+        let note = intro
+            .as_ref()
+            .and_then(|intro| intro.note.as_deref())
+            .map(QString::from);
         let examples = intro
             .as_ref()
             .map(|intro| variant::examples(&intro.examples));
         let mut this = self.as_mut().rust_mut();
         this.intro = intro;
         this.intro_about = about.unwrap_or_default();
+        this.intro_note = note.unwrap_or_default();
         this.intro_examples = examples.unwrap_or_default();
         self.as_mut().intro_about_changed();
+        self.as_mut().intro_note_changed();
         self.as_mut().intro_examples_changed();
     }
 

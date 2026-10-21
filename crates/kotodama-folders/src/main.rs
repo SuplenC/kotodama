@@ -26,6 +26,7 @@ use std::sync::mpsc::Sender;
 use kotodama_extension::Connection;
 use kotodama_extension::Event;
 use kotodama_extension::SentItems;
+use kotodama_extension::SentStatus;
 use kotodama_extension::Writer;
 use kotodama_extension::launch;
 use kotodama_extension::launch::Ended;
@@ -82,6 +83,7 @@ fn run() -> Result<(), kotodama_protocol::Error> {
         projects: BTreeMap::new(),
         scripts: BTreeMap::new(),
         sent: SentItems::default(),
+        status: SentStatus::default(),
         jobs: 0,
     };
     for event in received {
@@ -108,6 +110,7 @@ struct Extension {
     /// By Item id.
     scripts: BTreeMap<String, Script>,
     sent: SentItems,
+    status: SentStatus,
     /// How many background jobs have started, which names the next.
     jobs: u64,
 }
@@ -162,7 +165,21 @@ impl Extension {
             .values()
             .map(|project| items::project(project, home, settings))
             .chain(self.scripts.values().map(|script| items::script(script, home)));
-        self.sent.publish(&mut self.writer, all)
+        self.sent.publish(&mut self.writer, all)?;
+        let folders = &self.settings.folders;
+        if folders.projects.is_empty() && folders.scripts.is_empty() {
+            self.status.unusable(
+                &mut self.writer,
+                "No folders yet: name them in `[extensions.folders] folders`",
+            )
+        } else if self.projects.is_empty() && self.scripts.is_empty() {
+            self.status.unusable(
+                &mut self.writer,
+                "No projects or scripts in the folders the config names",
+            )
+        } else {
+            self.status.usable(&mut self.writer)
+        }
     }
 
     /// Runs `action` on the project or script whose Item is `id`.

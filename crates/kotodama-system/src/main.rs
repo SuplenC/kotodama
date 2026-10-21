@@ -24,6 +24,7 @@ use kotodama_extension::Chain;
 use kotodama_extension::Connection;
 use kotodama_extension::Event;
 use kotodama_extension::SentItems;
+use kotodama_extension::SentStatus;
 use kotodama_extension::Writer;
 use kotodama_extension::log;
 use kotodama_protocol::Error;
@@ -74,6 +75,8 @@ fn run() -> Result<(), Error> {
         windows_changed: false,
     };
     SentItems::default().publish(&mut extension.writer, power::items(hibernate))?;
+    // The power Items work on any compositor, with or without its windows.
+    SentStatus::default().usable(&mut extension.writer)?;
     #[cfg(target_os = "linux")]
     toplevels::follow(move |change| events.send(Event::Own(change)).is_ok())?;
     #[cfg(not(target_os = "linux"))]

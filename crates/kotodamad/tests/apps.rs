@@ -121,6 +121,7 @@ fn emoji_scope(intro: bool) -> Option<Scope> {
                 query: "fire".into(),
                 result: "🔥 Fire".into(),
             }],
+            note: None,
         }),
     })
 }
@@ -486,7 +487,8 @@ fn in_its_app_an_extension_is_asked_every_query_triggered_or_not() {
         "name = \"calc\"\ncommand = [\"x\"]\n[live_query]\nprefixes = [\"=\"]\ntriggers = ['^[0-9]']\ndebounce_ms = 0",
     );
     let mut h = Harness::new(vec![plain("apps"), calc]);
-    h.up(0);
+    let apps = h.up(0);
+    h.add(&apps, vec![app("Editor")]);
     let calc = h.up(1);
     let ui = h.front_end();
     calc.drain();
@@ -511,7 +513,8 @@ fn an_extension_behind_its_app_is_asked_nothing_by_the_search() {
         "name = \"calc\"\ncommand = [\"x\"]\nin_search = false\n[live_query]\ntriggers = ['^[0-9]']\ndebounce_ms = 0",
     );
     let mut h = Harness::new(vec![plain("apps"), calc]);
-    h.up(0);
+    let apps = h.up(0);
+    h.add(&apps, vec![app("Editor")]);
     let calc = h.up(1);
     let ui = h.front_end();
     calc.drain();
@@ -527,7 +530,8 @@ fn another_apps_live_queries_are_not_asked_in_one() {
         "name = \"calc\"\ncommand = [\"x\"]\n[live_query]\ntriggers = ['^[0-9]']\ndebounce_ms = 0",
     );
     let mut h = Harness::new(vec![plain("apps"), calc]);
-    h.up(0);
+    let apps = h.up(0);
+    h.add(&apps, vec![app("Editor")]);
     let calc = h.up(1);
     let ui = h.front_end();
     let mut desk = Desk { h, ui };
@@ -537,4 +541,119 @@ fn another_apps_live_queries_are_not_asked_in_one() {
     desk.search("apps 1+1");
 
     assert!(live_queries(calc.drain()).is_empty());
+}
+
+fn status(usable: bool, note: Option<&str>) -> FromExtension {
+    FromExtension::Status {
+        usable,
+        note: note.map(str::to_owned),
+    }
+}
+
+#[test]
+fn an_extension_that_cant_do_anything_has_no_entry_item_until_it_can() {
+    let hyprland = manifest("name = \"hyprland\"\ncommand = [\"x\"]\ntitle = \"Hyprland\"");
+    let mut h = Harness::new(vec![plain("apps"), hyprland]);
+    let apps = h.up(0);
+    h.add(&apps, vec![app("Editor")]);
+    let ext = h.up(1);
+    let ui = h.front_end();
+    let mut desk = Desk { h, ui };
+
+    desk.h
+        .send(&ext, status(false, Some("Hyprland isn't running")));
+    let hidden = (desk.titles("hyprland"), desk.titles(""));
+    desk.h.send(&ext, status(true, None));
+    let shown = (desk.titles("hyprland"), desk.titles(""));
+
+    assert!(!hidden.0.contains(&"Hyprland".to_owned()), "{hidden:?}");
+    assert_eq!(hidden.1, ["apps"]);
+    assert!(shown.0.contains(&"Hyprland".to_owned()), "{shown:?}");
+    assert_eq!(shown.1, ["apps", "Hyprland"]);
+}
+
+#[test]
+fn an_extension_that_never_says_has_an_entry_item_once_it_sends_items() {
+    let mut h = Harness::new(vec![plain("apps"), plain("notes")]);
+    let apps = h.up(0);
+    h.add(&apps, vec![app("Editor")]);
+    let notes = h.up(1);
+    let ui = h.front_end();
+
+    let before = titles(&h.query(&ui, "")).join(", ");
+    h.add(&notes, vec![app("Groceries")]);
+    let after = titles(&h.query(&ui, "")).join(", ");
+
+    assert_eq!(before, "apps");
+    assert_eq!(after, "apps, notes");
+}
+
+#[test]
+fn an_extension_with_live_queries_has_an_entry_item_without_items() {
+    let calc = manifest(
+        "name = \"calc\"\ncommand = [\"x\"]\n[live_query]\ntriggers = ['^[0-9]']\ndebounce_ms = 0",
+    );
+    let mut h = Harness::new(vec![calc]);
+    h.up(0);
+    let ui = h.front_end();
+
+    assert_eq!(titles(&h.query(&ui, "")), ["calc"]);
+}
+
+#[test]
+fn what_an_extension_says_goes_before_its_live_queries_and_items() {
+    let ai = manifest(
+        "name = \"ai\"\ncommand = [\"x\"]\n[live_query]\nprefixes = [\"?\"]\ndebounce_ms = 0",
+    );
+    let mut h = Harness::new(vec![ai]);
+    let ext = h.up(0);
+    h.send(&ext, status(false, Some("Set `api_key_command` or `url`")));
+    h.add(&ext, vec![app("Ask")]);
+    let ui = h.front_end();
+
+    assert!(!titles(&h.query(&ui, "")).contains(&"ai"));
+}
+
+#[test]
+fn an_extension_that_stopped_has_no_entry_item_until_it_says_again() {
+    let mut h = Harness::new(vec![plain("notes")]);
+    let ext = h.up(0);
+    h.send(&ext, status(true, None));
+    let ui = h.front_end();
+    assert_eq!(titles(&h.query(&ui, "")), ["notes"]);
+
+    h.down(&ext);
+
+    assert!(titles(&h.query(&ui, "")).is_empty());
+}
+
+#[test]
+fn opening_an_app_that_cant_do_anything_shows_why_on_its_intro_card() {
+    let mut h = Harness::new(vec![manifest(
+        "name = \"hyprland\"\ncommand = [\"x\"]\nabout = \"Windows and binds.\"",
+    )]);
+    let ext = h.up(0);
+    h.send(&ext, status(false, Some("Hyprland isn't running")));
+    let ui = h.front_end();
+    let cli = h.front_end();
+    h.query(&ui, "");
+
+    h.front_end_sends(
+        &cli,
+        FromFrontEnd::Open {
+            query: "hyprland ".into(),
+            view: None,
+        },
+    );
+    h.front_end_sends(
+        &ui,
+        FromFrontEnd::Query {
+            text: "hyprland ".into(),
+        },
+    );
+
+    let (_, scope) = last_results(ui.drain());
+    let intro = scope.and_then(|scope| scope.intro).expect("the intro card");
+    assert_eq!(intro.about, "Windows and binds.");
+    assert_eq!(intro.note.as_deref(), Some("Hyprland isn't running"));
 }

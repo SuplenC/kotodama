@@ -35,6 +35,7 @@ use kotodama_extension::Event;
 #[cfg(target_os = "linux")]
 use kotodama_extension::STACK_SIZE;
 use kotodama_extension::SentItems;
+use kotodama_extension::SentStatus;
 use kotodama_extension::Writer;
 use kotodama_extension::log;
 use kotodama_hyprland::binds;
@@ -53,6 +54,10 @@ use kotodama_protocol::ItemKind;
 use kotodama_protocol::ItemRef;
 use kotodama_protocol::Outcome;
 use kotodama_protocol::ToExtension;
+
+/// Why the Extension can't do anything outside Hyprland, which its app's
+/// intro card shows.
+const NOT_RUNNING: &str = "Hyprland isn't running";
 
 fn main() -> ExitCode {
     kotodama_extension::main("kotodama-hyprland", run)
@@ -86,7 +91,9 @@ fn run() -> Result<(), Error> {
         binds: Vec::new(),
         sent_binds: SentItems::default(),
         view_open: false,
+        status: SentStatus::default(),
     };
+    extension.status.unusable(&mut extension.writer, NOT_RUNNING)?;
     #[cfg(target_os = "linux")]
     follow_hyprland(events)?;
     #[cfg(not(target_os = "linux"))]
@@ -156,6 +163,8 @@ struct Extension {
     sent_binds: SentItems,
     /// Whether the Shortcuts View is open, so a config reload updates it.
     view_open: bool,
+    /// Usable while a Hyprland is running.
+    status: SentStatus,
 }
 
 impl Extension {
@@ -185,6 +194,7 @@ impl Extension {
                     self.windows = windows;
                 }
                 self.windows_changed = true;
+                self.status.usable(&mut self.writer)?;
             }
             Event::Own(Own::Change(Change::ConfigReloaded)) => {
                 self.read_binds();
@@ -203,6 +213,7 @@ impl Extension {
                 self.binds = Vec::new();
                 self.publish_binds()?;
                 self.windows_changed = true;
+                self.status.unusable(&mut self.writer, NOT_RUNNING)?;
             }
             Event::Hangup => return Ok(false),
         }
@@ -210,7 +221,7 @@ impl Extension {
     }
 
     fn run(&mut self, action: &str, item: &ItemRef, arguments: &BTreeMap<String, String>) -> Result<Outcome, String> {
-        let hyprland = self.hyprland.as_ref().ok_or("Hyprland isn't running")?;
+        let hyprland = self.hyprland.as_ref().ok_or(NOT_RUNNING)?;
         match &item.kind {
             ItemKind::Window { address } => {
                 let workspace = arguments.get(WORKSPACE).map(String::as_str);

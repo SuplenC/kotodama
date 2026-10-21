@@ -10,6 +10,9 @@
 //!   well. The Extension handles one event at a time, so nothing is shared.
 //! - [`SentItems`] sends Indexed items as changes: only the Items added or
 //!   changed since the last time, and the ids of the ones gone.
+//! - [`SentStatus`] tells the Daemon whether the Extension can do anything
+//!   now, as when it needs a setting the user hasn't made, so the search
+//!   leaves its app out until it can.
 //! - [`config`] reads settings from the Extension's config table, logging the
 //!   ones of the wrong shape.
 //! - [`dirs`] finds where the Extension keeps its state and cache.
@@ -82,6 +85,7 @@ pub mod launch;
 #[cfg(target_os = "linux")]
 pub mod runtime;
 pub mod scope;
+mod status;
 #[cfg(feature = "testing")]
 pub mod testing;
 pub mod url;
@@ -101,6 +105,7 @@ use std::thread;
 use kotodama_protocol::{Channel, ChannelWriter, Error, Hello, ToExtension, WireFormat};
 
 pub use items::SentItems;
+pub use status::SentStatus;
 
 /// Small, as the threads here only wait, and enough for decoding the deepest
 /// message serde_json allows.
