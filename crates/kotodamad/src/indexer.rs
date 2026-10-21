@@ -1,6 +1,7 @@
-//! Indexing off the keystroke path (ADR 0017): Extensions' changes to their
+//! Indexing off the keystroke path: Extensions' changes to their
 //! Items are made on a thread of their own, into a new version of each
-//! changed Segment, which the Daemon puts in whole between two events. A keystroke never waits for a change, and never sees half of one.
+//! changed Segment, which the Daemon puts in whole between two events. A keystroke never waits for
+//! a change, and never sees half of one.
 //!
 //! Changes that queue up while the thread works are made together, one new
 //! version of each Segment for all of them.
@@ -10,20 +11,45 @@
 //! picks, and those a keyword or an Alias names. Each read goes out with the
 //! version it was read from, so the thread answering keystrokes never reads
 //! a payload for them, nor plans.
+//!
+//! # Owns
+//!
+//! - [`Indexer`]: the `index` thread and the changes it coalesces.
+//! - [`Indexed`], [`Kept`] and [`Plan`]: what it sends back, and the hot Items it plans.
+//!
+//! # Not here
+//!
+//! - Putting a new version in: `daemon/from_extension.rs`. The Segments: `segment.rs`.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
+use std::collections::HashSet;
+use std::fmt;
 use std::hash::BuildHasherDefault;
 use std::path::Path;
 use std::sync::Arc;
-use std::sync::mpsc::{self, Receiver, Sender};
+use std::sync::mpsc;
+use std::sync::mpsc::Receiver;
+use std::sync::mpsc::Sender;
 use std::thread;
 
-use crate::clock::{DAY_SECS, When};
-use crate::daemon::{Event, ExtensionId};
-use crate::history::{self, Habit};
-use crate::index::{self, Index, Read, SIDES, Slot, SlotHasher};
-use crate::most_used::{Ahead, Usage, Versions};
-use crate::segment::{Edit, Row, Segment};
+use crate::clock::DAY_SECS;
+use crate::clock::When;
+use crate::daemon::Event;
+use crate::daemon::ExtensionId;
+use crate::history;
+use crate::history::Habit;
+use crate::index;
+use crate::index::Index;
+use crate::index::Read;
+use crate::index::SIDES;
+use crate::index::Slot;
+use crate::index::SlotHasher;
+use crate::most_used::Ahead;
+use crate::most_used::Usage;
+use crate::most_used::Versions;
+use crate::segment::Edit;
+use crate::segment::Row;
+use crate::segment::Segment;
 
 /// A new version of an Extension's Segments, those that changed, for the
 /// Daemon to put in together: an Item moved from one to the other is never
@@ -38,7 +64,7 @@ pub struct Indexed {
     pub(crate) reads: Vec<Read>,
 }
 
-/// Items to keep resident, read off the Segments the Daemon has now.
+/// Items to keep resident, read off the Segments the Daemon has.
 pub struct Kept {
     /// The hot Items, in slot order, when they were planned again.
     pub(crate) hot: Option<Vec<Slot>>,
@@ -46,6 +72,29 @@ pub struct Kept {
     /// were planned.
     pub(crate) ahead: Option<Ahead>,
     pub(crate) reads: Vec<Read>,
+}
+
+/// The Segments and the reads by count: their rows would fill a log.
+impl fmt::Debug for Indexed {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Indexed")
+            .field("extension", &self.extension)
+            .field("change", &self.change)
+            .field("segments", &self.segments.len())
+            .field("reads", &self.reads.len())
+            .finish()
+    }
+}
+
+/// The reads by count, as [`Indexed`] has them.
+impl fmt::Debug for Kept {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Kept")
+            .field("hot", &self.hot)
+            .field("ahead", &self.ahead)
+            .field("reads", &self.reads.len())
+            .finish()
+    }
 }
 
 /// How long before a time of day an Item picked then is hot.
@@ -73,7 +122,7 @@ pub struct Plan {
 
 impl Plan {
     /// The hot Items, in slot order, and the Empty query's most used Results
-    /// ranked ahead: for now, and for the start of the coming part of the
+    /// ranked ahead: for the current time, and for the start of the coming part of the
     /// day.
     pub fn run(&self) -> (Vec<Slot>, Ahead) {
         let mut habits = Vec::new();
@@ -121,8 +170,7 @@ impl Plan {
         for by in [-HOT_GRACE_SECS, 0, HOT_LEAD_SECS] {
             let when = When {
                 at: self.when.at.saturating_add_signed(by),
-                time_of_day: (i64::from(self.when.time_of_day) + by).rem_euclid(DAY_SECS as i64)
-                    as u32,
+                time_of_day: (i64::from(self.when.time_of_day) + by).rem_euclid(DAY_SECS as i64) as u32,
             };
             picked.picks.habits(when, habits);
             for (near, habit) in near.iter_mut().zip(habits.iter()) {
@@ -171,7 +219,7 @@ enum Job {
     Clear(ExtensionId),
     /// Work out the hot Items again.
     Plan(Plan),
-    /// These Items, by Extension and id, are what the Aliases name now.
+    /// These Items, by Extension and id, are what the Aliases name.
     Pin(Vec<(ExtensionId, String)>),
 }
 
@@ -192,7 +240,7 @@ impl Indexer {
         let (jobs, queue) = mpsc::channel();
         if let Err(err) = thread::Builder::new()
             .name("index".into())
-            .spawn(move || work(queue, dir, |event| events.send(event).is_ok()))
+            .spawn(move || work(&queue, dir.as_ref(), |event| events.send(event).is_ok()))
         {
             log::error!("can't start the thread that indexes Items: {err}");
         }
@@ -261,11 +309,7 @@ impl Keeping {
             .iter()
             .filter(|(ext, _)| *ext == extension)
             .filter_map(|(_, id)| segment.find(id));
-        let hot = self
-            .hot
-            .iter()
-            .filter(|slot| slot.segment == n)
-            .map(|slot| slot.row);
+        let hot = self.hot.iter().filter(|slot| slot.segment == n).map(|slot| slot.row);
         let mut rows: Vec<Row> = keyed.chain(aliased).chain(hot).collect();
         rows.sort_unstable();
         rows.dedup();
@@ -298,8 +342,8 @@ impl Keeping {
 /// Makes the changes from `queue`, all that are waiting at once, and passes
 /// each new version, then what to keep resident, to `send`, until it fails
 /// or the queue closes.
-fn work(queue: Receiver<Job>, dir: Option<Arc<Path>>, mut send: impl FnMut(Event) -> bool) {
-    let empty = || Arc::new(Segment::new(dir.clone()));
+fn work(queue: &Receiver<Job>, dir: Option<&Arc<Path>>, mut send: impl FnMut(Event) -> bool) {
+    let empty = || Arc::new(Segment::new(dir.cloned()));
     let mut segments: Vec<Arc<Segment>> = Vec::new();
     let mut keeping = Keeping::default();
     while let Ok(first) = queue.recv() {
@@ -324,12 +368,11 @@ fn work(queue: Receiver<Job>, dir: Option<Arc<Path>>, mut send: impl FnMut(Event
                     // A change that touches neither Segment still makes a
                     // version, of the first, so whoever waits for it hears.
                     let untouched = edits.iter().all(Vec::is_empty);
-                    let n = match changed.iter().position(|(ext, ..)| *ext == extension) {
-                        Some(n) => n,
-                        None => {
-                            changed.push((extension, change, [false; SIDES]));
-                            changed.len() - 1
-                        }
+                    let n = if let Some(n) = changed.iter().position(|(ext, ..)| *ext == extension) {
+                        n
+                    } else {
+                        changed.push((extension, change, [false; SIDES]));
+                        changed.len() - 1
                     };
                     let (_, last, sides) = &mut changed[n];
                     *last = change;
@@ -399,277 +442,4 @@ fn work(queue: Receiver<Job>, dir: Option<Arc<Path>>, mut send: impl FnMut(Event
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::daemon::Source;
-    use crate::history::{Frecent, History};
-    use crate::most_used::{Counts, Picked};
-    use kotodama_protocol::{Action, Item, ItemKind};
-
-    fn item(id: &str) -> Item {
-        Item {
-            id: id.into(),
-            kind: ItemKind::Url {
-                url: format!("https://example.org/{id}"),
-            },
-            identity: None,
-            title: id.into(),
-            subtitle: None,
-            icon: None,
-            keyword: None,
-            keywords: vec![],
-            hidden: false,
-            app_only: false,
-            actions: vec![Action {
-                id: "open".into(),
-                title: "Open".into(),
-                shortcut: None,
-                arguments: vec![],
-                confirm: false,
-            }],
-        }
-    }
-
-    /// Each version built, as where each Segment in it goes and the change
-    /// it holds.
-    fn versions(built: &[Indexed]) -> Vec<(usize, u64)> {
-        built
-            .iter()
-            .flat_map(|indexed| indexed.segments.iter().map(|(at, _)| (*at, indexed.change)))
-            .collect()
-    }
-
-    /// The Segment at `at` in what was built last.
-    fn segment(built: &[Indexed], at: usize) -> &Segment {
-        built
-            .iter()
-            .rev()
-            .find_map(|indexed| indexed.segments.iter().find(|(n, _)| *n == at))
-            .map(|(_, segment)| &**segment)
-            .unwrap()
-    }
-
-    /// Runs the thread's work over what is queued already.
-    fn built(jobs: Vec<Job>) -> Vec<Indexed> {
-        let (sender, queue) = mpsc::channel();
-        for job in jobs {
-            sender.send(job).unwrap();
-        }
-        drop(sender);
-        let mut built = Vec::new();
-        work(queue, None, |event| {
-            if let Event::Indexed(indexed) = event {
-                built.push(indexed);
-            }
-            true
-        });
-        built
-    }
-
-    fn edit(extension: usize, change: u64, edit: Edit) -> Job {
-        Job::Edit {
-            extension: ExtensionId(extension),
-            change,
-            edit,
-        }
-    }
-
-    #[test]
-    fn changes_waiting_together_make_one_version_of_each_segment() {
-        let built = built(vec![
-            edit(0, 1, Edit::Add(vec![item("a")])),
-            edit(1, 2, Edit::Add(vec![item("b")])),
-            edit(0, 3, Edit::Add(vec![item("c")])),
-            edit(0, 4, Edit::Remove(vec!["a".into()])),
-        ]);
-        assert_eq!(versions(&built), [(0, 4), (2, 2)]);
-        let first = &built[0].segments[0].1;
-        assert_eq!(first.find("a"), None);
-        assert!(first.find("c").is_some());
-    }
-
-    #[test]
-    fn a_row_emptied_in_a_version_is_not_taken_in_the_same_one() {
-        let built = built(vec![
-            edit(0, 1, Edit::Add(vec![item("a"), item("b")])),
-            edit(0, 2, Edit::Remove(vec!["a".into()])),
-            edit(0, 3, Edit::Add(vec![item("c")])),
-        ]);
-        let segment = &built[0].segments[0].1;
-        assert_eq!(segment.find("b"), Some(1));
-        assert_eq!(segment.find("c"), Some(2));
-    }
-
-    /// Runs the thread's work over what is queued already, and gives what it
-    /// sent: for each event, the slots of the Items read along with it.
-    fn sent(jobs: Vec<Job>) -> Vec<Vec<Slot>> {
-        let (sender, queue) = mpsc::channel();
-        for job in jobs {
-            sender.send(job).unwrap();
-        }
-        drop(sender);
-        let mut sent = Vec::new();
-        work(queue, None, |event| {
-            let reads = match event {
-                Event::Indexed(indexed) => indexed.reads,
-                Event::Kept(kept) => kept.reads,
-                _ => unreachable!(),
-            };
-            sent.push(reads.iter().map(|read| read.slot).collect());
-            true
-        });
-        sent
-    }
-
-    fn slot(row: Row) -> Slot {
-        Slot { segment: 0, row }
-    }
-
-    #[test]
-    fn items_named_by_a_keyword_or_an_alias_are_read_with_their_version_once() {
-        let mut keyed = item("b");
-        keyed.keyword = Some("bb".into());
-        let sent = sent(vec![
-            Job::Pin(vec![(ExtensionId(0), "c".into())]),
-            edit(0, 1, Edit::Add(vec![item("a"), keyed, item("c")])),
-            edit(0, 2, Edit::Add(vec![item("d")])),
-        ]);
-        // The version, then the Aliases' Items, read already.
-        assert_eq!(sent, [vec![slot(1), slot(2)], vec![]]);
-    }
-
-    const EIGHT: When = When {
-        at: 10 * DAY_SECS,
-        time_of_day: 8 * 3600,
-    };
-
-    /// A plan at eight o'clock, of `rows` picked at eight `picks` times
-    /// each and at no other time, with the Empty query showing `wanted`.
-    fn plan(rows: &[(Row, u32)], learned: &[Row], capacity: usize, wanted: usize) -> Plan {
-        let mut history = History::default();
-        let mut picked = Vec::new();
-        for &(row, picks) in rows {
-            let id = row.to_string();
-            for _ in 0..picks {
-                history.touch("apps", &id, EIGHT);
-            }
-            picked.push(*history.picks("apps", &id).unwrap());
-        }
-        let half_life = history.settings().half_life_secs;
-        Plan {
-            usage: Usage {
-                picked: Arc::new(Picked {
-                    slots: rows
-                        .iter()
-                        .map(|&(row, _)| (slot(row), Counts::Both))
-                        .collect(),
-                    groups: vec![None; rows.len()],
-                    picks: Frecent::new(&picked, half_life),
-                }),
-                others: Vec::new(),
-                wanted,
-                left_out: Vec::new(),
-            },
-            learned: learned.iter().map(|&row| slot(row)).collect(),
-            when: EIGHT,
-            capacity,
-            versions: (0, 0, 0),
-        }
-    }
-
-    fn slots(rows: &[Row]) -> Vec<Slot> {
-        rows.iter().map(|&row| slot(row)).collect()
-    }
-
-    #[test]
-    fn the_hot_items_are_planned_and_read_here() {
-        let sent = sent(vec![
-            edit(0, 1, Edit::Add(vec![item("a"), item("b")])),
-            Job::Plan(plan(&[(1, 1)], &[], 8, 0)),
-        ]);
-        assert_eq!(sent, [vec![], vec![slot(1)]]);
-    }
-
-    #[test]
-    fn learned_choices_take_a_quarter_of_the_hot_items_before_the_habit() {
-        let habit: Vec<(Row, u32)> = (0..10).map(|row| (row, 10 - row)).collect();
-
-        let (hot, _) = plan(&habit, &[20, 21, 22], 8, 0).run();
-
-        assert_eq!(hot, slots(&[0, 1, 2, 3, 4, 5, 20, 21]));
-    }
-
-    #[test]
-    fn learned_choices_take_the_room_the_habit_leaves() {
-        let (hot, _) = plan(&[(0, 1)], &[20, 21, 22, 23], 4, 0).run();
-
-        assert_eq!(hot, slots(&[0, 20, 21, 22]));
-    }
-
-    #[test]
-    fn the_items_the_empty_query_shows_are_hot_before_learned_choices() {
-        let habit = [(0, 5), (1, 4), (2, 3), (3, 2), (4, 1)];
-
-        let (hot, ahead) = plan(&habit, &[20], 4, 4).run();
-
-        let ranked: Vec<&[Source]> = ahead.ranked.iter().map(|(_, ranked)| &ranked[..]).collect();
-        let shown = [0, 1, 2, 3].map(|row| Source::Indexed(slot(row)));
-        assert_eq!(ranked, [shown, shown]);
-        assert_eq!(hot, slots(&[0, 1, 2, 3]));
-    }
-
-    fn app_only(id: &str) -> Item {
-        Item {
-            app_only: true,
-            ..item(id)
-        }
-    }
-
-    #[test]
-    fn an_extensions_items_go_to_the_segment_their_visibility_names() {
-        let built = built(vec![edit(1, 1, Edit::Add(vec![item("a"), app_only("b")]))]);
-
-        assert_eq!(versions(&built), [(2, 1), (3, 1)]);
-        assert!(segment(&built, 2).find("a").is_some());
-        assert_eq!(segment(&built, 2).find("b"), None);
-        assert!(segment(&built, 3).find("b").is_some());
-    }
-
-    #[test]
-    fn an_item_that_changes_visibility_leaves_its_old_segment() {
-        let built = built(vec![
-            edit(0, 1, Edit::Add(vec![item("a"), item("b")])),
-            edit(0, 2, Edit::Add(vec![app_only("a")])),
-        ]);
-
-        assert_eq!(built.len(), 1, "both Segments in one version");
-        assert_eq!(segment(&built, 0).find("a"), None);
-        assert!(segment(&built, 0).find("b").is_some());
-        assert!(segment(&built, 1).find("a").is_some());
-    }
-
-    #[test]
-    fn a_change_to_one_segment_leaves_the_other_alone() {
-        let built = built(vec![edit(0, 1, Edit::Add(vec![app_only("b")]))]);
-
-        assert_eq!(versions(&built), [(1, 1)]);
-    }
-
-    #[test]
-    fn a_change_that_touches_nothing_still_makes_a_version() {
-        let built = built(vec![edit(0, 1, Edit::Remove(vec!["gone".into()]))]);
-
-        assert_eq!(versions(&built), [(0, 1)]);
-    }
-
-    #[test]
-    fn a_cleared_extensions_earlier_changes_are_not_sent() {
-        let built = built(vec![
-            edit(0, 1, Edit::Add(vec![item("a")])),
-            Job::Clear(ExtensionId(0)),
-            edit(1, 2, Edit::Add(vec![item("b")])),
-        ]);
-        assert_eq!(built.len(), 1);
-        assert_eq!(built[0].extension, ExtensionId(1));
-    }
-}
+mod tests;

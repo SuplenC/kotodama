@@ -1,11 +1,24 @@
 //! A connection to an Extension or a Front end once its handshake is done:
 //! one thread writes what the Daemon sends, leaving out what the peer's
 //! protocol version can't read, and the calling thread reads.
+//!
+//! # Owns
+//!
+//! - `pump`: the threads of a connection once its handshake is done, for an Extension or a Front
+//!   end.
+//!
+//! # Not here
+//!
+//! - The handshake: `host.rs` for an Extension, `server.rs` for a Front end.
 
-use std::io::{Read, Write};
-use std::sync::mpsc::{self, SyncSender};
+use std::io::Read;
+use std::io::Write;
+use std::sync::mpsc;
+use std::sync::mpsc::SyncSender;
 
-use kotodama_protocol::{Channel, Error, Since};
+use kotodama_protocol::Channel;
+use kotodama_protocol::Error;
+use kotodama_protocol::Since;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 

@@ -2,13 +2,17 @@
 //! Extension processes. The test Extension is a bash script, so these need
 //! bash 4+, which the dev environment provides.
 
+use std::collections::BTreeMap;
 use std::fs;
 use std::os::unix::fs::symlink;
 use std::os::unix::net::UnixStream;
-use std::path::{Path, PathBuf};
-use std::process::{Child, Command};
+use std::path::Path;
+use std::path::PathBuf;
+use std::process::Child;
+use std::process::Command;
 use std::thread;
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use std::time::Instant;
 
 use kotodama_extension::testing;
 use kotodama_protocol::*;
@@ -137,11 +141,7 @@ fn install_in(extensions: &Path, name: &str, manifest_extra: &str, items: &[Item
     let dir = extensions.join(name);
     fs::create_dir_all(&dir).unwrap();
     fs::copy(fixture(), dir.join("extension.sh")).unwrap();
-    fs::write(
-        dir.join("items.json"),
-        serde_json::to_string(items).unwrap(),
-    )
-    .unwrap();
+    fs::write(dir.join("items.json"), serde_json::to_string(items).unwrap()).unwrap();
     testing::install(
         extensions,
         name,
@@ -167,8 +167,8 @@ struct Client {
 }
 
 impl Client {
-    fn send(&mut self, message: FromFrontEnd) {
-        self.channel.send(&message).unwrap();
+    fn send(&mut self, message: &FromFrontEnd) {
+        self.channel.send(message).unwrap();
     }
 
     fn recv(&mut self) -> ToFrontEnd {
@@ -185,14 +185,11 @@ impl Client {
     }
 
     fn titles(&mut self, query: &str) -> Vec<String> {
-        self.send(FromFrontEnd::Query { text: query.into() });
+        self.send(&FromFrontEnd::Query { text: query.into() });
         let (version, titles) = self.until(|message| match message {
-            ToFrontEnd::Results {
-                version, results, ..
-            } => Some((
-                version,
-                results.into_iter().map(|row| row.item.title).collect(),
-            )),
+            ToFrontEnd::Results { version, results, .. } => {
+                Some((version, results.into_iter().map(|row| row.item.title).collect()))
+            }
             _ => None,
         });
         self.shown = version;
@@ -200,7 +197,7 @@ impl Client {
     }
 
     fn run(&mut self, extension: &str, id: &str, action: &str) {
-        self.send(FromFrontEnd::RunAction {
+        self.send(&FromFrontEnd::RunAction {
             result: ResultRef {
                 extension: extension.into(),
                 id: id.into(),
@@ -210,7 +207,7 @@ impl Client {
                 extension: extension.into(),
                 id: action.into(),
             },
-            arguments: Default::default(),
+            arguments: BTreeMap::default(),
         });
         self.until(|message| (message == ToFrontEnd::Close).then_some(()));
     }
@@ -261,10 +258,7 @@ fn a_killed_extension_never_stalls_the_daemon_and_comes_back_on_its_own() {
     let pid_file = daemon.extension_dir("bookmarks").join("pid");
     let pid = fs::read_to_string(&pid_file).unwrap();
     fs::remove_file(&pid_file).unwrap();
-    Command::new("kill")
-        .args(["-9", pid.trim()])
-        .status()
-        .unwrap();
+    Command::new("kill").args(["-9", pid.trim()]).status().unwrap();
 
     // The daemon keeps answering while the Extension is down, and says so.
     ui.until(|message| match message {
@@ -282,27 +276,18 @@ fn a_killed_extension_never_stalls_the_daemon_and_comes_back_on_its_own() {
 }
 
 #[test]
-fn a_config_change_reaches_the_extension_without_a_restart_and_a_broken_file_keeps_the_last_good_config()
- {
+fn a_config_change_reaches_the_extension_without_a_restart_and_a_broken_file_keeps_the_last_good_config() {
     let root = Daemon::home();
     install(&root, "bookmarks", "", &[]);
     let user_config = root.path().join("config/kotodama");
-    fs::write(
-        user_config.join("a.toml"),
-        "[extensions.bookmarks]\nv = 1\n",
-    )
-    .unwrap();
+    fs::write(user_config.join("a.toml"), "[extensions.bookmarks]\nv = 1\n").unwrap();
     let daemon = Daemon::start(root);
     let dir = daemon.extension_dir("bookmarks");
     wait_for("the first config", || {
         (received(&dir) == [r#"{"config":{"v":1}}"#]).then_some(())
     });
 
-    fs::write(
-        user_config.join("a.toml"),
-        "[extensions.bookmarks]\nv = 2\n",
-    )
-    .unwrap();
+    fs::write(user_config.join("a.toml"), "[extensions.bookmarks]\nv = 2\n").unwrap();
     wait_for("the reloaded config", || {
         (received(&dir).last().map(String::as_str) == Some(r#"{"config":{"v":2}}"#)).then_some(())
     });
@@ -311,16 +296,9 @@ fn a_config_change_reaches_the_extension_without_a_restart_and_a_broken_file_kee
     // file's change doesn't reach the Extension until it is fixed.
     fs::write(user_config.join("c.toml"), "this is not toml").unwrap();
     thread::sleep(Duration::from_millis(300));
-    fs::write(
-        user_config.join("b.toml"),
-        "[extensions.bookmarks]\nv = 3\n",
-    )
-    .unwrap();
+    fs::write(user_config.join("b.toml"), "[extensions.bookmarks]\nv = 3\n").unwrap();
     thread::sleep(Duration::from_millis(500));
-    assert_eq!(
-        received(&dir).last().map(String::as_str),
-        Some(r#"{"config":{"v":2}}"#)
-    );
+    assert_eq!(received(&dir).last().map(String::as_str), Some(r#"{"config":{"v":2}}"#));
     fs::remove_file(user_config.join("c.toml")).unwrap();
     wait_for("the config once the file is fixed", || {
         (received(&dir).last().map(String::as_str) == Some(r#"{"config":{"v":3}}"#)).then_some(())
@@ -382,9 +360,7 @@ fn an_extension_that_never_says_hello_is_killed_restarted_and_dies_with_the_daem
             .unwrap()
             .success()
     };
-    wait_for("the Extension to die with the Daemon", || {
-        (!alive()).then_some(())
-    });
+    wait_for("the Extension to die with the Daemon", || (!alive()).then_some(()));
 }
 
 #[test]
@@ -413,12 +389,7 @@ fn an_extension_installed_or_removed_while_the_daemon_runs_is_picked_up() {
     let mut ui = daemon.connect();
     assert_eq!(ui.titles("kotodama"), Vec::<String>::new());
 
-    install(
-        &daemon.root,
-        "bookmarks",
-        "",
-        &[item("kotodama", "Kotodama")],
-    );
+    install(&daemon.root, "bookmarks", "", &[item("kotodama", "Kotodama")]);
     ui.wait_for_titles("kotodama", &["Kotodama"]);
 
     fs::remove_dir_all(daemon.extension_dir("bookmarks")).unwrap();
@@ -427,20 +398,13 @@ fn an_extension_installed_or_removed_while_the_daemon_runs_is_picked_up() {
 
 /// What each problem in a Status is about.
 fn abouts(problems: &[Problem]) -> Vec<&str> {
-    problems
-        .iter()
-        .map(|problem| problem.about.as_str())
-        .collect()
+    problems.iter().map(|problem| problem.about.as_str()).collect()
 }
 
 #[test]
 fn front_ends_hear_what_is_wrong_and_an_extension_starts_once_its_missing_program_appears() {
     let root = Daemon::home();
-    testing::install(
-        &root.path().join(EXTENSIONS),
-        "broken",
-        "name = \"broken\"\n",
-    );
+    testing::install(&root.path().join(EXTENSIONS), "broken", "name = \"broken\"\n");
     install(&root, "late", "", &[item("late", "Late thing")]);
     let program = extension_dir(&root, "late").join("extension.sh");
     fs::remove_file(&program).unwrap();
@@ -457,10 +421,7 @@ fn front_ends_hear_what_is_wrong_and_an_extension_starts_once_its_missing_progra
         _ => None,
     });
     let abouts = abouts(&problems);
-    assert!(
-        abouts[0].starts_with("history.half_life_days"),
-        "{abouts:?}"
-    );
+    assert!(abouts[0].starts_with("history.half_life_days"), "{abouts:?}");
     assert!(abouts[1].ends_with("broken/manifest.toml"), "{abouts:?}");
     assert_eq!(abouts[2], "extension late");
 
@@ -492,10 +453,7 @@ fn an_extension_a_profile_switch_brings_is_picked_up() {
     assert_eq!(ui.titles("kotodama"), Vec::<String>::new());
 
     // As `ln -sfn` and Nix do it: a new link renamed over the old one.
-    let (new, share) = (
-        daemon.root.path().join("share.new"),
-        daemon.root.path().join("share"),
-    );
+    let (new, share) = (daemon.root.path().join("share.new"), daemon.root.path().join("share"));
     symlink("gen-2", &new).unwrap();
     fs::rename(&new, &share).unwrap();
     ui.wait_for_titles("kotodama", &["Kotodama"]);
@@ -582,7 +540,6 @@ fn aliases_and_quicklinks_follow_the_config_directory_without_a_restart() {
 
 #[test]
 fn an_alias_that_cannot_run_reaches_the_front_end_as_a_row_that_decodes() {
-    // Regression: #152.
     let root = Daemon::home();
     fs::write(
         root.path().join("config/kotodama/keywords.toml"),
@@ -592,7 +549,7 @@ fn an_alias_that_cannot_run_reaches_the_front_end_as_a_row_that_decodes() {
     let daemon = Daemon::start(root);
     let mut ui = daemon.connect();
 
-    ui.send(FromFrontEnd::Query { text: "n".into() });
+    ui.send(&FromFrontEnd::Query { text: "n".into() });
     let results = ui.until(|message| match message {
         ToFrontEnd::Results { results, .. } => Some(results),
         _ => None,
@@ -618,9 +575,7 @@ fn the_usage_log_is_written_once_the_config_turns_it_on() {
     ui.wait_for_titles("kot", &["Kotlin", "Kotodama"]);
     ui.run("bookmarks", "kotodama", "open");
     let state = daemon.root.path().join("state/kotodama");
-    wait_for("the pick on disk", || {
-        state.join("history.json").exists().then_some(())
-    });
+    wait_for("the pick on disk", || state.join("history.json").exists().then_some(()));
     let log = state.join("usage.jsonl");
     assert!(!log.exists(), "the usage log is off by default");
 
@@ -674,10 +629,7 @@ fn a_quicklinks_command_starts_through_the_launch_prefix() {
     )
     .unwrap();
     let mut command = Command::new(env!("CARGO_BIN_EXE_kotodamad"));
-    with_home(&mut command, root.path()).env(
-        "KOTODAMA_LAUNCH_PREFIX",
-        format!("{} --scope", wrapper.display()),
-    );
+    with_home(&mut command, root.path()).env("KOTODAMA_LAUNCH_PREFIX", format!("{} --scope", wrapper.display()));
     let daemon = Daemon {
         child: command.spawn().unwrap(),
         root,
@@ -736,13 +688,10 @@ fn under_socket_activation_the_daemon_serves_the_socket_it_is_handed_and_the_nex
 /// Starts the Daemon with its log in `kotodamad.log` in its home.
 fn start_logged(root: TempDir) -> Daemon {
     let log = fs::File::create(root.path().join("kotodamad.log")).unwrap();
-    let child = with_home(
-        &mut Command::new(env!("CARGO_BIN_EXE_kotodamad")),
-        root.path(),
-    )
-    .stderr(log)
-    .spawn()
-    .unwrap();
+    let child = with_home(&mut Command::new(env!("CARGO_BIN_EXE_kotodamad")), root.path())
+        .stderr(log)
+        .spawn()
+        .unwrap();
     Daemon { child, root }
 }
 
@@ -768,11 +717,7 @@ fn a_front_end_and_an_extension_built_for_protocol_1_0_work_with_this_daemon() {
     let mut reader = BufReader::new(stream.try_clone().unwrap());
     let mut buf = Vec::new();
 
-    frame::write(
-        &mut stream,
-        br#"{"version":1,"minor":0,"formats":["protobuf","json"]}"#,
-    )
-    .unwrap();
+    frame::write(&mut stream, br#"{"version":1,"minor":0,"formats":["protobuf","json"]}"#).unwrap();
     assert!(frame::read(&mut reader, &mut buf).unwrap());
     let hello: Hello = WireFormat::Json.decode(&buf).unwrap();
     assert!(hello.protocol() >= Version::new(1, 0), "{hello:?}");
@@ -783,12 +728,8 @@ fn a_front_end_and_an_extension_built_for_protocol_1_0_work_with_this_daemon() {
     wait_for("Fir in the Results", || {
         frame::write(&mut stream, &query).unwrap();
         loop {
-            assert!(
-                frame::read(&mut reader, &mut buf).unwrap(),
-                "the Daemon hung up"
-            );
-            if let ToFrontEnd::Results { results, .. } = WireFormat::Protobuf.decode(&buf).unwrap()
-            {
+            assert!(frame::read(&mut reader, &mut buf).unwrap(), "the Daemon hung up");
+            if let ToFrontEnd::Results { results, .. } = WireFormat::Protobuf.decode(&buf).unwrap() {
                 let titles: Vec<String> = results.into_iter().map(|row| row.item.title).collect();
                 return (titles == ["Fir"]).then_some(());
             }
@@ -814,12 +755,9 @@ fn a_front_end_built_for_a_newer_major_version_is_turned_away_with_the_reason() 
     let mut received = Vec::new();
     stream.read_to_end(&mut received).unwrap();
     assert!(String::from_utf8_lossy(&received).contains("\"version\""));
-    let reason = format!(
-        "the peer needs protocol {newer}.0, newer than this Daemon's {PROTOCOL_VERSION}: update Kotodama"
-    );
-    wait_for("the reason in the log", || {
-        log(&daemon).contains(&reason).then_some(())
-    });
+    let reason =
+        format!("the peer needs protocol {newer}.0, newer than this Daemon's {PROTOCOL_VERSION}: update Kotodama");
+    wait_for("the reason in the log", || log(&daemon).contains(&reason).then_some(()));
 
     // The Daemon still serves everyone else.
     let mut ui = daemon.connect();
@@ -833,23 +771,15 @@ fn an_extension_built_for_a_newer_major_version_is_turned_away_with_the_reason()
     let script = extension_dir(&root, "future").join("extension.sh");
     let newer = PROTOCOL_VERSION.major + 1;
     let recorded = fs::read_to_string(&script).unwrap();
-    let rewritten = recorded.replace(
-        r#""version":1,"minor":0"#,
-        &format!(r#""version":{newer},"minor":0"#),
-    );
-    assert_ne!(
-        recorded, rewritten,
-        "the recording Extension names its version"
-    );
+    let rewritten = recorded.replace(r#""version":1,"minor":0"#, &format!(r#""version":{newer},"minor":0"#));
+    assert_ne!(recorded, rewritten, "the recording Extension names its version");
     fs::write(&script, rewritten).unwrap();
 
     let daemon = start_logged(root);
     let reason = format!(
         "future: the peer needs protocol {newer}.0, newer than this Daemon's {PROTOCOL_VERSION}: update Kotodama"
     );
-    wait_for("the reason in the log", || {
-        log(&daemon).contains(&reason).then_some(())
-    });
+    wait_for("the reason in the log", || log(&daemon).contains(&reason).then_some(()));
     let mut ui = daemon.connect();
     assert_eq!(ui.titles("fir"), Vec::<String>::new());
 }

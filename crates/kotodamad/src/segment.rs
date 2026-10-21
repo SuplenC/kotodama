@@ -1,7 +1,7 @@
 //! One Extension's Indexed items, laid out for scanning: what a keystroke
 //! reads is worked out once, when an Item arrives, and kept in dense arrays
 //! and one arena of text, so a search runs down them without following a
-//! pointer per Item (ADR 0017).
+//! pointer per Item.
 //!
 //! A Segment is built off the keystroke path and then only read, so a search
 //! can share it with the thread building the next one. Each Extension has its
@@ -10,18 +10,40 @@
 //! Of the rest of an Item, a Segment keeps in memory only what ranking reads:
 //! its id, Identity, keyword and Actions. The whole Item waits on a
 //! [`Shelf`], off the heap, until a Result shows it.
+//!
+//! # Owns
+//!
+//! - [`Segment`]: one Extension's rows, scanned a block at a time, and [`Edit`], a change to them.
+//! - [`Ranked`]: a row's keys for ranking, its texts read on demand.
+//!
+//! # Not here
+//!
+//! - The Segments together and the search: `index.rs`. The payloads: `payload.rs`.
 
-use std::collections::{BTreeSet, HashMap};
+use std::collections::BTreeSet;
+use std::collections::HashMap;
 use std::io;
 use std::path::Path;
 use std::sync::Arc;
 
 use kotodama_protocol::Item;
+use nucleo_matcher::Matcher;
+use nucleo_matcher::Utf32Str;
+use nucleo_matcher::Utf32String;
 use nucleo_matcher::pattern::Pattern;
-use nucleo_matcher::{Matcher, Utf32Str, Utf32String};
 
-use crate::payload::{Place, Shelf, encode};
-use crate::rank::{BLOCK, Filter, Folded, Letters, Mask, Matched, Searched, Text, Texts};
+use crate::payload::Place;
+use crate::payload::Shelf;
+use crate::payload::encode;
+use crate::rank::BLOCK;
+use crate::rank::Filter;
+use crate::rank::Folded;
+use crate::rank::Letters;
+use crate::rank::Mask;
+use crate::rank::Matched;
+use crate::rank::Searched;
+use crate::rank::Text;
+use crate::rank::Texts;
 
 /// Where an Item lives in its Segment. Stable until the Item is removed, and
 /// not taken by another Item until the change after that.
@@ -209,7 +231,7 @@ impl Segment {
     }
 
     /// Starts the next version of the Segment, which Front ends will see
-    /// whole: the rows emptied in the last one are free from now on.
+    /// whole: the rows emptied in the last one are free from here on.
     pub fn next_version(&mut self) {
         self.free.append(&mut self.freed);
     }
@@ -229,7 +251,7 @@ impl Segment {
                     if item.hidden {
                         self.remove(&item.id);
                     } else {
-                        self.add(item, &mut shelved);
+                        self.add(&item, &mut shelved);
                     }
                 }
                 self.shelve(&shelved);
@@ -242,8 +264,8 @@ impl Segment {
         }
         self.compact();
         if self.shelf_garbage * 2 >= self.end.max(SMALL_SHELF) {
-            let shelf = Shelf::new(self.dir.as_deref());
-            if let Err(err) = self.reshelve(shelf) {
+            let fresh = Shelf::new(self.dir.as_deref());
+            if let Err(err) = self.reshelve(fresh) {
                 log::warn!("can't copy Items to a new file: {err}");
             }
         }
@@ -253,38 +275,33 @@ impl Segment {
         self.ids.is_empty()
     }
 
-    fn add(&mut self, item: Item, shelved: &mut Shelved) {
-        let row = match self.ids.get(item.id.as_str()) {
-            Some(&row) => {
-                self.release(row);
+    fn add(&mut self, item: &Item, shelved: &mut Shelved) {
+        let row = if let Some(&row) = self.ids.get(item.id.as_str()) {
+            self.release(row);
+            row
+        } else {
+            let row = if let Some(row) = self.free.pop() {
                 row
-            }
-            None => {
-                let row = match self.free.pop() {
-                    Some(row) => row,
-                    None => {
-                        self.held.push(None);
-                        self.every_letter.push(Letters::NONE);
-                        self.initials.push(Letters::NONE);
-                        self.keys.push(Keys::default());
-                        (self.held.len() - 1) as Row
-                    }
-                };
-                self.ids.insert(item.id.as_str().into(), row);
-                row
-            }
+            } else {
+                self.held.push(None);
+                self.every_letter.push(Letters::NONE);
+                self.initials.push(Letters::NONE);
+                self.keys.push(Keys::default());
+                (self.held.len() - 1) as Row
+            };
+            self.ids.insert(item.id.as_str().into(), row);
+            row
         };
-        let folded = Folded::new(&item);
+        let folded = Folded::new(item);
         let starts = self.starts.len() as u32;
         self.starts.extend(&folded.title_starts);
         self.starts.extend(&folded.words_starts);
         let kind = item.kind.name();
-        let kind = match self.kinds.iter().position(|known| known == kind) {
-            Some(n) => n,
-            None => {
-                self.kinds.push(kind.to_owned());
-                self.kinds.len() - 1
-            }
+        let kind = if let Some(n) = self.kinds.iter().position(|known| known == kind) {
+            n
+        } else {
+            self.kinds.push(kind.to_owned());
+            self.kinds.len() - 1
         } as u16;
         let keys = Keys {
             title: self.push_text(&folded.title),
@@ -311,29 +328,29 @@ impl Segment {
             .identity
             .as_deref()
             .map(|identity| list(&mut self.identities, identity, row));
-        let actions =
-            item.actions
-                .iter()
-                .map(|action| {
-                    let n =
-                        match self.offered.iter().position(|offered| {
-                            offered.kind == kind && *offered.action == *action.id
-                        }) {
-                            Some(n) => n,
-                            None => {
-                                self.offered.push(Offered {
-                                    kind,
-                                    action: action.id.as_str().into(),
-                                    rows: BTreeSet::new(),
-                                });
-                                self.offered.len() - 1
-                            }
-                        };
-                    self.offered[n].rows.insert(row);
-                    n as u32
-                })
-                .collect();
-        encode(&item, &mut shelved.item);
+        let actions = item
+            .actions
+            .iter()
+            .map(|action| {
+                let n = if let Some(n) = self
+                    .offered
+                    .iter()
+                    .position(|offered| offered.kind == kind && *offered.action == *action.id)
+                {
+                    n
+                } else {
+                    self.offered.push(Offered {
+                        kind,
+                        action: action.id.as_str().into(),
+                        rows: BTreeSet::new(),
+                    });
+                    self.offered.len() - 1
+                };
+                self.offered[n].rows.insert(row);
+                n as u32
+            })
+            .collect();
+        encode(item, &mut shelved.item);
         let place = Place {
             at: shelved.at + shelved.bytes.len() as u64,
             len: shelved.item.len() as u32,
@@ -396,17 +413,14 @@ impl Segment {
         if shelved.bytes.is_empty() {
             return;
         }
-        let shelf = Arc::clone(
-            self.shelf
-                .get_or_insert_with(|| Shelf::new(self.dir.as_deref())),
-        );
-        let Err(err) = shelf.put(shelved.at, &shelved.bytes) else {
+        let store = Arc::clone(self.shelf.get_or_insert_with(|| Shelf::new(self.dir.as_deref())));
+        let Err(err) = store.put(shelved.at, &shelved.bytes) else {
             return;
         };
         log::error!("keeping Items in memory: can't write them to their file: {err}");
         let memory = Shelf::in_memory();
         let mut before = Vec::new();
-        let moved = shelf
+        let moved = store
             .read_up_to(0, shelved.at, &mut before)
             .and_then(|()| memory.put(0, &before))
             .and_then(|()| memory.put(shelved.at, &shelved.bytes));
@@ -416,11 +430,11 @@ impl Segment {
         self.shelf = Some(memory);
     }
 
-    /// Moves the payloads rows still hold to `shelf`, dropping the garbage:
+    /// Moves the payloads rows still hold to `to`, dropping the garbage:
     /// one read of the old Shelf and one write of the new.
-    fn reshelve(&mut self, shelf: Arc<Shelf>) -> io::Result<()> {
+    fn reshelve(&mut self, to: Arc<Shelf>) -> io::Result<()> {
         let Some(old) = self.shelf.clone() else {
-            self.shelf = Some(shelf);
+            self.shelf = Some(to);
             self.end = 0;
             return Ok(());
         };
@@ -441,13 +455,13 @@ impl Segment {
             places.push(place);
         }
         let end = kept.len() as u64;
-        shelf.put(0, &kept)?;
+        to.put(0, &kept)?;
         for (held, place) in self.held.iter_mut().zip(places) {
             if let Some(held) = held {
                 held.place = place;
             }
         }
-        self.shelf = Some(shelf);
+        self.shelf = Some(to);
         self.end = end;
         self.shelf_garbage = 0;
         Ok(())
@@ -489,8 +503,7 @@ impl Segment {
                 continue;
             }
             let keys = self.keys[at];
-            let starts = keys.starts as usize
-                ..(keys.starts + keys.title_starts + keys.words_starts) as usize;
+            let starts = keys.starts as usize..(keys.starts + keys.title_starts + keys.words_starts) as usize;
             let moved = Keys {
                 title: self.copy_text(&ascii, &wide, keys.title),
                 words: self.copy_text(&ascii, &wide, keys.words),
@@ -576,11 +589,7 @@ impl Segment {
     /// a block in one vectorised loop; past the last row they are empty, and
     /// never found. Only the rows found are read further.
     #[inline]
-    pub fn rows_where(
-        &self,
-        test: impl Fn(&[Letters; BLOCK], &[Letters; BLOCK]) -> Mask,
-        mut found: impl FnMut(Row),
-    ) {
+    pub fn rows_where(&self, test: impl Fn(&[Letters; BLOCK], &[Letters; BLOCK]) -> Mask, mut found: impl FnMut(Row)) {
         let (letters, letters_left) = self.every_letter.as_chunks::<BLOCK>();
         let (initials, initials_left) = self.initials.as_chunks::<BLOCK>();
         for (n, (letters, initials)) in letters.iter().zip(initials).enumerate() {
@@ -591,11 +600,7 @@ impl Segment {
             last.0[..letters_left.len()].copy_from_slice(letters_left);
             last.1[..initials_left.len()].copy_from_slice(initials_left);
             let filled = (1 << letters_left.len()) - 1;
-            each_bit(
-                test(&last.0, &last.1) & filled,
-                letters.len() * BLOCK,
-                &mut found,
-            );
+            each_bit(test(&last.0, &last.1) & filled, letters.len() * BLOCK, &mut found);
         }
     }
 
@@ -631,12 +636,11 @@ impl Segment {
 
     /// The rows whose Item, of kind `kind`, offers the Action `action`, in row order.
     pub fn offering<'a>(&'a self, kind: &str, action: &str) -> impl Iterator<Item = Row> + 'a {
-        let offered = self.offered.iter().find(|offered| {
-            self.kinds[offered.kind as usize] == kind && *offered.action == *action
-        });
-        offered
-            .into_iter()
-            .flat_map(|offered| offered.rows.iter().copied())
+        let offered = self
+            .offered
+            .iter()
+            .find(|offered| self.kinds[offered.kind as usize] == kind && *offered.action == *action);
+        offered.into_iter().flat_map(|offered| offered.rows.iter().copied())
     }
 
     /// Scores the Item in `row`, if there is one, as [`Texts::score`] does,
@@ -659,13 +663,13 @@ impl Segment {
             subtitle_initials: keys.subtitle_initials,
         };
         let subtitle = || self.text(keys.subtitle);
-        let (score, matched) = searched.score(subtitle, pattern, matcher, filter)?;
+        let (score, hits) = searched.score(subtitle, pattern, matcher, filter)?;
         let ranked = Ranked {
             segment: self,
             row,
             keys,
         };
-        Some((ranked, score, matched))
+        Some((ranked, score, hits))
     }
 
     /// What ranking reads of `row`, if it holds an Item.
@@ -764,89 +768,4 @@ fn unlist(lists: &mut HashMap<Arc<str>, Vec<Row>>, name: &str, row: Row) {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use kotodama_protocol::{Action, ItemKind};
-
-    fn item(id: &str, title: &str, actions: &[&str]) -> Item {
-        Item {
-            id: id.into(),
-            kind: ItemKind::Url {
-                url: format!("https://example.org/{id}"),
-            },
-            identity: None,
-            title: title.into(),
-            subtitle: Some("A subtitle long enough to fill the Shelf".into()),
-            icon: None,
-            keyword: None,
-            keywords: vec![],
-            hidden: false,
-            app_only: false,
-            actions: actions
-                .iter()
-                .map(|&id| Action {
-                    id: id.into(),
-                    title: format!("{id} it"),
-                    shortcut: None,
-                    arguments: vec![],
-                    confirm: false,
-                })
-                .collect(),
-        }
-    }
-
-    fn read(segment: &Segment, id: &str) -> Option<Item> {
-        let (shelf, place) = segment.payload(segment.find(id)?)?;
-        shelf.get(place)
-    }
-
-    #[test]
-    fn items_read_back_as_last_sent_after_the_shelf_drops_its_garbage() {
-        let dir = tempfile::tempdir().unwrap();
-        for mut segment in [Segment::default(), Segment::new(Some(dir.path().into()))] {
-            changed_over_and_over(&mut segment);
-        }
-    }
-
-    fn changed_over_and_over(segment: &mut Segment) {
-        let ids: Vec<String> = (0..100).map(|n| format!("item-{n}")).collect();
-        let shelves: std::collections::HashSet<u64> = (0..20)
-            .map(|round| {
-                let items = ids
-                    .iter()
-                    .map(|id| item(id, &format!("{id} round {round}"), &["open"]))
-                    .collect();
-                segment.edit(Edit::Add(items));
-                segment.shelf.as_ref().unwrap().id()
-            })
-            .collect();
-        assert!(shelves.len() > 1, "the Shelf was copied");
-        for id in &ids {
-            assert_eq!(read(segment, id).unwrap().title, format!("{id} round 19"));
-        }
-    }
-
-    #[test]
-    fn an_earlier_version_reads_its_own_items_after_a_later_one_replaced_them() {
-        let mut segment = Segment::default();
-        segment.edit(Edit::Add(vec![item("a", "First", &["open"])]));
-        let earlier = segment.clone();
-        segment.next_version();
-        segment.edit(Edit::Add(vec![item("a", "Second", &["open"])]));
-        assert_eq!(read(&earlier, "a").unwrap().title, "First");
-        assert_eq!(read(&segment, "a").unwrap().title, "Second");
-    }
-
-    #[test]
-    fn each_action_on_offer_comes_with_the_first_row_whose_item_has_it() {
-        let mut segment = Segment::default();
-        segment.edit(Edit::Add(vec![
-            item("a", "A", &["open"]),
-            item("b", "B", &["open", "copy"]),
-            item("c", "C", &["copy"]),
-        ]));
-        segment.edit(Edit::Remove(vec!["a".into()]));
-        let offered: Vec<_> = segment.offered().collect();
-        assert_eq!(offered, [("url", "open", 1), ("url", "copy", 1)]);
-    }
-}
+mod tests;

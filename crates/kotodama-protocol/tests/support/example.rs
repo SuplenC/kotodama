@@ -1,10 +1,20 @@
 //! Runs one of the example Extensions in `examples/` the way the Daemon does:
 //! its Manifest's command, from its directory, over its stdio.
 
-use std::path::{Path, PathBuf};
-use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
+use std::path::Path;
+use std::path::PathBuf;
+use std::process::Child;
+use std::process::ChildStdin;
+use std::process::ChildStdout;
+use std::process::Command;
+use std::process::Stdio;
 
-use kotodama_protocol::{Channel, FromExtension, Hello, Manifest, ToExtension, WireFormat};
+use kotodama_protocol::Channel;
+use kotodama_protocol::FromExtension;
+use kotodama_protocol::Hello;
+use kotodama_protocol::Manifest;
+use kotodama_protocol::ToExtension;
+use kotodama_protocol::WireFormat;
 
 pub fn dir(example: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -13,8 +23,7 @@ pub fn dir(example: &str) -> PathBuf {
 }
 
 pub fn manifest(example: &str) -> Manifest {
-    let toml =
-        std::fs::read_to_string(dir(example).join("manifest.toml")).expect("read the Manifest");
+    let toml = std::fs::read_to_string(dir(example).join("manifest.toml")).expect("read the Manifest");
     Manifest::from_toml(&toml).expect("a valid Manifest")
 }
 
@@ -36,8 +45,7 @@ impl Example {
             .spawn()
             .expect("start the example");
         let (stdout, stdin) = (child.stdout.take().unwrap(), child.stdin.take().unwrap());
-        let channel =
-            Channel::accept(stdout, stdin, &Hello::new(&WireFormat::ALL)).expect("the handshake");
+        let channel = Channel::accept(stdout, stdin, &Hello::new(&WireFormat::ALL)).expect("the handshake");
         Example {
             child,
             channel: Some(channel),
@@ -48,10 +56,8 @@ impl Example {
         self.channel().format()
     }
 
-    pub fn send(&mut self, message: ToExtension) {
-        self.channel_mut()
-            .send(&message)
-            .expect("send to the example");
+    pub fn send(&mut self, message: &ToExtension) {
+        self.channel_mut().send(message).expect("send to the example");
     }
 
     pub fn recv(&mut self) -> FromExtension {

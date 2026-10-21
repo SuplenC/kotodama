@@ -1,22 +1,64 @@
 //! Finding Extensions: every `<dir>/<anything>/manifest.toml` in the Extension
 //! directories.
+//!
+//! # Owns
+//!
+//! - [`discover`] and [`watch`]: the Extensions on disk, and noticing when they change.
+//! - [`Found`]: an Extension found, with its triggers compiled, and [`Error`], why one is refused.
+//! - [`Stamp`]: telling that a program changed.
+//!
+//! # Not here
+//!
+//! - What the config changes of an Extension: `configured.rs`.
+//! - Starting and stopping Extensions: `daemon/extensions.rs`.
 
 use std::collections::BTreeMap;
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::Path;
+use std::path::PathBuf;
 use std::sync::mpsc::Sender;
-use std::time::{Duration, SystemTime};
+use std::time::Duration;
+use std::time::SystemTime;
 
-use kotodama_extension::watch::{RecursiveMode, Watcher, notify};
-use kotodama_protocol::{Manifest, Problem};
+use kotodama_extension::Chain;
+use kotodama_extension::watch::RecursiveMode;
+use kotodama_extension::watch::Watcher;
+use kotodama_extension::watch::notify;
+use kotodama_protocol::Manifest;
+use kotodama_protocol::Problem;
 use regex::Regex;
 
-use crate::daemon::{Event, OWN};
+use crate::daemon::Event;
+use crate::daemon::OWN;
 use crate::problem::Report;
 
 /// How long the Extension directories must stay still before they are read
 /// again, so a package install that writes many files is read once, whole.
 const SETTLE: Duration = Duration::from_millis(200);
+
+/// Why a Manifest is refused.
+#[derive(Debug, thiserror::Error)]
+pub enum Error {
+    /// It takes the name the Daemon's own Results go by.
+    #[error("the name `{OWN}` is reserved for the Daemon")]
+    ReservedName,
+    /// A Live query trigger isn't a regex.
+    #[error("trigger `{trigger}`")]
+    Trigger {
+        trigger: String,
+        #[source]
+        source: regex::Error,
+    },
+}
+
+impl Error {
+    fn trigger(trigger: &str, source: regex::Error) -> Self {
+        Error::Trigger {
+            trigger: trigger.to_owned(),
+            source,
+        }
+    }
+}
 
 /// An Extension found on disk or defined in the config, with its Live query
 /// triggers compiled.
@@ -40,15 +82,20 @@ pub struct Found {
 impl Found {
     /// Refuses a Manifest whose Live query trigger doesn't compile, or that
     /// takes the name the Daemon's own Results go by.
-    pub fn new(manifest: Manifest, dir: PathBuf) -> Result<Self, String> {
+    ///
+    /// # Errors
+    ///
+    /// When the Manifest takes the Daemon's own name, or a Live query trigger
+    /// isn't a regex.
+    pub fn new(manifest: Manifest, dir: PathBuf) -> Result<Self, Error> {
         if manifest.name == OWN {
-            return Err(format!("the name `{OWN}` is reserved for the Daemon"));
+            return Err(Error::ReservedName);
         }
         let triggers = manifest
             .live_query
             .iter()
             .flat_map(|live| &live.triggers)
-            .map(|trigger| Regex::new(trigger).map_err(|err| format!("trigger `{trigger}`: {err}")))
+            .map(|trigger| Regex::new(trigger).map_err(|err| Error::trigger(trigger, err)))
             .collect::<Result<_, _>>()?;
         Ok(Found {
             manifest,
@@ -73,7 +120,7 @@ impl Found {
         self.dir.join(program)
     }
 
-    /// What the program file is like now, to tell when it changes; `None`
+    /// What the program file is like, to tell when it changes; `None`
     /// while it doesn't exist.
     pub fn stamp(&self) -> Option<Stamp> {
         let metadata = fs::metadata(self.program()).ok()?;
@@ -128,10 +175,7 @@ pub fn discover(dirs: &[PathBuf]) -> Discovered {
         let Ok(entries) = fs::read_dir(dir) else {
             continue;
         };
-        let mut paths: Vec<PathBuf> = entries
-            .filter_map(|entry| entry.ok())
-            .map(|entry| entry.path())
-            .collect();
+        let mut paths: Vec<PathBuf> = entries.filter_map(Result::ok).map(|entry| entry.path()).collect();
         paths.sort();
         for path in paths {
             let manifest_path = path.join("manifest.toml");
@@ -166,13 +210,17 @@ fn load(dir: &Path, manifest_path: &Path, report: &mut Report) -> Result<Found, 
             "`prefix` is the old name of `word`; call it `word`",
         );
     }
-    Found::new(manifest, dir.to_owned())
+    Found::new(manifest, dir.to_owned()).map_err(|err| Chain(&err).to_string())
 }
 
 /// Watches the Extension directories and sends [`Event::Extensions`] after each
 /// change: an Extension directory added, removed or renamed, or a
 /// `manifest.toml` written. Files an Extension writes in its own directory
 /// are ignored. Watching stops when the watcher is dropped.
+///
+/// # Errors
+///
+/// When the watcher can't start.
 pub fn watch(dirs: Vec<PathBuf>, events: Sender<Event>) -> notify::Result<Watcher> {
     let filter = dirs.clone();
     let first = watched(&dirs);

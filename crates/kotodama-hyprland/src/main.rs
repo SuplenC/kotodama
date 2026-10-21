@@ -95,7 +95,7 @@ fn run() -> Result<(), Error> {
     };
     extension.status.unusable(&mut extension.writer, NOT_RUNNING)?;
     #[cfg(target_os = "linux")]
-    follow_hyprland(events)?;
+    follow_hyprland(events).map_err(Error::Io)?;
     #[cfg(not(target_os = "linux"))]
     drop(events);
 

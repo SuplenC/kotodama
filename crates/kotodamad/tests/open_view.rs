@@ -1,13 +1,15 @@
 //! `kotodama open --view <extension>/<item>`: the Daemon runs the Item's
 //! primary Action and opens the menus only once the View it pushes is there,
-//! so their first frame shows it (ADR 0014).
+//! so their first frame shows it.
 
-mod common;
+#[path = "support/harness.rs"]
+#[expect(dead_code, reason = "each test uses part of the harness")]
+mod harness;
 
 use std::collections::BTreeMap;
 use std::time::Duration;
 
-use common::*;
+use harness::*;
 use kotodama_protocol::*;
 
 /// The git Extension's `branches` Item, whose primary Action lists them.
@@ -131,13 +133,7 @@ fn failed(message: &str) -> ToFrontEnd {
 }
 
 fn done(h: &mut Harness, ext: &Ext, invocation: u64, outcome: Outcome) {
-    h.send(
-        ext,
-        FromExtension::ActionDone {
-            invocation,
-            outcome,
-        },
-    );
+    h.send(ext, FromExtension::ActionDone { invocation, outcome });
 }
 
 #[test]
@@ -165,10 +161,7 @@ fn an_action_that_fails_opens_the_search_with_its_message() {
 
     let message = "not a repository".to_owned();
     done(&mut h, &git, invocation, Outcome::Failed { message });
-    assert_eq!(
-        sent(&menu),
-        [opened("git/branches"), failed("not a repository")]
-    );
+    assert_eq!(sent(&menu), [opened("git/branches"), failed("not a repository")]);
 }
 
 #[test]
@@ -260,18 +253,11 @@ fn an_extension_that_never_starts_opens_the_search_in_time_and_says_so() {
     open_on(&mut h, &command, "git/branches");
 
     let wait = Duration::from_secs(1);
-    assert!(
-        h.daemon
-            .next_deadline()
-            .is_some_and(|at| at <= h.now + wait)
-    );
+    assert!(h.daemon.next_deadline().is_some_and(|at| at <= h.now + wait));
     h.advance(wait);
     assert_eq!(
         sent(&menu),
-        [
-            opened("git/branches"),
-            failed("No View `git/branches` turned up"),
-        ]
+        [opened("git/branches"), failed("No View `git/branches` turned up"),]
     );
 }
 
@@ -284,10 +270,7 @@ fn an_extension_that_stops_before_its_view_is_there_opens_the_search_and_says_so
     h.down(&git);
     assert_eq!(
         sent(&menu)[..2],
-        [
-            opened("git/branches"),
-            failed("git stopped before its View opened"),
-        ]
+        [opened("git/branches"), failed("git stopped before its View opened"),]
     );
 }
 
@@ -325,17 +308,10 @@ fn a_toggle_or_open_while_a_view_is_awaited_waits_for_it_so_the_search_never_sho
         ],
         "in the order they were asked for"
     );
-    assert!(
-        !sent(&other).contains(&ToFrontEnd::Toggle),
-        "never to the asker"
-    );
+    assert!(!sent(&other).contains(&ToFrontEnd::Toggle), "never to the asker");
 
     h.front_end_sends(&other, FromFrontEnd::Toggle);
-    assert_eq!(
-        sent(&menu),
-        [ToFrontEnd::Toggle],
-        "nothing awaited any more"
-    );
+    assert_eq!(sent(&menu), [ToFrontEnd::Toggle], "nothing awaited any more");
 }
 
 #[test]
@@ -391,10 +367,7 @@ fn an_item_shows_in_the_search_only_while_it_isnt_hidden() {
     let menu = h.front_end();
     h.add(&calc, vec![calculator_history(true)]);
     h.add(&calc, vec![calculator_history(false)]);
-    assert_eq!(
-        titles(&h.query(&menu, "calculator history")),
-        ["Calculator history"]
-    );
+    assert_eq!(titles(&h.query(&menu, "calculator history")), ["Calculator history"]);
 
     h.add(&calc, vec![calculator_history(true)]);
     assert_eq!(titles(&h.query(&menu, "calculator history")), [""; 0]);

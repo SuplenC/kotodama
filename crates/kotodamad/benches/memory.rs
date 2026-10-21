@@ -8,18 +8,32 @@
 //! them with the baseline like the Daemon's resident memory (see
 //! `scripts/bench-compare`).
 
-use std::alloc::{GlobalAlloc, Layout, System};
+use std::alloc::GlobalAlloc;
+use std::alloc::Layout;
+use std::alloc::System;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::AtomicUsize;
+use std::sync::atomic::Ordering;
 use std::sync::mpsc;
 use std::time::Instant;
 
-use kotodama_protocol::{FromExtension, Item, Manifest, Table};
-use kotodamad::daemon::{Daemon, Desktop, Event, ExtensionId, Launcher, Output};
+use kotodama_protocol::FromExtension;
+use kotodama_protocol::Item;
+use kotodama_protocol::Manifest;
+use kotodama_protocol::Table;
+use kotodamad::daemon::Daemon;
+use kotodamad::daemon::Desktop;
+use kotodamad::daemon::Event;
+use kotodamad::daemon::ExtensionId;
+use kotodamad::daemon::Launcher;
+use kotodamad::daemon::Output;
 use kotodamad::discovery::Found;
-use kotodamad::history::{History, Store};
+use kotodamad::history::History;
+use kotodamad::history::Store;
 use kotodamad::usage::Entry;
 
+#[path = "support/corpus.rs"]
+#[expect(dead_code, reason = "the long titles are for `query.rs`")]
 mod corpus;
 
 /// The system's allocator, counting the bytes in use.
@@ -114,24 +128,21 @@ fn kept(name: &str, items: impl FnOnce() -> Vec<Item>) -> (usize, usize) {
 }
 
 fn main() {
+    type Corpus = fn() -> Vec<Item>;
     // `cargo bench` passes `--bench`; a filter that names neither skips them.
     let filter = std::env::args().skip(1).find(|arg| !arg.starts_with('-'));
-    type Corpus = fn() -> Vec<Item>;
     let corpora: [(&str, &str, Corpus); 2] = [
         ("index/10k_items/heap", "apps", corpus::items),
         ("index/emoji/heap", "emoji", kotodama_emoji::items),
     ];
     for (bench, name, items) in corpora {
-        if filter
-            .as_deref()
-            .is_some_and(|filter| !bench.contains(filter))
-        {
+        if filter.as_deref().is_some_and(|filter| !bench.contains(filter)) {
             continue;
         }
         let (bytes, count) = kept(name, items);
         println!(
             "{bench}: {count} Items, {:.1} MiB, {} bytes per Item",
-            bytes as f64 / (1 << 20) as f64,
+            bytes as f64 / f64::from(1 << 20),
             bytes / count
         );
         println!("test {bench} ... bench: {bytes} bytes (+/- 0)");

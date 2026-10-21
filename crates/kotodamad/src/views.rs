@@ -2,14 +2,31 @@
 //! filtering a list View's Items as the user types into it. A list View is
 //! filtered here, with the search's matcher and Tiers, so typing never waits
 //! on the Extension unless it asked to filter the list itself.
+//!
+//! # Owns
+//!
+//! - [`Views`]: the open Views, and filtering a list View.
+//! - [`Open`]: one open View.
+//!
+//! # Not here
+//!
+//! - Showing a View to the menus: `daemon/from_extension.rs`.
+//! - When a query only narrows the last one: `narrowing.rs`.
 
-use kotodama_protocol::{Item, ListMatch, View, ViewContent};
+use kotodama_protocol::Item;
+use kotodama_protocol::ListMatch;
+use kotodama_protocol::View;
+use kotodama_protocol::ViewContent;
 use nucleo_matcher::Matcher;
-use nucleo_matcher::pattern::{CaseMatching, Normalization, Pattern};
+use nucleo_matcher::pattern::CaseMatching;
+use nucleo_matcher::pattern::Normalization;
+use nucleo_matcher::pattern::Pattern;
 
 use crate::daemon::ExtensionId;
 use crate::narrowing::Narrowing;
-use crate::rank::{self, Haystack, Tiers};
+use crate::rank;
+use crate::rank::Haystack;
+use crate::rank::Tiers;
 
 /// The matches past which none has highlights: they cost as much as the
 /// matching, and rows that far down are seldom seen.
@@ -103,11 +120,7 @@ impl Views {
     /// Replaces the open View with the same id where it is. False if there
     /// is none.
     pub fn update(&mut self, extension: ExtensionId, view: View) -> bool {
-        match self
-            .stack
-            .iter_mut()
-            .find(|open| open.is(extension, &view.id))
-        {
+        match self.stack.iter_mut().find(|open| open.is(extension, &view.id)) {
             Some(open) => {
                 *open = Open::new(extension, view);
                 true
@@ -157,19 +170,14 @@ impl Views {
         let Some(open) = self.stack.iter_mut().find(|open| open.is(extension, id)) else {
             return Vec::new();
         };
-        let items = match &open.view.content {
-            ViewContent::List { items, .. } => items,
-            _ => return Vec::new(),
+        let ViewContent::List { items, .. } = &open.view.content else {
+            return Vec::new();
         };
         let haystacks = open
             .haystacks
             .get_or_insert_with(|| items.iter().map(Haystack::new).collect());
         // Folded like the haystacks, so neither case nor accents matter.
-        let pattern = Pattern::parse(
-            &rank::fold_text(text),
-            CaseMatching::Ignore,
-            Normalization::Never,
-        );
+        let pattern = Pattern::parse(&rank::fold_text(text), CaseMatching::Ignore, Normalization::Never);
         let query = rank::Query::new(text);
         let filter = query.filter();
         let scored = &mut self.scored;
@@ -197,18 +205,14 @@ impl Views {
             .map(|(rank, (_, _, n))| {
                 let mut highlights = Vec::new();
                 let title = haystacks[n as usize].title.slice(..);
-                if rank < HIGHLIGHTED && pattern.indices(title, matcher, &mut highlights).is_some()
-                {
+                if rank < HIGHLIGHTED && pattern.indices(title, matcher, &mut highlights).is_some() {
                     highlights.sort_unstable();
                     highlights.dedup();
                 } else {
                     // Matched by a keyword or the subtitle.
                     highlights.clear();
                 }
-                ListMatch {
-                    item: n,
-                    highlights,
-                }
+                ListMatch { item: n, highlights }
             })
             .collect()
     }

@@ -1,14 +1,36 @@
 //! The open View, the jobs and a Result's Action panel as the plain maps and
 //! lists QML reads them as. They are small and change only on a View, job or
 //! Ctrl+K, so unlike Results they may pass through JavaScript.
+//!
+//! # Owns
+//!
+//! - The keys of each map QML reads: [`view`], [`jobs`], [`actions`] and [`examples`].
+//!
+//! # Not here
+//!
+//! - The Views and jobs themselves: `views`; the Action panel: `rows`.
+//! - The Results, which reach QML through the model's roles: `model`.
 
-use cxx_qt_lib::{QList, QMap, QMapPair_QString_QVariant, QString, QVariant};
-use kotodama_protocol::{Example, FormInput, Job, JobState, Value, ViewContent};
+#![forbid(unsafe_code)]
+
+use cxx_qt_lib::QList;
+use cxx_qt_lib::QMap;
+use cxx_qt_lib::QMapPair_QString_QVariant;
+use cxx_qt_lib::QString;
+use cxx_qt_lib::QVariant;
+use kotodama_protocol::Example;
+use kotodama_protocol::FormInput;
+use kotodama_protocol::Job;
+use kotodama_protocol::JobState;
+use kotodama_protocol::Value;
+use kotodama_protocol::ViewContent;
 
 use crate::rows::Row;
 use crate::views::Views;
 
+/// A JavaScript object, as QML reads a `QVariantMap`.
 pub type Map = QMap<QMapPair_QString_QVariant>;
+/// A JavaScript array, as QML reads a `QVariantList`.
 pub type List = QList<QVariant>;
 
 fn text(value: &str) -> QVariant {
@@ -55,29 +77,24 @@ fn job(extension: &str, job: &Job) -> Map {
 
 /// An intro card's examples, each `{query, result}`.
 pub fn examples(examples: &[Example]) -> List {
-    list(examples.iter().map(|example| {
-        map([
-            ("query", text(&example.query)),
-            ("result", text(&example.result)),
-        ])
-    }))
+    list(
+        examples
+            .iter()
+            .map(|example| map([("query", text(&example.query)), ("result", text(&example.result))])),
+    )
 }
 
 /// The jobs still running, oldest first.
 pub fn jobs(views: &Views) -> List {
-    list(
-        views
-            .running()
-            .map(|(extension, running)| job(extension, running)),
-    )
+    list(views.running().map(|(extension, running)| job(extension, running)))
 }
 
 /// The top View, or an empty map at the search. `kind` is `list`, `form`,
 /// `detail` or `progress`; the other keys depend on it:
 ///
 /// - a list has `filter`, what is typed to filter it;
-/// - a form has `fields`, each `{label, kind, placeholder, secret, options,
-///   value}` with `kind` `text`, `checkbox` or `select`, and `submit`;
+/// - a form has `fields`, each `{label, kind, placeholder, secret, options, value}` with `kind`
+///   `text`, `checkbox` or `select`, and `submit`;
 /// - a detail has `markdown` and `metadata`, each `{label, value}`;
 /// - a progress View has `job`, as [`jobs`] lists them.
 pub fn view(views: &Views) -> Map {
@@ -106,21 +123,18 @@ pub fn view(views: &Views) -> Map {
                 };
                 let (kind, placeholder, secret, options) = match &field.input {
                     FormInput::Text {
-                        placeholder,
-                        secret,
-                        ..
+                        placeholder, secret, ..
                     } => ("text", placeholder.as_deref(), *secret, List::default()),
                     FormInput::Checkbox { .. } => ("checkbox", None, false, List::default()),
                     FormInput::Select { options, .. } => (
                         "select",
                         None,
                         false,
-                        list(options.iter().map(|option| {
-                            map([
-                                ("value", text(&option.value)),
-                                ("label", text(&option.label)),
-                            ])
-                        })),
+                        list(
+                            options
+                                .iter()
+                                .map(|option| map([("value", text(&option.value)), ("label", text(&option.label))])),
+                        ),
                     ),
                 };
                 map([

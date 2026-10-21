@@ -3,14 +3,19 @@
 //! replacing one View with the next, and the Views a Front end that connects
 //! is shown.
 
-mod common;
+#[path = "support/harness.rs"]
+#[expect(dead_code, reason = "each test uses part of the harness")]
+mod harness;
 
+use std::cell::Cell;
 use std::collections::BTreeMap;
+use std::sync::Arc;
 use std::sync::mpsc;
 
-use common::*;
+use harness::*;
 use kotodama_protocol::*;
-use kotodamad::daemon::{Event, FrontEndId};
+use kotodamad::daemon::Event;
+use kotodamad::daemon::FrontEndId;
 
 fn file(id: &str, title: &str) -> Item {
     item(
@@ -190,19 +195,15 @@ fn typing_filters_a_list_view_best_match_first_and_in_the_extensions_order_withi
         matches(&sent[0]),
         (
             "read",
-            vec![
-                (1, vec![0, 1, 2, 3]),
-                (3, vec![0, 1, 2, 3]),
-                (0, vec![2, 3, 4, 5]),
-            ]
+            vec![(1, vec![0, 1, 2, 3]), (3, vec![0, 1, 2, 3]), (0, vec![2, 3, 4, 5]),]
         ),
         "word starts in list order, then the match inside a word; Downloads doesn't match"
     );
     assert!(
-        files.drain().iter().all(|message| !matches!(
-            message,
-            ToExtension::FilterView { .. } | ToExtension::LiveQuery { .. }
-        )),
+        files
+            .drain()
+            .iter()
+            .all(|message| !matches!(message, ToExtension::FilterView { .. } | ToExtension::LiveQuery { .. })),
         "the Extension isn't asked"
     );
 }
@@ -222,9 +223,7 @@ fn typing_on_or_back_matches_what_the_same_text_typed_afresh_does() {
         }
         last
     };
-    let typed = [
-        "r", "re", "rea", "read", "rea", "read", "readm", "read l", "rd",
-    ];
+    let typed = ["r", "re", "rea", "read", "rea", "read", "readm", "read l", "rd"];
     for n in 1..=typed.len() {
         assert_eq!(
             typing(&typed[..n]),
@@ -251,18 +250,11 @@ fn typing_on_narrows_a_list_views_matches_as_it_narrows_the_searchs() {
         let files = h.up(0);
         let ui = h.front_end();
         h.add(&files, items.clone());
-        h.send(
-            &files,
-            FromExtension::PushView(list("recent", items.clone())),
-        );
+        h.send(&files, FromExtension::PushView(list("recent", items.clone())));
         ui.drain();
         let (mut searched, mut filtered) = (Vec::new(), Vec::new());
         for text in texts {
-            searched = h
-                .query(&ui, text)
-                .into_iter()
-                .map(|row| row.item.id)
-                .collect();
+            searched = h.query(&ui, text).into_iter().map(|row| row.item.id).collect();
             filter(&mut h, &ui, "recent", text);
             filtered = matches(&sent(&ui)[0])
                 .1
@@ -302,9 +294,7 @@ fn only_the_first_256_matches_of_a_long_list_have_highlights() {
     let mut h = Harness::new(vec![plain("files")]);
     let files = h.up(0);
     let ui = h.front_end();
-    let notes = (0..300)
-        .map(|n| file(&n.to_string(), &format!("note {n}")))
-        .collect();
+    let notes = (0..300).map(|n| file(&n.to_string(), &format!("note {n}"))).collect();
     h.send(&files, FromExtension::PushView(list("notes", notes)));
     ui.drain();
 
@@ -352,10 +342,7 @@ fn a_list_view_updated_while_filtered_is_filtered_again_in_the_menus_filtering_i
     let sent_filtering = sent(&filtering);
     assert_eq!(sent_filtering.len(), 2, "{sent_filtering:?}");
     assert_eq!(sent_filtering[0], update);
-    assert_eq!(
-        matches(&sent_filtering[1]),
-        ("read", vec![(0, vec![0, 1, 2, 3])])
-    );
+    assert_eq!(matches(&sent_filtering[1]), ("read", vec![(0, vec![0, 1, 2, 3])]));
     assert_eq!(sent(&other), [update], "this one isn't filtering");
 }
 
@@ -427,10 +414,7 @@ fn a_filtered_list_updated_into_another_kind_of_view_is_not_filtered_any_more() 
     // Nor when it is a list again.
     h.send(&files, FromExtension::UpdateView(reading()));
     let sent = self::sent(&ui);
-    assert!(
-        matches!(&sent[..], [ToFrontEnd::UpdateView { .. }]),
-        "{sent:?}"
-    );
+    assert!(matches!(&sent[..], [ToFrontEnd::UpdateView { .. }]), "{sent:?}");
 }
 
 #[test]
@@ -505,14 +489,15 @@ fn replacing_a_view_pops_it_and_pushes_the_next_in_one_message() {
     files.drain();
     run(&mut h, &ui, "files", "readme", "files", "open");
     assert!(
-        files.drain().iter().any(
-            |message| matches!(message, ToExtension::RunAction { item, .. } if item.id == "readme")
-        ),
+        files
+            .drain()
+            .iter()
+            .any(|message| matches!(message, ToExtension::RunAction { item, .. } if item.id == "readme")),
         "the new list's Items run"
     );
 }
 
-/// A Front end that connects now, with what the Daemon sent it on connecting
+/// A Front end that connects, with what the Daemon sent it on connecting
 /// still unread.
 fn connects(h: &mut Harness) -> FrontEnd {
     let id = FrontEndId(1000 + h.next_front_end);
@@ -526,8 +511,8 @@ fn connects(h: &mut Harness) -> FrontEnd {
     FrontEnd {
         id,
         rx,
-        closed: Default::default(),
-        shown: Default::default(),
+        closed: Arc::default(),
+        shown: Cell::default(),
     }
 }
 

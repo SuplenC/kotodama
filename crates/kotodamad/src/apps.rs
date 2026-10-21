@@ -5,26 +5,34 @@
 //!
 //! # Owns
 //!
-//! - [`Apps`]: each Extension's app, from its Manifest and the user's
-//!   `[extensions.<name>]` `word` and `in_search`, and the app a query is
-//!   in.
-//! - [`App::entry`]: the entry Item. [`App::scope`]: what a Front end shows
-//!   inside, the intro card included.
+//! - [`Apps`]: each Extension's app, from its Manifest and the user's `[extensions.<name>]` `word`
+//!   and `in_search`, and the app a query is in.
+//! - [`App::entry`]: the entry Item. [`App::scope`]: what a Front end shows inside, the intro card
+//!   included.
 //!
 //! # Not here
 //!
 //! - Which Segments the search skips: `index.rs`, `Reach`.
-//! - Entering, searching inside and the empty app: `daemon.rs`.
-
-use kotodama_protocol::{
-    APP_ENTRY_KIND, Action, Intro, Item, ItemKind, Manifest, NamespacedKind, Scope, Table, Value,
-    is_valid_word,
-};
+//! - Entering, searching inside and the empty app: `daemon/front_ends.rs`, `daemon/search.rs`,
+//!   `daemon/empty.rs`.
 
 use std::collections::HashMap;
 
+use kotodama_protocol::APP_ENTRY_KIND;
+use kotodama_protocol::Action;
+use kotodama_protocol::Intro;
+use kotodama_protocol::Item;
+use kotodama_protocol::ItemKind;
+use kotodama_protocol::Manifest;
+use kotodama_protocol::NamespacedKind;
+use kotodama_protocol::Scope;
+use kotodama_protocol::Table;
+use kotodama_protocol::Value;
+use kotodama_protocol::is_valid_word;
+
 use crate::config::extension_table;
-use crate::conflict::{Conflict, Holder};
+use crate::conflict::Conflict;
+use crate::conflict::Holder;
 use crate::daemon::ExtensionId;
 use crate::index::SIDES;
 use crate::keywords::Keywords;
@@ -151,9 +159,8 @@ impl Apps {
             .collect();
         asked.sort_by_key(|&(from, name, _)| (from, name));
         let mut held: HashMap<String, Holder> = HashMap::new();
-        let holder_of = |held: &HashMap<String, Holder>, word: &str| {
-            keywords.holder(word).or_else(|| held.get(word).cloned())
-        };
+        let holder_of =
+            |held: &HashMap<String, Holder>, word: &str| keywords.holder(word).or_else(|| held.get(word).cloned());
         let mut lost = Vec::new();
         for (n, (_, name, app)) in asked.iter().enumerate() {
             match holder_of(&held, &app.word) {
@@ -167,6 +174,10 @@ impl Apps {
         let mut conflicts = Vec::new();
         for (n, holder) in lost {
             let (_, name, app) = &mut asked[n];
+            #[expect(
+                clippy::maybe_infinite_iter,
+                reason = "the keywords and the apps hold finitely many words, so one of endless candidates is free"
+            )]
             let instead = (1..)
                 .map(|n| match n {
                     1 => (*name).to_owned(),
@@ -198,12 +209,7 @@ impl Apps {
 impl App {
     /// The app of the Extension of `manifest`, with the word it asks for,
     /// and where that word comes from.
-    fn new(
-        extension: ExtensionId,
-        manifest: &Manifest,
-        config: &Table,
-        report: &mut Report,
-    ) -> (Asked, Self) {
+    fn new(extension: ExtensionId, manifest: &Manifest, config: &Table, report: &mut Report) -> (Asked, Self) {
         let name = &manifest.name;
         let table = extension_table(config, name);
         let configured = match configured_word(&table, name, report) {
@@ -236,9 +242,8 @@ impl App {
         };
         let searched = match in_search {
             Some(true) => [true, true],
-            Some(false) => [false, false],
             None if manifest.in_search => [true, false],
-            None => [false, false],
+            Some(false) | None => [false, false],
         };
         let title = manifest.title.clone().unwrap_or_else(|| name.clone());
         let about = manifest
@@ -306,11 +311,10 @@ impl Apps {
         let start = query.len() - trimmed.len();
         let end = trimmed.find(char::is_whitespace)?;
         let word = &trimmed[..end];
-        let n = self.apps.iter().position(|app| {
-            word.chars()
-                .flat_map(char::to_lowercase)
-                .eq(app.word.chars())
-        })?;
+        let n = self
+            .apps
+            .iter()
+            .position(|app| word.chars().flat_map(char::to_lowercase).eq(app.word.chars()))?;
         let space = trimmed[end..].chars().next().map_or(0, char::len_utf8);
         Some((n, start + end + space))
     }

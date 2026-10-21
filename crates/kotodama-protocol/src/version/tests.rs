@@ -1,6 +1,10 @@
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
+use serde::Serialize;
 
-use super::{PROTOCOL_VERSION, Version, encoding_for, older_minor};
+use super::PROTOCOL_VERSION;
+use super::Version;
+use super::encoding_for;
+use super::older_minor;
 use crate::WireFormat;
 
 /// A message as a later minor version might grow it: `added` arrived in
@@ -28,11 +32,7 @@ fn grown() -> Grown {
 
 #[test]
 fn a_field_newer_than_the_peer_is_left_out_of_what_it_is_sent() {
-    for format in [
-        WireFormat::Protobuf,
-        WireFormat::MessagePack,
-        WireFormat::Json,
-    ] {
+    for format in [WireFormat::Protobuf, WireFormat::MessagePack, WireFormat::Json] {
         let bytes = encoding_for(0, || format.encode(&grown())).expect("encode");
 
         let original: Original = format.decode(&bytes).expect("an older peer reads it");
@@ -45,32 +45,19 @@ fn a_field_newer_than_the_peer_is_left_out_of_what_it_is_sent() {
 fn a_peer_on_the_minor_version_that_added_a_field_is_sent_it() {
     for format in WireFormat::ALL {
         let bytes = encoding_for(1, || format.encode(&grown())).expect("encode");
-        assert_eq!(
-            format.decode::<Grown>(&bytes).expect("decode"),
-            grown(),
-            "{format:?}"
-        );
+        assert_eq!(format.decode::<Grown>(&bytes).expect("decode"), grown(), "{format:?}");
     }
 }
 
 #[test]
 fn every_field_is_sent_outside_an_encoding_for_an_older_peer() {
     let bytes = WireFormat::Postcard.encode(&grown()).expect("encode");
-    assert_eq!(
-        WireFormat::Postcard
-            .decode::<Grown>(&bytes)
-            .expect("decode"),
-        grown()
-    );
+    assert_eq!(WireFormat::Postcard.decode::<Grown>(&bytes).expect("decode"), grown());
 }
 
 #[test]
 fn what_an_older_peer_sends_without_a_newer_field_still_decodes() {
-    for format in [
-        WireFormat::Protobuf,
-        WireFormat::MessagePack,
-        WireFormat::Json,
-    ] {
+    for format in [WireFormat::Protobuf, WireFormat::MessagePack, WireFormat::Json] {
         let bytes = encoding_for(0, || format.encode(&grown())).expect("encode");
 
         let back: Grown = format.decode(&bytes).expect("decode");
@@ -92,5 +79,5 @@ fn only_a_peer_on_an_older_minor_version_of_this_major_is_sent_less() {
     assert!(!older_minor(PROTOCOL_VERSION));
     assert!(!older_minor(Version::new(major, minor + 1)));
     assert!(!older_minor(Version::new(major + 1, 0)));
-    assert!(older_minor(Version::new(major, 0)) == (minor > 0));
+    assert_eq!(older_minor(Version::new(major, 0)), minor > 0);
 }

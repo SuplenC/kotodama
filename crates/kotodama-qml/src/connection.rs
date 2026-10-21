@@ -2,24 +2,54 @@
 //! Daemon sends, turns it into what the model needs, and hands it to the Qt
 //! thread; the Qt thread writes. When the Daemon goes away the thread connects
 //! again, so the menu works whenever the Daemon does.
+//!
+//! # Owns
+//!
+//! - The connection thread: connecting, the handshake, retrying, and batching what arrives
+//!   together.
+//! - [`Update`], each message as the Qt thread takes it, and [`Writer`], the Qt thread's half of
+//!   the socket.
+//!
+//! # Not here
+//!
+//! - What an update does to the menu: `updates`.
+//! - The Wire formats and the framing: `kotodama-protocol`.
 
+#![forbid(unsafe_code)]
+
+use std::fmt;
+use std::io;
 use std::net::Shutdown;
 use std::os::unix::net::UnixStream;
 use std::time::Duration;
 
-use kotodama_protocol::{
-    Channel, ChannelWriter, Error, FromFrontEnd, Hello, Job, ListMatch, Scope, ToFrontEnd, View,
-    WireFormat, socket_path,
-};
+use kotodama_protocol::Channel;
+use kotodama_protocol::ChannelWriter;
+use kotodama_protocol::Error;
+use kotodama_protocol::FromFrontEnd;
+use kotodama_protocol::Hello;
+use kotodama_protocol::Job;
+use kotodama_protocol::ListMatch;
+use kotodama_protocol::Scope;
+use kotodama_protocol::ToFrontEnd;
+use kotodama_protocol::View;
+use kotodama_protocol::WireFormat;
+use kotodama_protocol::socket_path;
 
 use crate::rows::Row;
 use crate::views::Contributed;
 
+/// The wait before connecting again, doubled after each failure in a row up
+/// to [`MAX_RETRY`].
 const FIRST_RETRY: Duration = Duration::from_millis(100);
+/// The longest wait between two tries, so a Daemon that restarts is found
+/// within it.
 const MAX_RETRY: Duration = Duration::from_secs(2);
 /// A Daemon that takes longer than this to read a keystroke has hung. The Qt
 /// thread gives up on the write rather than freeze the menu.
 const WRITE_TIMEOUT: Duration = Duration::from_millis(100);
+/// A Daemon that doesn't answer the handshake within this has hung; the thread
+/// tries again.
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(5);
 /// The most messages handed over at once.
 const MAX_BATCH: usize = 64;
@@ -29,20 +59,23 @@ const PUSH_AFTER_POP: Duration = Duration::from_millis(16);
 
 /// What the connection hands the Qt thread.
 pub enum Update {
+    /// The Daemon answered the handshake; the Qt thread writes through this.
     Connected(Writer),
     /// The Results, their version, and the app the query is in.
     Rows(u32, Vec<Row>, Option<Scope>),
     /// The Extensions that are down, and how many problems there are.
     Status(Vec<String>, usize),
+    /// The Daemon asks the window to close.
     Close,
-    Open {
-        query: String,
-        view: Option<String>,
-    },
+    /// `kotodama open`: the query to show, and the View asked for.
+    Open { query: String, view: Option<String> },
+    /// `kotodama toggle`.
     Toggle,
+    /// Why an Action failed.
     ActionFailed(String),
     /// The Daemon replaces the query, as running an app's entry Item does.
     SetQuery(String),
+    /// A View on top, with the Actions contributed to a list View's Items.
     PushView {
         extension: String,
         view: View,
@@ -68,23 +101,15 @@ pub enum Update {
         text: String,
         matches: Vec<ListMatch>,
     },
-    PopView {
-        extension: String,
-        view: String,
-    },
-    JobProgress {
-        extension: String,
-        job: Job,
-    },
+    /// The Extension popped one of its Views.
+    PopView { extension: String, view: String },
+    /// A job's latest state.
+    JobProgress { extension: String, job: Job },
     /// The change to the History the Toast offers to undo.
-    OfferUndo {
-        change: u64,
-        title: String,
-    },
+    OfferUndo { change: u64, title: String },
     /// The change can't be undone any more.
-    WithdrawUndo {
-        change: u64,
-    },
+    WithdrawUndo { change: u64 },
+    /// The Daemon hung up; the thread connects again.
     Disconnected,
 }
 
@@ -94,11 +119,7 @@ impl Update {
     pub fn signals(&self) -> bool {
         matches!(
             self,
-            Update::Close
-                | Update::Open { .. }
-                | Update::Toggle
-                | Update::ActionFailed(_)
-                | Update::SetQuery(_)
+            Update::Close | Update::Open { .. } | Update::Toggle | Update::ActionFailed(_) | Update::SetQuery(_)
         )
     }
 }
@@ -106,12 +127,27 @@ impl Update {
 /// The Qt thread's half of the connection.
 pub struct Writer {
     channel: ChannelWriter<UnixStream>,
+    /// The socket, shut down when the writer drops.
     stream: UnixStream,
 }
 
 impl Writer {
+    /// Sends `message` to the Daemon.
+    ///
+    /// # Errors
+    ///
+    /// The Daemon is gone, took longer than [`WRITE_TIMEOUT`] to read, or the
+    /// message didn't encode.
     pub fn send(&mut self, message: &FromFrontEnd) -> Result<(), Error> {
         self.channel.send(message)
+    }
+}
+
+impl fmt::Debug for Writer {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Writer")
+            .field("stream", &self.stream)
+            .finish_non_exhaustive()
     }
 }
 
@@ -166,25 +202,48 @@ fn run(deliver: &impl Fn(Vec<Update>) -> bool) {
 
 type Reader = kotodama_protocol::ChannelReader<UnixStream>;
 
+/// Why the thread couldn't connect to the Daemon. Each cause prints as the
+/// error itself, so the log line reads `can't reach the Daemon yet: <cause>`.
+#[derive(Debug, thiserror::Error)]
+enum ConnectError {
+    #[error("XDG_RUNTIME_DIR isn't set")]
+    NoRuntimeDir,
+    #[error(transparent)]
+    Socket(io::Error),
+    #[error(transparent)]
+    Handshake(Error),
+}
+
+impl ConnectError {
+    fn socket(err: io::Error) -> Self {
+        ConnectError::Socket(err)
+    }
+
+    fn handshake(err: Error) -> Self {
+        ConnectError::Handshake(err)
+    }
+}
+
 /// The reader, the socket again for [`more_within`], and the writer.
-fn connect() -> Result<(Reader, UnixStream, Writer), Error> {
-    let socket = socket_path().ok_or_else(|| {
-        Error::Io(std::io::Error::new(
-            std::io::ErrorKind::NotFound,
-            "XDG_RUNTIME_DIR isn't set",
-        ))
-    })?;
-    let stream = UnixStream::connect(socket)?;
-    stream.set_read_timeout(Some(HANDSHAKE_TIMEOUT))?;
+fn connect() -> Result<(Reader, UnixStream, Writer), ConnectError> {
+    let socket = socket_path().ok_or(ConnectError::NoRuntimeDir)?;
+    let stream = UnixStream::connect(socket).map_err(ConnectError::socket)?;
+    stream
+        .set_read_timeout(Some(HANDSHAKE_TIMEOUT))
+        .map_err(ConnectError::socket)?;
     let channel = Channel::handshake(
-        stream.try_clone()?,
-        stream.try_clone()?,
+        stream.try_clone().map_err(ConnectError::socket)?,
+        stream.try_clone().map_err(ConnectError::socket)?,
         &Hello::new(&WireFormat::ALL),
-    )?;
-    stream.set_read_timeout(None)?;
-    stream.set_write_timeout(Some(WRITE_TIMEOUT))?;
+    )
+    .map_err(ConnectError::handshake)?;
+    stream.set_read_timeout(None).map_err(ConnectError::socket)?;
+    stream
+        .set_write_timeout(Some(WRITE_TIMEOUT))
+        .map_err(ConnectError::socket)?;
     let (reader, channel) = channel.split();
-    Ok((reader, stream.try_clone()?, Writer { channel, stream }))
+    let probe = stream.try_clone().map_err(ConnectError::socket)?;
+    Ok((reader, probe, Writer { channel, stream }))
 }
 
 /// Reads until the Daemon hangs up or the model is gone. What has arrived
@@ -192,11 +251,7 @@ fn connect() -> Result<(Reader, UnixStream, Writer), Error> {
 ///
 /// A View the Extension popped waits [`PUSH_AFTER_POP`] for more, as the
 /// Extension may push the next one in the same reply.
-fn read(
-    mut reader: Reader,
-    probe: &UnixStream,
-    deliver: &impl Fn(Vec<Update>) -> bool,
-) -> Result<(), Error> {
+fn read(mut reader: Reader, probe: &UnixStream, deliver: &impl Fn(Vec<Update>) -> bool) -> Result<(), Error> {
     let mut batch = Vec::new();
     loop {
         let message = match reader.recv::<ToFrontEnd>() {
@@ -222,8 +277,7 @@ fn read(
             batch.push(update);
         }
         let popped = matches!(batch.last(), Some(Update::PopView { .. }));
-        let more =
-            reader.has_buffered() || (popped && more_within(&mut reader, probe, PUSH_AFTER_POP));
+        let more = reader.has_buffered() || (popped && more_within(&mut reader, probe, PUSH_AFTER_POP));
         if batch.is_empty() || (more && batch.len() < MAX_BATCH) {
             continue;
         }

@@ -1,8 +1,18 @@
-//! Telling the Daemon whether the Extension can do anything now.
+//! Telling the Daemon whether the Extension can do anything at the moment.
+//!
+//! # Owns
+//!
+//! What the Daemon was last told, and the `status` message for each change.
+//!
+//! # Not here
+//!
+//! What the search does with it, which the Daemon decides.
 
 use std::io::Write;
 
-use kotodama_protocol::{ChannelWriter, Error, FromExtension};
+use kotodama_protocol::ChannelWriter;
+use kotodama_protocol::Error;
+use kotodama_protocol::FromExtension;
 
 /// What the Daemon was last told of whether the Extension can do anything,
 /// so each change is sent once. The search shows the Extension's app only
@@ -45,34 +55,21 @@ impl SentStatus {
     /// # Errors
     ///
     /// When the message can't be written to the Daemon.
-    pub fn noted<W: Write>(
-        &mut self,
-        writer: &mut ChannelWriter<W>,
-        note: impl AsRef<str>,
-    ) -> Result<(), Error> {
+    pub fn noted<W: Write>(&mut self, writer: &mut ChannelWriter<W>, note: impl AsRef<str>) -> Result<(), Error> {
         self.send(writer, true, Some(note.as_ref()))
     }
 
-    /// Says the Extension can't do anything now, and why, such as `Hyprland
+    /// Says the Extension can't do anything at the moment, and why, such as `Hyprland
     /// isn't running`: the search leaves its app out until it says it can.
     ///
     /// # Errors
     ///
     /// When the message can't be written to the Daemon.
-    pub fn unusable<W: Write>(
-        &mut self,
-        writer: &mut ChannelWriter<W>,
-        why: impl AsRef<str>,
-    ) -> Result<(), Error> {
+    pub fn unusable<W: Write>(&mut self, writer: &mut ChannelWriter<W>, why: impl AsRef<str>) -> Result<(), Error> {
         self.send(writer, false, Some(why.as_ref()))
     }
 
-    fn send<W: Write>(
-        &mut self,
-        writer: &mut ChannelWriter<W>,
-        usable: bool,
-        note: Option<&str>,
-    ) -> Result<(), Error> {
+    fn send<W: Write>(&mut self, writer: &mut ChannelWriter<W>, usable: bool, note: Option<&str>) -> Result<(), Error> {
         match self.update(usable, note) {
             Some(message) => writer.send(&message),
             None => Ok(()),
@@ -96,33 +93,4 @@ impl SentStatus {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn each_change_is_sent_once() {
-        let mut status = SentStatus::default();
-
-        let first = status.update(false, Some("Hyprland isn't running"));
-        let again = status.update(false, Some("Hyprland isn't running"));
-        let up = status.update(true, None);
-        let noted = status.update(true, Some("Paused"));
-
-        assert_eq!(
-            first,
-            Some(FromExtension::Status {
-                usable: false,
-                note: Some("Hyprland isn't running".into()),
-            })
-        );
-        assert_eq!(again, None);
-        assert_eq!(
-            up,
-            Some(FromExtension::Status {
-                usable: true,
-                note: None,
-            })
-        );
-        assert!(noted.is_some());
-    }
-}
+mod tests;

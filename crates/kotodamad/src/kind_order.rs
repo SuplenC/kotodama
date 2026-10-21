@@ -1,7 +1,20 @@
 //! Which kinds of Result come first when two match a query equally well: apps
 //! before projects, projects before bookmarks, and bookmarks before files.
+//!
+//! # Owns
+//!
+//! - [`KindOrder`]: the kind order of the `[ranking]` table.
+//! - [`KindPlaces`]: each Segment's kinds by place, worked out per search.
+//!
+//! # Not here
+//!
+//! - The rest of the Result order: `daemon.rs`, `Candidate::rank`.
 
-use kotodama_protocol::{ItemKind, KindName, SHARED_KINDS, Table, Value};
+use kotodama_protocol::ItemKind;
+use kotodama_protocol::KindName;
+use kotodama_protocol::SHARED_KINDS;
+use kotodama_protocol::Table;
+use kotodama_protocol::Value;
 
 use crate::problem::Report;
 
@@ -41,10 +54,7 @@ impl KindOrder {
     /// past the 255th are left out.
     fn new(kinds: &[&str]) -> Self {
         let kinds = &kinds[..kinds.len().min(usize::from(u8::MAX))];
-        let others = kinds
-            .iter()
-            .position(|&kind| kind == OTHERS)
-            .unwrap_or(kinds.len()) as u8;
+        let others = kinds.iter().position(|&kind| kind == OTHERS).unwrap_or(kinds.len()) as u8;
         let mut order = KindOrder {
             shared: [others; SHARED_KINDS.len()],
             namespaced: Vec::new(),
@@ -90,10 +100,7 @@ impl KindOrder {
                         if names.len() > kept {
                             report.add(
                                 "ranking.kinds",
-                                format!(
-                                    "names {} kinds, more than {kept}; the rest are left out",
-                                    names.len()
-                                ),
+                                format!("names {} kinds, more than {kept}; the rest are left out", names.len()),
                             );
                         }
                         order = KindOrder::new(&names);
@@ -137,10 +144,10 @@ impl KindOrder {
 }
 
 /// The place of each kind every Segment of the Index names, by Segment and
-/// kind (see [`Segment::kinds`](crate::segment::Segment::kinds)). Worked out
+/// kind (see `Segment::kinds`). Worked out
 /// per search from the few kinds there are. Ranking then looks up each
 /// Result's place, and doesn't compare kind names.
-#[derive(Default)]
+#[derive(Debug, Default)]
 pub struct KindPlaces {
     places: Vec<Vec<u8>>,
     others: u8,
@@ -179,7 +186,9 @@ impl KindPlaces {
 fn kind_name(value: &Value) -> Result<&str, String> {
     match value {
         Value::String(kind) if kind == OTHERS => Ok(kind),
-        Value::String(kind) => KindName::new(kind.as_str()).map(|_| kind.as_str()),
+        Value::String(kind) => KindName::new(kind.as_str())
+            .map(|_| kind.as_str())
+            .map_err(|err| err.to_string()),
         _ => Err("should be the name of an Item kind, or `*`".to_owned()),
     }
 }

@@ -12,12 +12,9 @@ use serde::de::DeserializeOwned;
 fn round_trip<T: Serialize + DeserializeOwned + PartialEq + Debug>(message: &T) {
     for format in WireFormat::ALL {
         let bytes = format.encode(message).unwrap();
-        let back: T = format.decode(&bytes).unwrap_or_else(|err| {
-            panic!(
-                "{format:?}: {err}: {:?}\n{message:?}",
-                std::error::Error::source(&err)
-            )
-        });
+        let back: T = format
+            .decode(&bytes)
+            .unwrap_or_else(|err| panic!("{format:?}: {err}: {:?}\n{message:?}", std::error::Error::source(&err)));
         assert_eq!(&back, message, "{format:?}");
     }
 }
@@ -169,6 +166,10 @@ fn to_extension_messages() -> Vec<ToExtension> {
 }
 
 fn from_extension_messages() -> Vec<FromExtension> {
+    [item_messages(), view_messages(), job_and_status_messages()].concat()
+}
+
+fn item_messages() -> Vec<FromExtension> {
     vec![
         FromExtension::AddItems { items: items() },
         FromExtension::RemoveItems {
@@ -234,6 +235,11 @@ fn from_extension_messages() -> Vec<FromExtension> {
                 arguments: BTreeMap::from([("name".into(), "demo".into())]),
             },
         },
+    ]
+}
+
+fn view_messages() -> Vec<FromExtension> {
+    vec![
         FromExtension::PushView(view(ViewContent::List {
             items: items(),
             filters_itself: false,
@@ -294,14 +300,17 @@ fn from_extension_messages() -> Vec<FromExtension> {
                 value: "4 KiB".into(),
             }],
         })),
-        FromExtension::UpdateView(view(ViewContent::Progress {
-            job: "install".into(),
-        })),
+        FromExtension::UpdateView(view(ViewContent::Progress { job: "install".into() })),
         FromExtension::PopView { view: "v".into() },
         FromExtension::ReplaceView {
             view: "v".into(),
             with: view(ViewContent::Progress { job: "j".into() }),
         },
+    ]
+}
+
+fn job_and_status_messages() -> Vec<FromExtension> {
+    vec![
         FromExtension::JobProgress(Job {
             id: "install".into(),
             title: "Installing Go 1.23".into(),
@@ -373,6 +382,10 @@ fn from_extension_variant(message: &FromExtension) -> usize {
 const FROM_EXTENSION_VARIANTS: usize = 12;
 
 fn to_front_end_messages() -> Vec<ToFrontEnd> {
+    [results_messages(), menu_and_view_messages()].concat()
+}
+
+fn results_messages() -> Vec<ToFrontEnd> {
     vec![
         ToFrontEnd::Results {
             version: 1,
@@ -411,6 +424,11 @@ fn to_front_end_messages() -> Vec<ToFrontEnd> {
             results: vec![unavailable_row()],
             scope: None,
         },
+    ]
+}
+
+fn menu_and_view_messages() -> Vec<ToFrontEnd> {
+    vec![
         ToFrontEnd::Status {
             down: vec!["calculator".into()],
             problems: vec![Problem {
@@ -492,9 +510,7 @@ fn to_front_end_messages() -> Vec<ToFrontEnd> {
             title: "Forgot “Firefox”".into(),
         },
         ToFrontEnd::WithdrawUndo { change: 3 },
-        ToFrontEnd::SetQuery {
-            text: "emoji ".into(),
-        },
+        ToFrontEnd::SetQuery { text: "emoji ".into() },
         ToFrontEnd::Reached { menus: 1 },
     ]
 }
@@ -669,7 +685,7 @@ fn the_handshake_survives_every_wire_format() {
     round_trip(&Hello::new(&WireFormat::ALL));
 }
 
-/// Other languages read MessagePack with a generic decoder, so it must have the
+/// Other languages read `MessagePack` with a generic decoder, so it must have the
 /// same shape as JSON: named fields, variant names as keys or strings.
 #[test]
 fn messagepack_has_the_same_shape_as_json() {
@@ -691,9 +707,7 @@ fn json<T: Serialize>(message: &T) -> serde_json::Value {
 #[test]
 fn json_messages_are_tagged_by_a_snake_case_key() {
     assert_eq!(
-        json(&FromExtension::RemoveItems {
-            ids: vec!["a".into()]
-        }),
+        json(&FromExtension::RemoveItems { ids: vec!["a".into()] }),
         serde_json::json!({"remove_items": {"ids": ["a"]}})
     );
     assert_eq!(
@@ -785,9 +799,7 @@ fn a_score_outside_zero_to_one_is_rejected() {
                 "actions": [{{"id": "copy", "title": "Copy"}}]}}, "score": {score}}}], "done": true}}}}"#
         );
         assert!(
-            WireFormat::Json
-                .decode::<FromExtension>(bytes.as_bytes())
-                .is_err(),
+            WireFormat::Json.decode::<FromExtension>(bytes.as_bytes()).is_err(),
             "{score}"
         );
     }

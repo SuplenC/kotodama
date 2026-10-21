@@ -6,21 +6,45 @@
 //!
 //! The cdylib can't be linked, so the bench compiles the model's Qt-free
 //! modules itself; whatever it doesn't use is dead code to it.
-#![allow(dead_code, unused_imports)]
 
 #[path = "../src/rows.rs"]
+#[expect(dead_code, reason = "the bench runs the diff, not the rest of the rows' code")]
+#[cfg_attr(
+    test,
+    expect(
+        unused_imports,
+        reason = "checking the benches compiles the unit tests' imports, but not the tests that use them"
+    )
+)]
 mod rows;
 #[path = "../src/views.rs"]
+#[expect(dead_code, reason = "the bench filters a list View, not the rest of the Views' code")]
+#[cfg_attr(
+    test,
+    expect(
+        unused_imports,
+        reason = "checking the benches compiles the unit tests' imports, but not the tests that use them"
+    )
+)]
 mod views;
 
 use std::hint::black_box;
 use std::ops::Range;
 
-use criterion::{Criterion, criterion_group, criterion_main};
-use kotodama_protocol::{Action, Item, ItemKind, ListMatch, View, ViewContent};
-
-use rows::{Model, Rows};
-use views::{Contributed, Open, Views};
+use criterion::Criterion;
+use criterion::criterion_group;
+use criterion::criterion_main;
+use kotodama_protocol::Action;
+use kotodama_protocol::Item;
+use kotodama_protocol::ItemKind;
+use kotodama_protocol::ListMatch;
+use kotodama_protocol::View;
+use kotodama_protocol::ViewContent;
+use rows::Model;
+use rows::Rows;
+use views::Contributed;
+use views::Open;
+use views::Views;
 
 const ITEMS: u32 = 1000;
 
@@ -82,7 +106,7 @@ impl Model for Unheard {
 fn reply(views: &mut Views, rows: &mut Unheard, text: &str, matches: &[ListMatch]) {
     views.set_filter(text);
     views.filtered("clipboard", "history", text, matches.to_vec());
-    let listed = views.top().and_then(Open::listed).unwrap();
+    let listed = views.top().and_then(Open::listed).expect("a list View on top");
     rows::diff(rows, &listed);
 }
 

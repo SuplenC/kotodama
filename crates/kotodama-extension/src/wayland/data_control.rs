@@ -7,52 +7,78 @@
 //! [`OfferMimes`], what a source serves in [`SourceData`]. So the state an
 //! event queue dispatches to only implements [`DataControlHandler`] and
 //! names itself in [`delegate_data_control!`](crate::delegate_data_control).
+//!
+//! # Owns
+//!
+//! Binding either protocol, setting the selection and serving pastes from
+//! it, and turning the events into [`DataControlHandler`] calls.
+//!
+//! # Not here
+//!
+//! The connection and its event queue (`super::display`, the caller); what
+//! a selection is kept or used for.
 
 use std::fs::File;
 use std::io::Write;
-use std::os::fd::{AsFd, OwnedFd};
-use std::sync::{Arc, Mutex};
+use std::os::fd::AsFd;
+use std::os::fd::OwnedFd;
+use std::sync::Arc;
+use std::sync::Mutex;
 use std::thread;
 
+use wayland_client::Connection;
+use wayland_client::Dispatch;
+use wayland_client::Proxy;
+use wayland_client::QueueHandle;
 use wayland_client::globals::GlobalList;
 use wayland_client::protocol::wl_seat::WlSeat;
-use wayland_client::{Connection, Dispatch, Proxy, QueueHandle};
-use wayland_protocols::ext::data_control::v1::client::{
-    ext_data_control_device_v1::{self as ext_device, ExtDataControlDeviceV1},
-    ext_data_control_manager_v1::{self as ext_manager, ExtDataControlManagerV1},
-    ext_data_control_offer_v1::{self as ext_offer, ExtDataControlOfferV1},
-    ext_data_control_source_v1::{self as ext_source, ExtDataControlSourceV1},
-};
-use wayland_protocols_wlr::data_control::v1::client::{
-    zwlr_data_control_device_v1::{self as wlr_device, ZwlrDataControlDeviceV1},
-    zwlr_data_control_manager_v1::{self as wlr_manager, ZwlrDataControlManagerV1},
-    zwlr_data_control_offer_v1::{self as wlr_offer, ZwlrDataControlOfferV1},
-    zwlr_data_control_source_v1::{self as wlr_source, ZwlrDataControlSourceV1},
-};
+use wayland_protocols::ext::data_control::v1::client::ext_data_control_device_v1 as ext_device;
+use wayland_protocols::ext::data_control::v1::client::ext_data_control_device_v1::ExtDataControlDeviceV1;
+use wayland_protocols::ext::data_control::v1::client::ext_data_control_manager_v1 as ext_manager;
+use wayland_protocols::ext::data_control::v1::client::ext_data_control_manager_v1::ExtDataControlManagerV1;
+use wayland_protocols::ext::data_control::v1::client::ext_data_control_offer_v1 as ext_offer;
+use wayland_protocols::ext::data_control::v1::client::ext_data_control_offer_v1::ExtDataControlOfferV1;
+use wayland_protocols::ext::data_control::v1::client::ext_data_control_source_v1 as ext_source;
+use wayland_protocols::ext::data_control::v1::client::ext_data_control_source_v1::ExtDataControlSourceV1;
+use wayland_protocols_wlr::data_control::v1::client::zwlr_data_control_device_v1 as wlr_device;
+use wayland_protocols_wlr::data_control::v1::client::zwlr_data_control_device_v1::ZwlrDataControlDeviceV1;
+use wayland_protocols_wlr::data_control::v1::client::zwlr_data_control_manager_v1 as wlr_manager;
+use wayland_protocols_wlr::data_control::v1::client::zwlr_data_control_manager_v1::ZwlrDataControlManagerV1;
+use wayland_protocols_wlr::data_control::v1::client::zwlr_data_control_offer_v1 as wlr_offer;
+use wayland_protocols_wlr::data_control::v1::client::zwlr_data_control_offer_v1::ZwlrDataControlOfferV1;
+use wayland_protocols_wlr::data_control::v1::client::zwlr_data_control_source_v1 as wlr_source;
+use wayland_protocols_wlr::data_control::v1::client::zwlr_data_control_source_v1::ZwlrDataControlSourceV1;
 
 /// A thread that writes the clipboard to a paste needs little stack.
 const STACK: usize = 64 * 1024;
 
 /// What an event queue's state does with the clipboard's events.
 pub trait DataControlHandler: Sized + 'static {
-    /// The clipboard now holds `offer`, offered as `mimes`. The offer is
+    /// The clipboard changed to `offer`, offered as `mimes`. The offer is
     /// destroyed once this returns; read it with [`Offer::receive`] before.
     fn selected(&mut self, _offer: &Offer, _mimes: Vec<String>) {}
 
-    /// The compositor took the data device away: the clipboard can no longer
-    /// be watched or set on this connection.
+    /// The compositor took the data device away: the clipboard can't be
+    /// watched or set on this connection any more.
     fn finished(&mut self) {}
 }
 
 /// The bound data-control manager and the seat's data device.
+#[derive(Debug)]
 pub enum DataControl {
+    /// ext-data-control, the standard protocol.
     Ext(ExtDataControlManagerV1, ExtDataControlDeviceV1),
+    /// wlr-data-control, on a compositor without ext-data-control.
     Wlr(ZwlrDataControlManagerV1, ZwlrDataControlDeviceV1),
 }
 
 impl DataControl {
     /// Binds ext-data-control, or wlr-data-control if the compositor has
     /// only that, for `seat`.
+    ///
+    /// # Errors
+    ///
+    /// When the compositor has neither, with a message for the log.
     pub fn bind<S>(globals: &GlobalList, seat: &WlSeat, qh: &QueueHandle<S>) -> Result<Self, String>
     where
         S: DataControlHandler
@@ -85,9 +111,7 @@ impl DataControl {
     /// it once the next round trip is done.
     pub fn set_selection<S>(&self, mimes: Vec<String>, data: Vec<u8>, qh: &QueueHandle<S>)
     where
-        S: Dispatch<ExtDataControlSourceV1, SourceData>
-            + Dispatch<ZwlrDataControlSourceV1, SourceData>
-            + 'static,
+        S: Dispatch<ExtDataControlSourceV1, SourceData> + Dispatch<ZwlrDataControlSourceV1, SourceData> + 'static,
     {
         let data = SourceData(Arc::new(data));
         match self {
@@ -110,8 +134,11 @@ impl DataControl {
 }
 
 /// Something on the clipboard, offered by another client.
+#[derive(Debug)]
 pub enum Offer {
+    /// Offered over ext-data-control.
     Ext(ExtDataControlOfferV1),
+    /// Offered over wlr-data-control.
     Wlr(ZwlrDataControlOfferV1),
 }
 
@@ -135,19 +162,19 @@ impl Offer {
 /// The MIME types an offer has announced so far. Public only for
 /// [`delegate_data_control!`](crate::delegate_data_control).
 #[doc(hidden)]
-#[derive(Default)]
+#[derive(Debug, Default)]
 pub struct OfferMimes(Mutex<Vec<String>>);
 
 impl OfferMimes {
     fn add(&self, mime: String) {
         self.0
             .lock()
-            .unwrap_or_else(|poison| poison.into_inner())
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .push(mime);
     }
 
     fn take(&self) -> Vec<String> {
-        std::mem::take(&mut *self.0.lock().unwrap_or_else(|poison| poison.into_inner()))
+        std::mem::take(&mut *self.0.lock().unwrap_or_else(std::sync::PoisonError::into_inner))
     }
 }
 
@@ -155,6 +182,12 @@ impl OfferMimes {
 /// [`delegate_data_control!`](crate::delegate_data_control).
 #[doc(hidden)]
 pub struct SourceData(Arc<Vec<u8>>);
+
+impl std::fmt::Debug for SourceData {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SourceData").field("len", &self.0.len()).finish()
+    }
+}
 
 impl SourceData {
     /// Writes it to a paste, on a thread of its own: a slow reader mustn't

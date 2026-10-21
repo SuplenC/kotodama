@@ -103,6 +103,10 @@ pub mod prost {
     }
 
     #[derive(Clone, PartialEq, ::prost::Message)]
+    #[expect(
+        clippy::struct_field_names,
+        reason = "mirrors `ToFrontEnd::Results`, whose field is `results`"
+    )]
     pub struct Results {
         #[prost(uint32, tag = "1")]
         pub version: u32,
@@ -198,9 +202,7 @@ pub mod prost {
         };
         match &item.kind {
             real::ItemKind::App { desktop_id } => mirror.desktop_id = Some(desktop_id.clone()),
-            real::ItemKind::File { path }
-            | real::ItemKind::Folder { path }
-            | real::ItemKind::Project { path } => {
+            real::ItemKind::File { path } | real::ItemKind::Folder { path } | real::ItemKind::Project { path } => {
                 mirror.path = Some(path.display().to_string());
             }
             real::ItemKind::Window { address } => mirror.address = Some(address.clone()),
@@ -272,8 +274,10 @@ pub mod prost {
 
 /// The protocol's types as müsli derives them, for its `wire` format.
 pub mod musli {
-    use ::musli::{Decode, Encode};
-    use serde::{Deserialize, Serialize};
+    use ::musli::Decode;
+    use ::musli::Encode;
+    use serde::Deserialize;
+    use serde::Serialize;
 
     use super::real;
 
@@ -511,6 +515,10 @@ pub mod bilrost {
     }
 
     #[derive(Clone, Debug, PartialEq, ::bilrost::Message)]
+    #[expect(
+        clippy::struct_field_names,
+        reason = "mirrors `ToFrontEnd::Results`, whose field is `results`"
+    )]
     pub struct Results {
         pub version: u32,
         pub results: Vec<ShownResult>,

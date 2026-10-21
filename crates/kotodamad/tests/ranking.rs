@@ -4,16 +4,22 @@
 //! questionnaire (M1, L3, ...) in its doc comment. The invariants at the end
 //! hold for any query.
 
-mod common;
+#[path = "support/harness.rs"]
+#[expect(dead_code, reason = "each test uses part of the harness")]
+mod harness;
 
 use std::time::Duration;
 
-use common::*;
+use harness::*;
 use kotodama_protocol::*;
 use kotodamad::daemon::Event;
-use kotodamad::rank::{Haystack, Matched, Query, Tier, Tiers};
+use kotodamad::rank::Haystack;
+use kotodamad::rank::Matched;
+use kotodamad::rank::Query;
+use kotodamad::rank::Tier;
+use kotodamad::rank::Tiers;
 
-const DAY: Duration = Duration::from_secs(24 * 60 * 60);
+const DAY: Duration = Duration::from_hours(24);
 
 /// One user's desktop: one Extension, `apps`, and a Front end.
 struct World {
@@ -151,25 +157,15 @@ fn an_exact_keyword_beats_a_title_that_starts_with_the_query() {
         ],
         "",
     );
-    assert_eq!(
-        rows(&mut w, "browser"),
-        ["Firefox", "Browser History Viewer"]
-    );
+    assert_eq!(rows(&mut w, "browser"), ["Firefox", "Browser History Viewer"]);
 }
 
 /// M5
 #[test]
 fn subtitles_are_searched_by_their_words() {
-    let mut w = World::with(
-        vec![with_subtitle(app("Firefox"), "Web Browser"), app("Files")],
-        "",
-    );
+    let mut w = World::with(vec![with_subtitle(app("Firefox"), "Web Browser"), app("Files")], "");
     assert_eq!(rows(&mut w, "web browser"), ["Firefox"]);
-    assert_eq!(
-        rows(&mut w, "eb"),
-        Vec::<String>::new(),
-        "only at the start of a word"
-    );
+    assert_eq!(rows(&mut w, "eb"), Vec::<String>::new(), "only at the start of a word");
 }
 
 /// M6
@@ -240,12 +236,7 @@ fn on_an_equal_match_apps_come_before_projects_bookmarks_and_files() {
     );
     assert_eq!(
         rows(&mut w, "note"),
-        [
-            "Notebook Organizer",
-            "notebook-tools",
-            "Notes Online",
-            "notes.txt"
-        ]
+        ["Notebook Organizer", "notebook-tools", "Notes Online", "notes.txt"]
     );
 }
 
@@ -287,10 +278,7 @@ fn the_kind_order_is_a_setting() {
         "by default, other kinds come between bookmarks and files"
     );
     let mut w = World::with(items(), "[ranking]\nkinds = [\"file\", \"*\", \"app\"]");
-    assert_eq!(
-        rows(&mut w, "note"),
-        ["notes.txt", "Notes Clip", "Notebook Organizer"]
-    );
+    assert_eq!(rows(&mut w, "note"), ["notes.txt", "Notes Clip", "Notebook Organizer"]);
     w.reconfigure("[ranking]\nkinds = [\"apps.clip\", \"app\"]");
     assert_eq!(
         rows(&mut w, "note"),
@@ -338,20 +326,15 @@ fn with_emoji(apps: &[&str], query: &str) -> Vec<String> {
     h.add(&apps_ext, apps.iter().map(|title| app(title)).collect());
     h.add(&emoji, kotodama_emoji::items());
     let ui = h.front_end();
-    titles(&h.query(&ui, query))
-        .into_iter()
-        .map(str::to_owned)
-        .collect()
+    titles(&h.query(&ui, query)).into_iter().map(str::to_owned).collect()
 }
 
-// Regression: #121.
 #[test]
 fn the_emoji_named_as_the_query_comes_first_among_emoji() {
     let rows = with_emoji(&[], "fire");
     assert_eq!(rows[0], "🔥 Fire", "{rows:?}");
 }
 
-// Regression: #121.
 #[test]
 fn an_app_named_as_the_query_comes_before_the_emoji_of_that_name() {
     let rows = with_emoji(&["Fire"], "fire");
@@ -423,17 +406,9 @@ fn use_never_lifts_a_near_miss_above_a_real_match() {
 #[test]
 fn a_query_has_at_most_one_typo_per_four_letters() {
     let mut w = World::new(&["Firefox", "Calculator"]);
-    assert_eq!(
-        rows(&mut w, "fri"),
-        Vec::<String>::new(),
-        "3 letters, no typo"
-    );
+    assert_eq!(rows(&mut w, "fri"), Vec::<String>::new(), "3 letters, no typo");
     assert_eq!(rows(&mut w, "frie"), ["Firefox"], "4 letters, one typo");
-    assert_eq!(
-        rows(&mut w, "cakcuka"),
-        Vec::<String>::new(),
-        "7 letters, one typo"
-    );
+    assert_eq!(rows(&mut w, "cakcuka"), Vec::<String>::new(), "7 letters, one typo");
     assert_eq!(rows(&mut w, "cakcukat"), ["Calculator"], "8 letters, two");
 }
 
@@ -569,11 +544,7 @@ fn picking_the_learned_choice_again_resets_the_count_to_take_over() {
 
     w.pick("fi", "Files");
     w.pick("fi", "Fish");
-    assert_eq!(
-        w.first("fi"),
-        "Fish",
-        "another pick between doesn't reset it"
-    );
+    assert_eq!(w.first("fi"), "Fish", "another pick between doesn't reset it");
 }
 
 /// L7
@@ -908,7 +879,6 @@ fn beside_an_app(titles: &[&str], title: &str, word: &str, query: &str) -> Vec<(
         .collect()
 }
 
-// Regression: #173.
 #[test]
 fn an_application_ranks_above_the_app_whose_word_is_typed() {
     let rows = beside_an_app(&["Calculator"], "Calculator", "calc", "calc");
@@ -921,15 +891,9 @@ fn an_application_ranks_above_the_app_whose_word_is_typed() {
     );
 }
 
-// Regression: #173.
 #[test]
 fn applications_starting_with_an_apps_title_rank_above_it() {
-    let rows = beside_an_app(
-        &["System Monitor", "System Settings"],
-        "System",
-        "system",
-        "system",
-    );
+    let rows = beside_an_app(&["System Monitor", "System Settings"], "System", "system", "system");
     let titles: Vec<&str> = rows.iter().map(|(_, title)| title.as_str()).collect();
     assert_eq!(titles, ["System Monitor", "System Settings", "System"]);
 }
@@ -1012,12 +976,9 @@ fn showing_the_menu_in_another_part_of_the_day_ranks_the_empty_query_again() {
     w.at(8);
     assert_eq!(rows(&mut w, ""), ["Mail", "News", "Calendar", "apps"]);
 
-    w.later(Duration::from_secs(30 * 60));
+    w.later(Duration::from_mins(30));
     w.h.front_end_sends(&w.ui, FromFrontEnd::Shown);
-    assert!(
-        w.ui.results().is_none(),
-        "shown in the same part of the day"
-    );
+    assert!(w.ui.results().is_none(), "shown in the same part of the day");
 
     w.at(20);
     assert!(w.ui.results().is_none(), "nothing is ranked while hidden");
@@ -1025,16 +986,13 @@ fn showing_the_menu_in_another_part_of_the_day_ranks_the_empty_query_again() {
     let evening = w.ui.results().expect("shown in the evening");
     assert_eq!(titles(&evening), ["Music", "Editor", "Games", "apps"]);
 
-    w.later(Duration::from_secs(50 * 60));
+    w.later(Duration::from_mins(50));
     w.h.front_end_sends(&w.ui, FromFrontEnd::Shown);
     assert!(w.ui.results().is_none(), "shown again in the same part");
 
     w.later(DAY);
     w.h.front_end_sends(&w.ui, FromFrontEnd::Shown);
-    assert!(
-        w.ui.results().is_some(),
-        "shown in the same part a day later"
-    );
+    assert!(w.ui.results().is_some(), "shown in the same part a day later");
 }
 
 /// Z1: showing the menu leaves a typed query's Results alone.
@@ -1202,10 +1160,7 @@ fn a_lift_threshold_of_zero_keeps_the_default() {
 /// H4
 #[test]
 fn how_much_the_time_of_day_counts_is_a_setting() {
-    let mut w = World::with(
-        vec![app("Alpha Tool"), app("Beta Tool")],
-        "[history]\ntime_of_day = 0",
-    );
+    let mut w = World::with(vec![app("Alpha Tool"), app("Beta Tool")], "[history]\ntime_of_day = 0");
     for _ in 0..10 {
         w.at(8);
         w.pick("alpha", "Alpha Tool");
@@ -1255,7 +1210,7 @@ impl Calculating {
             h,
             calc,
             ui,
-            calculator: kotodama_calculator::Calculator::new(Default::default()),
+            calculator: kotodama_calculator::Calculator::new(kotodama_calculator::Rates::default()),
         }
     }
 
@@ -1300,7 +1255,7 @@ fn a_bare_number_gives_no_answer_but_an_expression_or_conversion_takes_the_top_r
 // only what real matches leave rows empty for, ranked after every real match.
 
 /// Apps, and the web search Bundled extension, searching Google and then
-/// DuckDuckGo, answering what it is sent.
+/// `DuckDuckGo`, answering what it is sent.
 struct Searching {
     h: Harness,
     web: Ext,
@@ -1356,10 +1311,7 @@ impl Searching {
     }
 
     fn rows(&mut self, query: &str) -> Vec<String> {
-        titles(&self.shown(query))
-            .into_iter()
-            .map(str::to_owned)
-            .collect()
+        titles(&self.shown(query)).into_iter().map(str::to_owned).collect()
     }
 
     fn pick(&mut self, query: &str, title: &str) {
@@ -1369,14 +1321,7 @@ impl Searching {
             .find(|row| row.item.title == title)
             .unwrap_or_else(|| panic!("no row {title:?} in {:?}", titles(&rows)));
         let id = row.item.id.clone();
-        run(
-            &mut self.h,
-            &self.ui,
-            "web-search",
-            &id,
-            "web-search",
-            "open",
-        );
+        run(&mut self.h, &self.ui, "web-search", &id, "web-search", "open");
         self.ui.drain();
         self.web.drain();
     }
@@ -1388,11 +1333,7 @@ fn web_search_is_offered_below_the_real_matches_when_they_leave_rows_empty() {
     let mut w = Searching::new(&["Firefox", "Terminal"]);
     assert_eq!(
         w.rows("fire"),
-        [
-            "Firefox",
-            "Search Google for fire",
-            "Search DuckDuckGo for fire"
-        ]
+        ["Firefox", "Search Google for fire", "Search DuckDuckGo for fire"]
     );
 }
 
@@ -1406,17 +1347,12 @@ fn web_search_is_offered_for_a_query_nothing_matches() {
     );
 }
 
-/// V3, ADR 0013
 #[test]
 fn web_search_ranks_below_a_near_miss() {
     let mut w = Searching::new(&["Firefox"]);
     assert_eq!(
         w.rows("fierfox"),
-        [
-            "Firefox",
-            "Search Google for fierfox",
-            "Search DuckDuckGo for fierfox"
-        ]
+        ["Firefox", "Search Google for fierfox", "Search DuckDuckGo for fierfox"]
     );
 }
 
@@ -1525,10 +1461,7 @@ fn a_late_real_match_goes_above_web_search_on_screen() {
         },
     );
     let rows = ui.results().unwrap();
-    assert_eq!(
-        titles(&rows),
-        ["Zebra crossing", "Search DuckDuckGo for zebra"]
-    );
+    assert_eq!(titles(&rows), ["Zebra crossing", "Search DuckDuckGo for zebra"]);
 }
 
 /// V3: picking a search for a query never stops what the user learned
@@ -1575,10 +1508,7 @@ fn an_address_opens_in_the_first_row_with_its_searches_last() {
     let rows = w.rows("example.com");
     assert_eq!(rows[0], "Open example.com");
     // The rows are full, so no search is offered.
-    assert!(
-        rows[1..].iter().all(|row| row.starts_with("Example.com")),
-        "{rows:?}"
-    );
+    assert!(rows[1..].iter().all(|row| row.starts_with("Example.com")), "{rows:?}");
 }
 
 // Invariants, over a desktop's worth of apps and a range of queries.
@@ -1649,15 +1579,12 @@ const QUERIES: &[&str] = &[
 ];
 
 /// A one-letter query only matches at a word start; the next letter may
-/// match inside a word (#80).
+/// match inside a word.
 #[test]
 fn typing_on_from_one_letter_finds_matches_inside_words() {
     let mut w = World::new(&["Terminal", "Steam"]);
     assert_eq!(rows(&mut w, "t"), ["Terminal"]);
-    assert_eq!(
-        rows(&mut w, "te"),
-        World::new(&["Terminal", "Steam"]).rows("te")
-    );
+    assert_eq!(rows(&mut w, "te"), World::new(&["Terminal", "Steam"]).rows("te"));
     assert_eq!(rows(&mut w, "te"), ["Terminal", "Steam"]);
 }
 
@@ -1695,11 +1622,7 @@ fn with_nothing_learned_a_better_match_is_never_below_a_worse_one() {
                 let haystack = Haystack::new(&row.item);
                 tiers
                     .item(&haystack, &row.item, &folded, Matched::ALL)
-                    .or_else(|| {
-                        tiers
-                            .near_miss(&haystack, &row.item, &folded)
-                            .then_some(Tier::NearMiss)
-                    })
+                    .or_else(|| tiers.near_miss(&haystack, &row.item, &folded).then_some(Tier::NearMiss))
                     .unwrap_or_else(|| panic!("{:?} doesn't match {query:?}", row.item.title))
                     .coarse()
             })

@@ -10,17 +10,34 @@
 //! inside a measured query.
 
 use std::path::PathBuf;
-use std::sync::mpsc::{self, Receiver};
-use std::time::{Duration, Instant};
+use std::sync::mpsc;
+use std::sync::mpsc::Receiver;
+use std::time::Duration;
+use std::time::Instant;
 
-use kotodama_protocol::{
-    FromExtension, FromFrontEnd, Item, Manifest, PROTOCOL_VERSION, Table, ToFrontEnd, View,
-    ViewContent, WireFormat,
-};
-use kotodamad::clock::{Clock, DAY_SECS, When};
-use kotodamad::daemon::{Daemon, Desktop, Event, ExtensionId, FrontEndId, Launcher, Output};
+use kotodama_protocol::FromExtension;
+use kotodama_protocol::FromFrontEnd;
+use kotodama_protocol::Item;
+use kotodama_protocol::Manifest;
+use kotodama_protocol::PROTOCOL_VERSION;
+use kotodama_protocol::Table;
+use kotodama_protocol::ToFrontEnd;
+use kotodama_protocol::View;
+use kotodama_protocol::ViewContent;
+use kotodama_protocol::WireFormat;
+use kotodamad::clock::Clock;
+use kotodamad::clock::DAY_SECS;
+use kotodamad::clock::When;
+use kotodamad::daemon::Daemon;
+use kotodamad::daemon::Desktop;
+use kotodamad::daemon::Event;
+use kotodamad::daemon::ExtensionId;
+use kotodamad::daemon::FrontEndId;
+use kotodamad::daemon::Launcher;
+use kotodamad::daemon::Output;
 use kotodamad::discovery::Found;
-use kotodamad::history::{History, Store};
+use kotodamad::history::History;
+use kotodamad::history::Store;
 use kotodamad::usage::Entry;
 
 use crate::corpus;
@@ -51,7 +68,6 @@ pub const START: u64 = 1_792_485_000;
 /// The Extensions every Setup runs: `apps` holds the corpus, `clipboard`
 /// whatever a bench sends it.
 pub const APPS: ExtensionId = ExtensionId(0);
-#[allow(dead_code)] // query.rs alone
 pub const CLIPBOARD: ExtensionId = ExtensionId(1);
 /// The emoji Extension, which `Setup::with_emoji` runs too.
 const EMOJI: ExtensionId = ExtensionId(2);
@@ -122,7 +138,6 @@ impl Setup {
 
     /// The corpus, and the emoji Extension's Items beside it, as the Daemon
     /// with `config` holds them.
-    #[allow(dead_code)] // instructions.rs alone
     pub fn with_emoji(config: Table) -> Self {
         let mut setup = Self::running(
             &["apps", "clipboard", "emoji"],
@@ -248,7 +263,6 @@ impl Setup {
     }
 
     /// Pushes the corpus as a list View, as `apps/all`.
-    #[allow(dead_code)] // query.rs alone
     pub fn push_list(&mut self) {
         self.daemon.handle(
             Event::FromExtension {
@@ -269,7 +283,6 @@ impl Setup {
     }
 
     /// Types `text` into the list View and encodes the Daemon's matches.
-    #[allow(dead_code)] // query.rs alone
     pub fn filter(&mut self, text: &str) -> usize {
         self.daemon.handle(
             Event::FromFrontEnd {
@@ -292,7 +305,6 @@ impl Setup {
 
     /// `kotodama open --query <query>`: the menu opens on it, in the app
     /// whose word it starts with.
-    #[allow(dead_code)] // instructions.rs alone
     pub fn open(&mut self, query: &str) {
         self.daemon.handle(
             Event::FromFrontEnd {
@@ -308,7 +320,6 @@ impl Setup {
     }
 
     /// `kotodama toggle`: the menu opens on the Empty query.
-    #[allow(dead_code)] // query.rs alone
     pub fn toggle(&mut self) {
         self.daemon.handle(
             Event::FromFrontEnd {

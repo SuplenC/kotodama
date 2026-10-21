@@ -25,9 +25,11 @@
 //! - Re-reading the Extension directories when `[paths]` changes: `lib.rs`.
 
 use std::env;
-use std::path::{Path, PathBuf};
+use std::path::Path;
+use std::path::PathBuf;
 
-use kotodama_protocol::{Table, Value};
+use kotodama_protocol::Table;
+use kotodama_protocol::Value;
 
 use crate::problem::Report;
 
@@ -124,6 +126,17 @@ impl Overrides {
     }
 }
 
+/// Why a path the Daemon needs has no place.
+#[derive(Debug, thiserror::Error)]
+pub enum Error {
+    /// Nothing names the socket.
+    #[error("XDG_RUNTIME_DIR isn't set, nor `[paths] socket`")]
+    NoSocket,
+    /// A path falls back on the home directory, and there is none.
+    #[error("HOME isn't set")]
+    NoHome,
+}
+
 /// The config directories, least important first: `dir`, as `--config`
 /// names it, else `KOTODAMA_CONFIG_DIR`, else `$XDG_CONFIG_DIRS/kotodama`
 /// and then `$XDG_CONFIG_HOME/kotodama`. One named directory is the whole
@@ -132,7 +145,7 @@ impl Overrides {
 /// # Errors
 ///
 /// When neither `XDG_CONFIG_HOME` nor `HOME` is set.
-pub fn config_dirs(dir: Option<PathBuf>) -> Result<Vec<PathBuf>, String> {
+pub fn config_dirs(dir: Option<PathBuf>) -> Result<Vec<PathBuf>, Error> {
     let named = dir.or_else(|| {
         env::var_os(CONFIG_DIR_VAR)
             .filter(|dir| !dir.is_empty())
@@ -154,13 +167,12 @@ impl Paths {
     /// When the socket has no place: neither `KOTODAMA_SOCKET`, `[paths]
     /// socket` nor `XDG_RUNTIME_DIR` is set; or when `HOME` is needed and
     /// isn't set.
-    pub fn new(config_dirs: Vec<PathBuf>, overrides: &Overrides) -> Result<Self, String> {
+    pub fn new(config_dirs: Vec<PathBuf>, overrides: &Overrides) -> Result<Self, Error> {
         let socket = match env::var_os("KOTODAMA_SOCKET").filter(|socket| !socket.is_empty()) {
             Some(socket) => PathBuf::from(socket),
             None => match &overrides.socket {
                 Some(socket) => socket.clone(),
-                None => kotodama_protocol::socket_path()
-                    .ok_or("XDG_RUNTIME_DIR isn't set, nor `[paths] socket`")?,
+                None => kotodama_protocol::socket_path().ok_or(Error::NoSocket)?,
             },
         };
         let state = match &overrides.state_dir {
@@ -207,24 +219,17 @@ fn path(value: &Value) -> Result<PathBuf, &'static str> {
         return Err(WANTED);
     };
     let path = match text.strip_prefix("~/") {
-        Some(rest) => {
-            PathBuf::from(env::var_os("HOME").ok_or("starts with `~/`, but HOME isn't set")?)
-                .join(rest)
-        }
+        Some(rest) => PathBuf::from(env::var_os("HOME").ok_or("starts with `~/`, but HOME isn't set")?).join(rest),
         None => PathBuf::from(text),
     };
-    if path.is_absolute() {
-        Ok(path)
-    } else {
-        Err(WANTED)
-    }
+    if path.is_absolute() { Ok(path) } else { Err(WANTED) }
 }
 
 /// `$var`, or `fallback` in the home directory when it is unset or empty.
-fn xdg_home(var: &str, fallback: &str) -> Result<PathBuf, String> {
+fn xdg_home(var: &str, fallback: &str) -> Result<PathBuf, Error> {
     match env::var_os(var).filter(|dir| !dir.is_empty()) {
         Some(dir) => Ok(PathBuf::from(dir)),
-        None => Ok(PathBuf::from(env::var_os("HOME").ok_or("HOME isn't set")?).join(fallback)),
+        None => Ok(PathBuf::from(env::var_os("HOME").ok_or(Error::NoHome)?).join(fallback)),
     }
 }
 
@@ -244,73 +249,4 @@ fn search_path(var: &str, default: &str) -> Vec<PathBuf> {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn overrides(toml: &str) -> (Overrides, Vec<String>) {
-        let config = crate::config::parse(toml).unwrap();
-        let mut report = Report::new();
-        let overrides = Overrides::from_config(&config, &mut report);
-        let abouts = report
-            .into_problems()
-            .into_iter()
-            .map(|problem| problem.about)
-            .collect();
-        (overrides, abouts)
-    }
-
-    #[test]
-    fn paths_reads_directories_and_refuses_relative_ones() {
-        let (overrides, problems) = overrides(
-            "[paths]\nextension_dirs = [\"/opt/ext\", \"ext\"]\ndefault_extension_dirs = false\n\
-             state_dir = \"/var/lib/kotodama\"\ncache_dir = \"cache\"\nsocket = \"/run/k.sock\"\n",
-        );
-
-        assert_eq!(
-            overrides,
-            Overrides {
-                extension_dirs: vec![PathBuf::from("/opt/ext")],
-                default_extension_dirs: false,
-                state_dir: Some(PathBuf::from("/var/lib/kotodama")),
-                cache_dir: None,
-                socket: Some(PathBuf::from("/run/k.sock")),
-            }
-        );
-        assert_eq!(problems, ["paths.cache_dir", "paths.extension_dirs[1]"]);
-    }
-
-    #[test]
-    fn extension_dirs_from_the_config_come_after_the_default_ones_unless_those_are_off() {
-        let config_dirs = [
-            PathBuf::from("/etc/xdg/kotodama"),
-            PathBuf::from("/home/me/.config/kotodama"),
-        ];
-        let mut overrides = Overrides {
-            extension_dirs: vec![PathBuf::from("/opt/ext")],
-            ..Overrides::default()
-        };
-
-        let dirs = extension_dirs(&config_dirs, &overrides);
-        assert_eq!(
-            dirs[dirs.len() - 2..],
-            [
-                PathBuf::from("/home/me/.config/kotodama/extensions"),
-                PathBuf::from("/opt/ext")
-            ]
-        );
-
-        overrides.default_extension_dirs = false;
-        assert_eq!(
-            extension_dirs(&config_dirs, &overrides),
-            [PathBuf::from("/opt/ext")]
-        );
-    }
-
-    #[test]
-    fn a_named_config_dir_is_the_whole_config() {
-        assert_eq!(
-            config_dirs(Some(PathBuf::from("/tmp/conf"))).unwrap(),
-            [PathBuf::from("/tmp/conf")]
-        );
-    }
-}
+mod tests;

@@ -1,5 +1,17 @@
 //! URL templates and opening URLs, shared by the Daemon's Quicklinks and the
 //! Extensions that open web pages, so a template means the same everywhere.
+//!
+//! # Owns
+//!
+//! The query placeholder, percent-encoding, and the command that opens a
+//! URL.
+//!
+//! # Not here
+//!
+//! Starting that command (`crate::launch`); the Quicklinks themselves (the
+//! Daemon).
+
+use std::fmt::Write as _;
 
 /// The placeholder a URL template takes the typed query in.
 pub const PLACEHOLDER: &str = "{query}";
@@ -22,33 +34,11 @@ pub fn percent_encode(text: &str) -> String {
         if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'.' | b'_' | b'~') {
             encoded.push(byte as char);
         } else {
-            encoded.push_str(&format!("%{byte:02X}"));
+            let _ = write!(encoded, "%{byte:02X}");
         }
     }
     encoded
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn spaces_ampersands_and_non_ascii_are_encoded_as_utf_8_bytes() {
-        assert_eq!(
-            fill("https://example.com/?q={query}", "rock & roll żółw"),
-            "https://example.com/?q=rock%20%26%20roll%20%C5%BC%C3%B3%C5%82w"
-        );
-    }
-
-    #[test]
-    fn unreserved_characters_stay_and_the_rest_are_encoded() {
-        assert_eq!(percent_encode("a-b.c_d~e"), "a-b.c_d~e");
-        assert_eq!(percent_encode("a+b=c?d#e/f%"), "a%2Bb%3Dc%3Fd%23e%2Ff%25");
-    }
-
-    #[test]
-    fn every_placeholder_is_filled_and_a_template_without_one_is_unchanged() {
-        assert_eq!(fill("{query}/{query}", "a b"), "a%20b/a%20b");
-        assert_eq!(fill("https://github.com", "x"), "https://github.com");
-    }
-}
+mod tests;

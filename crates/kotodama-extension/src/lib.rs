@@ -2,31 +2,39 @@
 //! does. The Bundled extensions are built on it, and an Extension installed
 //! separately can be too.
 //!
-//! - [`main`] keeps resident memory down, names the Extension in what it logs,
-//!   and turns the run's error into the exit code.
-//! - [`connect`] does the handshake on stdio and starts a thread that reads
-//!   the Daemon's messages into a channel, which the Extension's own threads
-//!   (a scan, a watcher, a finished download) send their [`Event::Own`]s to as
-//!   well. The Extension handles one event at a time, so nothing is shared.
-//! - [`SentItems`] sends Indexed items as changes: only the Items added or
-//!   changed since the last time, and the ids of the ones gone.
-//! - [`SentStatus`] tells the Daemon whether the Extension can do anything
-//!   now, as when it needs a setting the user hasn't made, so the search
-//!   leaves its app out until it can.
-//! - [`config`] reads settings from the Extension's config table, logging the
-//!   ones of the wrong shape.
+//! - [`main`] keeps resident memory down, names the Extension in what it logs, and turns the run's
+//!   error into the exit code.
+//! - [`connect`] does the handshake on stdio and starts a thread that reads the Daemon's messages
+//!   into a channel, which the Extension's own threads (a scan, a watcher, a finished download)
+//!   send their [`Event::Own`]s to as well. The Extension handles one event at a time, so nothing
+//!   is shared.
+//! - [`SentItems`] sends Indexed items as changes: only the Items added or changed since the last
+//!   time, and the ids of the ones gone.
+//! - [`SentStatus`] tells the Daemon whether the Extension can do anything at the moment, as when
+//!   it needs a setting the user hasn't made, so the search leaves its app out until it can.
+//! - [`config`] reads settings from the Extension's config table, logging the ones of the wrong
+//!   shape.
 //! - [`dirs`] finds where the Extension keeps its state and cache.
-//! - [`launch`] starts the programs Actions run, detached from the Extension,
-//!   each in a systemd scope of its own ([`scope`], over [`dbus`]) when
-//!   there is a user manager to make one.
-//! - `watch` (with the `watch` feature) watches directories, and acts once
-//!   they settle after a change.
+//! - [`launch`] starts the programs Actions run, detached from the Extension, each in a systemd
+//!   scope of its own ([`scope`], over [`dbus`]) when there is a user manager to make one.
+//! - `watch` (with the `watch` feature) watches directories, and acts once they settle after a
+//!   change.
 //!
 //! An Extension is installed as a directory of its own in
 //! `$XDG_DATA_DIRS/kotodama/extensions/` or `~/.config/kotodama/extensions/`,
 //! holding its `manifest.toml` and, by the Bundled extensions' convention,
 //! its binary beside it, which the Manifest runs as
 //! `command = ["./<binary>"]`.
+//!
+//! # Owns
+//!
+//! Running an Extension's process and its connection to the Daemon, and the
+//! pieces every Extension shares, each in its module.
+//!
+//! # Not here
+//!
+//! The protocol itself, its messages and Wire formats
+//! (`kotodama_protocol`); what any one Extension does.
 //!
 //! A whole Extension, which offers one Item titled by its config:
 //!
@@ -95,20 +103,27 @@ pub mod watch;
 pub mod wayland;
 
 use std::fmt::Display;
-use std::io::{self, Stdout};
+use std::io;
+use std::io::Stdout;
 use std::path::Path;
 use std::process::ExitCode;
 use std::sync::OnceLock;
-use std::sync::mpsc::{self, Receiver, Sender};
+use std::sync::mpsc;
+use std::sync::mpsc::Receiver;
+use std::sync::mpsc::Sender;
 use std::thread;
 
-use kotodama_protocol::{Channel, ChannelWriter, Error, Hello, ToExtension, WireFormat};
-
 pub use items::SentItems;
+use kotodama_protocol::Channel;
+use kotodama_protocol::ChannelWriter;
+use kotodama_protocol::Error;
+use kotodama_protocol::Hello;
+use kotodama_protocol::ToExtension;
+use kotodama_protocol::WireFormat;
 pub use status::SentStatus;
 
 /// Small, as the threads here only wait, and enough for decoding the deepest
-/// message serde_json allows.
+/// message `serde_json` allows.
 pub const STACK_SIZE: usize = 256 * 1024;
 
 /// What sends messages to the Daemon.
@@ -128,11 +143,21 @@ pub enum Event<T> {
 
 /// The connection to the Daemon, once the handshake is done.
 pub struct Connection<T> {
+    /// Sends the Extension's messages to the Daemon.
     pub writer: Writer,
     /// Sends to `received`, for the Extension's own threads. The Daemon's
     /// messages arrive there already.
     pub events: Sender<Event<T>>,
+    /// Every event, in the order it happened, for the Extension to handle.
     pub received: Receiver<Event<T>>,
+}
+
+impl<T> std::fmt::Debug for Connection<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Connection")
+            .field("writer", &self.writer)
+            .finish_non_exhaustive()
+    }
 }
 
 /// Runs an Extension: keeps its resident memory down, names it `name` in what
@@ -159,6 +184,10 @@ pub fn main<E: Display>(name: &'static str, run: impl FnOnce() -> Result<(), E>)
 /// Extension sent ([`ToExtension::Rejected`]), its reason is logged, and the
 /// message still arrives as an [`Event::Message`] for an Extension that
 /// does more with it.
+///
+/// # Errors
+///
+/// When the handshake fails, or the reading thread can't start.
 pub fn connect<T: Send + 'static>() -> Result<Connection<T>, Error> {
     let channel = Channel::handshake(io::stdin(), io::stdout(), &Hello::new(&WireFormat::ALL))?;
     let (mut reader, writer) = channel.split();
@@ -187,7 +216,8 @@ pub fn connect<T: Send + 'static>() -> Result<Connection<T>, Error> {
                 }
             }
             let _ = messages.send(Event::Hangup);
-        })?;
+        })
+        .map_err(Error::Io)?;
     Ok(Connection {
         writer,
         events,
@@ -236,10 +266,7 @@ pub fn name() -> &'static str {
             .next()
             .as_deref()
             .and_then(|program| Path::new(program).file_name())
-            .map_or_else(
-                || "extension".to_owned(),
-                |name| name.to_string_lossy().into_owned(),
-            )
+            .map_or_else(|| "extension".to_owned(), |name| name.to_string_lossy().into_owned())
     })
 }
 

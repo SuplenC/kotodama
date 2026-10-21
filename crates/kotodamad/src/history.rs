@@ -4,20 +4,39 @@
 //!
 //! Times are passed in by the caller, as [`When`], so the History is the same
 //! in tests as on a real clock.
+//!
+//! # Owns
+//!
+//! - [`History`]: picks, Learned choices and Frecency, and its [`Settings`].
+//! - [`Change`]: one change to it, and undoing it.
+//! - [`Store`] and [`Disk`]: saving it off the Daemon's thread.
+//!
+//! # Not here
+//!
+//! - The Usage log: `usage.rs`.
+//! - Ranking by what it learned: `daemon/search.rs`, `most_used.rs`.
 
 use std::collections::HashMap;
-use std::hash::{BuildHasherDefault, DefaultHasher};
-use std::path::{Path, PathBuf};
-use std::sync::mpsc::{self, Sender};
-use std::{fs, io};
+use std::fs;
+use std::hash::BuildHasherDefault;
+use std::hash::DefaultHasher;
+use std::io;
+use std::path::Path;
+use std::path::PathBuf;
+use std::sync::mpsc;
+use std::sync::mpsc::Sender;
 
-use kotodama_protocol::{Table, Value};
-use serde::{Deserialize, Serialize};
+use kotodama_protocol::Table;
+use kotodama_protocol::Value;
+use serde::Deserialize;
+use serde::Serialize;
 
-use crate::clock::{DAY_SECS, When};
+use crate::clock::DAY_SECS;
+use crate::clock::When;
 use crate::host::spawn;
 use crate::problem::Report;
-use crate::usage::{self, Entry};
+use crate::usage;
+use crate::usage::Entry;
 
 const DAY: f64 = DAY_SECS as f64;
 
@@ -197,7 +216,7 @@ pub type ResultKey = (String, String);
 pub const IDENTITIES: &str = "*";
 
 /// A map by name that hashes with fixed keys rather than a random seed per
-/// process: SipHash as fast as `HashMap`'s own, but a lookup runs the same
+/// process: `SipHash` as fast as `HashMap`'s own, but a lookup runs the same
 /// instructions in every Daemon, so the empty query's instruction count is
 /// the same from run to run.
 type ByName<V> = HashMap<String, V, BuildHasherDefault<DefaultHasher>>;
@@ -263,9 +282,7 @@ fn parts(time_of_day: u32) -> [(usize, f64); 2] {
 /// part on another day, or the same moment in another time zone.
 pub fn part_of_day(when: When) -> (u64, u32) {
     let part_secs = (DAY_SECS / PARTS as u64) as u32;
-    let started = when
-        .at
-        .saturating_sub(u64::from(when.time_of_day % part_secs));
+    let started = when.at.saturating_sub(u64::from(when.time_of_day % part_secs));
     (started, when.time_of_day / part_secs)
 }
 
@@ -291,6 +308,7 @@ pub struct Habit {
 
 impl Habit {
     /// What two ways to one Result add up to.
+    #[must_use]
     pub fn and(self, other: Habit) -> Habit {
         Habit {
             near_now: self.near_now + other.near_now,
@@ -299,6 +317,7 @@ impl Habit {
     }
 
     /// The more used of the two, for each count.
+    #[must_use]
     pub fn max(self, other: Habit) -> Habit {
         Habit {
             near_now: self.near_now.max(other.near_now),
@@ -306,7 +325,7 @@ impl Habit {
         }
     }
 
-    /// Most used near now first, then most used overall.
+    /// Most used near the current time first, then most used overall.
     pub fn rank(&self, other: &Habit) -> std::cmp::Ordering {
         other
             .near_now
@@ -459,9 +478,7 @@ impl Frecent {
             for (column, &share) in frecent.parts.iter_mut().zip(&picks.parts) {
                 column.push(share);
             }
-            frecent
-                .most
-                .push(picks.parts.iter().copied().max().unwrap_or(0));
+            frecent.most.push(picks.parts.iter().copied().max().unwrap_or(0));
         }
         frecent
     }
@@ -513,11 +530,7 @@ impl Frecent {
         out.resize(len, T::default());
         // Sliced to one length, so the loop reads them without bounds checks.
         let (out, decayed, score) = (&mut out[..len], &self.decayed[..len], &self.score[..len]);
-        let (first, second, most) = (
-            &self.parts[first][..len],
-            &self.parts[second][..len],
-            &self.most[..len],
-        );
+        let (first, second, most) = (&self.parts[first][..len], &self.parts[second][..len], &self.most[..len]);
         // HAZARD: vectorised (NEON `fmul`/`fdiv`/`fcmgt`, SSE2
         // `mulpd`/`divpd`): no branch, call or early exit in this loop. It is
         // the empty query's per-Result work: 25k instructions for 2,000
@@ -527,11 +540,7 @@ impl Frecent {
             let count = if count < score[n] { count } else { score[n] };
             let read = near_first * f64::from(first[n]) + near_second * f64::from(second[n]);
             let usual = read / (whole * f64::from(most[n]));
-            let usual = if most[n] == 0 || usual > 1.0 {
-                1.0
-            } else {
-                usual
-            };
+            let usual = if most[n] == 0 || usual > 1.0 { 1.0 } else { usual };
             out[n] = with(count, usual);
         }
     }
@@ -622,20 +631,14 @@ impl Learned {
         when: When,
         settings: &Settings,
     ) -> Option<Learned> {
-        let made_choice = after.choice.as_ref() == Some(picked)
-            && before.and_then(|before| before.choice.as_ref()) != Some(picked);
+        let made_choice =
+            after.choice.as_ref() == Some(picked) && before.and_then(|before| before.choice.as_ref()) != Some(picked);
         if !made_choice || self.choice.as_ref() != Some(picked) {
             return self.clone().take_off(picked, when, settings.half_life_secs);
         }
         let mut restored = before.cloned().unwrap_or_else(|| Learned::empty(after.at));
         // The picks of `picked` since, as its strength grew past the pick's.
-        let grown = f64::from(self.strength)
-            - decay(
-                after.strength.into(),
-                after.at,
-                self.at,
-                settings.half_life_secs,
-            );
+        let grown = f64::from(self.strength) - decay(after.strength.into(), after.at, self.at, settings.half_life_secs);
         for _ in 0..grown.round().max(0.0) as u32 {
             restored.add(picked, &[], self.at, settings);
         }
@@ -703,7 +706,7 @@ impl History {
         &self.settings
     }
 
-    /// Changes how the History learns and counts from now on. What it kept
+    /// Changes how the History learns and counts from here on. What it kept
     /// stays: picks already made decay at the new half-life, and counts
     /// towards a Learned choice are compared with the new ones at the next
     /// pick.
@@ -720,30 +723,15 @@ impl History {
     /// [`Settings::picks_to_learn`] times for one query becomes its Learned
     /// choice, and one picked [`Settings::picks_to_take_over`] times since the
     /// choice was last picked replaces it. Returns the change, to undo it.
-    pub fn pick(
-        &mut self,
-        extension: &str,
-        id: &str,
-        query: &str,
-        above: &[ResultKey],
-        when: When,
-    ) -> Change {
+    pub fn pick(&mut self, extension: &str, id: &str, query: &str, above: &[ResultKey], when: When) -> Change {
         let mut change = self.bump(extension, id, when);
         let at = when.at;
 
         let key = query_key(query);
         if !key.is_empty() {
             let before = self.learned.get(&key).cloned();
-            let learned = self
-                .learned
-                .entry(key.clone())
-                .or_insert_with(|| Learned::empty(at));
-            learned.add(
-                &(extension.to_owned(), id.to_owned()),
-                above,
-                at,
-                &self.settings,
-            );
+            let learned = self.learned.entry(key.clone()).or_insert_with(|| Learned::empty(at));
+            learned.add(&(extension.to_owned(), id.to_owned()), above, at, &self.settings);
             let after = Some(learned.clone());
             change.learned.push(Replaced { key, before, after });
             if let Some(pick) = &mut change.pick {
@@ -776,10 +764,7 @@ impl History {
                 after: Some(picks),
             }],
             learned: Vec::new(),
-            pick: Some(Pick {
-                when,
-                learned: None,
-            }),
+            pick: Some(Pick { when, learned: None }),
         }
     }
 
@@ -804,9 +789,7 @@ impl History {
     /// for them or count towards one. What other Learned choices were picked
     /// over stays.
     pub fn forget(&mut self, keys: &[ResultKey]) -> Change {
-        self.forget_where(|(extension, id)| {
-            keys.iter().any(|key| key.0 == extension && key.1 == id)
-        })
+        self.forget_where(|(extension, id)| keys.iter().any(|key| key.0 == extension && key.1 == id))
     }
 
     /// Forgets every Result `forgotten` is true for, as [`forget`](Self::forget) does.
@@ -852,7 +835,7 @@ impl History {
     /// Undoes a change: puts back what it replaced, except where the History
     /// changed again since. There, a change that records a pick takes that
     /// one pick off, so withdrawing the first of two launches keeps the
-    /// second; any other change leaves the entry as it is now.
+    /// second; any other change leaves the entry as it is.
     pub fn undo(&mut self, change: Change) {
         self.version += 1;
         let half_life = self.settings.half_life_secs;
@@ -939,8 +922,7 @@ impl History {
             .learned
             .iter()
             .filter(|(learned_for, _)| {
-                !key.is_empty()
-                    && (learned_for.starts_with(key) || key.starts_with(learned_for.as_str()))
+                !key.is_empty() && (learned_for.starts_with(key) || key.starts_with(learned_for.as_str()))
             })
             .filter_map(|(learned_for, learned)| {
                 let (extension, id) = learned.choice.as_ref()?;
@@ -949,20 +931,13 @@ impl History {
                     Choice {
                         extension,
                         id,
-                        strength: decay(
-                            learned.strength.into(),
-                            learned.at,
-                            at,
-                            self.settings.half_life_secs,
-                        ),
+                        strength: decay(learned.strength.into(), learned.at, at, self.settings.half_life_secs),
                         passed_over: &learned.passed_over,
                     },
                 ))
             })
             .collect();
-        choices.sort_by(|(a_len, a), (b_len, b)| {
-            b.strength.total_cmp(&a.strength).then(b_len.cmp(a_len))
-        });
+        choices.sort_by(|(a_len, a), (b_len, b)| b.strength.total_cmp(&a.strength).then(b_len.cmp(a_len)));
         choices.into_iter().map(|(_, choice)| choice).collect()
     }
 
@@ -972,9 +947,7 @@ impl History {
         let mut change = Change::default();
         for (extension, ids) in self.picks.drain() {
             for (id, picks) in ids {
-                change
-                    .picks
-                    .push(Replaced::gone((extension.clone(), id), picks));
+                change.picks.push(Replaced::gone((extension.clone(), id), picks));
             }
         }
         for (query, learned) in self.learned.drain() {
@@ -991,10 +964,7 @@ impl History {
         if results > max_results {
             let at = self.picked().map(|(.., p)| p.at).max().unwrap_or(0);
             let half_life = self.settings.half_life_secs;
-            let mut scores: Vec<f64> = self
-                .picked()
-                .map(|(.., p)| p.count(at, half_life))
-                .collect();
+            let mut scores: Vec<f64> = self.picked().map(|(.., p)| p.count(at, half_life)).collect();
             let cut = results - max_results;
             scores.select_nth_unstable_by(cut, f64::total_cmp);
             let floor = scores[cut];
@@ -1018,9 +988,7 @@ impl History {
             self.learned.retain(|query, learned| {
                 let keep = learned.at >= floor;
                 if !keep {
-                    change
-                        .learned
-                        .push(Replaced::gone(query.clone(), learned.clone()));
+                    change.learned.push(Replaced::gone(query.clone(), learned.clone()));
                 }
                 keep
             });
@@ -1120,6 +1088,7 @@ pub fn load(path: &Path) -> History {
 /// Saves that pile up while the disk is slow are written once, latest only.
 /// The Usage log goes to a file of its own, on another thread, started only
 /// once there is something to log.
+#[derive(Debug)]
 pub struct Disk {
     saves: Sender<Vec<u8>>,
     usage: PathBuf,
@@ -1185,439 +1154,8 @@ fn write(path: &Path, bytes: &[u8]) -> io::Result<()> {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    const HOUR: u32 = 3600;
-
-    /// `hour` seconds into day `day`, in UTC.
-    fn when(day: u64, hour: u32) -> When {
-        When {
-            at: 1_792_368_000 + day * DAY_SECS + u64::from(hour),
-            time_of_day: hour,
-        }
-    }
-
-    #[test]
-    fn a_part_of_the_day_starts_every_three_hours_of_local_time() {
-        let nine = when(0, 9 * HOUR);
-        assert_eq!(part_of_day(nine), part_of_day(when(0, 11 * HOUR + 3599)));
-        assert_ne!(part_of_day(nine), part_of_day(when(0, 12 * HOUR)));
-        assert_ne!(part_of_day(nine), part_of_day(when(1, 9 * HOUR)));
-        for ahead in [HOUR / 2, 3 * HOUR] {
-            let in_another_zone = When {
-                time_of_day: nine.time_of_day + ahead,
-                ..nine
-            };
-            assert_ne!(part_of_day(nine), part_of_day(in_another_zone), "{ahead}");
-        }
-    }
-
-    #[test]
-    fn the_next_part_of_the_day_starts_where_this_one_ends() {
-        assert_eq!(next_part(when(0, 10 * HOUR)), when(0, 12 * HOUR));
-        assert_eq!(next_part(when(0, 9 * HOUR)), when(0, 12 * HOUR));
-        assert_eq!(next_part(when(0, 23 * HOUR)), when(1, 0));
-        let started = next_part(when(0, 10 * HOUR));
-        assert_ne!(part_of_day(started), part_of_day(when(0, 12 * HOUR - 1)));
-        assert_eq!(part_of_day(started), part_of_day(when(0, 14 * HOUR)));
-    }
-
-    /// 2,000 Results, the most the History keeps, picked one to seven
-    /// times each over two months at all times of day, some for a query.
-    fn picked_2000() -> History {
-        let mut history = History::default();
-        for n in 0..2000u64 {
-            for k in 0..1 + n % 7 {
-                let day = (n * 13 + k * 5) % 60;
-                let hour = ((n * 7 + k * 11) % 24) as u32 * HOUR + (n % 3600) as u32;
-                let id = format!("item-{n}");
-                if n % 10 == 0 {
-                    history.pick("apps", &id, &format!("q{}", n % 50), &[], when(day, hour));
-                } else {
-                    history.touch("apps", &id, when(day, hour));
-                }
-            }
-        }
-        history
-    }
-
-    /// Every Result, by its Frecency and Habit at `when`, then the Learned
-    /// choices for a few queries, each with what it counts.
-    fn ranked(history: &History, when: When) -> Vec<String> {
-        let half_life = history.settings.half_life_secs;
-        let mut results: Vec<_> = history
-            .picked()
-            .map(|(_, id, picks)| {
-                let habit = picks.habit(when, half_life);
-                let frecency = picks.frecency(when, &history.settings);
-                (frecency, habit.near_now, habit.overall, id.to_owned())
-            })
-            .collect();
-        results.sort_by(|a, b| {
-            b.0.total_cmp(&a.0)
-                .then(b.1.total_cmp(&a.1))
-                .then(a.3.cmp(&b.3))
-        });
-        let learned = (0..50)
-            .flat_map(|n| history.learned(&format!("q{n}"), when.at))
-            .map(|choice| format!("{}/{} {}", choice.extension, choice.id, choice.strength));
-        results
-            .into_iter()
-            .map(|(frecency, near_now, overall, id)| {
-                format!("{id} {frecency} {near_now} {overall}")
-            })
-            .chain(learned)
-            .collect()
-    }
-
-    #[test]
-    fn a_saved_and_reloaded_history_ranks_identically() {
-        let history = picked_2000();
-        let json = serde_json::to_string(&history).expect("the History encodes");
-        let reloaded: History = serde_json::from_str(&json).expect("the History decodes");
-        for at in [when(60, 9 * HOUR), when(75, 22 * HOUR + 1234)] {
-            assert_eq!(ranked(&reloaded, at), ranked(&history, at));
-        }
-    }
-
-    #[test]
-    fn a_history_kept_with_full_precision_scores_loads() {
-        let history: History = serde_json::from_str(
-            r#"{"picks":{"apps":{"firefox":{"score":481.8121234736919,"at":1792368000}}},
-            "learned":{"fi":{"choice":["apps","firefox"],"strength":3.141592653589793,
-            "contenders":[],"at":1792368000}}}"#,
-        )
-        .expect("an old History decodes");
-        let at = when(0, 0);
-        assert_eq!(
-            history
-                .picks("apps", "firefox")
-                .expect("the picks are kept")
-                .count(at.at, DAY),
-            481.8121337890625
-        );
-        assert_eq!(history.learned("fi", at.at)[0].strength, 3.1415927410125732);
-    }
-
-    #[test]
-    fn decayed_together_picks_count_as_each_on_its_own() {
-        let history = picked_2000();
-        let picks: Vec<Picks> = history.picked().map(|(.., picks)| picks).collect();
-        let settings = history.settings;
-        let frecent = Frecent::new(&picks, settings.half_life_secs);
-        let (mut habits, mut frecency) = (Vec::new(), Vec::new());
-        // Also before some of the picks: a clock set back.
-        for at in [when(30, 3 * HOUR), when(60, 9 * HOUR), when(400, 17 * HOUR)] {
-            frecent.habits(at, &mut habits);
-            frecent.frecency(at, settings.time_of_day, &mut frecency);
-            for (n, picks) in picks.iter().enumerate() {
-                let alone = picks.habit(at, settings.half_life_secs);
-                let close = |a: f64, b: f64| (a - b).abs() <= 1e-12 * b.abs().max(1.0);
-                assert!(close(habits[n].overall, alone.overall), "{n}");
-                assert!(close(habits[n].near_now, alone.near_now), "{n}");
-                assert!(close(frecency[n], picks.frecency(at, &settings)), "{n}");
-                assert_eq!(frecent.picks(n), *picks);
-            }
-        }
-    }
-
-    #[test]
-    fn a_result_takes_about_a_hundred_bytes_however_often_it_is_picked() {
-        let mut history = History::default();
-        for day in 0..100 {
-            for hour in 0..24 {
-                history.touch("apps", "firefox", when(day, hour * HOUR + 17 * 60));
-            }
-        }
-        let json = serde_json::to_string(&history).unwrap();
-        let entry = json.find("\"firefox\"").map(|at| &json[at..]).unwrap();
-        let entry = &entry[..=entry.find('}').unwrap()];
-        assert!(entry.len() <= 110, "{entry}");
-    }
-
-    #[test]
-    fn picks_kept_before_times_of_day_were_count_in_full_at_any_time() {
-        let history: History = serde_json::from_str(
-            r#"{"picks":{"apps":{"firefox":{"score":2.0,"at":1792368000}}},"learned":{}}"#,
-        )
-        .unwrap();
-        assert_eq!(counts(&history, "firefox", when(0, 3 * HOUR)), 1.0);
-        assert_eq!(counts(&history, "firefox", when(0, 15 * HOUR)), 1.0);
-    }
-
-    #[test]
-    fn picks_count_in_full_at_the_time_of_day_they_are_made_and_less_away_from_it() {
-        let mut history = History::default();
-        for day in 0..5 {
-            history.touch("apps", "mail", when(day, 7 * HOUR));
-        }
-        assert_eq!(counts(&history, "mail", when(5, 7 * HOUR)), 1.0);
-        let near = counts(&history, "mail", when(5, 9 * HOUR));
-        assert!(near > 0.8, "two hours later: {near}");
-        assert_eq!(counts(&history, "mail", when(5, 19 * HOUR)), 0.5, "away");
-    }
-
-    #[test]
-    fn habits_four_hours_apart_each_count_most_at_their_own_time() {
-        let mut history = History::default();
-        for day in 0..5 {
-            history.touch("apps", "mail", when(day, 8 * HOUR));
-            history.touch("apps", "news", when(day, 12 * HOUR));
-        }
-        assert!(counts(&history, "news", when(5, 8 * HOUR)) < 0.7);
-        assert!(counts(&history, "mail", when(5, 12 * HOUR)) < 0.7);
-    }
-
-    #[test]
-    fn a_result_picked_hundreds_of_times_a_day_still_learns_a_new_time_of_day() {
-        let mut history = History::default();
-        for day in 0..60 {
-            for minute in 0..300 {
-                history.touch("apps", "mail", when(day, 8 * HOUR + minute));
-            }
-        }
-        let before = counts(&history, "mail", when(60, 20 * HOUR));
-        for day in 60..74 {
-            for minute in 0..300 {
-                history.touch("apps", "mail", when(day, 20 * HOUR + minute));
-            }
-        }
-        let after = counts(&history, "mail", when(74, 20 * HOUR));
-        assert_eq!(before, 0.5, "never picked in the evening");
-        assert!(after > 0.9, "picked as much in the evening lately: {after}");
-    }
-
-    fn key(extension: &str, id: &str) -> ResultKey {
-        (extension.to_owned(), id.to_owned())
-    }
-
-    /// Firefox picked through its Identity three times for `fi`, over Files,
-    /// and Fish three times for `sh`.
-    fn used() -> History {
-        let mut history = History::default();
-        let above = [key("apps", "files")];
-        for day in 0..3 {
-            history.pick(IDENTITIES, "app:firefox", "fi", &above, when(day, 9 * HOUR));
-            history.touch("apps", "firefox", when(day, 9 * HOUR));
-            history.pick("apps", "fish", "sh", &[], when(day, 10 * HOUR));
-        }
-        history
-    }
-
-    /// The History as it is kept, which undoing must restore.
-    fn kept(history: &History) -> serde_json::Value {
-        serde_json::to_value(history).unwrap()
-    }
-
-    fn firefox() -> [ResultKey; 2] {
-        [key(IDENTITIES, "app:firefox"), key("apps", "firefox")]
-    }
-
-    #[test]
-    fn forgetting_a_result_drops_its_picks_and_the_learned_choices_for_it() {
-        let mut history = used();
-        let at = when(3, 0).at;
-        assert!(!history.learned("fi", at).is_empty());
-        history.forget(&firefox());
-        assert!(history.picks(IDENTITIES, "app:firefox").is_none());
-        assert!(history.picks("apps", "firefox").is_none());
-        assert!(history.learned("fi", at).is_empty());
-        assert!(history.picks("apps", "fish").is_some(), "the rest stays");
-        assert_eq!(history.learned("sh", at)[0].id, "fish");
-    }
-
-    #[test]
-    fn a_result_picked_towards_a_learned_choice_is_forgotten_from_it_too() {
-        let mut history = History::default();
-        history.pick("apps", "fish", "fi", &[], when(0, 9 * HOUR));
-        history.forget(&[key("apps", "fish")]);
-        assert!(history.is_empty(), "{history:?}");
-    }
-
-    #[test]
-    fn undoing_a_forget_restores_the_history_exactly() {
-        let mut history = used();
-        let before = kept(&history);
-        let change = history.forget(&firefox());
-        history.undo(change);
-        assert_eq!(kept(&history), before);
-    }
-
-    #[test]
-    fn undoing_a_clear_restores_the_history_exactly() {
-        let mut history = used();
-        let before = kept(&history);
-        let change = history.clear();
-        assert!(history.is_empty());
-        history.undo(change);
-        assert_eq!(kept(&history), before);
-    }
-
-    #[test]
-    fn undoing_a_pick_restores_the_history_exactly() {
-        let mut history = used();
-        let before = kept(&history);
-        let above = [key("apps", "files")];
-        let mut change = history.pick(IDENTITIES, "app:firefox", "fi", &above, when(4, 9 * HOUR));
-        change.and(history.touch("apps", "firefox", when(4, 9 * HOUR)));
-        history.undo(change);
-        assert_eq!(kept(&history), before);
-
-        let change = history.pick("apps", "mail", "ma", &[], when(4, 9 * HOUR));
-        history.undo(change);
-        assert_eq!(kept(&history), before, "a Result picked for the first time");
-    }
-
-    #[test]
-    fn undoing_a_pick_puts_back_what_the_caps_trimmed_for_it() {
-        let mut history = History::default();
-        for n in 0..DEFAULT_MAX_RESULTS {
-            // A second apart, so one is the weakest.
-            history.touch("apps", &n.to_string(), when(0, n as u32));
-        }
-        let before = kept(&history);
-        let change = history.touch("apps", "new", when(1, 9 * HOUR));
-        assert_eq!(history.picked().count(), DEFAULT_MAX_RESULTS);
-        history.undo(change);
-        assert_eq!(kept(&history), before);
-    }
-
-    #[test]
-    fn undoing_the_first_of_two_picks_takes_off_that_pick_alone() {
-        let above = [key("apps", "files")];
-        let mut withdrawn = used();
-        let first = withdrawn.pick(IDENTITIES, "app:firefox", "fi", &above, when(4, 9 * HOUR));
-        withdrawn.pick(IDENTITIES, "app:firefox", "fi", &above, when(4, 21 * HOUR));
-        let first_fish = withdrawn.pick("apps", "fish", "sh", &[], when(4, 10 * HOUR));
-        withdrawn.pick("apps", "fish", "sh", &[], when(5, 10 * HOUR));
-        let first_mail = withdrawn.pick("apps", "mail", "ma", &[], when(4, 9 * HOUR));
-        withdrawn.pick("apps", "mail", "ma", &[], when(5, 9 * HOUR));
-        for change in [first, first_fish, first_mail] {
-            withdrawn.undo(change);
-        }
-
-        let mut second_only = used();
-        second_only.pick(IDENTITIES, "app:firefox", "fi", &above, when(4, 21 * HOUR));
-        second_only.pick("apps", "fish", "sh", &[], when(5, 10 * HOUR));
-        second_only.pick("apps", "mail", "ma", &[], when(5, 9 * HOUR));
-        let close = |a: f64, b: f64| (a - b).abs() <= 1e-3 * b.abs().max(1.0);
-        for at in [when(5, 9 * HOUR), when(5, 21 * HOUR), when(9, 3 * HOUR)] {
-            let picked = [
-                (IDENTITIES, "app:firefox"),
-                ("apps", "fish"),
-                ("apps", "mail"),
-            ];
-            for (extension, id) in picked {
-                let (got, want) = (
-                    withdrawn.frecency(extension, id, at),
-                    second_only.frecency(extension, id, at),
-                );
-                assert!(close(got, want), "{id} at {at:?}: {got} for {want}");
-            }
-            for query in ["fi", "sh"] {
-                let strengths = |history: &History| -> Vec<(String, f64)> {
-                    let choices = history.learned(query, at.at);
-                    choices
-                        .iter()
-                        .map(|c| (c.id.to_owned(), c.strength))
-                        .collect()
-                };
-                let (got, want) = (strengths(&withdrawn), strengths(&second_only));
-                assert_eq!(got.len(), want.len(), "{query}: {got:?} for {want:?}");
-                for ((got_id, got), (want_id, want)) in got.iter().zip(&want) {
-                    assert_eq!(got_id, want_id);
-                    assert!(close(*got, *want), "{query}: {got} for {want}");
-                }
-            }
-        }
-        assert_eq!(
-            withdrawn.learned["ma"].contenders,
-            second_only.learned["ma"].contenders
-        );
-    }
-
-    #[test]
-    fn undoing_a_pick_that_was_forgotten_since_leaves_the_history_alone() {
-        let mut history = used();
-        let change = history.pick("apps", "mail", "ma", &[], when(4, 9 * HOUR));
-        history.forget(&[key("apps", "mail")]);
-        let before = kept(&history);
-        history.undo(change);
-        assert_eq!(kept(&history), before);
-    }
-
-    #[test]
-    fn undoing_a_pick_that_took_over_brings_back_the_choice_it_replaced() {
-        let picks = |history: &mut History, mistaken: bool| {
-            history.pick("apps", "fish", "fi", &[], when(5, 9 * HOUR));
-            let change =
-                mistaken.then(|| history.pick("apps", "fish", "fi", &[], when(5, 9 * HOUR + 1)));
-            // The app the user meant, picked right after.
-            history.pick(IDENTITIES, "app:firefox", "fi", &[], when(5, 9 * HOUR + 2));
-            change
-        };
-        let mut withdrawn = used();
-        let took_over = picks(&mut withdrawn, true).unwrap();
-        assert_eq!(withdrawn.learned("fi", when(5, 9 * HOUR).at)[0].id, "fish");
-        withdrawn.undo(took_over);
-        let mut never = used();
-        picks(&mut never, false);
-
-        let (got, want) = (&withdrawn.learned["fi"], &never.learned["fi"]);
-        assert_eq!(got.choice, want.choice);
-        assert_eq!(got.contenders, want.contenders);
-        assert_eq!(got.passed_over, want.passed_over);
-        assert!(
-            (got.strength - want.strength).abs() < 1e-3,
-            "{} for {}",
-            got.strength,
-            want.strength
-        );
-    }
-
-    #[test]
-    fn undo_leaves_alone_what_changed_since() {
-        let mut history = used();
-        let change = history.clear();
-        history.touch("apps", "mail", when(4, 9 * HOUR));
-        history.touch("apps", "fish", when(4, 9 * HOUR));
-        let fish = *history.picks("apps", "fish").unwrap();
-        history.undo(change);
-        assert!(history.picks("apps", "mail").is_some(), "picked since");
-        assert_eq!(
-            history.picks("apps", "fish"),
-            Some(&fish),
-            "picked again since"
-        );
-        assert!(
-            history.picks(IDENTITIES, "app:firefox").is_some(),
-            "put back"
-        );
-        assert_eq!(history.learned("fi", when(4, 0).at)[0].id, "app:firefox");
-    }
-
-    #[test]
-    fn forgetting_what_one_extension_offered_keeps_the_rest() {
-        let mut history = used();
-        history.touch("files", "notes", when(0, 9 * HOUR));
-        let before = kept(&history);
-        let change = history.forget_where(|(extension, id)| {
-            extension == "apps" || (extension == IDENTITIES && id == "app:firefox")
-        });
-        let at = when(3, 0).at;
-        assert!(history.learned("fi", at).is_empty());
-        assert!(history.learned("sh", at).is_empty());
-        let left: Vec<_> = history.picked().map(|(e, i, _)| (e, i)).collect();
-        assert_eq!(left, [("files", "notes")]);
-        history.undo(change);
-        assert_eq!(kept(&history), before);
-    }
-
-    /// How much an app's picks count at `when`, of their decayed number.
-    fn counts(history: &History, id: &str, when: When) -> f64 {
-        let picks = history.picks("apps", id).unwrap();
-        let count = picks.count(when.at, history.settings().half_life_secs);
-        history.frecency("apps", id, when) / count
-    }
-}
+#[expect(
+    clippy::float_cmp,
+    reason = "the History's counts are exact: a test checks the very number a pick decays to"
+)]
+mod tests;

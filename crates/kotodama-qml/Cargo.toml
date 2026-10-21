@@ -16,6 +16,7 @@ cxx = "1.0.194"
 cxx-qt = "0.10.0"
 cxx-qt-lib = "0.10.0"
 kotodama-protocol = { path = "../kotodama-protocol" }
+thiserror = "2.0.21"
 
 [build-dependencies]
 cxx-qt-build = "0.10.0"
@@ -28,3 +29,6 @@ criterion = { version = "0.8.2", default-features = false, features = ["cargo_be
 [[bench]]
 name = "filter"
 harness = false
+
+[lints]
+workspace = true

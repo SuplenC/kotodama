@@ -2,11 +2,13 @@
 //! since it changes `TZ`, which nothing else in the process may read
 //! meanwhile.
 
-mod common;
+#[path = "support/harness.rs"]
+#[expect(dead_code, reason = "each test uses part of the harness")]
+mod harness;
 
 use std::time::Duration;
 
-use common::*;
+use harness::*;
 use kotodamad::clock::Clock;
 
 /// Sets the time zone, as a POSIX `TZ` rule, so no zone file is needed.
@@ -37,11 +39,7 @@ fn the_time_of_day_follows_a_change_of_time_zone() {
         pick(&mut h, &ui, "music", "music");
     }
     h.advance_to(8);
-    assert_eq!(
-        titles(&h.query(&ui, "")),
-        ["Mail", "Music", "apps"],
-        "08:00 in UTC"
-    );
+    assert_eq!(titles(&h.query(&ui, "")), ["Mail", "Music", "apps"], "08:00 in UTC");
 
     set_zone("NZST-12");
     h.advance(Duration::from_secs(60));

@@ -3,7 +3,7 @@
 //! break a peer on an older one.
 //!
 //! `layouts/<major>.<minor>.txt` holds, for one version, the postcard,
-//! protobuf, MessagePack and JSON encodings of a sample of every message:
+//! protobuf, `MessagePack` and JSON encodings of a sample of every message:
 //! every variant of every enum in one, and every field set to a value that
 //! isn't its default. A file is written once, when its version is new, and
 //! never again. Against the current version's file, the test checks that this
@@ -13,19 +13,22 @@
 //! may be on, is byte for byte what that version encoded: so the older peer
 //! reads it. When a message changes:
 //!
-//! 1. raise `PROTOCOL_VERSION` in `src/version.rs`: the minor version when the
-//!    change only adds, and mark what is new with [`Since`] or `unread`;
+//! 1. raise `PROTOCOL_VERSION` in `src/version.rs`: the minor version when the change only adds,
+//!    and mark what is new with [`Since`] or `unread`;
 //! 2. give anything new a sample here;
-//! 3. rerun this test with `KOTODAMA_BLESS_LAYOUT=1`, which writes the new
-//!    version's file. It never writes over one that exists.
+//! 3. rerun this test with `KOTODAMA_BLESS_LAYOUT=1`, which writes the new version's file. It never
+//!    writes over one that exists.
 //!
 //! The samples are written out in full, never with `..`, so a new field stops
 //! this file compiling until it has a value. A variant without a sample fails
 //! the test.
 
-use std::collections::{BTreeMap, BTreeSet};
-use std::fmt::{Debug, Write as _};
-use std::path::{Path, PathBuf};
+use std::collections::BTreeMap;
+use std::collections::BTreeSet;
+use std::fmt::Debug;
+use std::fmt::Write as _;
+use std::path::Path;
+use std::path::PathBuf;
 use std::rc::Rc;
 
 use kotodama_protocol::*;
@@ -86,11 +89,7 @@ fn what_the_daemon_sends_a_peer_on_an_older_minor_version_is_what_that_version_r
     let mut failures = Vec::new();
     for (version, path) in pinned_versions() {
         if version.major == PROTOCOL_VERSION.major && version < PROTOCOL_VERSION {
-            failures.extend(check_older(
-                version,
-                &std::fs::read_to_string(path).unwrap(),
-                &samples,
-            ));
+            failures.extend(check_older(version, &std::fs::read_to_string(path).unwrap(), &samples));
         }
     }
     assert!(failures.is_empty(), "{}", failures.join("\n"));
@@ -98,10 +97,7 @@ fn what_the_daemon_sends_a_peer_on_an_older_minor_version_is_what_that_version_r
 
 #[test]
 fn every_major_version_from_the_first_release_on_has_a_pinned_layout() {
-    let pinned: Vec<Version> = pinned_versions()
-        .into_iter()
-        .map(|(version, _)| version)
-        .collect();
+    let pinned: Vec<Version> = pinned_versions().into_iter().map(|(version, _)| version).collect();
     assert!(
         pinned.contains(&FIRST_VERSION),
         "no layout pinned for {FIRST_VERSION}: {pinned:?}"
@@ -122,11 +118,7 @@ fn check(pinned: Option<&str>, actual: &str, version: Version, bless: bool) -> V
         Some(pinned) if pinned == actual => Verdict::Same,
         Some(pinned) => {
             let before: BTreeSet<&str> = pinned.lines().collect();
-            let changed: Vec<&str> = actual
-                .lines()
-                .filter(|line| !before.contains(line))
-                .take(5)
-                .collect();
+            let changed: Vec<&str> = actual.lines().filter(|line| !before.contains(line)).take(5).collect();
             Verdict::Fail(format!(
                 "The protocol's encoding changed, but PROTOCOL_VERSION is still {version}, whose \
                  layout is pinned. A peer built for {version} would pass the handshake and then \
@@ -161,10 +153,7 @@ fn a_layout_is_pinned_only_for_a_version_without_one() {
     let layout = "protocol version 1.1\nItem postcard 00 01\n";
     let version = Version::new(1, 1);
     assert_eq!(check(None, layout, version, true), Verdict::Write);
-    assert!(matches!(
-        check(None, layout, version, false),
-        Verdict::Fail(_)
-    ));
+    assert!(matches!(check(None, layout, version, false), Verdict::Fail(_)));
     assert_eq!(check(Some(layout), layout, version, false), Verdict::Same);
 }
 
@@ -320,10 +309,7 @@ fn check_older(version: Version, pinned: &str, samples: &[Sample]) -> Vec<String
             continue;
         };
         // Postcard is only spoken between peers on the same version.
-        for (format, bytes) in encodings
-            .iter()
-            .filter(|(format, _)| *format != WireFormat::Postcard)
-        {
+        for (format, bytes) in encodings.iter().filter(|(format, _)| *format != WireFormat::Postcard) {
             if let Err(err) = (sample.decode)(*format, bytes) {
                 failures.push(format!(
                     "{label} as protocol {version} sent it in {format:?} no longer decodes: {err}"
@@ -399,7 +385,7 @@ fn a_message_new_since_an_older_minor_version_must_say_it_is_newer() {
     let pinned: String = layout(&samples, version)
         .lines()
         .filter(|line| !line.starts_with("ToFrontEnd::close "))
-        .map(|line| format!("{line}\n"))
+        .flat_map(|line| [line, "\n"])
         .collect();
     let failures = check_older(version, &pinned, &samples);
     assert_eq!(failures.len(), 1, "{failures:?}");
@@ -412,31 +398,19 @@ fn a_message_new_since_an_older_minor_version_must_say_it_is_newer() {
 /// Every sample, in the order the layout lists them.
 fn samples() -> Vec<Sample> {
     let mut samples = Vec::new();
-    enum_samples(&mut samples, "ToExtension", to_extension(), |m| {
-        Some(m.since())
-    });
+    enum_samples(&mut samples, "ToExtension", to_extension(), |m| Some(m.since()));
     enum_samples(&mut samples, "FromExtension", from_extension(), |_| None);
     enum_samples(&mut samples, "FromFrontEnd", from_front_end(), |_| None);
-    enum_samples(&mut samples, "ToFrontEnd", to_front_end(), |m| {
-        Some(m.since())
-    });
+    enum_samples(&mut samples, "ToFrontEnd", to_front_end(), |m| Some(m.since()));
     enum_samples(&mut samples, "Outcome", outcomes(), |_| None);
     enum_samples(&mut samples, "Clipboard", clipboards(), |_| None);
-    enum_samples(&mut samples, "ViewContent", view_contents(), |m| {
-        Some(m.since())
-    });
-    enum_samples(&mut samples, "FormInput", form_inputs(), |m| {
-        Some(m.since())
-    });
+    enum_samples(&mut samples, "ViewContent", view_contents(), |m| Some(m.since()));
+    enum_samples(&mut samples, "FormInput", form_inputs(), |m| Some(m.since()));
     enum_samples(&mut samples, "JobState", job_states(), |m| Some(m.since()));
     // The Daemon sends Values in an Extension's config. No Value is newer than
     // the first version; one that is needs a since() to say so.
     for value in values() {
-        samples.push(sample(
-            format!("Value::{}", value_variant(&value)),
-            Some(0),
-            value,
-        ));
+        samples.push(sample(format!("Value::{}", value_variant(&value)), Some(0), value));
     }
     for item in items() {
         let label = format!("Item::{}", kind_variant(&item.kind));
@@ -447,12 +421,8 @@ fn samples() -> Vec<Sample> {
 
 /// A sample for each variant, under the variant's name; fails if a variant of
 /// `T` has none.
-fn enum_samples<T>(
-    out: &mut Vec<Sample>,
-    name: &str,
-    values: Vec<T>,
-    since: impl Fn(&T) -> Option<u32>,
-) where
+fn enum_samples<T>(out: &mut Vec<Sample>, name: &str, values: Vec<T>, since: impl Fn(&T) -> Option<u32>)
+where
     T: Serialize + DeserializeOwned + PartialEq + Debug + 'static,
 {
     let mut covered = BTreeSet::new();
@@ -488,12 +458,7 @@ fn variants<T: DeserializeOwned>() -> Vec<String> {
         .split_once("expected")
         .unwrap_or_else(|| panic!("unexpected error: {error}"))
         .1;
-    expected
-        .split('`')
-        .skip(1)
-        .step_by(2)
-        .map(str::to_owned)
-        .collect()
+    expected.split('`').skip(1).step_by(2).map(str::to_owned).collect()
 }
 
 // Value and ItemKind aren't plain derived enums, so their variants are listed
@@ -527,10 +492,7 @@ fn kind_variant(kind: &ItemKind) -> &'static str {
 fn every_value_and_item_kind_has_a_sample() {
     let values: BTreeSet<_> = values().iter().map(value_variant).collect();
     assert_eq!(values.len(), 6, "{values:?}");
-    let kinds: BTreeSet<_> = items()
-        .iter()
-        .map(|item| kind_variant(&item.kind))
-        .collect();
+    let kinds: BTreeSet<_> = items().iter().map(|item| kind_variant(&item.kind)).collect();
     assert_eq!(kinds.len(), 7, "{kinds:?}");
 }
 
@@ -594,13 +556,9 @@ fn items() -> Vec<Item> {
             path: PathBuf::from("/a/folder"),
         }),
         item(project()),
-        item(ItemKind::Window {
-            address: "0x1".into(),
-        }),
+        item(ItemKind::Window { address: "0x1".into() }),
         item(url()),
-        item(ItemKind::Namespaced(
-            NamespacedKind::new("kubaos.suite").unwrap(),
-        )),
+        item(ItemKind::Namespaced(NamespacedKind::new("kubaos.suite").unwrap())),
     ]
 }
 
@@ -690,9 +648,7 @@ fn to_extension() -> Vec<ToExtension> {
             view: "view".into(),
             values: table(),
         },
-        ToExtension::ViewPopped {
-            view: "view".into(),
-        },
+        ToExtension::ViewPopped { view: "view".into() },
         ToExtension::FilterView {
             view: "view".into(),
             text: "fir".into(),
@@ -733,9 +689,7 @@ fn from_extension() -> Vec<FromExtension> {
         },
         FromExtension::PushView(view()),
         FromExtension::UpdateView(view()),
-        FromExtension::PopView {
-            view: "view".into(),
-        },
+        FromExtension::PopView { view: "view".into() },
         FromExtension::ReplaceView {
             view: "form".into(),
             with: view(),
@@ -829,9 +783,7 @@ fn to_front_end() -> Vec<ToFrontEnd> {
             }],
         },
         ToFrontEnd::Close,
-        ToFrontEnd::ActionFailed {
-            message: "no".into(),
-        },
+        ToFrontEnd::ActionFailed { message: "no".into() },
         ToFrontEnd::PushView {
             extension: "shell".into(),
             view: view(),
@@ -875,9 +827,7 @@ fn to_front_end() -> Vec<ToFrontEnd> {
             title: "Forgot “Firefox”".into(),
         },
         ToFrontEnd::WithdrawUndo { change: 7 },
-        ToFrontEnd::SetQuery {
-            text: "emoji ".into(),
-        },
+        ToFrontEnd::SetQuery { text: "emoji ".into() },
         ToFrontEnd::Reached { menus: 1 },
     ]
 }
@@ -886,14 +836,10 @@ fn outcomes() -> Vec<Outcome> {
     vec![
         Outcome::Close,
         Outcome::KeepOpen,
-        Outcome::Type {
-            text: "typed".into(),
-        },
+        Outcome::Type { text: "typed".into() },
         Outcome::Paste(Clipboard::Text("pasted".into())),
         Outcome::Copy(Clipboard::Text("copied".into())),
-        Outcome::Failed {
-            message: "no".into(),
-        },
+        Outcome::Failed { message: "no".into() },
         Outcome::RunCatalogAction {
             extension: "kubaos".into(),
             kind: KindName::new("kubaos.suite").expect("a valid kind"),

@@ -4,8 +4,18 @@
 //! A frame is the payload's length in ASCII decimal, a newline, then the payload:
 //! `7\n{"a":1}`. The header is text so a shell script can read a frame with
 //! `read -r len` and `read -r -N "$len"`, and write one with `printf '%d\n%s'`.
+//!
+//! # Owns
+//!
+//! - Writing and reading one frame, and [`MAX_FRAME_LEN`].
+//!
+//! # Not here
+//!
+//! - What the payload holds: `wire.rs`. Reading frames off a connection: `channel.rs`.
 
-use std::io::{self, BufRead, Write};
+use std::io;
+use std::io::BufRead;
+use std::io::Write;
 
 use crate::Error;
 
@@ -18,6 +28,10 @@ pub const MAX_FRAME_LEN: usize = 64 << 20;
 const MAX_HEADER_DIGITS: usize = 9;
 
 /// Writes one frame and flushes it.
+///
+/// # Errors
+///
+/// The writer's, if it can't be written or flushed.
 pub fn write(writer: &mut impl Write, payload: &[u8]) -> io::Result<()> {
     let mut header = itoa::Buffer::new();
     writer.write_all(header.format(payload.len()).as_bytes())?;
@@ -28,6 +42,12 @@ pub fn write(writer: &mut impl Write, payload: &[u8]) -> io::Result<()> {
 
 /// Reads the next frame's payload into `buf`, replacing its contents. Returns
 /// `false` when the stream ends cleanly between frames.
+///
+/// # Errors
+///
+/// [`Error::Io`] if the stream fails or ends inside a frame,
+/// [`Error::BadFrameHeader`] for a header that isn't a length and a newline,
+/// and [`Error::FrameTooLong`] for one over [`MAX_FRAME_LEN`].
 pub fn read(reader: &mut impl BufRead, buf: &mut Vec<u8>) -> Result<bool, Error> {
     let Some(len) = read_header(reader)? else {
         return Ok(false);
@@ -37,7 +57,7 @@ pub fn read(reader: &mut impl BufRead, buf: &mut Vec<u8>) -> Result<bool, Error>
     }
     buf.clear();
     buf.resize(len, 0);
-    reader.read_exact(buf)?;
+    reader.read_exact(buf).map_err(Error::Io)?;
     Ok(true)
 }
 
@@ -45,12 +65,12 @@ fn read_header(reader: &mut impl BufRead) -> Result<Option<usize>, Error> {
     let mut len: usize = 0;
     let mut digits = 0;
     loop {
-        let available = reader.fill_buf()?;
+        let available = reader.fill_buf().map_err(Error::Io)?;
         if available.is_empty() {
             return if digits == 0 {
                 Ok(None)
             } else {
-                Err(io::Error::from(io::ErrorKind::UnexpectedEof).into())
+                Err(Error::Io(io::ErrorKind::UnexpectedEof.into()))
             };
         }
         let mut used = 0;

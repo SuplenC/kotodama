@@ -31,13 +31,31 @@
 //!
 //! Keywords are matched without regard to case. An entry that doesn't parse is
 //! logged and skipped; the rest still apply.
+//!
+//! # Owns
+//!
+//! - [`Keywords`]: the Aliases and Quicklinks, read from the config, and which keyword wins.
+//! - [`Quicklink`]: its Item, and the command or URL it runs.
+//!
+//! # Not here
+//!
+//! - Keyword conflicts with apps: `conflict.rs`.
+//! - Opening a URL: `kotodama_extension::url`.
 
 use std::collections::HashMap;
 
-use kotodama_extension::url::{self, PLACEHOLDER};
-use kotodama_protocol::{Action, Argument, Item, ItemKind, NamespacedKind, Table, Value};
+use kotodama_extension::url;
+use kotodama_extension::url::PLACEHOLDER;
+use kotodama_protocol::Action;
+use kotodama_protocol::Argument;
+use kotodama_protocol::Item;
+use kotodama_protocol::ItemKind;
+use kotodama_protocol::NamespacedKind;
+use kotodama_protocol::Table;
+use kotodama_protocol::Value;
 
-use crate::conflict::{Conflict, Holder};
+use crate::conflict::Conflict;
+use crate::conflict::Holder;
 use crate::problem::Report;
 
 /// A keyword that stands for an Item, or for one of its own Actions.
@@ -94,14 +112,15 @@ impl Quicklink {
                     None => url::opener(&url),
                 }
             }
-            Target::Command(args) => args
-                .iter()
-                .map(|arg| arg.replace(PLACEHOLDER, query))
-                .collect(),
+            Target::Command(args) => args.iter().map(|arg| arg.replace(PLACEHOLDER, query)).collect(),
         }
     }
 
     /// The Item the Daemon shows for this Quicklink.
+    ///
+    /// # Panics
+    ///
+    /// Never: `kotodama.quicklink` is a valid kind.
     pub fn item(&self) -> Item {
         let subtitle = match &self.target {
             Target::Url { template, .. } => template.clone(),
@@ -109,9 +128,7 @@ impl Quicklink {
         };
         Item {
             id: format!("quicklink:{}", self.keyword),
-            kind: ItemKind::Namespaced(
-                NamespacedKind::new("kotodama.quicklink").expect("a valid kind"),
-            ),
+            kind: ItemKind::Namespaced(NamespacedKind::new("kotodama.quicklink").expect("a valid kind")),
             title: self.title.clone(),
             subtitle: Some(subtitle),
             icon: self.icon.clone(),
@@ -239,11 +256,7 @@ fn default_opener(config: &Table) -> Result<Option<Vec<String>>, String> {
     }
 }
 
-fn quicklink(
-    keyword: &str,
-    value: &Value,
-    default_opener: Option<&[String]>,
-) -> Result<Quicklink, String> {
+fn quicklink(keyword: &str, value: &Value, default_opener: Option<&[String]>) -> Result<Quicklink, String> {
     if keyword.is_empty() || keyword.contains(char::is_whitespace) {
         return Err("a keyword is one word".into());
     }

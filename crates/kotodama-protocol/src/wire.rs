@@ -1,10 +1,21 @@
 //! The Wire formats, and encoding any protocol message in one of them.
+//!
+//! # Owns
+//!
+//! - [`WireFormat`], its order of preference, and encoding and decoding one whole message.
+//!
+//! # Not here
+//!
+//! - The protobuf encoding itself: `protobuf.rs`. The frame around a message: `frame.rs`. The
+//!   fields left out for an older peer: `version.rs`.
 
+use serde::Deserialize;
+use serde::Serialize;
 use serde::de::DeserializeOwned;
-use serde::{Deserialize, Serialize};
 
 use crate::Error;
-use crate::version::{self, Version};
+use crate::version;
+use crate::version::Version;
 
 /// An encoding the two ends of a connection agree on at the handshake. Every
 /// protocol type goes through serde, so one set of types serves all four.
@@ -41,6 +52,12 @@ impl WireFormat {
         WireFormat::Json,
     ];
 
+    /// `value` encoded in this format.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::Encode`] if `value` doesn't fit the format, as a protobuf
+    /// message that isn't a struct or an enum.
     pub fn encode<T: Serialize + ?Sized>(self, value: &T) -> Result<Vec<u8>, Error> {
         let mut buf = Vec::new();
         self.encode_into(value, &mut buf)?;
@@ -48,15 +65,13 @@ impl WireFormat {
     }
 
     /// Appends the encoded `value` to `buf`, so a caller can reuse one buffer.
-    pub fn encode_into<T: Serialize + ?Sized>(
-        self,
-        value: &T,
-        buf: &mut Vec<u8>,
-    ) -> Result<(), Error> {
+    ///
+    /// # Errors
+    ///
+    /// As [`WireFormat::encode`].
+    pub fn encode_into<T: Serialize + ?Sized>(self, value: &T, buf: &mut Vec<u8>) -> Result<(), Error> {
         let encoded = match self {
-            WireFormat::Postcard => postcard::to_io(value, &mut *buf)
-                .map(drop)
-                .map_err(Box::from),
+            WireFormat::Postcard => postcard::to_io(value, &mut *buf).map(drop).map_err(Box::from),
             WireFormat::Protobuf => crate::protobuf::to_vec(value, buf).map_err(Box::from),
             WireFormat::MessagePack => {
                 let mut serializer = rmp_serde::Serializer::new(&mut *buf)
@@ -66,26 +81,27 @@ impl WireFormat {
             }
             WireFormat::Json => serde_json::to_writer(&mut *buf, value).map_err(Box::from),
         };
-        encoded.map_err(|source| Error::Encode {
-            format: self,
-            source,
-        })
+        encoded.map_err(|source| Error::Encode { format: self, source })
     }
 
     /// Encodes `value` for a peer on protocol version `peer`: for one on an
     /// older minor version of this major, the fields that version lacks are
     /// left out.
-    pub fn encode_for<T: Serialize + ?Sized>(
-        self,
-        peer: Version,
-        value: &T,
-    ) -> Result<Vec<u8>, Error> {
+    ///
+    /// # Errors
+    ///
+    /// As [`WireFormat::encode`].
+    pub fn encode_for<T: Serialize + ?Sized>(self, peer: Version, value: &T) -> Result<Vec<u8>, Error> {
         let mut buf = Vec::new();
         self.encode_for_into(peer, value, &mut buf)?;
         Ok(buf)
     }
 
     /// [`WireFormat::encode_for`], appending to `buf`.
+    ///
+    /// # Errors
+    ///
+    /// As [`WireFormat::encode`].
     pub fn encode_for_into<T: Serialize + ?Sized>(
         self,
         peer: Version,
@@ -98,7 +114,24 @@ impl WireFormat {
         self.encode_into(value, buf)
     }
 
-    /// Decodes one whole message; bytes left over after it are an error.
+    /// Decodes one whole message.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::Decode`] if `bytes` aren't a `T` in this format, or hold more
+    /// after it.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use kotodama_protocol::FromExtension;
+    /// use kotodama_protocol::WireFormat;
+    ///
+    /// let bytes = br#"{"remove_items": {"ids": ["a"]}}"#;
+    /// let message: FromExtension = WireFormat::Json.decode(bytes)?;
+    /// assert_eq!(message, FromExtension::RemoveItems { ids: vec!["a".into()] });
+    /// # Ok::<(), kotodama_protocol::Error>(())
+    /// ```
     pub fn decode<T: DeserializeOwned>(self, bytes: &[u8]) -> Result<T, Error> {
         let decoded = match self {
             WireFormat::Postcard => postcard::take_from_bytes(bytes)
@@ -107,18 +140,14 @@ impl WireFormat {
             WireFormat::Protobuf => crate::protobuf::from_slice(bytes).map_err(Box::from),
             WireFormat::MessagePack => {
                 let mut rest = bytes;
-                let mut deserializer =
-                    rmp_serde::Deserializer::new(&mut rest).with_human_readable();
+                let mut deserializer = rmp_serde::Deserializer::new(&mut rest).with_human_readable();
                 T::deserialize(&mut deserializer)
                     .map_err(Box::from)
                     .and_then(|value| ensure_consumed(value, rest))
             }
             WireFormat::Json => serde_json::from_slice(bytes).map_err(Box::from),
         };
-        decoded.map_err(|source| Error::Decode {
-            format: self,
-            source,
-        })
+        decoded.map_err(|source| Error::Decode { format: self, source })
     }
 }
 

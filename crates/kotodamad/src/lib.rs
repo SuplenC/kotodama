@@ -1,5 +1,17 @@
 //! The Kotodama Daemon. It owns the index and the ranking, runs the Extensions,
 //! and serves Front ends on a Unix socket.
+//!
+//! # Owns
+//!
+//! - [`start`] and [`run`]: wiring the paths, the config, discovery, the watchers, the socket and
+//!   the main loop.
+//! - [`print_config`]: `kotodamad config`.
+//! - [`Error`]: why the Daemon couldn't start.
+//!
+//! # Not here
+//!
+//! - The state machine the main loop feeds: `daemon.rs`.
+//! - The command line: `main.rs`.
 
 mod apps;
 mod arguments;
@@ -36,19 +48,70 @@ pub mod usage;
 mod views;
 
 use std::io::Write;
+use std::path::Path;
 use std::path::PathBuf;
-use std::sync::mpsc::{self, RecvTimeoutError, Sender};
-use std::time::{Duration, Instant};
+use std::sync::mpsc;
+use std::sync::mpsc::RecvTimeoutError;
+use std::sync::mpsc::Sender;
+use std::time::Duration;
+use std::time::Instant;
 
-use daemon::{Daemon, Event};
-use kotodama_extension::watch::{RecursiveMode, Watcher};
-use paths::{Overrides, Paths};
+use daemon::Daemon;
+use daemon::Event;
+use kotodama_extension::watch::RecursiveMode;
+use kotodama_extension::watch::Watcher;
+use paths::Overrides;
+use paths::Paths;
 use problem::Report;
 
 /// How long the directories of programs that couldn't start must stay still
 /// before they are tried again, so a build or an install that writes many
 /// files is tried once, whole.
 const PROGRAMS_SETTLE: Duration = Duration::from_millis(500);
+
+/// Why the Daemon couldn't start, or couldn't print its config.
+#[derive(Debug, thiserror::Error)]
+pub enum Error {
+    /// A path it needs has no place.
+    #[error(transparent)]
+    Paths(paths::Error),
+    /// It can't serve on its socket.
+    #[error("{}", path.display())]
+    Listen {
+        path: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
+    /// The config to print can't be loaded.
+    #[error(transparent)]
+    Config(config::Error),
+    /// Stdout can't be written.
+    #[error(transparent)]
+    Print(std::io::Error),
+}
+
+impl Error {
+    /// The error of a path with no place.
+    #[must_use]
+    pub fn paths(err: paths::Error) -> Self {
+        Error::Paths(err)
+    }
+
+    fn listen(path: &Path, source: std::io::Error) -> Self {
+        Error::Listen {
+            path: path.to_owned(),
+            source,
+        }
+    }
+
+    fn config(err: config::Error) -> Self {
+        Error::Config(err)
+    }
+
+    fn print(err: std::io::Error) -> Self {
+        Error::Print(err)
+    }
+}
 
 /// Runs the Daemon with its config in `config_dirs` (see
 /// [`paths::config_dirs`]) and the paths it sets, until it fails to start.
@@ -57,13 +120,13 @@ const PROGRAMS_SETTLE: Duration = Duration::from_millis(500);
 ///
 /// When it can't start: a path it needs has no place, or it can't serve on
 /// its socket.
-pub fn start(config_dirs: Vec<PathBuf>) -> Result<(), String> {
+pub fn start(config_dirs: Vec<PathBuf>) -> Result<(), Error> {
     // The Daemon reports what is wrong with `[paths]` once it is there.
     let overrides = match config::load(&config_dirs) {
         Ok(config) => Overrides::from_config(&config, &mut Report::silent()),
         Err(_) => Overrides::default(),
     };
-    run(&Paths::new(config_dirs, &overrides)?)
+    run(&Paths::new(config_dirs, &overrides).map_err(Error::paths)?)
 }
 
 /// Runs the Daemon on `paths` until it fails to start. The Extension
@@ -72,7 +135,7 @@ pub fn start(config_dirs: Vec<PathBuf>) -> Result<(), String> {
 /// # Errors
 ///
 /// When it can't serve on its socket.
-pub fn run(paths: &Paths) -> Result<(), String> {
+pub fn run(paths: &Paths) -> Result<(), Error> {
     let log_pinned = engine::log_from_env().is_some();
     let config = config::load(&paths.config_dirs);
     let started_with = match &config {
@@ -101,8 +164,7 @@ pub fn run(paths: &Paths) -> Result<(), String> {
             .join(", ")
     );
 
-    let listener = server::listen(&paths.socket)
-        .map_err(|err| format!("{}: {err}", paths.socket.display()))?;
+    let listener = server::listen(&paths.socket).map_err(|err| Error::listen(&paths.socket, err))?;
     let (events_tx, events) = mpsc::channel();
     let _watcher = config::watch(paths.config_dirs.clone(), events_tx.clone())
         .map_err(|err| log::error!("not watching the config directory: {err}"))
@@ -110,10 +172,7 @@ pub fn run(paths: &Paths) -> Result<(), String> {
     let mut _extension_watcher = watch_extensions(&paths.extension_dirs, &events_tx);
     // What `[paths]` said of the Extension directories when they were last
     // read.
-    let mut extension_overrides = (
-        started_with.extension_dirs.clone(),
-        started_with.default_extension_dirs,
-    );
+    let mut extension_overrides = (started_with.extension_dirs.clone(), started_with.default_extension_dirs);
     let programs_watcher = watch_programs(events_tx.clone())
         .map_err(|err| log::error!("not watching for programs that couldn't start: {err}"))
         .ok();
@@ -123,7 +182,7 @@ pub fn run(paths: &Paths) -> Result<(), String> {
 
     let (config, unreadable) = match config {
         Ok(config) => (config, None),
-        Err(err) => (Default::default(), Some(err)),
+        Err(err) => (kotodama_protocol::Table::default(), Some(err)),
     };
     let mut daemon = Daemon::new(
         found,
@@ -139,7 +198,7 @@ pub fn run(paths: &Paths) -> Result<(), String> {
     }
     daemon.keep_items_in(&paths.cache);
     daemon.index_in_background(indexed);
-    // What discovery and the config found wrong, now that there is a
+    // What discovery and the config found wrong, once there is a
     // Daemon to tell.
     daemon.handle(Event::Extensions(discovered), Instant::now());
     if let Some(err) = unreadable {
@@ -147,13 +206,11 @@ pub fn run(paths: &Paths) -> Result<(), String> {
     }
     loop {
         let event = match daemon.next_wake() {
-            Some(deadline) => {
-                match events.recv_timeout(deadline.saturating_duration_since(Instant::now())) {
-                    Ok(event) => Some(event),
-                    Err(RecvTimeoutError::Timeout) => None,
-                    Err(RecvTimeoutError::Disconnected) => return Ok(()),
-                }
-            }
+            Some(deadline) => match events.recv_timeout(deadline.saturating_duration_since(Instant::now())) {
+                Ok(event) => Some(event),
+                Err(RecvTimeoutError::Timeout) => None,
+                Err(RecvTimeoutError::Disconnected) => return Ok(()),
+            },
             None => match events.recv() {
                 Ok(event) => Some(event),
                 Err(_) => return Ok(()),
@@ -172,10 +229,7 @@ pub fn run(paths: &Paths) -> Result<(), String> {
                 if (&now_says.extension_dirs, now_says.default_extension_dirs)
                     != (&extension_overrides.0, extension_overrides.1)
                 {
-                    extension_overrides = (
-                        now_says.extension_dirs.clone(),
-                        now_says.default_extension_dirs,
-                    );
+                    extension_overrides = (now_says.extension_dirs.clone(), now_says.default_extension_dirs);
                     let dirs = paths::extension_dirs(&paths.config_dirs, now_says);
                     log::info!("reading Extensions from {}", joined(&dirs));
                     _extension_watcher = watch_extensions(&dirs, &rediscover);
@@ -228,19 +282,16 @@ fn joined(dirs: &[PathBuf]) -> String {
 ///
 /// When the config can't be loaded, its paths have no place, or stdout
 /// can't be written.
-pub fn print_config(config_dirs: Vec<PathBuf>, schema: bool) -> Result<(), String> {
+pub fn print_config(config_dirs: Vec<PathBuf>, schema: bool) -> Result<(), Error> {
     let mut out = std::io::stdout().lock();
     if schema {
-        return schema::print_schema(&mut out).map_err(|err| err.to_string());
+        return schema::print_schema(&mut out).map_err(Error::print);
     }
-    let (config, sources) =
-        config::load_with_sources(&config_dirs).map_err(|err| err.to_string())?;
-    let paths = Paths::new(
-        config_dirs,
-        &Overrides::from_config(&config, &mut Report::silent()),
-    )?;
-    schema::print_config(&config, &sources, &paths, &mut out).map_err(|err| err.to_string())?;
-    out.flush().map_err(|err| err.to_string())
+    let (config, sources) = config::load_with_sources(&config_dirs).map_err(Error::config)?;
+    let paths =
+        Paths::new(config_dirs, &Overrides::from_config(&config, &mut Report::silent())).map_err(Error::paths)?;
+    schema::print_config(&config, &sources, &paths, &mut out).map_err(Error::print)?;
+    out.flush().map_err(Error::print)
 }
 
 /// A watcher, watching nothing until told, that sends

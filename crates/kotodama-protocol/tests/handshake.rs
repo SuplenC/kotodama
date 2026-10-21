@@ -1,6 +1,14 @@
-use kotodama_protocol::{Channel, Error, Hello, PROTOCOL_VERSION, Version, WireFormat, frame};
-
-use WireFormat::{Json, MessagePack, Postcard, Protobuf};
+use WireFormat::Json;
+use WireFormat::MessagePack;
+use WireFormat::Postcard;
+use WireFormat::Protobuf;
+use kotodama_protocol::Channel;
+use kotodama_protocol::Error;
+use kotodama_protocol::Hello;
+use kotodama_protocol::PROTOCOL_VERSION;
+use kotodama_protocol::Version;
+use kotodama_protocol::WireFormat;
+use kotodama_protocol::frame;
 
 fn hello(json: &str) -> Hello {
     WireFormat::Json.decode(json.as_bytes()).unwrap()
@@ -77,14 +85,8 @@ fn a_hello_without_a_minor_version_is_on_minor_version_0() {
 fn a_side_that_leaves_out_json_fails_the_handshake_even_with_a_format_in_common() {
     let daemon = Hello::new(&WireFormat::ALL);
     let no_json = Hello::new(&[Postcard]);
-    assert!(matches!(
-        daemon.accept_peer(&no_json),
-        Err(Error::JsonNotOffered)
-    ));
-    assert!(matches!(
-        no_json.accept_daemon(&daemon),
-        Err(Error::JsonNotOffered)
-    ));
+    assert!(matches!(daemon.accept_peer(&no_json), Err(Error::JsonNotOffered)));
+    assert!(matches!(no_json.accept_daemon(&daemon), Err(Error::JsonNotOffered)));
 }
 
 #[test]
@@ -107,9 +109,7 @@ fn a_peer_newer_than_the_daemon_is_turned_away_with_the_version_it_needs() {
     ] {
         let newer = on(major, minor, &WireFormat::ALL);
 
-        let error = daemon
-            .accept_peer(&newer)
-            .expect_err("a newer peer is refused");
+        let error = daemon.accept_peer(&newer).expect_err("a newer peer is refused");
 
         assert!(
             matches!(error, Error::PeerTooNew { peer, ours } if peer == Version::new(major, minor) && ours == PROTOCOL_VERSION)
@@ -159,18 +159,12 @@ fn a_peer_built_for_a_newer_major_is_turned_away_at_the_handshake_not_at_a_later
     let mut peer_hello = Vec::new();
     frame::write(
         &mut peer_hello,
-        format!(r#"{{"version":{newer},"formats":["postcard","protobuf","msgpack","json"]}}"#)
-            .as_bytes(),
+        format!(r#"{{"version":{newer},"formats":["postcard","protobuf","msgpack","json"]}}"#).as_bytes(),
     )
     .unwrap();
 
-    let error = Channel::accept(
-        peer_hello.as_slice(),
-        Vec::new(),
-        &Hello::new(&WireFormat::ALL),
-    )
-    .err()
-    .expect("a peer on a newer major should fail the handshake");
+    let error = Channel::accept(peer_hello.as_slice(), Vec::new(), &Hello::new(&WireFormat::ALL))
+        .expect_err("a peer on a newer major should fail the handshake");
 
     assert!(matches!(
         error,

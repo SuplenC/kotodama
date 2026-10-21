@@ -1,29 +1,49 @@
 //! Runs Extension processes. Each gets a thread that reads its stdout and one
 //! that writes its stdin, so the Daemon's state machine only ever touches channels and a stuck or
 //! dead Extension can't stall it.
+//!
+//! # Owns
+//!
+//! - [`Processes`]: starting an Extension's process, the handshake, its threads, and how its run
+//!   ended.
+//!
+//! # Not here
+//!
+//! - When to start or stop one: `daemon/extensions.rs`.
+//! - The connection once the handshake is done: `link.rs`.
 
 use std::collections::HashMap;
-use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
+use std::process::Child;
+use std::process::ChildStdin;
+use std::process::ChildStdout;
+use std::process::Command;
+use std::process::Stdio;
+use std::sync::Arc;
+use std::sync::Mutex;
+use std::sync::PoisonError;
 use std::sync::mpsc::Sender;
-use std::sync::{Arc, Mutex};
 use std::thread;
 
-use kotodama_protocol::{Channel, Error, FromExtension, Hello, ToExtension, WireFormat};
+use kotodama_protocol::Channel;
+use kotodama_protocol::Error;
+use kotodama_protocol::FromExtension;
+use kotodama_protocol::Hello;
+use kotodama_protocol::ToExtension;
+use kotodama_protocol::WireFormat;
 
-use crate::daemon::{Ended, Event, ExtensionId, Launcher};
+use crate::daemon::Ended;
+use crate::daemon::Event;
+use crate::daemon::ExtensionId;
+use crate::daemon::Launcher;
 use crate::discovery::Found;
 use crate::link::pump;
 
-/// Enough for decoding the deepest message serde_json allows, and small, since
+/// Enough for decoding the deepest message `serde_json` allows, and small, since
 /// every Extension has two of these threads.
 pub(crate) const STACK_SIZE: usize = 256 * 1024;
 
 pub(crate) fn spawn(name: String, run: impl FnOnce() + Send + 'static) {
-    if let Err(err) = thread::Builder::new()
-        .name(name)
-        .stack_size(STACK_SIZE)
-        .spawn(run)
-    {
+    if let Err(err) = thread::Builder::new().name(name).stack_size(STACK_SIZE).spawn(run) {
         log::error!("couldn't start a thread: {err}");
     }
 }
@@ -85,33 +105,28 @@ impl Launcher for Processes {
                 return;
             }
         };
-        let stdio = (child.stdout.take(), child.stdin.take());
+        let pipes = (child.stdout.take(), child.stdin.take());
         let child = Arc::new(Mutex::new(child));
-        self.running
-            .insert(extension, (generation, Arc::clone(&child)));
+        self.running.insert(extension, (generation, Arc::clone(&child)));
 
         let events = self.events.clone();
         spawn(format!("ext-{name}"), move || {
-            let spoke = match stdio {
-                (Some(stdout), Some(stdin)) => {
-                    speak(extension, generation, &name, stdout, stdin, &events)
-                }
+            let spoke = match pipes {
+                (Some(stdout), Some(stdin)) => speak(extension, generation, &name, stdout, stdin, &events),
                 _ => Ok(()),
             };
             // Kill before waiting, so a process that closed its stdout but kept
             // running doesn't hold this thread. std won't signal a process it
             // has already reaped, so `stop` can't hit a reused pid.
-            let mut child = child.lock().unwrap_or_else(|poison| poison.into_inner());
+            let mut child = child.lock().unwrap_or_else(PoisonError::into_inner);
             let _ = child.kill();
             let status = child.wait();
             drop(child);
             let ended = match spoke {
                 // Restarting won't make it speak a protocol it doesn't.
-                Err(
-                    err @ (Error::PeerTooNew { .. }
-                    | Error::PeerTooOld { .. }
-                    | Error::JsonNotOffered),
-                ) => Ended::Refused(err.to_string()),
+                Err(err @ (Error::PeerTooNew { .. } | Error::PeerTooOld { .. } | Error::JsonNotOffered)) => {
+                    Ended::Refused(err.to_string())
+                }
                 Err(err) => Ended::Stopped(err.to_string()),
                 Ok(()) => Ended::Stopped(match status {
                     Ok(status) => status.to_string(),
@@ -126,10 +141,7 @@ impl Launcher for Processes {
         if let Some((running, child)) = self.running.get(&extension)
             && *running == generation
         {
-            let _ = child
-                .lock()
-                .unwrap_or_else(|poison| poison.into_inner())
-                .kill();
+            let _ = child.lock().unwrap_or_else(PoisonError::into_inner).kill();
         }
     }
 }

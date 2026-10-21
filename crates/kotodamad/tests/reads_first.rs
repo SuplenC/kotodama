@@ -1,17 +1,24 @@
-//! Reads first (ADR 0017): Items are indexed off the keystroke path, and a
+//! Reads first: Items are indexed off the keystroke path, and a
 //! search never sees half of a change. The Items expected at a time of day
 //! are hot ahead of it: read back off their Shelf before they are shown.
 
-mod common;
+#[path = "support/harness.rs"]
+#[expect(dead_code, reason = "each test uses part of the harness")]
+mod harness;
 
-use std::sync::mpsc::{self, Receiver, Sender};
-use std::time::{Duration, Instant};
+use std::sync::mpsc;
+use std::sync::mpsc::Receiver;
+use std::sync::mpsc::Sender;
+use std::time::Duration;
+use std::time::Instant;
 
-use common::*;
+use harness::*;
 use kotodama_protocol::*;
-use kotodamad::clock::{DAY_SECS, When};
+use kotodamad::clock::DAY_SECS;
+use kotodamad::clock::When;
+use kotodamad::daemon::Event;
+use kotodamad::daemon::HOT_CAPACITY;
 use kotodamad::daemon::RERANK_FOR;
-use kotodamad::daemon::{Event, HOT_CAPACITY};
 use kotodamad::history::History;
 
 /// How long a change may take to show: about one frame of a slow typist.
@@ -96,10 +103,7 @@ fn a_copied_clip_is_found_within_the_staleness_bound() {
     let copied = Instant::now();
     h.add(&clipboard, vec![clip("2", "git push origin main")]);
     let event = indexed.recv_timeout(STALENESS);
-    assert!(
-        event.is_ok(),
-        "not indexed within {STALENESS:?} of the copy"
-    );
+    assert!(event.is_ok(), "not indexed within {STALENESS:?} of the copy");
     h.event(event.unwrap());
     assert!(copied.elapsed() < STALENESS * 2);
     assert_eq!(titles(&h.query(&ui, "push")), ["git push origin main"]);
@@ -131,9 +135,7 @@ fn a_version_indexed_before_its_extension_stopped_is_dropped() {
     let apps = h.up(0);
     let ui = h.front_end();
     h.add(&apps, vec![app("Firefox")]);
-    let event = indexed
-        .recv_timeout(Duration::from_secs(5))
-        .expect("indexed");
+    let event = indexed.recv_timeout(Duration::from_secs(5)).expect("indexed");
     h.down(&apps);
     h.event(event);
     assert_eq!(titles(&h.query(&ui, "fire")), Vec::<&str>::new());
@@ -196,7 +198,7 @@ fn routine(hot: usize) -> (Harness, FrontEnd) {
     let ui = h.front_end();
     for (firefox_by, mail_by) in FIREFOX_BY.into_iter().zip(MAIL_BY) {
         h.advance_to(8);
-        h.advance(Duration::from_secs(30 * 60));
+        h.advance(Duration::from_mins(30));
         pick(&mut h, &ui, &apps, firefox_by, "firefox");
         h.advance_to(20);
         pick(&mut h, &ui, &apps, mail_by, "mail");
@@ -229,11 +231,7 @@ fn an_item_picked_at_half_past_eight_is_hot_by_twenty_past_and_cold_again_later(
     ] {
         advance_to(&mut h, hour, minute);
         advance_to(&mut cold, hour, minute);
-        assert_eq!(
-            h.daemon.hot(),
-            hot,
-            "hot, and read back, at {hour}:{minute:02}"
-        );
+        assert_eq!(h.daemon.hot(), hot, "hot, and read back, at {hour}:{minute:02}");
         assert_eq!(cold.daemon.hot(), [], "none hot without room for them");
         for query in ["", "f", "fire", "mail", "files"] {
             assert_eq!(
@@ -256,7 +254,7 @@ fn the_hot_items_are_planned_and_read_on_the_indexing_thread() {
     let ui = h.front_end();
     for query in FIREFOX_BY {
         h.advance_to(8);
-        h.advance(Duration::from_secs(30 * 60));
+        h.advance(Duration::from_mins(30));
         pick(&mut h, &ui, &apps, query, "firefox");
     }
     // Plans asked for while picking.
@@ -304,11 +302,7 @@ fn on(days_before: u64, hour: u64, minute: u64) -> When {
 
 /// A Daemon running `apps`, with `history`, `config`, and a Front end,
 /// indexing on its own thread if `indexed` is given one.
-fn with_history(
-    history: History,
-    toml: &str,
-    indexed: Option<Sender<Event>>,
-) -> (Harness, Ext, FrontEnd) {
+fn with_history(history: History, toml: &str, indexed: Option<Sender<Event>>) -> (Harness, Ext, FrontEnd) {
     let mut h = Harness::with_history(vec![plain("apps")], config(toml), history);
     if let Some(events) = indexed {
         h.daemon.index_in_background(events);
@@ -345,16 +339,8 @@ fn a_learned_choice_is_resident_once_planned_and_its_query_reads_nothing_off_its
     let alarm = ("apps".to_owned(), "fire-alarm".to_owned());
     assert_eq!(h.daemon.hot(), [alarm]);
     assert_eq!(titles(&shown), ["Fire Alarm"]);
-    assert_eq!(
-        h.daemon.shelf_reads(),
-        read,
-        "read off its Shelf on the keystroke"
-    );
-    assert_eq!(
-        cold.daemon.shelf_reads(),
-        cold_read + 1,
-        "read when nothing is hot"
-    );
+    assert_eq!(h.daemon.shelf_reads(), read, "read off its Shelf on the keystroke");
+    assert_eq!(cold.daemon.shelf_reads(), cold_read + 1, "read when nothing is hot");
 }
 
 /// Firefox picked at half past ten and Mail at half past one, on each of
@@ -389,10 +375,7 @@ impl AheadAndHere {
         let (mut ahead, ahead_apps, ahead_ui) = with_history(history.clone(), "", Some(events));
         let (mut here, here_apps, here_ui) = with_history(history, "", None);
         here.daemon.set_hot_capacity(0);
-        ahead.add(
-            &ahead_apps,
-            titles.iter().map(|&title| app(title)).collect(),
-        );
+        ahead.add(&ahead_apps, titles.iter().map(|&title| app(title)).collect());
         first_version_and_plan(&mut ahead, &indexed);
         here.add(&here_apps, titles.iter().map(|&title| app(title)).collect());
         let mut both = AheadAndHere {
@@ -435,30 +418,18 @@ fn the_empty_querys_rows_for_the_next_part_of_the_day_are_ranked_before_the_menu
     let mut both = AheadAndHere::new(morning_and_afternoon(), &["Firefox", "Mail"]);
     let before_noon = both.empty_query("at 11:58");
     // Before the hot Items are planned again, at 12:03.
-    both.advance(Duration::from_secs(3 * 60));
+    both.advance(Duration::from_mins(3));
     let ranked_here = both.ahead.daemon.ranked_here();
 
-    for (h, ui) in [
-        (&mut both.ahead, &both.ahead_ui),
-        (&mut both.here, &both.here_ui),
-    ] {
+    for (h, ui) in [(&mut both.ahead, &both.ahead_ui), (&mut both.here, &both.here_ui)] {
         h.front_end_sends(ui, FromFrontEnd::Shown);
     }
-    let after_noon = both
-        .ahead_ui
-        .results()
-        .expect("ranked again for the afternoon");
-    let here = both
-        .here_ui
-        .results()
-        .expect("ranked again for the afternoon");
+    let after_noon = both.ahead_ui.results().expect("ranked again for the afternoon");
+    let here = both.here_ui.results().expect("ranked again for the afternoon");
 
     assert_eq!(
         before_noon,
-        (
-            vec!["Firefox".to_owned(), "Mail".to_owned(), "apps".to_owned()],
-            false
-        )
+        (vec!["Firefox".to_owned(), "Mail".to_owned(), "apps".to_owned()], false)
     );
     assert_eq!(titles(&after_noon), ["Mail", "Firefox", "apps"]);
     assert_eq!(titles(&after_noon), titles(&here));
@@ -470,10 +441,7 @@ fn rows_ranked_ahead_are_ranked_again_once_the_items_or_the_history_change() {
     let mut both = AheadAndHere::new(morning_and_afternoon(), &["Firefox", "Mail"]);
     let ranked = both.empty_query("as planned");
 
-    for (h, apps) in [
-        (&mut both.ahead, &both.ahead_apps),
-        (&mut both.here, &both.here_apps),
-    ] {
+    for (h, apps) in [(&mut both.ahead, &both.ahead_apps), (&mut both.here, &both.here_apps)] {
         h.add(apps, vec![app("Terminal")]);
     }
     next_version(&mut both.ahead, &both.indexed);
@@ -492,21 +460,10 @@ fn rows_ranked_ahead_are_ranked_again_once_the_items_or_the_history_change() {
     next_hot(&mut both.ahead, &both.indexed);
     let planned_again = both.empty_query("planned again");
 
-    let rows = |titles: &[&str]| {
-        titles
-            .iter()
-            .map(|&title| title.to_owned())
-            .collect::<Vec<_>>()
-    };
+    let rows = |titles: &[&str]| titles.iter().map(|&title| title.to_owned()).collect::<Vec<_>>();
     assert_eq!(ranked, (rows(&["Firefox", "Mail", "apps"]), false));
-    assert_eq!(
-        terminal_added,
-        (rows(&["Terminal", "Firefox", "Mail", "apps"]), true)
-    );
-    assert_eq!(
-        mail_picked,
-        (rows(&["Mail", "Terminal", "Firefox", "apps"]), true)
-    );
+    assert_eq!(terminal_added, (rows(&["Terminal", "Firefox", "Mail", "apps"]), true));
+    assert_eq!(mail_picked, (rows(&["Mail", "Terminal", "Firefox", "apps"]), true));
     assert_eq!(planned_again, (mail_picked.0, false));
 }
 
@@ -582,9 +539,7 @@ const WORDS: &[&str] = &[
 ];
 
 fn words(random: &mut Random, most: usize) -> String {
-    let words: Vec<&str> = (0..1 + random.below(most))
-        .map(|_| random.pick(WORDS))
-        .collect();
+    let words: Vec<&str> = (0..=random.below(most)).map(|_| random.pick(WORDS)).collect();
     words.join(random.pick(&[" ", "-", ""]))
 }
 
@@ -610,12 +565,12 @@ fn random_item(random: &mut Random) -> Item {
 
 fn random_query(random: &mut Random) -> String {
     let mut text = String::new();
-    for n in 0..1 + random.below(2) {
+    for n in 0..=random.below(2) {
         if n > 0 {
             text.push(' ');
         }
         let word: Vec<char> = random.pick(WORDS).chars().collect();
-        let mut word = word[..1 + random.below(word.len())].to_vec();
+        let mut word = word[..=random.below(word.len())].to_vec();
         if word.len() > 2 && random.below(3) == 0 {
             let at = random.below(word.len() - 1);
             word.swap(at, at + 1);
@@ -691,14 +646,7 @@ impl Twins {
             (&mut self.naive, &self.naive_ui, &self.naive_exts),
         ] {
             let action = &result.item.actions[0].id;
-            run(
-                h,
-                ui,
-                &result.extension,
-                &result.item.id,
-                &result.extension,
-                action,
-            );
+            run(h, ui, &result.extension, &result.item.id, &result.extension, action);
             ui.drain();
             for ext in exts {
                 ext.drain();
@@ -730,13 +678,11 @@ fn results_are_those_of_a_full_search_after_any_changes_picks_and_keystrokes() {
             let ext = random.below(2);
             match random.below(6) {
                 0 | 1 => {
-                    let items = (0..1 + random.below(6))
-                        .map(|_| random_item(&mut random))
-                        .collect();
+                    let items = (0..=random.below(6)).map(|_| random_item(&mut random)).collect();
                     twins.send(ext, FromExtension::AddItems { items });
                 }
                 2 => {
-                    let ids = (0..1 + random.below(3))
+                    let ids = (0..=random.below(3))
                         .map(|_| format!("item-{}", random.below(30)))
                         .collect();
                     twins.send(ext, FromExtension::RemoveItems { ids });

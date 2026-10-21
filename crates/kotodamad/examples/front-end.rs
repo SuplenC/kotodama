@@ -11,15 +11,29 @@
 //! cargo run -p kotodamad --example front-end -- --app --run emoji thumbs
 //! ```
 
+use std::collections::BTreeMap;
 use std::env;
 use std::os::unix::net::UnixStream;
 use std::path::PathBuf;
 use std::process::ExitCode;
 use std::time::Duration;
 
-use kotodama_protocol::{
-    ActionRef, Channel, FromFrontEnd, Hello, ResultRef, ToFrontEnd, WireFormat,
-};
+use kotodama_protocol::ActionRef;
+use kotodama_protocol::Channel;
+use kotodama_protocol::FromFrontEnd;
+use kotodama_protocol::Hello;
+use kotodama_protocol::ResultRef;
+use kotodama_protocol::ToFrontEnd;
+use kotodama_protocol::WireFormat;
+
+/// What to do once the Results are printed.
+enum Then {
+    Stop,
+    /// Run the top Result's primary Action.
+    RunPrimary,
+    /// Run the top Result's Action of this id.
+    Run(String),
+}
 
 fn main() -> ExitCode {
     let mut args: Vec<String> = env::args().skip(1).collect();
@@ -27,17 +41,16 @@ fn main() -> ExitCode {
     if app {
         args.remove(0);
     }
-    // `None` prints the Results; `Some(None)` runs the primary Action.
-    let mut run = None;
+    let mut then = Then::Stop;
     if args.first().is_some_and(|arg| arg == "--run") {
         args.remove(0);
-        run = Some(None);
+        then = Then::RunPrimary;
     } else if args.first().is_some_and(|arg| arg == "--action") && args.len() > 1 {
         args.remove(0);
-        run = Some(Some(args.remove(0)));
+        then = Then::Run(args.remove(0));
     }
     let query = args.join(" ");
-    match front_end(&query, app, run) {
+    match front_end(&query, app, then) {
         Ok(()) => ExitCode::SUCCESS,
         Err(err) => {
             eprintln!("front-end: {err}");
@@ -46,17 +59,12 @@ fn main() -> ExitCode {
     }
 }
 
-fn front_end(
-    query: &str,
-    app: bool,
-    run: Option<Option<String>>,
-) -> Result<(), Box<dyn std::error::Error>> {
-    let socket = PathBuf::from(env::var_os("XDG_RUNTIME_DIR").ok_or("XDG_RUNTIME_DIR isn't set")?)
-        .join("kotodama.sock");
+fn front_end(query: &str, app: bool, then: Then) -> Result<(), Box<dyn std::error::Error>> {
+    let socket =
+        PathBuf::from(env::var_os("XDG_RUNTIME_DIR").ok_or("XDG_RUNTIME_DIR isn't set")?).join("kotodama.sock");
     let stream = UnixStream::connect(&socket)?;
     stream.set_read_timeout(Some(Duration::from_secs(10)))?;
-    let mut channel =
-        Channel::handshake(stream.try_clone()?, stream, &Hello::new(&WireFormat::ALL))?;
+    let mut channel = Channel::handshake(stream.try_clone()?, stream, &Hello::new(&WireFormat::ALL))?;
 
     if app {
         let word = query.split_whitespace().next().unwrap_or_default();
@@ -68,11 +76,9 @@ fn front_end(
     channel.send(&FromFrontEnd::Query { text: query.into() })?;
     let (shown, results) = loop {
         match channel.recv()?.ok_or("the Daemon hung up")? {
-            ToFrontEnd::Results {
-                version, results, ..
-            } => break (version, results),
+            ToFrontEnd::Results { version, results, .. } => break (version, results),
             ToFrontEnd::Status { down, .. } if !down.is_empty() => {
-                eprintln!("down: {}", down.join(", "))
+                eprintln!("down: {}", down.join(", "));
             }
             _ => {}
         }
@@ -80,8 +86,10 @@ fn front_end(
     for row in &results {
         println!("{}\t{}\t{}", row.extension, row.item.id, row.item.title);
     }
-    let Some(action) = run else {
-        return Ok(());
+    let action = match then {
+        Then::Stop => return Ok(()),
+        Then::RunPrimary => None,
+        Then::Run(id) => Some(id),
     };
 
     let top = results.first().ok_or("nothing to run")?;
@@ -104,7 +112,7 @@ fn front_end(
             extension: top.extension.clone(),
             id: action.id.clone(),
         },
-        arguments: Default::default(),
+        arguments: BTreeMap::default(),
     })?;
     loop {
         match channel.recv()?.ok_or("the Daemon hung up")? {

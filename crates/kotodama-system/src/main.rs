@@ -76,7 +76,7 @@ fn run() -> Result<(), Error> {
     // The power Items work on any compositor, with or without its windows.
     SentStatus::default().usable(&mut extension.writer)?;
     #[cfg(target_os = "linux")]
-    toplevels::follow(move |change| events.send(Event::Own(change)).is_ok())?;
+    toplevels::follow(move |change| events.send(Event::Own(change)).is_ok()).map_err(Error::Io)?;
     #[cfg(not(target_os = "linux"))]
     drop(events);
 

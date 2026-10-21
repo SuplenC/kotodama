@@ -1,24 +1,39 @@
 //! Values whose shape the protocol doesn't fix: an Extension's config table and a
 //! submitted form.
 //!
-//! JSON and MessagePack are self-describing, so a value there is plain data: a
+//! JSON and `MessagePack` are self-describing, so a value there is plain data: a
 //! table is a map, a list an array. Postcard and protobuf aren't, so there each
 //! value carries a tag naming its type. The two cases are told apart by serde's
-//! `is_human_readable`, which this crate turns on for MessagePack (see
+//! `is_human_readable`, which this crate turns on for `MessagePack` (see
 //! [`WireFormat`](crate::WireFormat)).
+//!
+//! # Owns
+//!
+//! - [`Value`] and [`Table`], [`Bytes`], and [`Fraction`].
+//!
+//! # Not here
+//!
+//! - Reading an Extension's settings out of its table: `kotodama-extension`'s `config.rs`.
 
 use std::collections::BTreeMap;
 use std::fmt;
 
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64;
-use serde::de::{self, MapAccess, SeqAccess, Visitor};
-use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use serde::Deserialize;
+use serde::Deserializer;
+use serde::Serialize;
+use serde::Serializer;
+use serde::de;
+use serde::de::MapAccess;
+use serde::de::SeqAccess;
+use serde::de::Visitor;
 
 /// A config value: anything a TOML file can hold, except that dates arrive as
 /// strings. There is no null, because TOML has none.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Value {
+    /// `true` or `false`.
     Bool(bool),
     Integer(i64),
     Float(f64),
@@ -27,6 +42,7 @@ pub enum Value {
     Table(Table),
 }
 
+/// A TOML table: values by key, in key order.
 pub type Table = BTreeMap<String, Value>;
 
 /// Postcard's and protobuf's form: the tag picks the variant.
@@ -112,11 +128,9 @@ impl<'de> Visitor<'de> for PlainVisitor {
     }
 
     fn visit_u64<E: de::Error>(self, value: u64) -> Result<Value, E> {
-        i64::try_from(value).map(Value::Integer).map_err(|_| {
-            E::custom(format!(
-                "{value} is too large; integers must fit in 64 signed bits"
-            ))
-        })
+        i64::try_from(value)
+            .map(Value::Integer)
+            .map_err(|_| E::custom(format!("{value} is too large; integers must fit in 64 signed bits")))
     }
 
     fn visit_f64<E>(self, value: f64) -> Result<Value, E> {
@@ -148,9 +162,10 @@ impl<'de> Visitor<'de> for PlainVisitor {
     }
 }
 
-/// Binary data, such as an image to paste. JSON and MessagePack carry it as a
-/// base64 string; postcard and protobuf as raw bytes. Decoding MessagePack also accepts its
-/// native binary type, which other languages' libraries produce for byte strings.
+/// Binary data, such as an image to paste. JSON and `MessagePack` carry it as a
+/// base64 string; postcard and protobuf as raw bytes. Decoding `MessagePack` also
+/// accepts its native binary type, which other languages' libraries produce for
+/// byte strings.
 #[derive(Clone, PartialEq, Eq, Default)]
 pub struct Bytes(pub Vec<u8>);
 
@@ -173,7 +188,7 @@ impl Serialize for Bytes {
 impl<'de> Deserialize<'de> for Bytes {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         struct BytesVisitor;
-        impl<'de> Visitor<'de> for BytesVisitor {
+        impl Visitor<'_> for BytesVisitor {
             type Value = Bytes;
             fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
                 f.write_str("base64 text or bytes")
@@ -203,22 +218,33 @@ impl<'de> Deserialize<'de> for Bytes {
 pub struct Fraction(f32);
 
 impl Fraction {
-    pub fn new(value: f32) -> Result<Self, String> {
+    /// `value` as a fraction.
+    ///
+    /// # Errors
+    ///
+    /// [`FractionError`] if `value` is below 0, above 1, or not a number.
+    pub fn new(value: f32) -> Result<Self, FractionError> {
         if (0.0..=1.0).contains(&value) {
             Ok(Fraction(value))
         } else {
-            Err(format!("{value} isn't between 0 and 1"))
+            Err(FractionError(value))
         }
     }
 
+    /// The number, from 0 to 1.
     pub fn get(self) -> f32 {
         self.0
     }
 }
 
+/// A number given as a [`Fraction`] that isn't between 0 and 1.
+#[derive(Debug, Clone, Copy, PartialEq, thiserror::Error)]
+#[error("{0} isn't between 0 and 1")]
+pub struct FractionError(f32);
+
 impl TryFrom<f32> for Fraction {
-    type Error = String;
-    fn try_from(value: f32) -> Result<Self, String> {
+    type Error = FractionError;
+    fn try_from(value: f32) -> Result<Self, FractionError> {
         Fraction::new(value)
     }
 }

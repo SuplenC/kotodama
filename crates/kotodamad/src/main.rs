@@ -1,6 +1,17 @@
+//! `kotodamad`: the Daemon's command line.
+//!
+//! # Owns
+//!
+//! - Parsing the command line, and logging to stderr.
+//!
+//! # Not here
+//!
+//! - Running the Daemon and printing the config: `lib.rs`.
+
 use std::path::PathBuf;
 use std::process::ExitCode;
 
+use kotodama_extension::Chain;
 use kotodamad::engine;
 use kotodamad::paths;
 
@@ -49,9 +60,7 @@ fn parse(args: &[String]) -> Option<(Option<PathBuf>, Command)> {
     let command = match rest {
         [] => Command::Run,
         [config] if config == "config" => Command::Config { schema: false },
-        [config, schema] if config == "config" && schema == "--schema" => {
-            Command::Config { schema: true }
-        }
+        [config, schema] if config == "config" && schema == "--schema" => Command::Config { schema: true },
         _ => return None,
     };
     Some((config_dir, command))
@@ -74,14 +83,16 @@ fn main() -> ExitCode {
         eprintln!("{USAGE}");
         return ExitCode::from(2);
     };
-    let result = paths::config_dirs(config_dir).and_then(|config_dirs| match command {
-        Command::Run => kotodamad::start(config_dirs),
-        Command::Config { schema } => kotodamad::print_config(config_dirs, schema),
-    });
+    let result = paths::config_dirs(config_dir)
+        .map_err(kotodamad::Error::paths)
+        .and_then(|config_dirs| match command {
+            Command::Run => kotodamad::start(config_dirs),
+            Command::Config { schema } => kotodamad::print_config(config_dirs, schema),
+        });
     match result {
         Ok(()) => ExitCode::SUCCESS,
         Err(err) => {
-            log::error!("{err}");
+            log::error!("{}", Chain(&err));
             ExitCode::FAILURE
         }
     }

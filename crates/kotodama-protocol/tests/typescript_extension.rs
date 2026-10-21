@@ -15,12 +15,12 @@ const EXAMPLE: &str = "typescript-extension";
 
 fn started() -> Example {
     let mut example = Example::start(EXAMPLE);
-    example.send(ToExtension::Config(BTreeMap::new()));
+    example.send(&ToExtension::Config(BTreeMap::new()));
     example
 }
 
 fn titles(example: &mut Example, id: u64, query: &str) -> Vec<String> {
-    example.send(ToExtension::LiveQuery {
+    example.send(&ToExtension::LiveQuery {
         id,
         query: query.into(),
         prefix: Some("ts ".into()),
@@ -35,10 +35,7 @@ fn titles(example: &mut Example, id: u64, query: &str) -> Vec<String> {
     };
     assert_eq!(live_query, id);
     assert!(done);
-    results
-        .into_iter()
-        .map(|result| result.item.title)
-        .collect()
+    results.into_iter().map(|result| result.item.title).collect()
 }
 
 #[test]
@@ -66,7 +63,7 @@ fn the_typescript_example_shows_a_timestamp_as_a_date_and_a_date_as_a_timestamp(
 #[test]
 fn the_typescript_example_copies_or_types_the_form_picked() {
     let mut example = started();
-    example.send(ToExtension::LiveQuery {
+    example.send(&ToExtension::LiveQuery {
         id: 9,
         query: "0".into(),
         prefix: Some("ts ".into()),
@@ -90,7 +87,7 @@ fn the_typescript_example_copies_or_types_the_form_picked() {
             },
         ),
     ] {
-        example.send(ToExtension::RunAction {
+        example.send(&ToExtension::RunAction {
             invocation: 1 << 40,
             action: action.into(),
             item: iso.to_ref(),

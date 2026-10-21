@@ -967,6 +967,7 @@ dependencies = [
  "cxx-qt-build",
  "cxx-qt-lib",
  "kotodama-protocol",
+ "thiserror 2.0.21",
 ]
 
 [[package]]
@@ -1011,6 +1012,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tempfile",
+ "thiserror 2.0.21",
  "toml",
  "wayland-client",
  "wayland-protocols-misc",

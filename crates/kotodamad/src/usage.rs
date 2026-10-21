@@ -12,13 +12,11 @@
 //!
 //! - `at`: seconds since the Unix epoch.
 //! - `kind`: `query` when the user typed, `pick` when they ran an Action.
-//! - `query`: what was typed, as the Front end sent it. Typing that empties
-//!   the search box isn't logged, but a pick made with nothing typed is, with
-//!   `"query":""`.
+//! - `query`: what was typed, as the Front end sent it. Typing that empties the search box isn't
+//!   logged, but a pick made with nothing typed is, with `"query":""`.
 //! - `extension` and `id`: the picked Result's Extension and Item id.
 //! - `action`: the id of the Action run.
-//! - `row`: where the Result was in the list, from 0, or `null` if it wasn't
-//!   in the list last sent.
+//! - `row`: where the Result was in the list, from 0, or `null` if it wasn't in the list last sent.
 //!
 //! When the file would grow past [`MAX_BYTES`], it is renamed to
 //! `usage.jsonl.1`, replacing the one before, and a new file is started, so
@@ -26,15 +24,34 @@
 //! was written; delete the files to forget it. Clearing the History deletes
 //! both files, and clearing one Extension's History drops the picks of its
 //! Results from them. Undoing either puts back the History, never the log.
+//!
+//! # Owns
+//!
+//! - [`Writer`]: appending to the log and rotating it, off the Daemon's thread.
+//! - [`forget`]: dropping an Extension's picks, or the whole log.
+//!
+//! # Not here
+//!
+//! - The History: `history.rs`.
 
-use std::fs::{self, File, OpenOptions};
-use std::io::{self, BufRead, BufReader, BufWriter, Write};
-use std::path::{Path, PathBuf};
+use std::fs;
+use std::fs::File;
+use std::fs::OpenOptions;
+use std::io;
+use std::io::BufRead;
+use std::io::BufReader;
+use std::io::BufWriter;
+use std::io::Write;
+use std::path::Path;
+use std::path::PathBuf;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::mpsc::{self, Sender};
+use std::sync::atomic::AtomicUsize;
+use std::sync::atomic::Ordering;
+use std::sync::mpsc;
+use std::sync::mpsc::Sender;
 
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
+use serde::Serialize;
 
 use crate::host::spawn;
 
@@ -91,13 +108,12 @@ impl Log {
         serde_json::to_writer(&mut self.line, entry)?;
         self.line.push(b'\n');
         let len = self.line.len() as u64;
-        let (mut file, mut size) = match self.file.take() {
-            Some(open) => open,
-            None => {
-                let file = open(&self.path)?;
-                let size = file.metadata()?.len();
-                (file, size)
-            }
+        let (mut file, mut size) = if let Some(open) = self.file.take() {
+            open
+        } else {
+            let file = open(&self.path)?;
+            let size = file.metadata()?.len();
+            (file, size)
         };
         // A file an earlier run left full is rotated too.
         if size > 0 && size + len > self.max {
@@ -146,8 +162,8 @@ fn drop_picks(path: &Path, extension: &str) -> io::Result<()> {
     let mut dropped = false;
     for line in lines {
         let line = line?;
-        let picked = serde_json::from_slice::<Picked>(&line)
-            .is_ok_and(|picked| picked.extension.as_deref() == Some(extension));
+        let picked =
+            serde_json::from_slice::<Picked>(&line).is_ok_and(|picked| picked.extension.as_deref() == Some(extension));
         if picked {
             dropped = true;
         } else {
@@ -206,6 +222,7 @@ enum Op {
 
 /// Writes the log on a thread of its own, so the Daemon never waits for the
 /// disk. The thread ends when this is dropped.
+#[derive(Debug)]
 pub struct Writer {
     ops: Sender<Op>,
     /// How many entries wait to be written.
@@ -244,7 +261,7 @@ impl Writer {
         Writer { ops, pending }
     }
 
-    /// Never blocks: an entry that finds [`PENDING`] others waiting is dropped.
+    /// Never blocks: an entry that finds `PENDING` others waiting is dropped.
     pub fn write(&self, entry: Entry) {
         if self.pending.load(Ordering::Relaxed) < PENDING {
             self.pending.fetch_add(1, Ordering::Relaxed);
@@ -261,173 +278,4 @@ impl Writer {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn query(at: u64, query: &str) -> Entry {
-        Entry {
-            at,
-            used: Used::Query {
-                query: query.into(),
-            },
-        }
-    }
-
-    #[test]
-    fn each_entry_is_a_line_of_json() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("state/usage.jsonl");
-        let mut log = Log::new(path.clone(), MAX_BYTES);
-        log.write(&query(10, "fi")).unwrap();
-        log.write(&Entry {
-            at: 11,
-            used: Used::Pick {
-                query: "fi".into(),
-                extension: "apps".into(),
-                id: "firefox".into(),
-                action: "open".into(),
-                row: Some(1),
-            },
-        })
-        .unwrap();
-        log.write(&Entry {
-            at: 12,
-            used: Used::Pick {
-                query: "fi".into(),
-                extension: "apps".into(),
-                id: "fish".into(),
-                action: "open".into(),
-                row: None,
-            },
-        })
-        .unwrap();
-        assert_eq!(
-            fs::read_to_string(&path).unwrap(),
-            concat!(
-                r#"{"at":10,"kind":"query","query":"fi"}"#,
-                "\n",
-                r#"{"at":11,"kind":"pick","query":"fi","extension":"apps","id":"firefox","action":"open","row":1}"#,
-                "\n",
-                r#"{"at":12,"kind":"pick","query":"fi","extension":"apps","id":"fish","action":"open","row":null}"#,
-                "\n",
-            )
-        );
-    }
-
-    #[test]
-    fn a_full_log_is_rotated_and_never_grows_past_its_limit() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("usage.jsonl");
-        let line = r#"{"at":10,"kind":"query","query":"fi"}"#.len() as u64 + 1;
-        let mut log = Log::new(path.clone(), 2 * line);
-        for _ in 0..5 {
-            log.write(&query(10, "fi")).unwrap();
-        }
-        let older = dir.path().join("usage.jsonl.1");
-        assert_eq!(fs::metadata(&older).unwrap().len(), 2 * line);
-        assert_eq!(fs::metadata(&path).unwrap().len(), line);
-    }
-
-    #[test]
-    fn a_log_an_earlier_run_filled_is_rotated_at_the_first_entry() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("usage.jsonl");
-        let line = r#"{"at":10,"kind":"query","query":"fi"}"#.len() as u64 + 1;
-        let mut log = Log::new(path.clone(), 2 * line);
-        log.write(&query(10, "fi")).unwrap();
-        log.write(&query(10, "fi")).unwrap();
-
-        Log::new(path.clone(), 2 * line)
-            .write(&query(10, "fi"))
-            .unwrap();
-        let older = dir.path().join("usage.jsonl.1");
-        assert_eq!(fs::metadata(&older).unwrap().len(), 2 * line);
-        assert_eq!(fs::metadata(&path).unwrap().len(), line);
-    }
-
-    #[test]
-    fn the_log_keeps_what_an_earlier_run_wrote() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("usage.jsonl");
-        Log::new(path.clone(), MAX_BYTES)
-            .write(&query(10, "fi"))
-            .unwrap();
-        Log::new(path.clone(), MAX_BYTES)
-            .write(&query(11, "fir"))
-            .unwrap();
-        assert_eq!(fs::read_to_string(&path).unwrap().lines().count(), 2);
-    }
-
-    fn pick(at: u64, extension: &str, id: &str) -> Entry {
-        Entry {
-            at,
-            used: Used::Pick {
-                query: "fi".into(),
-                extension: extension.into(),
-                id: id.into(),
-                action: "open".into(),
-                row: Some(0),
-            },
-        }
-    }
-
-    /// A query and a pick of an app in the rotated log, then a pick of a
-    /// file and of an app in the current one.
-    fn rotated_log(dir: &Path) -> (Log, PathBuf, PathBuf) {
-        let older = dir.join("usage.jsonl.1");
-        let mut log = Log::new(older.clone(), MAX_BYTES);
-        log.write(&query(10, "fi")).unwrap();
-        log.write(&pick(11, "apps", "firefox")).unwrap();
-        let path = dir.join("usage.jsonl");
-        let mut log = Log::new(path.clone(), MAX_BYTES);
-        log.write(&pick(12, "files", "notes")).unwrap();
-        log.write(&pick(13, "apps", "fish")).unwrap();
-        (log, path, older)
-    }
-
-    #[test]
-    fn forgetting_everything_removes_the_log_and_the_rotated_one() {
-        let dir = tempfile::tempdir().unwrap();
-        let (mut log, path, older) = rotated_log(dir.path());
-        assert!(older.exists());
-        log.forget(None).unwrap();
-        assert!(!path.exists() && !older.exists());
-
-        log.write(&query(13, "fir")).unwrap();
-        assert_eq!(fs::read_to_string(&path).unwrap().lines().count(), 1);
-        log.forget(None).unwrap();
-        log.forget(None).unwrap();
-    }
-
-    #[test]
-    fn forgetting_one_extension_drops_its_picks_from_both_files() {
-        let dir = tempfile::tempdir().unwrap();
-        let (mut log, path, older) = rotated_log(dir.path());
-        log.forget(Some("apps")).unwrap();
-        let lines = |path: &Path| {
-            fs::read_to_string(path)
-                .unwrap()
-                .lines()
-                .map(|line| serde_json::from_str::<serde_json::Value>(line).unwrap()["at"].clone())
-                .collect::<Vec<_>>()
-        };
-        assert_eq!(lines(&older), [10]);
-        assert_eq!(lines(&path), [12]);
-
-        log.write(&pick(14, "apps", "firefox")).unwrap();
-        assert_eq!(lines(&path).len(), 2, "the log goes on after it");
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn only_the_user_can_read_the_log() {
-        use std::os::unix::fs::PermissionsExt;
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("usage.jsonl");
-        Log::new(path.clone(), MAX_BYTES)
-            .write(&query(10, "fi"))
-            .unwrap();
-        let mode = fs::metadata(&path).unwrap().permissions().mode();
-        assert_eq!(mode & 0o777, 0o600);
-    }
-}
+mod tests;

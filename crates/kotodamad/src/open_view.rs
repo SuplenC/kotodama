@@ -1,5 +1,14 @@
 //! `kotodama open --view <extension>/<item>`: what it names, and the request
-//! the Daemon holds back from the menus until the View is there (ADR 0014).
+//! the Daemon holds back from the menus until the View is there.
+//!
+//! # Owns
+//!
+//! - [`ViewName`]: the View named on the command line.
+//! - [`Opening`]: the request held back while the View opens.
+//!
+//! # Not here
+//!
+//! - Opening it and holding the menus back: `daemon/openings.rs`.
 
 use std::fmt;
 use std::time::Instant;
@@ -53,24 +62,4 @@ impl Opening {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn a_view_name_is_an_extension_and_an_item_id_that_may_hold_slashes() {
-        assert_eq!(
-            ViewName::parse("folders/src/kotodama"),
-            Some(ViewName {
-                extension: "folders".into(),
-                item: "src/kotodama".into(),
-            })
-        );
-        assert_eq!(
-            ViewName::parse("clipboard/history").map(|name| name.to_string()),
-            Some("clipboard/history".into())
-        );
-        for bad in ["history", "/history", "clipboard/", ""] {
-            assert_eq!(ViewName::parse(bad), None, "{bad}");
-        }
-    }
-}
+mod tests;

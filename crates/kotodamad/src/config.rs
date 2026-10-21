@@ -6,15 +6,32 @@
 //! order. Later values win: tables merge key by key, and anything else,
 //! including a list, replaces the earlier value whole. File names carry no
 //! meaning, and subdirectories (such as `extensions/`) are ignored.
+//!
+//! # Owns
+//!
+//! - [`load`] and [`watch`]: reading, merging and watching the config files.
+//! - [`extension_settings`]: an Extension's table, as the Extension gets it.
+//! - [`Error`] and [`ParseError`]: why the config couldn't be loaded.
+//!
+//! # Not here
+//!
+//! - What each setting means: its owner (`engine.rs`, `paths.rs`, `history.rs`, `keywords.rs`,
+//!   `configured.rs`, ...), and every key in `schema.rs`.
+//! - Taking a new config in: `daemon/settings.rs`.
 
 use std::collections::BTreeMap;
-use std::path::{Path, PathBuf};
+use std::fs;
+use std::io;
+use std::path::Path;
+use std::path::PathBuf;
 use std::sync::mpsc::Sender;
 use std::time::Duration;
-use std::{fmt, fs, io};
 
-use kotodama_extension::watch::{RecursiveMode, Watcher, notify};
-use kotodama_protocol::{Table, Value};
+use kotodama_extension::watch::RecursiveMode;
+use kotodama_extension::watch::Watcher;
+use kotodama_extension::watch::notify;
+use kotodama_protocol::Table;
+use kotodama_protocol::Value;
 
 use crate::daemon::Event;
 
@@ -23,19 +40,26 @@ use crate::daemon::Event;
 const SETTLE: Duration = Duration::from_millis(50);
 
 /// Why the config couldn't be loaded. The caller keeps the last good config.
-#[derive(Debug)]
+///
+/// The file and the reason are fields, not a cause to match on: the Daemon
+/// shows the user both, apart, as a problem with that file.
+#[derive(Debug, thiserror::Error)]
+#[error("{}: {reason}", path.display())]
 pub struct Error {
     pub path: PathBuf,
     pub reason: String,
 }
 
-impl fmt::Display for Error {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}: {}", self.path.display(), self.reason)
+/// Why a config file's text isn't TOML.
+#[derive(Debug, thiserror::Error)]
+#[error("{}", .0.message())]
+pub struct ParseError(toml::de::Error);
+
+impl ParseError {
+    fn toml(err: toml::de::Error) -> Self {
+        ParseError(err)
     }
 }
-
-impl std::error::Error for Error {}
 
 /// The file each value of the merged config came from, by its dotted key,
 /// such as `history.half_life_days`. A list is one value.
@@ -44,11 +68,19 @@ pub type Sources = BTreeMap<String, PathBuf>;
 /// Reads and merges every config file in `dirs`, least important directory
 /// first. A directory that doesn't exist counts as empty. Fails on the first
 /// file that can't be read or parsed.
+///
+/// # Errors
+///
+/// When a directory or a file in it can't be read, or a file isn't TOML.
 pub fn load(dirs: &[PathBuf]) -> Result<Table, Error> {
     load_from(dirs, None)
 }
 
 /// [`load`], and where each value came from.
+///
+/// # Errors
+///
+/// As [`load`].
 pub fn load_with_sources(dirs: &[PathBuf]) -> Result<(Table, Sources), Error> {
     let mut sources = Sources::new();
     let config = load_from(dirs, Some(&mut sources))?;
@@ -64,7 +96,7 @@ fn load_from(dirs: &[PathBuf], mut sources: Option<&mut Sources>) -> Result<Tabl
                 reason,
             };
             let text = fs::read_to_string(&path).map_err(|err| error(err.to_string()))?;
-            let table = parse(&text).map_err(error)?;
+            let table = parse(&text).map_err(|err| error(err.to_string()))?;
             if let Some(sources) = sources.as_deref_mut() {
                 note_sources(&table, "", &path, sources);
             }
@@ -75,10 +107,12 @@ fn load_from(dirs: &[PathBuf], mut sources: Option<&mut Sources>) -> Result<Tabl
 }
 
 /// One config file's text as a table.
-pub fn parse(text: &str) -> Result<Table, String> {
-    let table: toml::Table = text
-        .parse()
-        .map_err(|err: toml::de::Error| err.message().to_owned())?;
+///
+/// # Errors
+///
+/// When `text` isn't TOML.
+pub fn parse(text: &str) -> Result<Table, ParseError> {
+    let table: toml::Table = text.parse().map_err(ParseError::toml)?;
     Ok(from_toml_table(table))
 }
 
@@ -103,6 +137,10 @@ fn note_sources(table: &Table, prefix: &str, path: &Path, sources: &mut Sources)
 /// each change, or [`Event::ConfigFailed`] when it can't be loaded, and the
 /// Daemon keeps the last good config. Watching stops when the watcher is
 /// dropped.
+///
+/// # Errors
+///
+/// When the watcher can't start.
 pub fn watch(dirs: Vec<PathBuf>, events: Sender<Event>) -> notify::Result<Watcher> {
     let filter = dirs.clone();
     let watcher = Watcher::start(
@@ -130,9 +168,7 @@ pub fn watch(dirs: Vec<PathBuf>, events: Sender<Event>) -> notify::Result<Watche
 /// ignore everything else.
 pub fn is_config_file(dirs: &[PathBuf], path: &Path) -> bool {
     path.extension().is_some_and(|ext| ext == "toml")
-        && path
-            .parent()
-            .is_some_and(|parent| dirs.iter().any(|dir| dir == parent))
+        && path.parent().is_some_and(|parent| dirs.iter().any(|dir| dir == parent))
 }
 
 /// The top-level `*.toml` files in `dir`, in filename order.
@@ -148,7 +184,7 @@ fn files(dir: &Path) -> Result<Vec<PathBuf>, Error> {
         }
     };
     let mut files: Vec<PathBuf> = entries
-        .filter_map(|entry| entry.ok())
+        .filter_map(Result::ok)
         .map(|entry| entry.path())
         .filter(|path| path.extension().is_some_and(|ext| ext == "toml") && path.is_file())
         .collect();
@@ -181,15 +217,7 @@ pub fn extension_table(config: &Table, name: &str) -> Table {
 
 /// The keys of `[extensions.<name>]` the Daemon reads itself, for every
 /// Extension.
-pub const DAEMON_KEYS: [&str; 7] = [
-    "word",
-    "prefix",
-    "in_search",
-    "enable",
-    "command",
-    "env",
-    "live_query",
-];
+pub const DAEMON_KEYS: [&str; 7] = ["word", "prefix", "in_search", "enable", "command", "env", "live_query"];
 /// The Manifest's keys, which an Extension defined in the config takes from
 /// its table too.
 pub const MANIFEST_KEYS: [&str; 8] = [
@@ -209,17 +237,12 @@ pub const MANIFEST_KEYS: [&str; 8] = [
 /// Manifest's keys too.
 pub fn extension_settings(config: &Table, name: &str, inline: bool) -> Table {
     let mut table = extension_table(config, name);
-    table.retain(|key, _| {
-        !DAEMON_KEYS.contains(&key.as_str()) && !(inline && MANIFEST_KEYS.contains(&key.as_str()))
-    });
+    table.retain(|key, _| !DAEMON_KEYS.contains(&key.as_str()) && (!inline || !MANIFEST_KEYS.contains(&key.as_str())));
     table
 }
 
 fn from_toml_table(table: toml::Table) -> Table {
-    table
-        .into_iter()
-        .map(|(key, value)| (key, from_toml(value)))
-        .collect()
+    table.into_iter().map(|(key, value)| (key, from_toml(value))).collect()
 }
 
 /// `value` as TOML: what a Manifest is read from, and what `kotodamad config`
@@ -231,12 +254,9 @@ pub fn to_toml(value: &Value) -> toml::Value {
         Value::Float(value) => toml::Value::Float(*value),
         Value::Bool(value) => toml::Value::Boolean(*value),
         Value::Array(values) => toml::Value::Array(values.iter().map(to_toml).collect()),
-        Value::Table(table) => toml::Value::Table(
-            table
-                .iter()
-                .map(|(key, value)| (key.clone(), to_toml(value)))
-                .collect(),
-        ),
+        Value::Table(table) => {
+            toml::Value::Table(table.iter().map(|(key, value)| (key.clone(), to_toml(value))).collect())
+        }
     }
 }
 

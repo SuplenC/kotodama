@@ -2,9 +2,11 @@
 //! query searches that Extension's Items alone, those it keeps out of the
 //! search included.
 
-mod common;
+#[path = "support/harness.rs"]
+#[expect(dead_code, reason = "each test uses part of the harness")]
+mod harness;
 
-use common::*;
+use harness::*;
 use kotodama_protocol::*;
 use kotodamad::discovery::Found;
 
@@ -48,10 +50,7 @@ impl Desk {
     fn with(emoji: Found, toml: &str) -> Self {
         let mut h = Harness::with_config(vec![plain("apps"), emoji], config(toml));
         let apps = h.up(0);
-        h.add(
-            &apps,
-            vec![app("Editor"), app("Firefox"), app("Emoji Keyboard")],
-        );
+        h.add(&apps, vec![app("Editor"), app("Firefox"), app("Emoji Keyboard")]);
         let emoji = h.up(1);
         h.add(&emoji, characters());
         let ui = h.front_end();
@@ -61,8 +60,7 @@ impl Desk {
     /// Types `query`: the rows, as extension and title, and the scope.
     fn search(&mut self, query: &str) -> (Vec<(String, String)>, Option<Scope>) {
         let text = query.into();
-        self.h
-            .front_end_sends(&self.ui, FromFrontEnd::Query { text });
+        self.h.front_end_sends(&self.ui, FromFrontEnd::Query { text });
         let (rows, scope) = last_results(self.ui.drain());
         (rows, scope)
     }
@@ -103,15 +101,12 @@ fn last_results(sent: Vec<ToFrontEnd>) -> (Vec<(String, String)>, Option<Scope>)
             _ => None,
         })
         .expect("a query is always answered");
-    let rows = results
-        .into_iter()
-        .map(|row| (row.extension, row.item.title))
-        .collect();
+    let rows = results.into_iter().map(|row| (row.extension, row.item.title)).collect();
     (rows, scope)
 }
 
-fn emoji_scope(intro: bool) -> Option<Scope> {
-    Some(Scope {
+fn emoji_scope(intro: bool) -> Scope {
+    Scope {
         word: "emoji".into(),
         title: "Emoji".into(),
         icon: Some("face-smile".into()),
@@ -123,7 +118,7 @@ fn emoji_scope(intro: bool) -> Option<Scope> {
             }],
             note: None,
         }),
-    })
+    }
 }
 
 #[test]
@@ -157,10 +152,7 @@ fn the_entry_item_found_by_the_word_says_what_follows_it() {
 
     let (rows, scope) = desk.search("emoji fire");
 
-    assert_eq!(
-        rows[0],
-        ("kotodama".to_owned(), "Search Emoji for “fire”".to_owned())
-    );
+    assert_eq!(rows[0], ("kotodama".to_owned(), "Search Emoji for “fire”".to_owned()));
     assert_eq!(scope, None);
 }
 
@@ -179,7 +171,7 @@ fn entering_the_app_keeps_what_follows_the_word() {
     );
     let (rows, scope) = last_results(sent);
     assert_eq!(rows[0].1, "🔥 Fire");
-    assert_eq!(scope, emoji_scope(false));
+    assert_eq!(scope, Some(emoji_scope(false)));
 }
 
 #[test]
@@ -215,23 +207,18 @@ fn running_the_entry_item_enters_the_app_with_its_intro_in_the_same_flush() {
     desk.pick("emo", "Emoji");
 
     let sent = desk.ui.drain();
-    let set = sent
+    let set_at = sent
         .iter()
-        .position(|message| {
-            *message
-                == ToFrontEnd::SetQuery {
-                    text: "emoji ".into(),
-                }
-        })
+        .position(|message| *message == ToFrontEnd::SetQuery { text: "emoji ".into() })
         .unwrap_or_else(|| panic!("{sent:?}"));
     let results = sent
         .iter()
         .rposition(|message| matches!(message, ToFrontEnd::Results { .. }))
         .unwrap();
-    assert!(set < results, "{sent:?}");
+    assert!(set_at < results, "{sent:?}");
     assert!(!sent.contains(&ToFrontEnd::Close), "the menu stays open");
     let (rows, scope) = last_results(sent);
-    assert_eq!(scope, emoji_scope(true));
+    assert_eq!(scope, Some(emoji_scope(true)));
     let titles: Vec<String> = rows.into_iter().map(|(_, title)| title).collect();
     let sent: Vec<String> = characters().into_iter().map(|item| item.title).collect();
     assert_eq!(titles, sent);
@@ -245,11 +232,8 @@ fn typing_in_the_app_searches_only_its_extensions_items() {
     let (rows, scope) = desk.search("emoji fire");
 
     assert_eq!(rows[0].1, "🔥 Fire");
-    assert!(
-        rows.iter().all(|(extension, _)| extension == "emoji"),
-        "{rows:?}"
-    );
-    assert_eq!(scope, emoji_scope(false));
+    assert!(rows.iter().all(|(extension, _)| extension == "emoji"), "{rows:?}");
+    assert_eq!(scope, Some(emoji_scope(false)));
 }
 
 #[test]
@@ -260,7 +244,7 @@ fn the_word_is_kept_in_any_case() {
     let (rows, scope) = desk.search("Emoji fire");
 
     assert_eq!(rows[0].1, "🔥 Fire");
-    assert_eq!(scope, emoji_scope(false));
+    assert_eq!(scope, Some(emoji_scope(false)));
 }
 
 #[test]
@@ -364,10 +348,7 @@ fn an_app_only_item_shows_only_in_its_app() {
     let mut desk = Desk { h, ui };
     desk.enter("clipboard", "clipboard");
     let titles = desk.titles("clipboard clip");
-    assert!(
-        titles.contains(&"Clipboard History".to_owned()),
-        "{titles:?}"
-    );
+    assert!(titles.contains(&"Clipboard History".to_owned()), "{titles:?}");
     assert!(titles.contains(&"Clip Editor".to_owned()), "{titles:?}");
 }
 
@@ -405,10 +386,7 @@ fn the_app_lists_its_commands_first() {
 
     desk.enter("clipboard", "clipboard");
 
-    assert_eq!(
-        desk.titles("clipboard "),
-        ["Clipboard History", "Alpha", "Beta"]
-    );
+    assert_eq!(desk.titles("clipboard "), ["Clipboard History", "Alpha", "Beta"]);
 }
 
 #[test]
@@ -468,7 +446,7 @@ fn opening_on_an_apps_word_enters_it() {
         },
     );
 
-    assert_eq!(desk.search("emoji fire").1, emoji_scope(false));
+    assert_eq!(desk.search("emoji fire").1, Some(emoji_scope(false)));
 }
 
 /// The Live queries in `sent`, and the prefix each was routed by.
@@ -526,9 +504,7 @@ fn an_extension_behind_its_app_is_asked_nothing_by_the_search() {
 
 #[test]
 fn another_apps_live_queries_are_not_asked_in_one() {
-    let calc = manifest(
-        "name = \"calc\"\ncommand = [\"x\"]\n[live_query]\ntriggers = ['^[0-9]']\ndebounce_ms = 0",
-    );
+    let calc = manifest("name = \"calc\"\ncommand = [\"x\"]\n[live_query]\ntriggers = ['^[0-9]']\ndebounce_ms = 0");
     let mut h = Harness::new(vec![plain("apps"), calc]);
     let apps = h.up(0);
     h.add(&apps, vec![app("Editor")]);
@@ -560,8 +536,7 @@ fn an_extension_that_cant_do_anything_has_no_entry_item_until_it_can() {
     let ui = h.front_end();
     let mut desk = Desk { h, ui };
 
-    desk.h
-        .send(&ext, status(false, Some("Hyprland isn't running")));
+    desk.h.send(&ext, status(false, Some("Hyprland isn't running")));
     let hidden = (desk.titles("hyprland"), desk.titles(""));
     desk.h.send(&ext, status(true, None));
     let shown = (desk.titles("hyprland"), desk.titles(""));
@@ -590,9 +565,7 @@ fn an_extension_that_never_says_has_an_entry_item_once_it_sends_items() {
 
 #[test]
 fn an_extension_with_live_queries_has_an_entry_item_without_items() {
-    let calc = manifest(
-        "name = \"calc\"\ncommand = [\"x\"]\n[live_query]\ntriggers = ['^[0-9]']\ndebounce_ms = 0",
-    );
+    let calc = manifest("name = \"calc\"\ncommand = [\"x\"]\n[live_query]\ntriggers = ['^[0-9]']\ndebounce_ms = 0");
     let mut h = Harness::new(vec![calc]);
     h.up(0);
     let ui = h.front_end();
@@ -602,9 +575,7 @@ fn an_extension_with_live_queries_has_an_entry_item_without_items() {
 
 #[test]
 fn what_an_extension_says_goes_before_its_live_queries_and_items() {
-    let ai = manifest(
-        "name = \"ai\"\ncommand = [\"x\"]\n[live_query]\nprefixes = [\"?\"]\ndebounce_ms = 0",
-    );
+    let ai = manifest("name = \"ai\"\ncommand = [\"x\"]\n[live_query]\nprefixes = [\"?\"]\ndebounce_ms = 0");
     let mut h = Harness::new(vec![ai]);
     let ext = h.up(0);
     h.send(&ext, status(false, Some("Set `api_key_command` or `url`")));

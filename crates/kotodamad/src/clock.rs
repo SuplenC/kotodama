@@ -1,8 +1,18 @@
 //! The wall clock the History's times come from: seconds since the Unix epoch,
 //! and the time of day where the user is, which Frecency learns by.
+//!
+//! # Owns
+//!
+//! - [`Clock`]: the wall clock and the user's time zone, read again once a minute.
+//! - [`When`]: a moment as the History counts it, and [`DAY_SECS`].
+//!
+//! # Not here
+//!
+//! - What the History does with the time of day: `history.rs`, `part_of_day`.
 
 use std::cell::Cell;
-use std::time::{Duration, SystemTime};
+use std::time::Duration;
+use std::time::SystemTime;
 
 /// Seconds in a day.
 pub const DAY_SECS: u64 = 24 * 60 * 60;
@@ -20,7 +30,7 @@ pub struct Clock {
     /// the machine spends suspended.
     start: Option<u64>,
     /// How far the user's local time is ahead of UTC at a time, in seconds,
-    /// read from the time zone as it is now.
+    /// read from the current time zone.
     utc_offset: fn(u64) -> i64,
     /// The minute, counted from the epoch, `utc_offset` was last read in,
     /// and what it read.
@@ -89,7 +99,7 @@ pub struct When {
     pub time_of_day: u32,
 }
 
-/// The local time's offset from UTC at `at`, in the time zone as it is now.
+/// The local time's offset from UTC at `at`, in the current time zone.
 /// glibc's `localtime_r` reads the zone once per process, and `tzset` reads
 /// `TZ` and `/etc/localtime` again: a `stat` of the file, which it parses
 /// only when it changed. So a zone the user switches to while the Daemon
@@ -103,7 +113,7 @@ fn local_utc_offset(at: u64) -> i64 {
     // SAFETY: an all-zero `tm` is valid, and `localtime_r` only writes to it.
     let mut tm: libc::tm = unsafe { std::mem::zeroed() };
     // SAFETY: both pointers are valid for the call.
-    if unsafe { libc::localtime_r(&time, &mut tm) }.is_null() {
+    if unsafe { libc::localtime_r(&raw const time, &raw mut tm) }.is_null() {
         return 0;
     }
     tm.tm_gmtoff as i64
@@ -121,55 +131,4 @@ fn local_utc_offset(_at: u64) -> i64 {
 }
 
 #[cfg(test)]
-mod tests {
-    use std::sync::atomic::{AtomicU64, Ordering};
-
-    use super::*;
-
-    #[test]
-    fn the_time_of_day_is_local() {
-        let clock = Clock::new(Some(23 * 3600), |_| 2 * 3600);
-        assert_eq!(clock.when(Duration::ZERO).time_of_day, 3600);
-        let clock = Clock::new(Some(3600), |_| -2 * 3600);
-        assert_eq!(
-            clock.when(Duration::from_secs(60)).time_of_day,
-            23 * 3600 + 60
-        );
-    }
-
-    #[test]
-    fn the_system_clock_is_read_each_time() {
-        let clock = Clock::system();
-        let now = SystemTime::now()
-            .duration_since(SystemTime::UNIX_EPOCH)
-            .unwrap()
-            .as_secs();
-        let at = clock.when(Duration::ZERO).at;
-        assert!(at.abs_diff(now) <= 1, "{at} {now}");
-    }
-
-    /// How often the zone of `counted` was read.
-    static READS: AtomicU64 = AtomicU64::new(0);
-
-    /// A zone one hour ahead of UTC that counts its readings.
-    fn counted(_at: u64) -> i64 {
-        READS.fetch_add(1, Ordering::Relaxed);
-        3600
-    }
-
-    #[test]
-    fn the_time_zone_is_read_once_a_minute() {
-        let clock = Clock::new(Some(10 * ZONE_SECS), counted);
-
-        for secs in [0, 1, 30, 59] {
-            assert_eq!(
-                clock.when(Duration::from_secs(secs)).time_of_day,
-                3600 + 600 + secs as u32
-            );
-        }
-        assert_eq!(READS.load(Ordering::Relaxed), 1, "once in the first minute");
-        clock.when(Duration::from_secs(60));
-        clock.when(Duration::from_secs(61));
-        assert_eq!(READS.load(Ordering::Relaxed), 2, "again in the next");
-    }
-}
+mod tests;

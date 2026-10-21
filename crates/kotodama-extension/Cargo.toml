@@ -30,3 +30,6 @@ wayland-protocols-wlr = { version = "0.3.12", features = ["client"], optional = 
 
 [dev-dependencies]
 tempfile = "3.27.0"
+
+[lints]
+workspace = true

@@ -21,8 +21,7 @@ where
     P: Message + Default + PartialEq,
 {
     let encoded = WireFormat::Protobuf.encode(ours).unwrap();
-    let read_by_prost =
-        P::decode(encoded.as_slice()).expect("prost reads the protobuf Wire format");
+    let read_by_prost = P::decode(encoded.as_slice()).expect("prost reads the protobuf Wire format");
     assert!(read_by_prost == *theirs, "prost read something else");
 
     let from_prost: T = WireFormat::Protobuf

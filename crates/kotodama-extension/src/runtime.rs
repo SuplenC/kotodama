@@ -9,12 +9,27 @@
 //! compositor makes them, and waits there with [`wait_for`] until they are
 //! made: an inotify watch wakes it the moment they are, so waiting costs
 //! nothing.
+//!
+//! # Owns
+//!
+//! The runtime directory, the compositors' sockets in it, and waiting for
+//! something there with an inotify watch and a backoff.
+//!
+//! # Not here
+//!
+//! Connecting to what turned up: Wayland (`crate::wayland`), Hyprland (its
+//! Extension).
 
-use std::ffi::{CString, OsStr, OsString};
-use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
+use std::ffi::CString;
+use std::ffi::OsStr;
+use std::ffi::OsString;
+use std::os::fd::AsRawFd;
+use std::os::fd::FromRawFd;
+use std::os::fd::OwnedFd;
 use std::os::unix::ffi::OsStrExt;
 use std::os::unix::fs::FileTypeExt;
-use std::path::{Path, PathBuf};
+use std::path::Path;
+use std::path::PathBuf;
 use std::process::Command;
 use std::time::Duration;
 
@@ -40,12 +55,7 @@ pub fn wayland_sockets(dir: &Path) -> Vec<PathBuf> {
     let mut found: Vec<(u32, PathBuf)> = entries
         .flatten()
         .filter_map(|entry| {
-            let number = entry
-                .file_name()
-                .to_str()?
-                .strip_prefix("wayland-")?
-                .parse()
-                .ok()?;
+            let number = entry.file_name().to_str()?.strip_prefix("wayland-")?.parse().ok()?;
             let path = entry.path();
             // Follows a link.
             path.metadata()
@@ -63,10 +73,7 @@ pub fn wayland_sockets(dir: &Path) -> Vec<PathBuf> {
 /// programs launched from the menu still find the compositor.
 pub fn pass_wayland_display(command: &mut Command) {
     let runtime = dir();
-    if let Some(display) = missing_wayland_display(
-        std::env::var_os("WAYLAND_DISPLAY").as_deref(),
-        runtime.as_deref(),
-    ) {
+    if let Some(display) = missing_wayland_display(std::env::var_os("WAYLAND_DISPLAY").as_deref(), runtime.as_deref()) {
         command.env("WAYLAND_DISPLAY", display);
     }
 }
@@ -85,17 +92,13 @@ fn missing_wayland_display(own: Option<&OsStr>, runtime: Option<&Path>) -> Optio
 /// is made, moved in or changed in one of `watched` (directories that don't
 /// exist are left out), or failing that, a while that doubles each time.
 /// `waiting` hears why the first try failed, so the wait is logged once.
-pub fn wait_for<T>(
-    watched: &[&Path],
-    mut attempt: impl FnMut() -> Result<T, String>,
-    waiting: impl FnOnce(&str),
-) -> T {
+pub fn wait_for<T>(watched: &[&Path], mut attempt: impl FnMut() -> Result<T, String>, waiting: impl FnOnce(&str)) -> T {
     let mut waiting = Some(waiting);
     let mut backoff = MIN_BACKOFF;
     loop {
         // Watching before trying, so a change between the two still ends the
         // wait.
-        let changes = Changes::watch(watched);
+        let watch = Changes::watch(watched);
         match attempt() {
             Ok(done) => return done,
             Err(err) => {
@@ -104,12 +107,11 @@ pub fn wait_for<T>(
                 }
             }
         }
-        let changed = match changes {
-            Some(changes) => changes.wait(backoff),
-            None => {
-                std::thread::sleep(backoff);
-                false
-            }
+        let changed = if let Some(watch) = watch {
+            watch.wait(backoff)
+        } else {
+            std::thread::sleep(backoff);
+            false
         };
         // After a change, what turned up may need a moment more, such as a
         // socket made just before its compositor listens on it.
@@ -155,137 +157,9 @@ impl Changes {
         };
         let millis = timeout.as_millis().min(i32::MAX as u128) as i32;
         // SAFETY: one valid pollfd, for the length given.
-        unsafe { libc::poll(&mut poll, 1, millis) > 0 }
+        unsafe { libc::poll(&raw mut poll, 1, millis) > 0 }
     }
 }
 
 #[cfg(test)]
-mod tests {
-    use std::sync::mpsc;
-    use std::thread;
-    use std::time::{Duration, Instant};
-
-    use std::os::unix::net::UnixListener;
-
-    use super::{missing_wayland_display, wait_for};
-
-    /// A program started before the compositor's environment reached it
-    /// passes on the display it would have had.
-    #[test]
-    fn a_launched_program_gets_the_display_the_launcher_lacks() {
-        let runtime = tempfile::tempdir().unwrap();
-        let dir = runtime.path();
-        assert_eq!(missing_wayland_display(None, Some(dir)), None);
-
-        let _three = UnixListener::bind(dir.join("wayland-3")).unwrap();
-        let _one = UnixListener::bind(dir.join("wayland-1")).unwrap();
-        assert_eq!(
-            missing_wayland_display(None, Some(dir)),
-            Some("wayland-1".into())
-        );
-        assert_eq!(
-            missing_wayland_display(Some("".as_ref()), Some(dir)),
-            Some("wayland-1".into())
-        );
-        // One it has already, it passes on as it is.
-        assert_eq!(
-            missing_wayland_display(Some("wayland-3".as_ref()), Some(dir)),
-            None
-        );
-        assert_eq!(missing_wayland_display(None, None), None);
-    }
-
-    #[test]
-    fn waiting_ends_once_something_is_made_where_it_watches() {
-        let runtime = tempfile::tempdir().unwrap();
-        let socket = runtime.path().join("compositor");
-        let (done, waited) = mpsc::channel();
-        let dir = runtime.path().to_owned();
-        let looked_for = socket.clone();
-        thread::spawn(move || {
-            let mut said = Vec::new();
-            wait_for(
-                &[&dir],
-                || {
-                    if looked_for.exists() {
-                        Ok(())
-                    } else {
-                        Err("not there".into())
-                    }
-                },
-                |err| said.push(err.to_owned()),
-            );
-            let _ = done.send(said);
-        });
-        // Long enough that the wait between tries has grown past what the
-        // test allows below, so only the watch can end it in time.
-        thread::sleep(Duration::from_millis(1600));
-        assert!(waited.try_recv().is_err(), "found nothing");
-
-        let made = Instant::now();
-        std::fs::write(&socket, "").unwrap();
-        let said = waited.recv_timeout(Duration::from_secs(5)).unwrap();
-        assert!(
-            made.elapsed() < Duration::from_millis(500),
-            "{:?}",
-            made.elapsed()
-        );
-        assert_eq!(said, ["not there"], "says it waits once");
-    }
-
-    /// A compositor makes its socket a moment before it listens on it: a try
-    /// that fails just after a change goes again soon, not after the long
-    /// wait the backoff had grown to.
-    #[test]
-    fn a_try_that_fails_just_after_a_change_is_soon_tried_again() {
-        let runtime = tempfile::tempdir().unwrap();
-        let socket = runtime.path().join("compositor");
-        let (done, waited) = mpsc::channel();
-        let dir = runtime.path().to_owned();
-        let looked_for = socket.clone();
-        thread::spawn(move || {
-            let mut refused = 1;
-            wait_for(
-                &[&dir],
-                || {
-                    if !looked_for.exists() {
-                        Err("not there".into())
-                    } else if refused > 0 {
-                        refused -= 1;
-                        Err("refused".into())
-                    } else {
-                        Ok(())
-                    }
-                },
-                |_| {},
-            );
-            let _ = done.send(());
-        });
-        thread::sleep(Duration::from_millis(1600));
-
-        let made = Instant::now();
-        std::fs::write(&socket, "").unwrap();
-        waited.recv_timeout(Duration::from_secs(10)).unwrap();
-        assert!(
-            made.elapsed() < Duration::from_millis(600),
-            "{:?}",
-            made.elapsed()
-        );
-    }
-
-    #[test]
-    fn a_missing_directory_is_tried_again_after_a_while() {
-        let runtime = tempfile::tempdir().unwrap();
-        let missing = runtime.path().join("hypr");
-        let mut tries = 0;
-        wait_for(
-            &[&missing],
-            || {
-                tries += 1;
-                if tries < 3 { Err("no".into()) } else { Ok(()) }
-            },
-            |_| {},
-        );
-        assert_eq!(tries, 3);
-    }
-}
+mod tests;

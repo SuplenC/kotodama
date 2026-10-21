@@ -13,10 +13,17 @@
 
 use std::hint::black_box;
 
-use gungraun::{library_benchmark, library_benchmark_group, main};
-use kotodama_protocol::{Table, Value};
+use gungraun::library_benchmark;
+use gungraun::library_benchmark_group;
+use gungraun::main;
+use kotodama_protocol::Table;
+use kotodama_protocol::Value;
 
+#[path = "support/corpus.rs"]
+#[expect(dead_code, reason = "the long titles are for `query.rs`")]
 mod corpus;
+#[path = "support/setup.rs"]
+#[expect(dead_code, reason = "the clipboard, the list View and the toggle are for `query.rs`")]
 mod setup;
 
 use setup::Setup;

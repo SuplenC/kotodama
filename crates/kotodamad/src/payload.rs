@@ -1,18 +1,33 @@
 //! Items' payload: everything a Result shows of an Item but a search never
-//! reads, kept encoded (ADR 0017). A Shelf holds the payloads of one
+//! reads, kept encoded. A Shelf holds the payloads of one
 //! Extension's Items, in a file the kernel pages in when a row is shown, or
 //! in memory when there is no file to use.
 //!
 //! A Shelf is only appended to: the versions of a Segment built one after
 //! another share it, and each reads only what was there when it was built.
+//!
+//! # Owns
+//!
+//! - [`Shelf`]: the append-only store of encoded Items, and [`Place`], where one is.
+//! - [`encode`]: an Item as a Shelf keeps it.
+//!
+//! # Not here
+//!
+//! - Which Items stay resident: `index.rs`.
 
-use std::fs::{self, File, OpenOptions};
+use std::fs;
+use std::fs::File;
+use std::fs::OpenOptions;
 use std::io;
 use std::path::Path;
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
+use std::sync::PoisonError;
+use std::sync::RwLock;
+use std::sync::atomic::AtomicU64;
+use std::sync::atomic::Ordering;
 
-use kotodama_protocol::{Item, WireFormat};
+use kotodama_protocol::Item;
+use kotodama_protocol::WireFormat;
 
 /// Where one Item's payload lies on its Shelf.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -71,7 +86,7 @@ impl Shelf {
         match &self.store {
             Store::File(file) => std::os::unix::fs::FileExt::write_all_at(file, bytes, at),
             Store::Memory(memory) => {
-                let mut memory = memory.write().unwrap_or_else(|err| err.into_inner());
+                let mut memory = memory.write().unwrap_or_else(PoisonError::into_inner);
                 let at = at as usize;
                 if memory.len() < at + bytes.len() {
                     memory.resize(at + bytes.len(), 0);
@@ -96,11 +111,9 @@ impl Shelf {
         match &self.store {
             Store::File(file) => std::os::unix::fs::FileExt::read_exact_at(file, buf, start),
             Store::Memory(memory) => {
-                let memory = memory.read().unwrap_or_else(|err| err.into_inner());
+                let memory = memory.read().unwrap_or_else(PoisonError::into_inner);
                 let at = start as usize;
-                let bytes = memory
-                    .get(at..at + len)
-                    .ok_or(io::ErrorKind::UnexpectedEof)?;
+                let bytes = memory.get(at..at + len).ok_or(io::ErrorKind::UnexpectedEof)?;
                 buf.copy_from_slice(bytes);
                 Ok(())
             }
@@ -145,11 +158,9 @@ fn decode(bytes: &[u8]) -> Result<Item, kotodama_protocol::Error> {
 /// A new file in `dir`, already unlinked. Only its user may read it: it
 /// holds what the Extensions sent, clipboard entries among them.
 fn file_in(dir: &Path, id: u64) -> io::Result<File> {
-    use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt};
-    fs::DirBuilder::new()
-        .recursive(true)
-        .mode(0o700)
-        .create(dir)?;
+    use std::os::unix::fs::DirBuilderExt;
+    use std::os::unix::fs::OpenOptionsExt;
+    fs::DirBuilder::new().recursive(true).mode(0o700).create(dir)?;
     let path = dir.join(format!("items-{}-{id}", std::process::id()));
     let file = OpenOptions::new()
         .read(true)
@@ -162,68 +173,4 @@ fn file_in(dir: &Path, id: u64) -> io::Result<File> {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use kotodama_protocol::{Action, ItemKind};
-
-    fn item(id: &str) -> Item {
-        Item {
-            id: id.into(),
-            kind: ItemKind::Url {
-                url: format!("https://example.org/{id}"),
-            },
-            identity: Some(format!("url:{id}")),
-            title: format!("Title of {id}"),
-            subtitle: Some("A subtitle".into()),
-            icon: Some("web-browser".into()),
-            keyword: None,
-            keywords: vec!["more".into()],
-            hidden: false,
-            app_only: false,
-            actions: vec![Action {
-                id: "open".into(),
-                title: "Open".into(),
-                shortcut: None,
-                arguments: vec![],
-                confirm: false,
-            }],
-        }
-    }
-
-    fn shelve(shelf: &Shelf, items: &[Item]) -> Vec<Place> {
-        let mut buf = Vec::new();
-        let mut at = 0;
-        items
-            .iter()
-            .map(|item| {
-                encode(item, &mut buf);
-                shelf.put(at, &buf).unwrap();
-                let place = Place {
-                    at,
-                    len: buf.len() as u32,
-                };
-                at = place.end();
-                place
-            })
-            .collect()
-    }
-
-    #[test]
-    fn an_item_comes_back_off_a_shelf_in_memory_as_it_went_on() {
-        let shelf = Shelf::in_memory();
-        let items = [item("a"), item("b")];
-        let places = shelve(&shelf, &items);
-        assert_eq!(shelf.get(places[1]), Some(items[1].clone()));
-        assert_eq!(shelf.get(places[0]), Some(items[0].clone()));
-    }
-
-    #[test]
-    fn an_item_comes_back_off_a_shelf_in_a_file_that_leaves_nothing_behind() {
-        let dir = tempfile::tempdir().unwrap();
-        let shelf = Shelf::new(Some(dir.path()));
-        let items = [item("a"), item("b")];
-        let places = shelve(&shelf, &items);
-        assert_eq!(shelf.get(places[1]), Some(items[1].clone()));
-        assert_eq!(fs::read_dir(dir.path()).unwrap().count(), 0);
-    }
-}
+mod tests;

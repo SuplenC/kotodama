@@ -2,14 +2,19 @@
 //! Item's keyword, the form that asks for the ones left out, the Views
 //! Extensions push, and the jobs they report.
 
-mod common;
+#[path = "support/harness.rs"]
+#[expect(dead_code, reason = "each test uses part of the harness")]
+mod harness;
 
+use std::cell::Cell;
 use std::collections::BTreeMap;
+use std::sync::Arc;
 use std::sync::mpsc;
 
-use common::*;
+use harness::*;
 use kotodama_protocol::*;
-use kotodamad::daemon::{Event, FrontEndId};
+use kotodamad::daemon::Event;
+use kotodamad::daemon::FrontEndId;
 use kotodamad::usage::Used;
 
 fn argument(name: &str, optional: bool) -> Argument {
@@ -70,9 +75,7 @@ fn pushed(ui: &FrontEnd) -> Vec<(String, View)> {
     ui.drain()
         .into_iter()
         .filter_map(|message| match message {
-            ToFrontEnd::PushView {
-                extension, view, ..
-            } => Some((extension, view)),
+            ToFrontEnd::PushView { extension, view, .. } => Some((extension, view)),
             _ => None,
         })
         .collect()
@@ -84,21 +87,14 @@ fn a_required_argument_left_out_opens_a_form_that_runs_the_action_once_submitted
     let tools = h.up(0);
     h.add(
         &tools,
-        vec![go(vec![
-            argument("signal", false),
-            argument("process", false),
-        ])],
+        vec![go(vec![argument("signal", false), argument("process", false)])],
     );
     let ui = h.front_end();
     tools.drain();
 
     h.query(&ui, "go 9");
     run(&mut h, &ui, "tools", "go", "tools", "open");
-    assert_eq!(
-        arguments_run(&tools),
-        [],
-        "nothing runs until the form is in"
-    );
+    assert_eq!(arguments_run(&tools), [], "nothing runs until the form is in");
     let views = pushed(&ui);
     assert_eq!(views.len(), 1);
     let (extension, form) = &views[0];
@@ -106,10 +102,7 @@ fn a_required_argument_left_out_opens_a_form_that_runs_the_action_once_submitted
     let ViewContent::Form { fields, .. } = &form.content else {
         panic!("expected a form, got {form:?}")
     };
-    let fields: Vec<_> = fields
-        .iter()
-        .map(|field| (field.id.as_str(), &field.input))
-        .collect();
+    let fields: Vec<_> = fields.iter().map(|field| (field.id.as_str(), &field.input)).collect();
     assert_eq!(
         fields,
         [
@@ -229,11 +222,7 @@ fn an_item_in_a_list_view_runs_its_actions_like_a_search_result() {
     let git = h.up(0);
     let ui = h.front_end();
     h.send(&git, FromExtension::PushView(branches()));
-    assert_eq!(
-        pushed(&ui),
-        [("git".to_owned(), branches())],
-        "passed on unchanged"
-    );
+    assert_eq!(pushed(&ui), [("git".to_owned(), branches())], "passed on unchanged");
     git.drain();
 
     run(&mut h, &ui, "git", "main", "git", "open");
@@ -261,11 +250,7 @@ fn the_items_of_a_popped_list_view_no_longer_run() {
     git.drain();
 
     run(&mut h, &ui, "git", "main", "git", "open");
-    assert!(
-        !git.drain()
-            .iter()
-            .any(|m| matches!(m, ToExtension::RunAction { .. }))
-    );
+    assert!(!git.drain().iter().any(|m| matches!(m, ToExtension::RunAction { .. })));
     assert_eq!(failures(&ui).len(), 1);
 }
 
@@ -294,7 +279,7 @@ fn job(state: JobState, progress: f32, message: &str) -> Job {
     }
 }
 
-/// A Front end that connects now, with what the Daemon sent it on connecting
+/// A Front end that connects, with what the Daemon sent it on connecting
 /// still unread.
 fn reopened(h: &mut Harness) -> FrontEnd {
     let id = FrontEndId(1000 + h.next_front_end);
@@ -308,8 +293,8 @@ fn reopened(h: &mut Harness) -> FrontEnd {
     FrontEnd {
         id,
         rx,
-        closed: Default::default(),
-        shown: Default::default(),
+        closed: Arc::default(),
+        shown: Cell::default(),
     }
 }
 
@@ -359,10 +344,7 @@ fn a_finished_job_sends_a_desktop_notification_and_is_no_longer_shown() {
     );
     assert_eq!(
         *h.outputs.2.borrow(),
-        [(
-            "Installing Go".to_owned(),
-            "Go 1.23 is installed".to_owned()
-        )]
+        [("Installing Go".to_owned(), "Go 1.23 is installed".to_owned())]
     );
     assert_eq!(
         jobs_shown(&ui).last().map(|(_, job)| job.state),
@@ -384,9 +366,7 @@ fn a_job_whose_extension_stops_fails_and_says_so() {
     );
 
     h.down(&tools);
-    let failed = jobs_shown(&ui)
-        .pop()
-        .map(|(extension, job)| (extension, job.state));
+    let failed = jobs_shown(&ui).pop().map(|(extension, job)| (extension, job.state));
     assert_eq!(failed, Some(("tools".to_owned(), JobState::Failed)));
     assert_eq!(
         *h.outputs.2.borrow(),
@@ -401,10 +381,7 @@ fn each_argument_takes_a_word_and_the_last_takes_the_rest() {
     let tools = h.up(0);
     h.add(
         &tools,
-        vec![go(vec![
-            argument("signal", false),
-            argument("process", false),
-        ])],
+        vec![go(vec![argument("signal", false), argument("process", false)])],
     );
     let ui = h.front_end();
     tools.drain();
@@ -423,10 +400,7 @@ fn arguments_the_front_end_gives_win_over_the_typed_ones() {
     let tools = h.up(0);
     h.add(
         &tools,
-        vec![go(vec![
-            argument("signal", false),
-            argument("process", false),
-        ])],
+        vec![go(vec![argument("signal", false), argument("process", false)])],
     );
     let ui = h.front_end();
     tools.drain();
@@ -519,9 +493,7 @@ fn a_contributed_action_run_from_the_action_panel_is_recorded() {
     h.query(&ui, "koto");
 
     run(&mut h, &ui, "projects", "kotodama", "pinner", "pin");
-    assert!(
-        matches!(&pinner.drain()[..], [.., ToExtension::RunAction { action, .. }] if action == "pin")
-    );
+    assert!(matches!(&pinner.drain()[..], [.., ToExtension::RunAction { action, .. }] if action == "pin"));
     assert_eq!(picks(&h), [pick("kotodama", "pin")]);
 }
 

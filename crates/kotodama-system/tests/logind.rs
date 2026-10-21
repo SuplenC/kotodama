@@ -101,7 +101,7 @@ impl PrivateBus {
                 let call = if is("CanHibernate") {
                     let mut answer = Marshal::default();
                     answer.string(can_hibernate);
-                    bus.reply(&message, "s", answer).expect("answer CanHibernate");
+                    bus.reply(&message, "s", &answer).expect("answer CanHibernate");
                     continue;
                 } else if let Some(method) = BY_FLAG.into_iter().find(|&method| is(method)) {
                     format!("{method} {}", message.body().u32() == Some(1))
@@ -110,7 +110,7 @@ impl PrivateBus {
                 } else {
                     continue;
                 };
-                bus.reply(&message, "", Marshal::default()).expect("answer the call");
+                bus.reply(&message, "", &Marshal::default()).expect("answer the call");
                 if called.send(call).is_err() {
                     return;
                 }

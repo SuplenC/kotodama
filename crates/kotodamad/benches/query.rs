@@ -6,15 +6,23 @@
 //! list View of 10k Items the Daemon filters.
 
 use std::hint::black_box;
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use std::time::Instant;
 
-use criterion::{Criterion, criterion_group, criterion_main};
+use criterion::Criterion;
+use criterion::criterion_group;
+use criterion::criterion_main;
 use kotodamad::history::History;
 
+#[path = "support/corpus.rs"]
 mod corpus;
+#[path = "support/setup.rs"]
+#[expect(dead_code, reason = "the emoji and opening on a query are for `instructions.rs`")]
 mod setup;
 
-use setup::{APPS, CLIPBOARD, Setup};
+use setup::APPS;
+use setup::CLIPBOARD;
+use setup::Setup;
 
 /// Typing on: each keystroke narrows the last one's matches.
 fn next_keystroke(setup: &mut Setup, word: &str) -> impl FnMut() -> usize {
@@ -25,7 +33,8 @@ fn next_keystroke(setup: &mut Setup, word: &str) -> impl FnMut() -> usize {
     }
 }
 
-fn bench(c: &mut Criterion) {
+/// Keystrokes and batches on the 10k Indexed items.
+fn keystrokes(c: &mut Criterion) {
     let mut setup = Setup::new();
     let mut group = c.benchmark_group("query_10k_items");
     // The first keystroke matches the most Items and can't narrow.
@@ -34,7 +43,7 @@ fn bench(c: &mut Criterion) {
         b.iter(|| {
             alternate = !alternate;
             black_box(setup.query(if alternate { "f" } else { "t" }))
-        })
+        });
     });
     // Two words pasted into a cleared box: the Empty query forgets the last
     // search, so this one searches every Item. (Named `two_words` while the
@@ -43,11 +52,11 @@ fn bench(c: &mut Criterion) {
         b.iter(|| {
             setup.query("");
             black_box(setup.query("fire tool"))
-        })
+        });
     });
     group.bench_function("next_keystroke", |b| {
         let mut keystroke = next_keystroke(&mut setup, "firefoxterminal");
-        b.iter(|| black_box(keystroke()))
+        b.iter(|| black_box(keystroke()));
     });
     // A keystroke right behind a batch of 1,000 Items, as when the apps are
     // scanned again or the clipboard sends its history: from the batch
@@ -78,10 +87,7 @@ fn bench(c: &mut Criterion) {
     let mut group = c.benchmark_group("staleness");
     let clips = corpus::long_titles(1000, 60, 1);
     let apps = corpus::items();
-    for (name, extension, batch) in [
-        ("1k_clips", CLIPBOARD, &clips),
-        ("10k_apps_rescanned", APPS, &apps),
-    ] {
+    for (name, extension, batch) in [("1k_clips", CLIPBOARD, &clips), ("10k_apps_rescanned", APPS, &apps)] {
         group.bench_function(name, |b| {
             b.iter_custom(|iters| {
                 let mut total = Duration::ZERO;
@@ -95,17 +101,19 @@ fn bench(c: &mut Criterion) {
                     setup.pending -= 1;
                 }
                 total
-            })
+            });
         });
     }
     group.finish();
+}
 
+/// Opening the menu on the 10k Indexed items with 2,000 of them picked, and
+/// the keystrokes that follow.
+fn opening(c: &mut Criterion) {
     let mut group = c.benchmark_group("query_10k_items");
     // Opening the menu: the Results most used at this time of day.
     let mut setup = Setup::picked();
-    group.bench_function("empty_query_2k_picked", |b| {
-        b.iter(|| black_box(setup.query("")))
-    });
+    group.bench_function("empty_query_2k_picked", |b| b.iter(|| black_box(setup.query(""))));
     group.finish();
 
     // The first keystroke after the menu opens, with the CPU cache taken by
@@ -144,7 +152,7 @@ fn bench(c: &mut Criterion) {
                     total += start.elapsed();
                 }
                 total
-            })
+            });
         });
     }
     group.finish();
@@ -157,7 +165,7 @@ fn bench(c: &mut Criterion) {
         b.iter(|| {
             setup.query("");
             black_box(setup.query("app4321"))
-        })
+        });
     });
     group.bench_function("rows_from_payload_file", |b| {
         let mut n = 0;
@@ -165,12 +173,14 @@ fn bench(c: &mut Criterion) {
             n = (n + 7919) % corpus::ITEMS;
             setup.query("");
             black_box(setup.query(&format!("app{n}")))
-        })
+        });
     });
     group.finish();
+}
 
-    // Clipboard entries searched by their whole text: the time per keystroke
-    // should not grow with the titles' length.
+/// Clipboard entries searched by their whole text: the time per keystroke
+/// should not grow with the titles' length.
+fn long_titles(c: &mut Criterion) {
     let mut setup = Setup::with(History::default(), corpus::long_titles(1000, 200, 7));
     let mut group = c.benchmark_group("query_1k_long_titles");
     group.bench_function("first_keystroke", |b| {
@@ -178,11 +188,11 @@ fn bench(c: &mut Criterion) {
         b.iter(|| {
             alternate = !alternate;
             black_box(setup.query(if alternate { "f" } else { "t" }))
-        })
+        });
     });
     group.bench_function("next_keystroke", |b| {
         let mut keystroke = next_keystroke(&mut setup, "firefoxterminal");
-        b.iter(|| black_box(keystroke()))
+        b.iter(|| black_box(keystroke()));
     });
     group.finish();
 }
@@ -198,7 +208,7 @@ fn filter(c: &mut Criterion) {
         b.iter(|| {
             alternate = !alternate;
             black_box(setup.filter(if alternate { "f" } else { "t" }))
-        })
+        });
     });
     group.bench_function("next_keystroke", |b| {
         let word = "firefoxterminal";
@@ -206,10 +216,10 @@ fn filter(c: &mut Criterion) {
         b.iter(|| {
             len = len % word.len() + 1;
             black_box(setup.filter(&word[..len]))
-        })
+        });
     });
     group.finish();
 }
 
-criterion_group!(benches, bench, filter);
+criterion_group!(benches, keystrokes, opening, long_titles, filter);
 criterion_main!(benches);

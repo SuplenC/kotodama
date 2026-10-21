@@ -24,6 +24,18 @@
 //! for any other. The Daemon talks to every peer on its version or an older
 //! one, and turns away a newer one at the handshake. `tests/layout.rs` keeps
 //! the layout of every version and fails until the version goes up.
+//!
+//! # Owns
+//!
+//! - The protocol's types, re-exported here, and [`Error`], what every fallible operation on a
+//!   connection returns.
+//!
+//! # Not here
+//!
+//! - What the Daemon does with a message: `kotodamad`.
+//! - The runtime a Rust Extension is built on (the reader thread, sending only changed Items):
+//!   `kotodama-extension`.
+//! - The protobuf schema for other languages: `kotodama.proto`, written by `tests/layout.rs`.
 
 #![forbid(unsafe_code)]
 
@@ -42,41 +54,92 @@ mod version;
 mod view;
 mod wire;
 
-pub use channel::{Channel, ChannelReader, ChannelWriter};
-pub use front_end::{
-    APP_ENTRY_KIND, ActionRef, Example, FromFrontEnd, Intro, ListMatch, OfferedAction, Problem,
-    ResultRef, Scope, ShownResult, ToFrontEnd, socket_path,
-};
+pub use channel::Channel;
+pub use channel::ChannelReader;
+pub use channel::ChannelWriter;
+pub use front_end::APP_ENTRY_KIND;
+pub use front_end::ActionRef;
+pub use front_end::Example;
+pub use front_end::FromFrontEnd;
+pub use front_end::Intro;
+pub use front_end::ListMatch;
+pub use front_end::OfferedAction;
+pub use front_end::Problem;
+pub use front_end::ResultRef;
+pub use front_end::Scope;
+pub use front_end::ShownResult;
+pub use front_end::ToFrontEnd;
+pub use front_end::socket_path;
 pub use handshake::Hello;
-pub use item::{
-    Action, Argument, Item, ItemKind, ItemRef, KindName, NamespacedKind, SHARED_KINDS,
-    is_valid_name,
-};
-pub use launch::{LAUNCH_PREFIX, LAUNCH_SCOPED, SCOPE_PREFIX, launch_command, launch_prefix};
-pub use manifest::{ContributedAction, LiveQueries, Manifest, is_valid_word};
-pub use message::{CatalogEntry, Clipboard, FromExtension, LiveResult, Outcome, ToExtension};
-pub use shortcut::{FORGET_SHORTCUT, RESERVED_SHORTCUTS, UNDO_SHORTCUT, is_reserved_shortcut};
-pub use value::{Bytes, Fraction, Table, Value};
-pub use version::{FIRST_VERSION, PROTOCOL_VERSION, Since, Version};
-pub use view::{
-    FormField, FormInput, Job, JobState, MetadataEntry, SelectOption, View, ViewContent,
-};
+pub use item::Action;
+pub use item::Argument;
+pub use item::Item;
+pub use item::ItemKind;
+pub use item::ItemRef;
+pub use item::KindError;
+pub use item::KindName;
+pub use item::NamespacedKind;
+pub use item::SHARED_KINDS;
+pub use item::is_valid_name;
+pub use launch::LAUNCH_PREFIX;
+pub use launch::LAUNCH_SCOPED;
+pub use launch::SCOPE_PREFIX;
+pub use launch::launch_command;
+pub use launch::launch_prefix;
+pub use manifest::ContributedAction;
+pub use manifest::LiveQueries;
+pub use manifest::Manifest;
+pub use manifest::is_valid_word;
+pub use message::CatalogEntry;
+pub use message::Clipboard;
+pub use message::FromExtension;
+pub use message::LiveResult;
+pub use message::Outcome;
+pub use message::ToExtension;
+pub use shortcut::FORGET_SHORTCUT;
+pub use shortcut::RESERVED_SHORTCUTS;
+pub use shortcut::UNDO_SHORTCUT;
+pub use shortcut::is_reserved_shortcut;
+pub use value::Bytes;
+pub use value::Fraction;
+pub use value::FractionError;
+pub use value::Table;
+pub use value::Value;
+pub use version::FIRST_VERSION;
+pub use version::PROTOCOL_VERSION;
+pub use version::Since;
+pub use version::Version;
+pub use view::FormField;
+pub use view::FormInput;
+pub use view::Job;
+pub use view::JobState;
+pub use view::MetadataEntry;
+pub use view::SelectOption;
+pub use view::View;
+pub use view::ViewContent;
 pub use wire::WireFormat;
 
+/// Why a connection, a message or a Manifest failed.
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
+    /// Reading or writing the byte stream failed, or it ended inside a frame.
     #[error(transparent)]
-    Io(#[from] std::io::Error),
+    Io(std::io::Error),
+    /// A frame's header isn't a length and a newline.
     #[error("a frame header must be a decimal length followed by a newline")]
     BadFrameHeader,
+    /// A frame announced more than [`frame::MAX_FRAME_LEN`] bytes.
     #[error("a frame of {0} bytes is longer than the limit of {max}", max = frame::MAX_FRAME_LEN)]
     FrameTooLong(usize),
+    /// A message couldn't be written in the agreed Wire format.
     #[error("couldn't encode a message as {format:?}")]
     Encode {
         format: WireFormat,
         #[source]
         source: Box<dyn std::error::Error + Send + Sync>,
     },
+    /// A frame's payload isn't a message in the agreed Wire format. The reader
+    /// is left at the next frame.
     #[error("couldn't decode a message as {format:?}")]
     Decode {
         format: WireFormat,
@@ -92,12 +155,13 @@ pub enum Error {
     PeerTooOld { peer: Version, ours: Version },
     /// An Extension's or a Front end's side: the Daemon is older than the
     /// protocol this side was built for.
-    #[error(
-        "the Daemon speaks protocol {daemon}, older than the {ours} this side needs: update Kotodama"
-    )]
+    #[error("the Daemon speaks protocol {daemon}, older than the {ours} this side needs: update Kotodama")]
     DaemonTooOld { daemon: Version, ours: Version },
+    /// A side's [`Hello`] leaves out JSON.
     #[error("a side's hello leaves out JSON, which every side must support")]
     JsonNotOffered,
+    /// A `manifest.toml` doesn't parse, or breaks one of its rules. The text
+    /// is the TOML parser's, which points at the line.
     #[error("invalid manifest: {0}")]
     Manifest(String),
 }

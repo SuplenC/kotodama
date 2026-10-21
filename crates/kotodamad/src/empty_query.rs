@@ -1,7 +1,16 @@
 //! The Empty query: the Results most used at this time of day, then the Fixed
 //! menu, or without one the apps.
+//!
+//! # Owns
+//!
+//! - [`EmptyQuery`]: the `[empty_query]` settings, the Fixed menu among them.
+//!
+//! # Not here
+//!
+//! - Ranking and sending the Empty query: `daemon/empty.rs`, `most_used.rs`.
 
-use kotodama_protocol::{Table, Value};
+use kotodama_protocol::Table;
+use kotodama_protocol::Value;
 
 use crate::history::ResultKey;
 use crate::keywords::string;

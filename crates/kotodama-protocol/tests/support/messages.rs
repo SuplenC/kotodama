@@ -2,10 +2,16 @@
 //! interoperability test send them: a query, a list of Results, and a batch
 //! of Items.
 
-use kotodama_protocol::{
-    Action, Argument, FromExtension, FromFrontEnd, Item, ItemKind, OfferedAction, Scope,
-    ShownResult, ToFrontEnd,
-};
+use kotodama_protocol::Action;
+use kotodama_protocol::Argument;
+use kotodama_protocol::FromExtension;
+use kotodama_protocol::FromFrontEnd;
+use kotodama_protocol::Item;
+use kotodama_protocol::ItemKind;
+use kotodama_protocol::OfferedAction;
+use kotodama_protocol::Scope;
+use kotodama_protocol::ShownResult;
+use kotodama_protocol::ToFrontEnd;
 
 /// As many Results as the Daemon sends for one query.
 pub const RESULTS: usize = 50;
@@ -14,9 +20,7 @@ pub const RESULTS: usize = 50;
 pub const BATCH: usize = 1_000;
 
 pub fn query() -> FromFrontEnd {
-    FromFrontEnd::Query {
-        text: "firefox".into(),
-    }
+    FromFrontEnd::Query { text: "firefox".into() }
 }
 
 pub fn item(n: usize) -> Item {

@@ -2,15 +2,23 @@
 //! or everything, and undoing each for a short while after; and an
 //! Extension withdrawing the pick a run of its Action made.
 
-mod common;
+#[path = "support/harness.rs"]
+#[expect(dead_code, reason = "each test uses part of the harness")]
+mod harness;
 
 use std::time::Duration;
 
-use common::*;
+use harness::*;
 use kotodama_protocol::*;
 use kotodamad::clock::Clock;
-use kotodamad::daemon::{CLEAR_EXTENSION_HISTORY, Event, FORGET, FrontEndId, UNDO, UNDO_FOR};
-use kotodamad::history::{History, IDENTITIES};
+use kotodamad::daemon::CLEAR_EXTENSION_HISTORY;
+use kotodamad::daemon::Event;
+use kotodamad::daemon::FORGET;
+use kotodamad::daemon::FrontEndId;
+use kotodamad::daemon::UNDO;
+use kotodamad::daemon::UNDO_FOR;
+use kotodamad::history::History;
+use kotodamad::history::IDENTITIES;
 
 fn apps() -> Vec<Item> {
     vec![app("Files"), app("Firefox"), app("Fish")]
@@ -108,10 +116,7 @@ fn forgetting_a_result_drops_its_frecency_and_learned_choices() {
     assert_eq!(first(&mut h, &ui, "fi"), "Firefox");
 
     run_daemon_action(&mut h, &ui, "apps", "firefox", FORGET);
-    assert!(
-        !ui.drain().contains(&ToFrontEnd::Close),
-        "the menu stays open"
-    );
+    assert!(!ui.drain().contains(&ToFrontEnd::Close), "the menu stays open");
     let history = saved(&h);
     assert!(history.picks("apps", "firefox").is_none());
     assert!(history.picks("apps", "files").is_some(), "the rest stays");
@@ -201,10 +206,7 @@ fn the_latest_change_is_undone_first() {
     run_daemon_action(&mut h, &ui, "apps", "firefox", FORGET);
     run_daemon_action(&mut h, &ui, "apps", "fish", FORGET);
 
-    assert_eq!(
-        undo_row(&mut h, &ui).unwrap().item.title,
-        "Undo forgetting “Fish”"
-    );
+    assert_eq!(undo_row(&mut h, &ui).unwrap().item.title, "Undo forgetting “Fish”");
     undo(&mut h, &ui);
     assert!(saved(&h).picks("apps", "fish").is_some());
     assert!(saved(&h).picks("apps", "firefox").is_none());
@@ -220,7 +222,7 @@ fn undo_is_there_only_for_a_short_while() {
     let ui = h.front_end();
     pick(&mut h, &ui, "fi", "apps", "firefox");
     run_daemon_action(&mut h, &ui, "apps", "firefox", FORGET);
-    h.advance(UNDO_FOR - Duration::from_secs(1));
+    h.advance(UNDO_FOR.checked_sub(Duration::from_secs(1)).unwrap());
     assert!(undo_row(&mut h, &ui).is_some());
     assert!(h.daemon.next_deadline().is_some(), "it is put away on time");
     h.advance(Duration::from_secs(1));
@@ -301,11 +303,7 @@ fn clearing_one_extensions_history_keeps_the_rest_and_can_be_undone() {
     run_daemon_action(&mut h, &ui, "apps", "files", CLEAR_EXTENSION_HISTORY);
     let history = saved(&h);
     let left: Vec<(&str, &str)> = history.picked().map(|(e, i, _)| (e, i)).collect();
-    assert_eq!(
-        left,
-        [("projects", "fiddle")],
-        "with its Identity and Alias"
-    );
+    assert_eq!(left, [("projects", "fiddle")], "with its Identity and Alias");
     assert_eq!(first(&mut h, &ui, "fid"), "fiddle");
     assert_eq!(*h.saved.2.borrow(), [Some("apps".to_owned())]);
     assert_eq!(
@@ -374,24 +372,14 @@ fn a_picked_quicklink_offers_forget_among_its_own_actions() {
 fn undo_offers(ui: &FrontEnd) -> Vec<ToFrontEnd> {
     ui.drain()
         .into_iter()
-        .filter(|message| {
-            matches!(
-                message,
-                ToFrontEnd::OfferUndo { .. } | ToFrontEnd::WithdrawUndo { .. }
-            )
-        })
+        .filter(|message| matches!(message, ToFrontEnd::OfferUndo { .. } | ToFrontEnd::WithdrawUndo { .. }))
         .collect()
 }
 
 /// The change the one offer in `offers` names.
 fn offered(offers: &[ToFrontEnd], title: &str) -> u64 {
     match offers {
-        [
-            ToFrontEnd::OfferUndo {
-                change,
-                title: offer,
-            },
-        ] if offer == title => *change,
+        [ToFrontEnd::OfferUndo { change, title: offer }] if offer == title => *change,
         other => panic!("expected one offer of {title:?}, got {other:?}"),
     }
 }
@@ -435,10 +423,7 @@ fn every_front_end_is_offered_to_undo_a_forget_and_the_offer_undoes_it() {
     h.front_end_sends(&ui, FromFrontEnd::Undo { change });
     assert_eq!(kept(&saved(&h)), before);
     for front_end in [&ui, &other] {
-        assert_eq!(
-            undo_offers(front_end),
-            [ToFrontEnd::WithdrawUndo { change }]
-        );
+        assert_eq!(undo_offers(front_end), [ToFrontEnd::WithdrawUndo { change }]);
     }
     assert_eq!(first(&mut h, &ui, "fi"), "Firefox");
     assert!(undo_row(&mut h, &ui).is_none(), "undone once");
@@ -489,14 +474,7 @@ fn undoing_through_the_undo_result_withdraws_the_offer() {
     let change = offered(&undo_offers(&ui), "Forgot “Firefox”");
     let row = undo_row(&mut h, &ui).expect("an Undo Result");
 
-    run(
-        &mut h,
-        &ui,
-        "kotodama",
-        UNDO,
-        "kotodama",
-        &row.item.actions[0].id,
-    );
+    run(&mut h, &ui, "kotodama", UNDO, "kotodama", &row.item.actions[0].id);
 
     assert_eq!(undo_offers(&ui), [ToFrontEnd::WithdrawUndo { change }]);
 }
@@ -623,10 +601,7 @@ fn a_pick_is_never_offered_to_undo_and_withdrawing_it_offers_nothing() {
     assert_eq!(undo_offers(&ui), []);
     assert!(undo_row(&mut h, &ui).is_none());
     h.front_end_sends(&ui, FromFrontEnd::Undo { change: invocation });
-    assert!(
-        saved(&h).picks("apps", "firefox").is_some(),
-        "not the user's to undo"
-    );
+    assert!(saved(&h).picks("apps", "firefox").is_some(), "not the user's to undo");
 
     h.send(&ext, FromExtension::WithdrawPick { invocation });
     assert_eq!(undo_offers(&ui), []);
@@ -643,20 +618,14 @@ fn only_the_extension_that_ran_the_action_withdraws_its_pick_and_only_for_a_whil
 
     let invocation = launch(&mut h, &ui, &ext, "fi", "apps", "firefox");
     h.send(&other, FromExtension::WithdrawPick { invocation });
-    assert!(
-        saved(&h).picks("apps", "firefox").is_some(),
-        "another Extension's"
-    );
+    assert!(saved(&h).picks("apps", "firefox").is_some(), "another Extension's");
     h.send(
         &ext,
         FromExtension::WithdrawPick {
             invocation: invocation + 100,
         },
     );
-    assert!(
-        saved(&h).picks("apps", "firefox").is_some(),
-        "another run's"
-    );
+    assert!(saved(&h).picks("apps", "firefox").is_some(), "another run's");
 
     h.advance(UNDO_FOR);
     h.send(&ext, FromExtension::WithdrawPick { invocation });

@@ -10,18 +10,24 @@
 //!
 //! - [`Report`]: collects the problems found while reading something.
 //! - [`Problems`]: the Daemon's problems, by where they were found.
-//! - [`item`] and [`view`]: the Daemon's own Item that lists them, and the
-//!   View it opens.
+//! - [`item`] and [`view`]: the Daemon's own Item that lists them, and the View it opens.
 //!
 //! # Not here
 //!
-//! - The problems of Extensions that are down, and when the list is sent:
-//!   `daemon.rs`.
-//! - Reading the settings that report them: each setting's owner
-//!   (`engine.rs`, `paths.rs`, `history.rs`, `empty_query.rs`,
-//!   `kind_order.rs`, `keywords.rs`, `configured.rs`, `apps.rs`).
+//! - The problems of Extensions that are down, and when the list is sent: `daemon.rs`,
+//!   `daemon/settings.rs`.
+//! - Reading the settings that report them: each setting's owner (`engine.rs`, `paths.rs`,
+//!   `history.rs`, `empty_query.rs`, `kind_order.rs`, `keywords.rs`, `configured.rs`, `apps.rs`).
 
-use kotodama_protocol::{Action, Item, ItemKind, NamespacedKind, Problem, View, ViewContent};
+use std::fmt::Write as _;
+
+use kotodama_protocol::Action;
+use kotodama_protocol::Item;
+use kotodama_protocol::ItemKind;
+use kotodama_protocol::NamespacedKind;
+use kotodama_protocol::Problem;
+use kotodama_protocol::View;
+use kotodama_protocol::ViewContent;
 
 /// The id of the Daemon's own Item that opens the list, and of the View it
 /// opens: what `Problem::list` names, for Front ends.
@@ -120,6 +126,10 @@ pub fn replace(group: &mut Vec<Problem>, problems: Vec<Problem>) -> bool {
 
 /// The Daemon's own Item that opens the list of `count` problems: found by
 /// "problems", and shown only while there are any.
+///
+/// # Panics
+///
+/// Never: `kotodama.command` is a valid kind.
 pub fn item(count: usize) -> Item {
     let title = match count {
         1 => "1 problem".to_owned(),
@@ -145,16 +155,15 @@ pub fn view(problems: &[Problem]) -> View {
     let markdown = if problems.is_empty() {
         "Nothing is wrong.".to_owned()
     } else {
-        problems
-            .iter()
-            .map(|problem| {
-                format!(
-                    "- **{}**: {}\n",
-                    escape(&problem.about),
-                    escape(&problem.message)
-                )
-            })
-            .collect()
+        problems.iter().fold(String::new(), |mut markdown, problem| {
+            let _ = writeln!(
+                markdown,
+                "- **{}**: {}",
+                escape(&problem.about),
+                escape(&problem.message)
+            );
+            markdown
+        })
     };
     View {
         id: PROBLEMS.into(),
@@ -184,27 +193,4 @@ fn escape(text: &str) -> String {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn markdown_shows_the_text_as_it_is_but_keeps_code_spans() {
-        assert_eq!(
-            escape("history.half_life_days in ~/a_b.toml: `word_x` *x*"),
-            "history.half\\_life\\_days in ~/a\\_b.toml: `word_x` \\*x\\*"
-        );
-    }
-
-    #[test]
-    fn front_ends_name_the_item_and_its_action_as_the_daemon_does() {
-        assert_eq!(Problem::list().id, PROBLEMS);
-        assert_eq!(Problem::show().id, SHOW);
-        assert_eq!(Problem::list().extension, crate::daemon::OWN);
-    }
-
-    #[test]
-    fn the_item_counts_the_problems() {
-        assert_eq!(item(1).title, "1 problem");
-        assert_eq!(item(3).title, "3 problems");
-    }
-}
+mod tests;

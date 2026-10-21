@@ -18,7 +18,10 @@
 //! What is called: notifications are `kotodamad`'s `notify`, scopes
 //! `crate::scope`, logind the `system` Extension's.
 
-use std::io::{self, Read, Write};
+use std::fmt::Write as _;
+use std::io;
+use std::io::Read;
+use std::io::Write;
 use std::os::unix::net::UnixStream;
 use std::path::Path;
 use std::time::Duration;
@@ -54,13 +57,17 @@ pub enum Error {
     /// the address names no Unix socket.
     #[error("no address for the bus")]
     NoAddress,
+    /// The bus's socket didn't take the connection.
     #[error("connecting to the bus")]
     Connect(#[source] io::Error),
     /// The peer turned down the EXTERNAL authentication, with this line.
     #[error("the bus refused us: {0}")]
     Refused(String),
+    /// Reading from or writing to the bus failed, or timed out.
     #[error("talking to the bus")]
     Io(#[source] io::Error),
+    /// The bus announced a message larger than any answer this module
+    /// waits for, which it won't read into memory.
     #[error("the bus sent a message too large to be an answer")]
     TooLarge,
     /// The call failed: the error's name and message.
@@ -75,10 +82,7 @@ impl Error {
     pub fn is_absent(&self) -> bool {
         match self {
             Error::NoAddress => true,
-            Error::Connect(err) => matches!(
-                err.kind(),
-                io::ErrorKind::NotFound | io::ErrorKind::ConnectionRefused
-            ),
+            Error::Connect(err) => matches!(err.kind(), io::ErrorKind::NotFound | io::ErrorKind::ConnectionRefused),
             _ => false,
         }
     }
@@ -168,11 +172,10 @@ impl Bus {
     /// The EXTERNAL mechanism: the peer checks the uid on the socket against
     /// the one claimed. `BEGIN` goes out with the first message.
     fn authenticate(&mut self) -> Result<(), Error> {
-        let uid: String = uid()
-            .to_string()
-            .bytes()
-            .map(|byte| format!("{byte:02x}"))
-            .collect();
+        let uid = uid().to_string().bytes().fold(String::new(), |mut hex, byte| {
+            let _ = write!(hex, "{byte:02x}");
+            hex
+        });
         self.stream
             .write_all(format!("\0AUTH EXTERNAL {uid}\r\n").as_bytes())
             .map_err(Error::Io)?;
@@ -186,14 +189,12 @@ impl Bus {
             }
         }
         if !line.starts_with(b"OK ") {
-            return Err(Error::Refused(
-                String::from_utf8_lossy(&line).trim().to_owned(),
-            ));
+            return Err(Error::Refused(String::from_utf8_lossy(&line).trim().to_owned()));
         }
         self.stream.write_all(b"BEGIN\r\n").map_err(Error::Io)
     }
 
-    /// Waits for messages without a time limit from now on, as a service
+    /// Waits for every later message without a time limit, as a service
     /// waiting for calls does.
     ///
     /// # Errors
@@ -209,7 +210,7 @@ impl Bus {
     /// # Errors
     ///
     /// When it can't be written.
-    pub fn reply(&mut self, to: &Message, signature: &str, body: Marshal) -> Result<(), Error> {
+    pub fn reply(&mut self, to: &Message, signature: &str, body: &Marshal) -> Result<(), Error> {
         self.serial += 1;
         let mut m = Marshal::default();
         // Little-endian, a method return, no flags, protocol version 1.
@@ -251,11 +252,7 @@ impl Bus {
     ///
     /// When the call can't be made or answered in time, or answers with an
     /// error.
-    pub fn call(
-        &mut self,
-        call: &Call,
-        mut meanwhile: impl FnMut(&Message),
-    ) -> Result<Message, Error> {
+    pub fn call(&mut self, call: &Call, mut meanwhile: impl FnMut(&Message)) -> Result<Message, Error> {
         let serial = self.send(call)?;
         loop {
             let message = self.read()?;
@@ -538,7 +535,7 @@ impl Message {
                 }),
                 "g" => read.signature().map(|value| {
                     if code == SIGNATURE {
-                        self.signature = value.to_owned();
+                        value.clone_into(&mut self.signature);
                     }
                 }),
                 _ => None,
@@ -648,9 +645,7 @@ fn unescape(value: &str) -> String {
     let mut i = 0;
     while i < bytes.len() {
         if bytes[i] == b'%'
-            && let Some(byte) = value
-                .get(i + 1..i + 3)
-                .and_then(|hex| u8::from_str_radix(hex, 16).ok())
+            && let Some(byte) = value.get(i + 1..i + 3).and_then(|hex| u8::from_str_radix(hex, 16).ok())
         {
             out.push(byte);
             i += 3;

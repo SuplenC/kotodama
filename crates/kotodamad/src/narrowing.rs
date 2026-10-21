@@ -6,10 +6,8 @@
 //! - When a query narrows the last one, and what the last one matched.
 //!
 //! # Not here
-//! - The searches: `Daemon::refresh` over the Index, `Views::filter` over a
-//!   list View's Items.
-//! - Near misses, which the search narrows by rules of its own:
-//!   `Daemon::add_near_misses`.
+//! - The searches: `Daemon::refresh` over the Index, `Views::filter` over a list View's Items.
+//! - Near misses, which the search narrows by rules of its own: `Daemon::add_near_misses`.
 
 use crate::rank;
 
@@ -60,12 +58,7 @@ impl<T> Narrowing<T> {
 
     /// Remembers that `query`, folded as `folded`, matched `matched`, every
     /// match in the matcher in the order searched.
-    pub fn found(
-        &mut self,
-        query: &str,
-        folded: &rank::Query,
-        matched: impl IntoIterator<Item = T>,
-    ) {
+    pub fn found(&mut self, query: &str, folded: &rank::Query, matched: impl IntoIterator<Item = T>) {
         self.matched.clear();
         self.matched.extend(matched);
         self.query.clear();

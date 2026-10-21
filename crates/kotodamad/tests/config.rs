@@ -2,9 +2,11 @@
 //! then the user's, merged in order.
 
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::Path;
+use std::path::PathBuf;
 
-use kotodama_protocol::{Table, Value};
+use kotodama_protocol::Table;
+use kotodama_protocol::Value;
 use kotodamad::config;
 use tempfile::TempDir;
 
@@ -56,11 +58,7 @@ fn string(value: &str) -> Value {
 #[test]
 fn the_user_directory_wins_over_the_distro_directory() {
     let dirs = Dirs::new();
-    write(
-        &dirs.distro,
-        "defaults.toml",
-        "theme = \"distro\"\nwidth = 600",
-    );
+    write(&dirs.distro, "defaults.toml", "theme = \"distro\"\nwidth = 600");
     write(&dirs.user, "mine.toml", "theme = \"user\"");
 
     let config = dirs.load().unwrap();
@@ -85,21 +83,11 @@ fn tables_merge_key_by_key() {
         "a.toml",
         "[extensions.apps]\nterminal = \"foot\"\nhidden = true",
     );
-    write(
-        &dirs.user,
-        "b.toml",
-        "[extensions.apps]\nterminal = \"kitty\"",
-    );
+    write(&dirs.user, "b.toml", "[extensions.apps]\nterminal = \"kitty\"");
 
     let config = dirs.load().unwrap();
-    assert_eq!(
-        get(&config, "extensions.apps.terminal"),
-        Some(&string("kitty"))
-    );
-    assert_eq!(
-        get(&config, "extensions.apps.hidden"),
-        Some(&Value::Bool(true))
-    );
+    assert_eq!(get(&config, "extensions.apps.terminal"), Some(&string("kitty")));
+    assert_eq!(get(&config, "extensions.apps.hidden"), Some(&Value::Bool(true)));
 }
 
 #[test]
@@ -118,11 +106,7 @@ fn a_later_list_replaces_the_earlier_one_whole() {
 fn subdirectories_and_other_files_are_ignored() {
     let dirs = Dirs::new();
     fs::create_dir_all(dirs.user.join("extensions/x")).unwrap();
-    write(
-        &dirs.user.join("extensions"),
-        "nested.toml",
-        "theme = \"nested\"",
-    );
+    write(&dirs.user.join("extensions"), "nested.toml", "theme = \"nested\"");
     write(&dirs.user, "notes.txt", "theme = \"text\"");
     write(&dirs.user, "real.toml", "theme = \"real\"");
 

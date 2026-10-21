@@ -4,11 +4,28 @@
 //! expect, which tells a field's type. Fields reach serde by their position,
 //! as the derives accept, in the order they arrive; the ones that never arrive
 //! follow with protobuf's defaults.
+//!
+//! # Owns
+//!
+//! - [`from_slice`] and the deserializers it reads with.
+//!
+//! # Not here
+//!
+//! - The mapping from serde onto protobuf: `protobuf.rs`'s docs. Writing a message: `ser.rs`.
 
+use serde::de;
+use serde::de::DeserializeOwned;
+use serde::de::DeserializeSeed;
+use serde::de::Deserializer;
+use serde::de::Visitor;
 use serde::de::value::U64Deserializer;
-use serde::de::{self, DeserializeOwned, DeserializeSeed, Deserializer, Visitor};
 
-use super::{FIXED32, FIXED64, LEN, ProtobufError, VARINT, unzigzag};
+use super::FIXED32;
+use super::FIXED64;
+use super::LEN;
+use super::ProtobufError;
+use super::VARINT;
+use super::unzigzag;
 
 type Result<T> = std::result::Result<T, ProtobufError>;
 
@@ -109,9 +126,7 @@ impl<'de> Deserializer<'de> for Message<'_> {
     type Error = ProtobufError;
 
     fn deserialize_any<V: Visitor<'de>>(self, _: V) -> Result<V::Value> {
-        Err(ProtobufError::new(
-            "a protobuf message decodes as a struct or an enum",
-        ))
+        Err(ProtobufError::new("a protobuf message decodes as a struct or an enum"))
     }
 
     fn deserialize_struct<V: Visitor<'de>>(
@@ -132,11 +147,7 @@ impl<'de> Deserializer<'de> for Message<'_> {
         visitor.visit_enum(Variant::find(self.bytes)?)
     }
 
-    fn deserialize_newtype_struct<V: Visitor<'de>>(
-        self,
-        _: &'static str,
-        visitor: V,
-    ) -> Result<V::Value> {
+    fn deserialize_newtype_struct<V: Visitor<'de>>(self, _: &'static str, visitor: V) -> Result<V::Value> {
         visitor.visit_newtype_struct(self)
     }
 
@@ -273,11 +284,7 @@ impl<'de> de::VariantAccess<'de> for Variant<'_> {
         Err(ProtobufError::new("the protobuf Wire format has no tuples"))
     }
 
-    fn struct_variant<V: Visitor<'de>>(
-        self,
-        fields: &'static [&'static str],
-        visitor: V,
-    ) -> Result<V::Value> {
+    fn struct_variant<V: Visitor<'de>>(self, fields: &'static [&'static str], visitor: V) -> Result<V::Value> {
         let Value::Len(body) = self.entry.value else {
             return Err(wrong_type(self.entry, "a message"));
         };
@@ -420,19 +427,11 @@ impl<'de> Deserializer<'de> for Field<'_> {
         visitor.visit_unit()
     }
 
-    fn deserialize_unit_struct<V: Visitor<'de>>(
-        self,
-        _: &'static str,
-        visitor: V,
-    ) -> Result<V::Value> {
+    fn deserialize_unit_struct<V: Visitor<'de>>(self, _: &'static str, visitor: V) -> Result<V::Value> {
         visitor.visit_unit()
     }
 
-    fn deserialize_newtype_struct<V: Visitor<'de>>(
-        self,
-        _: &'static str,
-        visitor: V,
-    ) -> Result<V::Value> {
+    fn deserialize_newtype_struct<V: Visitor<'de>>(self, _: &'static str, visitor: V) -> Result<V::Value> {
         visitor.visit_newtype_struct(self)
     }
 
@@ -444,12 +443,7 @@ impl<'de> Deserializer<'de> for Field<'_> {
         Err(ProtobufError::new("the protobuf Wire format has no tuples"))
     }
 
-    fn deserialize_tuple_struct<V: Visitor<'de>>(
-        self,
-        _: &'static str,
-        _: usize,
-        _: V,
-    ) -> Result<V::Value> {
+    fn deserialize_tuple_struct<V: Visitor<'de>>(self, _: &'static str, _: usize, _: V) -> Result<V::Value> {
         Err(ProtobufError::new("the protobuf Wire format has no tuples"))
     }
 
@@ -599,19 +593,11 @@ impl<'de> Deserializer<'de> for Element<'_, '_> {
         deserialize_identifier deserialize_ignored_any
     }
 
-    fn deserialize_unit_struct<V: Visitor<'de>>(
-        self,
-        name: &'static str,
-        visitor: V,
-    ) -> Result<V::Value> {
+    fn deserialize_unit_struct<V: Visitor<'de>>(self, name: &'static str, visitor: V) -> Result<V::Value> {
         self.field().deserialize_unit_struct(name, visitor)
     }
 
-    fn deserialize_newtype_struct<V: Visitor<'de>>(
-        self,
-        _: &'static str,
-        visitor: V,
-    ) -> Result<V::Value> {
+    fn deserialize_newtype_struct<V: Visitor<'de>>(self, _: &'static str, visitor: V) -> Result<V::Value> {
         visitor.visit_newtype_struct(self)
     }
 
@@ -619,12 +605,7 @@ impl<'de> Deserializer<'de> for Element<'_, '_> {
         self.field().deserialize_tuple(len, visitor)
     }
 
-    fn deserialize_tuple_struct<V: Visitor<'de>>(
-        self,
-        name: &'static str,
-        len: usize,
-        visitor: V,
-    ) -> Result<V::Value> {
+    fn deserialize_tuple_struct<V: Visitor<'de>>(self, name: &'static str, len: usize, visitor: V) -> Result<V::Value> {
         self.field().deserialize_tuple_struct(name, len, visitor)
     }
 
@@ -874,19 +855,11 @@ impl<'de> Deserializer<'de> for Absent {
         visitor.visit_unit()
     }
 
-    fn deserialize_unit_struct<V: Visitor<'de>>(
-        self,
-        _: &'static str,
-        visitor: V,
-    ) -> Result<V::Value> {
+    fn deserialize_unit_struct<V: Visitor<'de>>(self, _: &'static str, visitor: V) -> Result<V::Value> {
         visitor.visit_unit()
     }
 
-    fn deserialize_newtype_struct<V: Visitor<'de>>(
-        self,
-        _: &'static str,
-        visitor: V,
-    ) -> Result<V::Value> {
+    fn deserialize_newtype_struct<V: Visitor<'de>>(self, _: &'static str, visitor: V) -> Result<V::Value> {
         visitor.visit_newtype_struct(self)
     }
 
@@ -898,12 +871,7 @@ impl<'de> Deserializer<'de> for Absent {
         Err(ProtobufError::new("the protobuf Wire format has no tuples"))
     }
 
-    fn deserialize_tuple_struct<V: Visitor<'de>>(
-        self,
-        _: &'static str,
-        _: usize,
-        _: V,
-    ) -> Result<V::Value> {
+    fn deserialize_tuple_struct<V: Visitor<'de>>(self, _: &'static str, _: usize, _: V) -> Result<V::Value> {
         Err(ProtobufError::new("the protobuf Wire format has no tuples"))
     }
 

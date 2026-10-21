@@ -1,9 +1,19 @@
 //! Views an Extension pushes on top of the search, and the jobs a progress View
 //! follows. The Daemon passes them on to the Front end unchanged.
+//!
+//! # Owns
+//!
+//! - [`View`], [`ViewContent`] and the forms' fields, [`Job`] and its state.
+//!
+//! # Not here
+//!
+//! - The messages that carry them: `message.rs` and `front_end.rs`.
 
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
+use serde::Serialize;
 
-use crate::{Fraction, Item};
+use crate::Fraction;
+use crate::Item;
 
 /// A screen pushed on top of the search. Esc pops it.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -15,11 +25,12 @@ pub struct View {
     pub content: ViewContent,
 }
 
+/// What a View shows.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ViewContent {
     /// Items to pick from; their Actions run like a search Result's, and
-    /// Contributed actions are offered on them by Item kind (ADR 0002). Typing
+    /// Contributed actions are offered on them by Item kind. Typing
     /// filters them: the Daemon matches them as it does the search, without
     /// asking the Extension, unless `filters_itself` is set.
     List {
@@ -36,6 +47,7 @@ pub enum ViewContent {
         /// The submit button's label.
         submit: String,
     },
+    /// Text to read, with a table of labels and values beside it.
     Detail {
         markdown: String,
         #[serde(default)]
@@ -45,6 +57,7 @@ pub enum ViewContent {
     Progress { job: String },
 }
 
+/// One field of a form View.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FormField {
     /// The key this field's value has in the submitted values.
@@ -58,6 +71,7 @@ pub struct FormField {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum FormInput {
+    /// A line of text.
     Text {
         #[serde(default)]
         placeholder: Option<String>,
@@ -67,10 +81,12 @@ pub enum FormInput {
         #[serde(default)]
         secret: bool,
     },
+    /// A checkbox, unchecked unless `default` says otherwise.
     Checkbox {
         #[serde(default)]
         default: bool,
     },
+    /// One of a list of options.
     Select {
         options: Vec<SelectOption>,
         /// The `value` of the option selected at first.
@@ -79,12 +95,15 @@ pub enum FormInput {
     },
 }
 
+/// One option of a [`FormInput::Select`]: the `value` submitted and the
+/// `label` shown.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SelectOption {
     pub value: String,
     pub label: String,
 }
 
+/// One row of a detail View's table.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MetadataEntry {
     pub label: String,
@@ -103,11 +122,12 @@ pub struct Job {
     /// How far the job has got; `None` when the Extension can't tell.
     #[serde(default)]
     pub progress: Option<Fraction>,
-    /// What the job is doing now, or why it failed.
+    /// What the job is doing at the moment, or why it failed.
     #[serde(default)]
     pub message: Option<String>,
 }
 
+/// Where a [`Job`] is.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum JobState {

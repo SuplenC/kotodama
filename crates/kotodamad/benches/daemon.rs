@@ -7,16 +7,25 @@
 //! The Extension is this same executable, run with `KOTODAMA_BENCH_EXTENSION`.
 
 use std::fs;
-use std::io::{stdin, stdout};
-use std::process::{Command, Stdio};
+use std::io::stdin;
+use std::io::stdout;
+use std::process::Command;
+use std::process::Stdio;
 use std::thread;
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use std::time::Instant;
 
 use kotodama_extension::testing;
-use kotodama_protocol::{
-    Channel, FromExtension, FromFrontEnd, Hello, ToExtension, ToFrontEnd, WireFormat,
-};
+use kotodama_protocol::Channel;
+use kotodama_protocol::FromExtension;
+use kotodama_protocol::FromFrontEnd;
+use kotodama_protocol::Hello;
+use kotodama_protocol::ToExtension;
+use kotodama_protocol::ToFrontEnd;
+use kotodama_protocol::WireFormat;
 
+#[path = "support/corpus.rs"]
+#[expect(dead_code, reason = "the long titles are for `query.rs`")]
 mod corpus;
 
 const QUERIES: usize = 2_000;
@@ -33,10 +42,7 @@ fn main() {
     testing::install(
         &path("config/kotodama/extensions"),
         "bench",
-        &format!(
-            "name = \"bench\"\ncommand = [{:?}]",
-            me.display().to_string()
-        ),
+        &format!("name = \"bench\"\ncommand = [{:?}]", me.display().to_string()),
     );
 
     let mut daemon = Command::new(env!("CARGO_BIN_EXE_kotodamad"))
@@ -69,7 +75,7 @@ fn main() {
 
     let mut times: Vec<Duration> = (0..QUERIES)
         .map(|n| {
-            let typed = &TYPED[..n % TYPED.len() + 1];
+            let typed = &TYPED[..=n % TYPED.len()];
             let start = Instant::now();
             query(typed);
             start.elapsed()
@@ -90,7 +96,7 @@ fn main() {
             println!(
                 "kotodamad, {} items: {:.1} MiB resident",
                 corpus::ITEMS,
-                bytes as f64 / (1 << 20) as f64
+                bytes as f64 / f64::from(1 << 20)
             );
             println!("test daemon/10k_items/resident ... bench: {bytes} bytes (+/- 0)");
         }
@@ -110,20 +116,13 @@ fn resident(pid: u32) -> Option<u64> {
 
 /// The Extension side: sends the corpus, then idles until the Daemon hangs up.
 fn extension() {
-    let mut channel = Channel::handshake(
-        stdin().lock(),
-        stdout().lock(),
-        &Hello::new(&WireFormat::ALL),
-    )
-    .unwrap();
+    let mut channel = Channel::handshake(stdin().lock(), stdout().lock(), &Hello::new(&WireFormat::ALL)).unwrap();
     let mut sent = false;
     while let Ok(Some(message)) = channel.recv::<ToExtension>() {
         if matches!(message, ToExtension::Config(_)) && !sent {
             sent = true;
             channel
-                .send(&FromExtension::AddItems {
-                    items: corpus::items(),
-                })
+                .send(&FromExtension::AddItems { items: corpus::items() })
                 .unwrap();
         }
     }

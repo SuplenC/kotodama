@@ -72,7 +72,8 @@ fn run() -> Result<(), kotodama_protocol::Error> {
     let results = events.clone();
     let scanner = Scanner::start(move |scan| {
         let _ = results.send(Event::Own(Own::Scanned(scan)));
-    })?;
+    })
+    .map_err(kotodama_protocol::Error::Io)?;
 
     let mut extension = Extension {
         writer,
