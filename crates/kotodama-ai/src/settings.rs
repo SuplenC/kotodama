@@ -35,6 +35,7 @@ pub struct Settings {
     pub url: String,
     /// Whether `url` was set in the config: a local endpoint may need no key.
     pub url_set: bool,
+    /// The model the endpoint runs.
     pub model: String,
     /// `output_config.effort`; `None` leaves it out, for a server without it.
     pub effort: Option<String>,

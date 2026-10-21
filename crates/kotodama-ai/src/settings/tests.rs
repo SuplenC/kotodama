@@ -9,10 +9,7 @@ fn it_is_off_until_a_key_or_an_endpoint_is_configured() {
         "api_key_command".into(),
         Value::Array(vec![Value::String("pass".into())]),
     )]);
-    let local = Table::from([(
-        "url".into(),
-        Value::String("http://localhost:11434/v1/messages".into()),
-    )]);
+    let local = Table::from([("url".into(), Value::String("http://localhost:11434/v1/messages".into()))]);
 
     assert!(!Settings::from_config(&Table::new()).enabled());
     assert!(Settings::from_config(&key).enabled());

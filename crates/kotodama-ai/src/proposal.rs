@@ -2,14 +2,13 @@
 //!
 //! # Owns
 //!
-//! - Reading the model's answer, and checking every Proposal against the
-//!   catalog.
+//! - Reading the model's answer, and checking every Proposal against the catalog.
 //! - The Results: the Proposals, and the "Ask AI" Result.
 //!
 //! # Not here
 //!
-//! - Running a confirmed Proposal: the Daemon, from the `run_catalog_action`
-//!   outcome [`Proposal::outcome`] builds.
+//! - Running a confirmed Proposal: the Daemon, from the `run_catalog_action` outcome
+//!   [`Proposal::outcome`] builds.
 
 use std::collections::BTreeMap;
 
@@ -35,8 +34,10 @@ const MAX_ARGUMENT: usize = 200;
 /// Why an answer couldn't be read.
 #[derive(Debug, thiserror::Error)]
 pub enum ParseError {
+    /// The body doesn't parse as JSON.
     #[error("the answer isn't JSON")]
     NotJson(#[source] serde_json::Error),
+    /// The JSON has no `content` array.
     #[error("the answer has no content")]
     NoContent,
 }
@@ -44,10 +45,13 @@ pub enum ParseError {
 /// A catalog Action the model proposed, with the Arguments it filled in.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Proposal {
+    /// The catalog entry of the Action it runs.
     pub entry: CatalogEntry,
+    /// The Arguments the model filled in, by name; the user is asked for the rest.
     pub arguments: BTreeMap<String, String>,
 }
 
+/// The Extension's own Item kind `name`.
 fn kind(name: &str) -> ItemKind {
     ItemKind::Namespaced(NamespacedKind::new(name).expect("the Extension's kinds are valid"))
 }
@@ -70,10 +74,7 @@ impl Proposal {
             kind: kind("ai.proposal"),
             identity: None,
             title,
-            subtitle: Some(format!(
-                "Proposed by AI, from {}; Enter runs it",
-                self.entry.extension
-            )),
+            subtitle: Some(format!("Proposed by AI, from {}; Enter runs it", self.entry.extension)),
             icon: None,
             keyword: None,
             keywords: Vec::new(),
@@ -96,6 +97,10 @@ impl Proposal {
 }
 
 /// The Proposals as Live results, best first.
+///
+/// # Panics
+///
+/// Never: with at most [`MAX_PROPOSALS`] Proposals, every score is between 0.5 and 1.
 #[must_use]
 pub fn live_results(proposals: &[Proposal], request: u64) -> Vec<LiveResult> {
     let step = 1.0 / (MAX_PROPOSALS as f32 * 2.0);
@@ -124,6 +129,10 @@ pub fn parse_proposal_id(id: &str) -> Option<(u64, usize)> {
 }
 
 /// The "Ask AI" Result for `query`, whose id is the query.
+///
+/// # Panics
+///
+/// Never: its score, 0, is a fraction.
 #[must_use]
 pub fn ask_result(query: &str) -> LiveResult {
     LiveResult {
@@ -149,8 +158,7 @@ pub fn ask_result(query: &str) -> LiveResult {
 fn arguments(entry: &CatalogEntry, proposed: &serde_json::Value) -> BTreeMap<String, String> {
     let mut arguments = BTreeMap::new();
     for argument in proposed["arguments"].as_array().into_iter().flatten() {
-        let (Some(name), Some(value)) = (argument["name"].as_str(), argument["value"].as_str())
-        else {
+        let (Some(name), Some(value)) = (argument["name"].as_str(), argument["value"].as_str()) else {
             continue;
         };
         let value = value.trim();

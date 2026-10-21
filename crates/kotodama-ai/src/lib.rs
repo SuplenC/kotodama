@@ -7,14 +7,13 @@
 //! - The `[extensions.ai]` settings ([`Settings`]).
 //! - The API key, read from `api_key_command` and kept in memory ([`Secret`]).
 //! - The request to the model and its `curl` ([`request_body`], [`post`]).
-//! - Reading the model's answer into proposals, and their Results
-//!   ([`parse_response`], [`Proposal`]).
+//! - Reading the model's answer into proposals, and their Results ([`parse_response`],
+//!   [`Proposal`]).
 //!
 //! # Not here
 //!
 //! - The protocol loop, debouncing and cancelling: `main.rs`.
-//! - Running a confirmed Proposal's Action: the Daemon, through
-//!   `Outcome::RunCatalogAction`.
+//! - Running a confirmed Proposal's Action: the Daemon, through `Outcome::RunCatalogAction`.
 
 #![forbid(unsafe_code)]
 
