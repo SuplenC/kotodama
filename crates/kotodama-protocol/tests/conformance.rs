@@ -477,6 +477,7 @@ fn to_front_end_messages() -> Vec<ToFrontEnd> {
         ToFrontEnd::SetQuery {
             text: "emoji ".into(),
         },
+        ToFrontEnd::Reached { menus: 1 },
     ]
 }
 
@@ -539,9 +540,10 @@ fn to_front_end_variant(message: &ToFrontEnd) -> usize {
         ToFrontEnd::OfferUndo { .. } => 12,
         ToFrontEnd::WithdrawUndo { .. } => 13,
         ToFrontEnd::SetQuery { .. } => 14,
+        ToFrontEnd::Reached { .. } => 15,
     }
 }
-const TO_FRONT_END_VARIANTS: usize = 15;
+const TO_FRONT_END_VARIANTS: usize = 16;
 
 fn from_front_end_variant(message: &FromFrontEnd) -> usize {
     match message {

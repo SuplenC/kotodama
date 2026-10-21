@@ -34,8 +34,8 @@ Which compositors it works on is in [Compositor support](docs/try-it.md#composit
   imports = [ inputs.kotodama.homeModules.default ];
   programs.kotodama = {
     enable = true;
-    # Runs the menu in a Quickshell of its own, with the graphical session.
-    frontEnd.enable = true;
+    # The menu runs in a Quickshell of its own, with the graphical session
+    # (`frontEnd.enable`, on unless home-manager runs a Quickshell of yours).
     # apps, calculator, clipboard, emoji and web-search are on unless turned off.
     extensions.hyprland.enable = true;
     # Written to ~/.config/kotodama/home-manager.toml; any other *.toml there still applies.
@@ -91,11 +91,11 @@ programs.kotodama = {
 };
 ```
 
-The module installs the package, with the enabled Extensions alone (its read-only `finalPackage`), and enables `kotodamad.socket`. `frontEnd.enable` adds the ready Front end: a systemd user service, `kotodama-menu`, that runs the menu in a Quickshell instance of its own, beside whatever shell the desktop already runs, so a compositor bind running `kotodama toggle` is all that's left to set up.
+The module installs the package, with the enabled Extensions alone (its read-only `finalPackage`), and enables `kotodamad.socket`. `frontEnd.enable` adds the ready Front end: a systemd user service, `kotodama-menu`, that runs the menu in a Quickshell instance of its own, beside whatever shell the desktop already runs, so a compositor bind running `kotodama toggle` is all that's left to set up. It is on unless home-manager runs a Quickshell of your own (`programs.quickshell.enable`), where you place `KotodamaMenu` yourself.
 
 | Option | What it does |
 | --- | --- |
-| `frontEnd.enable` | Runs the `kotodama-menu` service. Off by default. |
+| `frontEnd.enable` | Runs the `kotodama-menu` service. On unless `programs.quickshell.enable`. |
 | `frontEnd.quickshellPackage` | The Quickshell that runs it. Unset, the one from the same nixpkgs as `package` (its `quickshell` attribute), which shares the QML module's Qt. |
 | `frontEnd.target` | The systemd user target that starts and stops it. Unset, `wayland.systemd.target`, which is `graphical-session.target` unless set. |
 | `frontEnd.look.{background, foreground, dimmed, accent, selection, border, error}` | `KotodamaMenu`'s colors, as QML takes them (`"#1e1e2e"`, `"red"`). |
@@ -559,7 +559,7 @@ The other look properties are `dimmed`, `selection`, `border`, `error`, `fontSiz
 
 The home-manager module's `frontEnd.enable` runs such a config, the package's `share/kotodama/quickshell/shell.qml`, as a Quickshell of its own. To put the menu in your own Quickshell config instead, that Quickshell needs the module's directory as `QML_IMPORT_PATH`: `programs.kotodama.qmlImportPath` in home-manager, which home-manager's `programs.quickshell` service (`systemd.enable`) gets on its own. A Quickshell started some other way, such as `exec-once = quickshell` in Hyprland's config, needs it in its environment, for example `exec-once = env QML_IMPORT_PATH=${config.programs.kotodama.qmlImportPath} quickshell` written from Nix, or `$HOME/.nix-profile/lib/qt-6/qml` (`/etc/profiles/per-user/$USER/lib/qt-6/qml` with home-manager's `useUserPackages`), where the profile links the module. Set it on that Quickshell only: the module holds one Qt version's plugin, which nothing else in the session needs. That Quickshell must come from the same nixpkgs as Kotodama, or Kotodama built with its nixpkgs (see [Installing](#installing)).
 
-A compositor keybind opens it through the `kotodama` command, which asks the Daemon to pass the request on to every Front end:
+A compositor keybind opens it through the `kotodama` command, which asks the Daemon to pass the request on to one menu: the one shown last, else the one that connected last. With no menu connected, the Daemon waits two seconds for one, as at login, when the keypress can come before the menu has started; if none comes, `kotodama` exits with 1 and says how to start one. `docs/adr/0029-kotodama-open-and-toggle-reach-one-menu-and-say-so.md` gives the reasons:
 
 ```
 # Hyprland

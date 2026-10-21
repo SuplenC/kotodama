@@ -1,9 +1,10 @@
 # The home-manager module: `programs.kotodama`. It installs Kotodama with the
 # enabled Bundled extensions, writes the user's settings into
 # ~/.config/kotodama/, and enables the Daemon's socket, so the first
-# `kotodama toggle` starts the Daemon. With `frontEnd.enable`, a
-# systemd user service runs the ready Front end, the menu in a Quickshell of its
-# own, with the graphical session.
+# `kotodama toggle` starts the Daemon. With `frontEnd.enable`, on unless
+# home-manager runs a Quickshell of the user's, a systemd user service runs
+# the ready Front end, the menu in a Quickshell of its own, with the graphical
+# session.
 self:
 {
   config,
@@ -495,10 +496,20 @@ in
 
     # The ready Front end: the menu as a Quickshell instance of its own.
     frontEnd = {
-      enable = lib.mkEnableOption ''
-        the ready Front end: a systemd user service, `kotodama-menu`, that runs
-        the menu in a Quickshell instance of its own, beside whatever shell the
-        desktop already runs, with the graphical session'';
+      enable = lib.mkOption {
+        type = lib.types.bool;
+        default = !(config.programs.quickshell.enable or false);
+        defaultText = lib.literalExpression "!config.programs.quickshell.enable";
+        example = false;
+        description = ''
+          Whether to run the ready Front end: a systemd user service,
+          `kotodama-menu`, that runs the menu in a Quickshell instance of its
+          own, beside whatever shell the desktop already runs, with the
+          graphical session. On unless home-manager runs a Quickshell of the
+          user's, which is where a user who has one places `KotodamaMenu`.
+          Without a menu, `kotodama toggle` fails and says so.
+        '';
+      };
 
       quickshellPackage = lib.mkOption {
         type = lib.types.package;

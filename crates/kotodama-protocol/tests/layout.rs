@@ -865,6 +865,7 @@ fn to_front_end() -> Vec<ToFrontEnd> {
         ToFrontEnd::SetQuery {
             text: "emoji ".into(),
         },
+        ToFrontEnd::Reached { menus: 1 },
     ]
 }
 

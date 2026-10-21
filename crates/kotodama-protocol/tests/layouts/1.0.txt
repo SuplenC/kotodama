@@ -183,6 +183,10 @@ ToFrontEnd::set_query postcard 0e 06 65 6d 6f 6a 69 20
 ToFrontEnd::set_query protobuf 7a 08 0a 06 65 6d 6f 6a 69 20
 ToFrontEnd::set_query msgpack 81 a9 73 65 74 5f 71 75 65 72 79 81 a4 74 65 78 74 a6 65 6d 6f 6a 69 20
 ToFrontEnd::set_query json {"set_query":{"text":"emoji "}}
+ToFrontEnd::reached postcard 0f 01
+ToFrontEnd::reached protobuf 82 01 02 08 01
+ToFrontEnd::reached msgpack 81 a7 72 65 61 63 68 65 64 81 a5 6d 65 6e 75 73 01
+ToFrontEnd::reached json {"reached":{"menus":1}}
 Outcome::close postcard 00
 Outcome::close protobuf 0a 00
 Outcome::close msgpack a5 63 6c 6f 73 65

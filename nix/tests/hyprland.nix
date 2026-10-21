@@ -92,6 +92,12 @@ pkgs.testers.runNixOSTest {
     def user(command):
         return machine.succeed(as_alice(command))
 
+    def toggle_without_a_menu():
+        # No menu runs here: the command still starts the Daemon, waits a
+        # moment for a menu, then fails and says how to start one.
+        out = machine.fail(as_alice("kotodama toggle 2>&1"))
+        assert "no menu is running" in out, out
+
     def active_window():
         return as_alice("hyprctl -i 0 activewindow -j")
 
@@ -116,7 +122,7 @@ pkgs.testers.runNixOSTest {
     wayland = user("systemctl --user show-environment | grep ^WAYLAND_DISPLAY=").strip()
 
     with subtest("the Daemon starts inside Hyprland, and finds its binds"):
-        user("kotodama toggle")
+        toggle_without_a_menu()
         machine.wait_for_unit("kotodamad.service", "alice")
         machine.wait_until_succeeds(
             as_alice(f"{front_end} --app hyprland show the keyboard")

@@ -132,11 +132,21 @@ let
   # Nothing set: no config file at all, so every default applies.
   nothing = (home { }).xdg.configFile;
 
-  # The ready Front end, off unless enabled.
-  noMenu = (home { }).systemd.user.services;
-  # Enabled with the module's look: the package's own shell.qml, run by the
-  # package's Quickshell, with the module on its import path only.
-  menu = (home { frontEnd.enable = true; }).systemd.user.services.kotodama-menu;
+  # The ready Front end, on by default with the module's look: the package's
+  # own shell.qml, run by the package's Quickshell, with the module on its
+  # import path only.
+  menu = (home { }).systemd.user.services.kotodama-menu;
+  # Off when turned off.
+  noMenu = (home { frontEnd.enable = false; }).systemd.user.services;
+  # Off by default beside a Quickshell of the user's that home-manager runs,
+  # where the user places the menu.
+  ownQuickshellServices =
+    (homeWith {
+      programs.quickshell = {
+        enable = true;
+        systemd.enable = true;
+      };
+    } { }).systemd.user.services;
   importPath = "QML_IMPORT_PATH=${kotodama.qml}/lib/qt-6/qml";
   # With a look, and a stand-in Quickshell, so the check builds neither the
   # package nor Quickshell: ExecStart names the shell.qml written for it.
@@ -156,16 +166,11 @@ let
       };
     }).systemd.user.services.kotodama-menu;
   # home-manager's own Quickshell service finds the module too.
-  userQuickshell =
-    (homeWith {
-      programs.quickshell = {
-        enable = true;
-        systemd.enable = true;
-      };
-    } { }).systemd.user.services.quickshell;
+  userQuickshell = ownQuickshellServices.quickshell;
 in
 assert !(nothing ? "kotodama/home-manager.toml");
 assert !(noMenu ? kotodama-menu);
+assert !(ownQuickshellServices ? kotodama-menu);
 assert
   menu.Service.ExecStart
   == [ "${lib.getExe kotodama.quickshell} --path ${kotodama.qml}/share/kotodama/quickshell" ];

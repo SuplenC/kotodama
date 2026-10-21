@@ -383,6 +383,7 @@ message ToFrontEnd {
     ToFrontEnd.OfferUndo offer_undo = 13;
     ToFrontEnd.WithdrawUndo withdraw_undo = 14;
     ToFrontEnd.SetQuery set_query = 15;
+    ToFrontEnd.Reached reached = 16;
   }
 
   message ActionFailed {
@@ -420,6 +421,10 @@ message ToFrontEnd {
     string extension = 1;
     View view = 2;
     map<string, OfferedActionList> contributed = 3;
+  }
+
+  message Reached {
+    uint32 menus = 1;
   }
 
   message ReplaceView {

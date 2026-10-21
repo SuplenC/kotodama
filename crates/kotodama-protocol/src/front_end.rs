@@ -59,8 +59,10 @@ pub enum FromFrontEnd {
     /// Answers [`ToFrontEnd::Close`]: the window is gone and focus is back on the
     /// window the user came from, so the Daemon may type or paste into it.
     Closed,
-    /// Asks every other Front end to open, as `kotodama open` does from a
-    /// compositor keybind. The Daemon passes it on as [`ToFrontEnd::Open`].
+    /// Asks a menu to open, as `kotodama open` does from a compositor
+    /// keybind. The Daemon passes it on as [`ToFrontEnd::Open`] to one menu,
+    /// another Front end that has searched: the one shown last, else the one
+    /// that connected last. It answers with [`ToFrontEnd::Reached`].
     Open {
         /// The search text to open with; empty clears it.
         query: String,
@@ -69,8 +71,9 @@ pub enum FromFrontEnd {
         /// View it pushes is there, or after a second without it (ADR 0014).
         view: Option<String>,
     },
-    /// Asks every other Front end to open if it is closed and close if it is
-    /// open, as `kotodama toggle` does.
+    /// Asks a menu to open if it is closed and close if it is open, as
+    /// `kotodama toggle` does. It goes to one menu, as [`FromFrontEnd::Open`]
+    /// does, and the Daemon answers with [`ToFrontEnd::Reached`].
     Toggle,
     /// Undoes the change to the History that [`ToFrontEnd::OfferUndo`]
     /// offered, as its key does. Nothing happens once it can't be undone.
@@ -180,6 +183,13 @@ pub enum ToFrontEnd {
     /// [`FromFrontEnd::Query`] for it.
     SetQuery {
         text: String,
+    },
+    /// The answer to [`FromFrontEnd::Open`] and [`FromFrontEnd::Toggle`],
+    /// sent to the Front end that asked: how many menus the request was
+    /// passed to. With none running, the Daemon waits a moment for one to
+    /// connect first; `0` means none did, so nothing opened.
+    Reached {
+        menus: u32,
     },
 }
 
