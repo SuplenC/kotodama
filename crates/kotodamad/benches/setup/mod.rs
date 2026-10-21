@@ -14,7 +14,8 @@ use std::sync::mpsc::{self, Receiver};
 use std::time::{Duration, Instant};
 
 use kotodama_protocol::{
-    FromExtension, FromFrontEnd, Item, Manifest, Table, ToFrontEnd, View, ViewContent, WireFormat,
+    FromExtension, FromFrontEnd, Item, Manifest, PROTOCOL_VERSION, Table, ToFrontEnd, View,
+    ViewContent, WireFormat,
 };
 use kotodamad::clock::{Clock, DAY_SECS, When};
 use kotodamad::daemon::{Daemon, Desktop, Event, ExtensionId, FrontEndId, Launcher, Output};
@@ -220,7 +221,8 @@ impl Setup {
         self.results.try_iter().for_each(drop);
     }
 
-    /// Sends one query and encodes its Results as the socket writer would.
+    /// Sends one query and encodes its Results as the socket writer would for a
+    /// Front end on this protocol version.
     pub fn query(&mut self, text: &str) -> usize {
         self.daemon.handle(
             Event::FromFrontEnd {
@@ -240,7 +242,7 @@ impl Setup {
             .unwrap();
         self.buf.clear();
         WireFormat::Postcard
-            .encode_into(&results, &mut self.buf)
+            .encode_for_into(PROTOCOL_VERSION, &results, &mut self.buf)
             .unwrap();
         self.buf.len()
     }
@@ -283,7 +285,7 @@ impl Setup {
         let reply = self.results.try_recv().unwrap();
         self.buf.clear();
         WireFormat::Postcard
-            .encode_into(&reply, &mut self.buf)
+            .encode_for_into(PROTOCOL_VERSION, &reply, &mut self.buf)
             .unwrap();
         self.buf.len()
     }

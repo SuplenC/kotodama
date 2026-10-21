@@ -32,7 +32,7 @@ The Daemon starts `command` from `manifest.toml`, in this directory, and talks t
 {"remove_items":{"ids":["a"]}}
 ```
 
-**Handshake.** Each side sends a hello first, always in JSON: `{"version":10,"formats":["json"]}`. `version` is the protocol version, `PROTOCOL_VERSION` in `crates/kotodama-protocol`; the Daemon turns away a hello with any other. List the Wire formats you support, from `postcard`, `msgpack` and `json`. Both sides then use the fastest they share. JSON is required, so offering only JSON is enough.
+**Handshake.** Each side sends a hello first, always in JSON: `{"version":1,"minor":0,"formats":["json"]}`. `version` and `minor` are the protocol version your Extension was written for, 1.0 here; `PROTOCOL_VERSION` in `crates/kotodama-protocol` is the newest. A minor version only adds to the one before, so a Daemon on 1.3 talks to an Extension written for 1.0 and never sends it what 1.0 lacks. The Daemon turns away an Extension newer than itself, and your Extension should turn away a Daemon older than the version it needs, as this one does. List the Wire formats you support, from `postcard`, `protobuf`, `msgpack` and `json`. Both sides then use the fastest they share; postcard only between peers on the same version. JSON is required, so offering only JSON is enough. For `protobuf`, generate your messages from `crates/kotodama-protocol/kotodama.proto`.
 
 **Messages.** A message is an object with one key, its name, holding its fields: `{"add_items": {"items": [...]}}`. A message without fields is just its name as a string: `"request_action_catalog"`. Optional fields can be left out.
 

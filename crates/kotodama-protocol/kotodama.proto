@@ -1,0 +1,496 @@
+// The Kotodama protocol 1.0 as Protocol Buffers, for the `protobuf` Wire format.
+// Written by crates/kotodama-protocol/tests/layout.rs from the protocol's types; don't edit.
+//
+// Each frame (an ASCII length, a newline, then the payload) holds one message.
+// An Extension reads ToExtension and writes FromExtension; a Front end reads
+// ToFrontEnd and writes FromFrontEnd. The hello before them is always JSON.
+// A field absent from a message holds its default; unknown fields are
+// skipped, and a peer on an older minor version is never sent a field or a
+// variant its version lacks.
+
+syntax = "proto3";
+
+package kotodama.v1;
+
+message Action {
+  string id = 1;
+  string title = 2;
+  optional string shortcut = 3;
+  repeated Argument arguments = 4;
+}
+
+message ActionRef {
+  string extension = 1;
+  string id = 2;
+}
+
+message Argument {
+  string name = 1;
+  optional string placeholder = 2;
+  bool optional = 3;
+}
+
+message CatalogEntry {
+  string extension = 1;
+  string kind = 2;
+  Action action = 3;
+}
+
+message Clipboard {
+  oneof variant {
+    string text = 1;
+    Clipboard.Image image = 2;
+  }
+
+  message Image {
+    string mime = 1;
+    bytes data = 2;
+  }
+}
+
+message Empty {
+}
+
+message FormField {
+  string id = 1;
+  string label = 2;
+  FormInput input = 3;
+}
+
+message FormInput {
+  oneof variant {
+    FormInput.Text text = 1;
+    FormInput.Checkbox checkbox = 2;
+    FormInput.Select select = 3;
+  }
+
+  message Checkbox {
+    bool default = 1;
+  }
+
+  message Select {
+    repeated SelectOption options = 1;
+    optional string default = 2;
+  }
+
+  message Text {
+    optional string placeholder = 1;
+    optional string default = 2;
+    bool secret = 3;
+  }
+}
+
+message FromExtension {
+  oneof variant {
+    FromExtension.AddItems add_items = 1;
+    FromExtension.RemoveItems remove_items = 2;
+    FromExtension.LiveResults live_results = 3;
+    FromExtension.ActionDone action_done = 4;
+    View push_view = 5;
+    View update_view = 6;
+    FromExtension.PopView pop_view = 7;
+    FromExtension.ReplaceView replace_view = 8;
+    Job job_progress = 9;
+    Empty request_action_catalog = 10;
+    FromExtension.WithdrawPick withdraw_pick = 11;
+  }
+
+  message ActionDone {
+    uint64 invocation = 1;
+    Outcome outcome = 2;
+  }
+
+  message AddItems {
+    repeated Item items = 1;
+  }
+
+  message LiveResults {
+    uint64 live_query = 1;
+    repeated LiveResult results = 2;
+    bool done = 3;
+  }
+
+  message PopView {
+    string view = 1;
+  }
+
+  message RemoveItems {
+    repeated string ids = 1;
+  }
+
+  message ReplaceView {
+    string view = 1;
+    View with = 2;
+  }
+
+  message WithdrawPick {
+    uint64 invocation = 1;
+  }
+}
+
+message FromFrontEnd {
+  oneof variant {
+    FromFrontEnd.Query query = 1;
+    FromFrontEnd.Viewport viewport = 2;
+    Empty selection_moved = 3;
+    FromFrontEnd.RunAction run_action = 4;
+    FromFrontEnd.SubmitForm submit_form = 5;
+    FromFrontEnd.ViewPopped view_popped = 6;
+    FromFrontEnd.FilterView filter_view = 7;
+    Empty closed = 8;
+    FromFrontEnd.Open open = 9;
+    Empty toggle = 10;
+    FromFrontEnd.Undo undo = 11;
+    Empty shown = 12;
+  }
+
+  message FilterView {
+    string extension = 1;
+    string view = 2;
+    string text = 3;
+  }
+
+  message Open {
+    string query = 1;
+    optional string view = 2;
+  }
+
+  message Query {
+    string text = 1;
+  }
+
+  message RunAction {
+    ResultRef result = 1;
+    uint32 shown = 2;
+    ActionRef action = 3;
+    map<string, string> arguments = 4;
+  }
+
+  message SubmitForm {
+    string extension = 1;
+    string view = 2;
+    map<string, Value> values = 3;
+  }
+
+  message Undo {
+    uint64 change = 1;
+  }
+
+  message ViewPopped {
+    string extension = 1;
+    string view = 2;
+  }
+
+  message Viewport {
+    uint32 top = 1;
+    uint32 rows = 2;
+  }
+}
+
+message Item {
+  string id = 1;
+  string kind = 2;
+  optional string desktop_id = 3;
+  optional string path = 4;
+  optional string address = 5;
+  optional string url = 6;
+  optional string identity = 7;
+  string title = 8;
+  optional string subtitle = 9;
+  optional string icon = 10;
+  optional string keyword = 11;
+  repeated string keywords = 12;
+  repeated Action actions = 13;
+  bool hidden = 14;
+}
+
+message ItemRef {
+  string id = 1;
+  string kind = 2;
+  optional string desktop_id = 3;
+  optional string path = 4;
+  optional string address = 5;
+  optional string url = 6;
+}
+
+message Job {
+  string id = 1;
+  string title = 2;
+  JobState state = 3;
+  optional float progress = 4;
+  optional string message = 5;
+}
+
+message JobState {
+  oneof variant {
+    Empty running = 1;
+    Empty succeeded = 2;
+    Empty failed = 3;
+  }
+}
+
+message ListMatch {
+  uint32 item = 1;
+  repeated uint32 highlights = 2;
+}
+
+message LiveResult {
+  Item item = 1;
+  float score = 2;
+  bool answer = 3;
+}
+
+message MetadataEntry {
+  string label = 1;
+  string value = 2;
+}
+
+message OfferedAction {
+  string extension = 1;
+  Action action = 2;
+}
+
+message OfferedActionList {
+  repeated OfferedAction value = 1;
+}
+
+message Outcome {
+  oneof variant {
+    Empty close = 1;
+    Empty keep_open = 2;
+    Outcome.Type type = 3;
+    Clipboard paste = 4;
+    Clipboard copy = 5;
+    Outcome.Failed failed = 6;
+    Outcome.RunCatalogAction run_catalog_action = 7;
+  }
+
+  message Failed {
+    string message = 1;
+  }
+
+  message RunCatalogAction {
+    string extension = 1;
+    string kind = 2;
+    string action = 3;
+    map<string, string> arguments = 4;
+  }
+
+  message Type {
+    string text = 1;
+  }
+}
+
+message ResultRef {
+  string extension = 1;
+  string id = 2;
+}
+
+message Scope {
+  string prefix = 1;
+  string title = 2;
+  optional string icon = 3;
+}
+
+message SelectOption {
+  string value = 1;
+  string label = 2;
+}
+
+message ShownResult {
+  string extension = 1;
+  Item item = 2;
+  repeated OfferedAction contributed = 3;
+  repeated uint32 highlights = 4;
+  optional string alias = 5;
+  optional string unavailable = 6;
+}
+
+message ToExtension {
+  oneof variant {
+    ValueMap config = 1;
+    ToExtension.LiveQuery live_query = 2;
+    ToExtension.CancelLiveQuery cancel_live_query = 3;
+    ToExtension.RunAction run_action = 4;
+    ToExtension.SubmitForm submit_form = 5;
+    ToExtension.ViewPopped view_popped = 6;
+    ToExtension.FilterView filter_view = 7;
+    ToExtension.ActionCatalog action_catalog = 8;
+  }
+
+  message ActionCatalog {
+    repeated CatalogEntry entries = 1;
+  }
+
+  message CancelLiveQuery {
+    uint64 id = 1;
+  }
+
+  message FilterView {
+    string view = 1;
+    string text = 2;
+  }
+
+  message LiveQuery {
+    uint64 id = 1;
+    string query = 2;
+    optional string prefix = 3;
+  }
+
+  message RunAction {
+    uint64 invocation = 1;
+    string action = 2;
+    ItemRef item = 3;
+    map<string, string> arguments = 4;
+  }
+
+  message SubmitForm {
+    string view = 1;
+    map<string, Value> values = 2;
+  }
+
+  message ViewPopped {
+    string view = 1;
+  }
+}
+
+message ToFrontEnd {
+  oneof variant {
+    ToFrontEnd.Results results = 1;
+    ToFrontEnd.Status status = 2;
+    Empty close = 3;
+    ToFrontEnd.ActionFailed action_failed = 4;
+    ToFrontEnd.PushView push_view = 5;
+    ToFrontEnd.UpdateView update_view = 6;
+    ToFrontEnd.PopView pop_view = 7;
+    ToFrontEnd.ReplaceView replace_view = 8;
+    ToFrontEnd.FilteredView filtered_view = 9;
+    ToFrontEnd.JobProgress job_progress = 10;
+    ToFrontEnd.Open open = 11;
+    Empty toggle = 12;
+    ToFrontEnd.OfferUndo offer_undo = 13;
+    ToFrontEnd.WithdrawUndo withdraw_undo = 14;
+    ToFrontEnd.SetQuery set_query = 15;
+  }
+
+  message ActionFailed {
+    string message = 1;
+  }
+
+  message FilteredView {
+    string extension = 1;
+    string view = 2;
+    string text = 3;
+    repeated ListMatch matches = 4;
+  }
+
+  message JobProgress {
+    string extension = 1;
+    Job job = 2;
+  }
+
+  message OfferUndo {
+    uint64 change = 1;
+    string title = 2;
+  }
+
+  message Open {
+    string query = 1;
+    optional string view = 2;
+  }
+
+  message PopView {
+    string extension = 1;
+    string view = 2;
+  }
+
+  message PushView {
+    string extension = 1;
+    View view = 2;
+    map<string, OfferedActionList> contributed = 3;
+  }
+
+  message ReplaceView {
+    string extension = 1;
+    string view = 2;
+    View with = 3;
+    map<string, OfferedActionList> contributed = 4;
+  }
+
+  message Results {
+    uint32 version = 1;
+    repeated ShownResult results = 2;
+    Scope scope = 3;
+  }
+
+  message SetQuery {
+    string text = 1;
+  }
+
+  message Status {
+    repeated string down = 1;
+  }
+
+  message UpdateView {
+    string extension = 1;
+    View view = 2;
+    map<string, OfferedActionList> contributed = 3;
+  }
+
+  message WithdrawUndo {
+    uint64 change = 1;
+  }
+}
+
+message Value {
+  oneof variant {
+    bool bool = 1;
+    sint64 integer = 2;
+    double float = 3;
+    string string = 4;
+    ValueList array = 5;
+    ValueMap table = 6;
+  }
+}
+
+message ValueList {
+  repeated Value value = 1;
+}
+
+message ValueMap {
+  map<string, Value> value = 1;
+}
+
+message View {
+  string id = 1;
+  string title = 2;
+  ViewContent content = 3;
+}
+
+message ViewContent {
+  oneof variant {
+    ViewContent.List list = 1;
+    ViewContent.Form form = 2;
+    ViewContent.Detail detail = 3;
+    ViewContent.Progress progress = 4;
+  }
+
+  message Detail {
+    string markdown = 1;
+    repeated MetadataEntry metadata = 2;
+  }
+
+  message Form {
+    repeated FormField fields = 1;
+    string submit = 2;
+  }
+
+  message List {
+    repeated Item items = 1;
+    bool filters_itself = 2;
+  }
+
+  message Progress {
+    string job = 1;
+  }
+}

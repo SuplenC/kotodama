@@ -34,7 +34,7 @@ fn spawn() -> (Child, Channel<ChildStdout, ChildStdin>) {
         .spawn()
         .unwrap();
     let (stdout, stdin) = (child.stdout.take().unwrap(), child.stdin.take().unwrap());
-    let channel = Channel::handshake(stdout, stdin, &Hello::new(&WireFormat::ALL)).unwrap();
+    let channel = Channel::accept(stdout, stdin, &Hello::new(&WireFormat::ALL)).unwrap();
     (child, channel)
 }
 

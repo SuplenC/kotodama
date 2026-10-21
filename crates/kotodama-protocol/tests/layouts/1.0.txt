@@ -1,0 +1,313 @@
+protocol version 1.0
+ToExtension::config postcard 00 02 07 65 6e 61 62 6c 65 64 00 01 05 6c 69 6d 69 74 01 0e
+ToExtension::config protobuf 0a 1c 0a 0d 0a 07 65 6e 61 62 6c 65 64 12 02 08 01 0a 0b 0a 05 6c 69 6d 69 74 12 02 10 0e
+ToExtension::config msgpack 81 a6 63 6f 6e 66 69 67 82 a7 65 6e 61 62 6c 65 64 c3 a5 6c 69 6d 69 74 07
+ToExtension::config json {"config":{"enabled":true,"limit":7}}
+ToExtension::live_query postcard 01 03 03 31 2b 31 01 01 3d
+ToExtension::live_query protobuf 12 0a 08 03 12 03 31 2b 31 1a 01 3d
+ToExtension::live_query msgpack 81 aa 6c 69 76 65 5f 71 75 65 72 79 83 a2 69 64 03 a5 71 75 65 72 79 a3 31 2b 31 a6 70 72 65 66 69 78 a1 3d
+ToExtension::live_query json {"live_query":{"id":3,"query":"1+1","prefix":"="}}
+ToExtension::cancel_live_query postcard 02 04
+ToExtension::cancel_live_query protobuf 1a 02 08 04
+ToExtension::cancel_live_query msgpack 81 b1 63 61 6e 63 65 6c 5f 6c 69 76 65 5f 71 75 65 72 79 81 a2 69 64 04
+ToExtension::cancel_live_query json {"cancel_live_query":{"id":4}}
+ToExtension::run_action postcard 03 05 04 6f 70 65 6e 02 69 64 07 70 72 6f 6a 65 63 74 00 01 0a 2f 61 2f 70 72 6f 6a 65 63 74 00 00 01 07 76 65 72 73 69 6f 6e 04 31 2e 32 33
+ToExtension::run_action protobuf 22 34 08 05 12 04 6f 70 65 6e 1a 19 0a 02 69 64 12 07 70 72 6f 6a 65 63 74 22 0a 2f 61 2f 70 72 6f 6a 65 63 74 22 0f 0a 07 76 65 72 73 69 6f 6e 12 04 31 2e 32 33
+ToExtension::run_action msgpack 81 aa 72 75 6e 5f 61 63 74 69 6f 6e 84 aa 69 6e 76 6f 63 61 74 69 6f 6e 05 a6 61 63 74 69 6f 6e a4 6f 70 65 6e a4 69 74 65 6d 86 a2 69 64 a2 69 64 a4 6b 69 6e 64 a7 70 72 6f 6a 65 63 74 aa 64 65 73 6b 74 6f 70 5f 69 64 c0 a4 70 61 74 68 aa 2f 61 2f 70 72 6f 6a 65 63 74 a7 61 64 64 72 65 73 73 c0 a3 75 72 6c c0 a9 61 72 67 75 6d 65 6e 74 73 81 a7 76 65 72 73 69 6f 6e a4 31 2e 32 33
+ToExtension::run_action json {"run_action":{"invocation":5,"action":"open","item":{"id":"id","kind":"project","desktop_id":null,"path":"/a/project","address":null,"url":null},"arguments":{"version":"1.23"}}}
+ToExtension::submit_form postcard 04 04 76 69 65 77 02 07 65 6e 61 62 6c 65 64 00 01 05 6c 69 6d 69 74 01 0e
+ToExtension::submit_form protobuf 2a 22 0a 04 76 69 65 77 12 0d 0a 07 65 6e 61 62 6c 65 64 12 02 08 01 12 0b 0a 05 6c 69 6d 69 74 12 02 10 0e
+ToExtension::submit_form msgpack 81 ab 73 75 62 6d 69 74 5f 66 6f 72 6d 82 a4 76 69 65 77 a4 76 69 65 77 a6 76 61 6c 75 65 73 82 a7 65 6e 61 62 6c 65 64 c3 a5 6c 69 6d 69 74 07
+ToExtension::submit_form json {"submit_form":{"view":"view","values":{"enabled":true,"limit":7}}}
+ToExtension::view_popped postcard 05 04 76 69 65 77
+ToExtension::view_popped protobuf 32 06 0a 04 76 69 65 77
+ToExtension::view_popped msgpack 81 ab 76 69 65 77 5f 70 6f 70 70 65 64 81 a4 76 69 65 77 a4 76 69 65 77
+ToExtension::view_popped json {"view_popped":{"view":"view"}}
+ToExtension::filter_view postcard 06 04 76 69 65 77 03 66 69 72
+ToExtension::filter_view protobuf 3a 0b 0a 04 76 69 65 77 12 03 66 69 72
+ToExtension::filter_view msgpack 81 ab 66 69 6c 74 65 72 5f 76 69 65 77 82 a4 76 69 65 77 a4 76 69 65 77 a4 74 65 78 74 a3 66 69 72
+ToExtension::filter_view json {"filter_view":{"view":"view","text":"fir"}}
+ToExtension::action_catalog postcard 07 01 05 73 68 65 6c 6c 07 70 72 6f 6a 65 63 74 04 6f 70 65 6e 04 4f 70 65 6e 01 06 63 74 72 6c 2b 6f 01 07 76 65 72 73 69 6f 6e 01 04 31 2e 32 33 01
+ToExtension::action_catalog protobuf 42 3b 0a 39 0a 05 73 68 65 6c 6c 12 07 70 72 6f 6a 65 63 74 1a 27 0a 04 6f 70 65 6e 12 04 4f 70 65 6e 1a 06 63 74 72 6c 2b 6f 22 11 0a 07 76 65 72 73 69 6f 6e 12 04 31 2e 32 33 18 01
+ToExtension::action_catalog msgpack 81 ae 61 63 74 69 6f 6e 5f 63 61 74 61 6c 6f 67 81 a7 65 6e 74 72 69 65 73 91 83 a9 65 78 74 65 6e 73 69 6f 6e a5 73 68 65 6c 6c a4 6b 69 6e 64 a7 70 72 6f 6a 65 63 74 a6 61 63 74 69 6f 6e 84 a2 69 64 a4 6f 70 65 6e a5 74 69 74 6c 65 a4 4f 70 65 6e a8 73 68 6f 72 74 63 75 74 a6 63 74 72 6c 2b 6f a9 61 72 67 75 6d 65 6e 74 73 91 83 a4 6e 61 6d 65 a7 76 65 72 73 69 6f 6e ab 70 6c 61 63 65 68 6f 6c 64 65 72 a4 31 2e 32 33 a8 6f 70 74 69 6f 6e 61 6c c3
+ToExtension::action_catalog json {"action_catalog":{"entries":[{"extension":"shell","kind":"project","action":{"id":"open","title":"Open","shortcut":"ctrl+o","arguments":[{"name":"version","placeholder":"1.23","optional":true}]}}]}}
+FromExtension::add_items postcard 00 01 02 69 64 03 61 70 70 01 0f 66 69 72 65 66 6f 78 2e 64 65 73 6b 74 6f 70 00 00 00 01 13 61 70 70 3a 66 69 72 65 66 6f 78 2e 64 65 73 6b 74 6f 70 05 54 69 74 6c 65 01 08 53 75 62 74 69 74 6c 65 01 04 69 63 6f 6e 01 02 67 6f 01 07 62 72 6f 77 73 65 72 01 04 6f 70 65 6e 04 4f 70 65 6e 01 06 63 74 72 6c 2b 6f 01 07 76 65 72 73 69 6f 6e 01 04 31 2e 32 33 01 01
+FromExtension::add_items protobuf 0a 80 01 0a 7e 0a 02 69 64 12 03 61 70 70 1a 0f 66 69 72 65 66 6f 78 2e 64 65 73 6b 74 6f 70 3a 13 61 70 70 3a 66 69 72 65 66 6f 78 2e 64 65 73 6b 74 6f 70 42 05 54 69 74 6c 65 4a 08 53 75 62 74 69 74 6c 65 52 04 69 63 6f 6e 5a 02 67 6f 62 07 62 72 6f 77 73 65 72 6a 27 0a 04 6f 70 65 6e 12 04 4f 70 65 6e 1a 06 63 74 72 6c 2b 6f 22 11 0a 07 76 65 72 73 69 6f 6e 12 04 31 2e 32 33 18 01 70 01
+FromExtension::add_items msgpack 81 a9 61 64 64 5f 69 74 65 6d 73 81 a5 69 74 65 6d 73 91 8e a2 69 64 a2 69 64 a4 6b 69 6e 64 a3 61 70 70 aa 64 65 73 6b 74 6f 70 5f 69 64 af 66 69 72 65 66 6f 78 2e 64 65 73 6b 74 6f 70 a4 70 61 74 68 c0 a7 61 64 64 72 65 73 73 c0 a3 75 72 6c c0 a8 69 64 65 6e 74 69 74 79 b3 61 70 70 3a 66 69 72 65 66 6f 78 2e 64 65 73 6b 74 6f 70 a5 74 69 74 6c 65 a5 54 69 74 6c 65 a8 73 75 62 74 69 74 6c 65 a8 53 75 62 74 69 74 6c 65 a4 69 63 6f 6e a4 69 63 6f 6e a7 6b 65 79 77 6f 72 64 a2 67 6f a8 6b 65 79 77 6f 72 64 73 91 a7 62 72 6f 77 73 65 72 a7 61 63 74 69 6f 6e 73 91 84 a2 69 64 a4 6f 70 65 6e a5 74 69 74 6c 65 a4 4f 70 65 6e a8 73 68 6f 72 74 63 75 74 a6 63 74 72 6c 2b 6f a9 61 72 67 75 6d 65 6e 74 73 91 83 a4 6e 61 6d 65 a7 76 65 72 73 69 6f 6e ab 70 6c 61 63 65 68 6f 6c 64 65 72 a4 31 2e 32 33 a8 6f 70 74 69 6f 6e 61 6c c3 a6 68 69 64 64 65 6e c3
+FromExtension::add_items json {"add_items":{"items":[{"id":"id","kind":"app","desktop_id":"firefox.desktop","path":null,"address":null,"url":null,"identity":"app:firefox.desktop","title":"Title","subtitle":"Subtitle","icon":"icon","keyword":"go","keywords":["browser"],"actions":[{"id":"open","title":"Open","shortcut":"ctrl+o","arguments":[{"name":"version","placeholder":"1.23","optional":true}]}],"hidden":true}]}}
+FromExtension::remove_items postcard 01 02 01 61 01 62
+FromExtension::remove_items protobuf 12 06 0a 01 61 0a 01 62
+FromExtension::remove_items msgpack 81 ac 72 65 6d 6f 76 65 5f 69 74 65 6d 73 81 a3 69 64 73 92 a1 61 a1 62
+FromExtension::remove_items json {"remove_items":{"ids":["a","b"]}}
+FromExtension::live_results postcard 02 03 01 02 69 64 03 75 72 6c 00 00 00 01 13 68 74 74 70 73 3a 2f 2f 65 78 61 6d 70 6c 65 2e 6f 72 67 01 13 61 70 70 3a 66 69 72 65 66 6f 78 2e 64 65 73 6b 74 6f 70 05 54 69 74 6c 65 01 08 53 75 62 74 69 74 6c 65 01 04 69 63 6f 6e 01 02 67 6f 01 07 62 72 6f 77 73 65 72 01 04 6f 70 65 6e 04 4f 70 65 6e 01 06 63 74 72 6c 2b 6f 01 07 76 65 72 73 69 6f 6e 01 04 31 2e 32 33 01 01 00 00 40 3f 01 01
+FromExtension::live_results protobuf 1a 93 01 08 03 12 8c 01 0a 82 01 0a 02 69 64 12 03 75 72 6c 32 13 68 74 74 70 73 3a 2f 2f 65 78 61 6d 70 6c 65 2e 6f 72 67 3a 13 61 70 70 3a 66 69 72 65 66 6f 78 2e 64 65 73 6b 74 6f 70 42 05 54 69 74 6c 65 4a 08 53 75 62 74 69 74 6c 65 52 04 69 63 6f 6e 5a 02 67 6f 62 07 62 72 6f 77 73 65 72 6a 27 0a 04 6f 70 65 6e 12 04 4f 70 65 6e 1a 06 63 74 72 6c 2b 6f 22 11 0a 07 76 65 72 73 69 6f 6e 12 04 31 2e 32 33 18 01 70 01 15 00 00 40 3f 18 01 18 01
+FromExtension::live_results msgpack 81 ac 6c 69 76 65 5f 72 65 73 75 6c 74 73 83 aa 6c 69 76 65 5f 71 75 65 72 79 03 a7 72 65 73 75 6c 74 73 91 83 a4 69 74 65 6d 8e a2 69 64 a2 69 64 a4 6b 69 6e 64 a3 75 72 6c aa 64 65 73 6b 74 6f 70 5f 69 64 c0 a4 70 61 74 68 c0 a7 61 64 64 72 65 73 73 c0 a3 75 72 6c b3 68 74 74 70 73 3a 2f 2f 65 78 61 6d 70 6c 65 2e 6f 72 67 a8 69 64 65 6e 74 69 74 79 b3 61 70 70 3a 66 69 72 65 66 6f 78 2e 64 65 73 6b 74 6f 70 a5 74 69 74 6c 65 a5 54 69 74 6c 65 a8 73 75 62 74 69 74 6c 65 a8 53 75 62 74 69 74 6c 65 a4 69 63 6f 6e a4 69 63 6f 6e a7 6b 65 79 77 6f 72 64 a2 67 6f a8 6b 65 79 77 6f 72 64 73 91 a7 62 72 6f 77 73 65 72 a7 61 63 74 69 6f 6e 73 91 84 a2 69 64 a4 6f 70 65 6e a5 74 69 74 6c 65 a4 4f 70 65 6e a8 73 68 6f 72 74 63 75 74 a6 63 74 72 6c 2b 6f a9 61 72 67 75 6d 65 6e 74 73 91 83 a4 6e 61 6d 65 a7 76 65 72 73 69 6f 6e ab 70 6c 61 63 65 68 6f 6c 64 65 72 a4 31 2e 32 33 a8 6f 70 74 69 6f 6e 61 6c c3 a6 68 69 64 64 65 6e c3 a5 73 63 6f 72 65 ca 3f 40 00 00 a6 61 6e 73 77 65 72 c3 a4 64 6f 6e 65 c3
+FromExtension::live_results json {"live_results":{"live_query":3,"results":[{"item":{"id":"id","kind":"url","desktop_id":null,"path":null,"address":null,"url":"https://example.org","identity":"app:firefox.desktop","title":"Title","subtitle":"Subtitle","icon":"icon","keyword":"go","keywords":["browser"],"actions":[{"id":"open","title":"Open","shortcut":"ctrl+o","arguments":[{"name":"version","placeholder":"1.23","optional":true}]}],"hidden":true},"score":0.75,"answer":true}],"done":true}}
+FromExtension::action_done postcard 03 05 01
+FromExtension::action_done protobuf 22 06 08 05 12 02 12 00
+FromExtension::action_done msgpack 81 ab 61 63 74 69 6f 6e 5f 64 6f 6e 65 82 aa 69 6e 76 6f 63 61 74 69 6f 6e 05 a7 6f 75 74 63 6f 6d 65 a9 6b 65 65 70 5f 6f 70 65 6e
+FromExtension::action_done json {"action_done":{"invocation":5,"outcome":"keep_open"}}
+FromExtension::push_view postcard 04 04 76 69 65 77 06 41 20 56 69 65 77 03 03 6a 6f 62
+FromExtension::push_view protobuf 2a 17 0a 04 76 69 65 77 12 06 41 20 56 69 65 77 1a 07 22 05 0a 03 6a 6f 62
+FromExtension::push_view msgpack 81 a9 70 75 73 68 5f 76 69 65 77 83 a2 69 64 a4 76 69 65 77 a5 74 69 74 6c 65 a6 41 20 56 69 65 77 a7 63 6f 6e 74 65 6e 74 81 a8 70 72 6f 67 72 65 73 73 81 a3 6a 6f 62 a3 6a 6f 62
+FromExtension::push_view json {"push_view":{"id":"view","title":"A View","content":{"progress":{"job":"job"}}}}
+FromExtension::update_view postcard 05 04 76 69 65 77 06 41 20 56 69 65 77 03 03 6a 6f 62
+FromExtension::update_view protobuf 32 17 0a 04 76 69 65 77 12 06 41 20 56 69 65 77 1a 07 22 05 0a 03 6a 6f 62
+FromExtension::update_view msgpack 81 ab 75 70 64 61 74 65 5f 76 69 65 77 83 a2 69 64 a4 76 69 65 77 a5 74 69 74 6c 65 a6 41 20 56 69 65 77 a7 63 6f 6e 74 65 6e 74 81 a8 70 72 6f 67 72 65 73 73 81 a3 6a 6f 62 a3 6a 6f 62
+FromExtension::update_view json {"update_view":{"id":"view","title":"A View","content":{"progress":{"job":"job"}}}}
+FromExtension::pop_view postcard 06 04 76 69 65 77
+FromExtension::pop_view protobuf 3a 06 0a 04 76 69 65 77
+FromExtension::pop_view msgpack 81 a8 70 6f 70 5f 76 69 65 77 81 a4 76 69 65 77 a4 76 69 65 77
+FromExtension::pop_view json {"pop_view":{"view":"view"}}
+FromExtension::replace_view postcard 07 04 66 6f 72 6d 04 76 69 65 77 06 41 20 56 69 65 77 03 03 6a 6f 62
+FromExtension::replace_view protobuf 42 1f 0a 04 66 6f 72 6d 12 17 0a 04 76 69 65 77 12 06 41 20 56 69 65 77 1a 07 22 05 0a 03 6a 6f 62
+FromExtension::replace_view msgpack 81 ac 72 65 70 6c 61 63 65 5f 76 69 65 77 82 a4 76 69 65 77 a4 66 6f 72 6d a4 77 69 74 68 83 a2 69 64 a4 76 69 65 77 a5 74 69 74 6c 65 a6 41 20 56 69 65 77 a7 63 6f 6e 74 65 6e 74 81 a8 70 72 6f 67 72 65 73 73 81 a3 6a 6f 62 a3 6a 6f 62
+FromExtension::replace_view json {"replace_view":{"view":"form","with":{"id":"view","title":"A View","content":{"progress":{"job":"job"}}}}}
+FromExtension::job_progress postcard 08 03 6a 6f 62 0a 49 6e 73 74 61 6c 6c 69 6e 67 02 01 00 00 40 3f 01 0c 6f 75 74 20 6f 66 20 73 70 61 63 65
+FromExtension::job_progress protobuf 4a 28 0a 03 6a 6f 62 12 0a 49 6e 73 74 61 6c 6c 69 6e 67 1a 02 1a 00 25 00 00 40 3f 2a 0c 6f 75 74 20 6f 66 20 73 70 61 63 65
+FromExtension::job_progress msgpack 81 ac 6a 6f 62 5f 70 72 6f 67 72 65 73 73 85 a2 69 64 a3 6a 6f 62 a5 74 69 74 6c 65 aa 49 6e 73 74 61 6c 6c 69 6e 67 a5 73 74 61 74 65 a6 66 61 69 6c 65 64 a8 70 72 6f 67 72 65 73 73 ca 3f 40 00 00 a7 6d 65 73 73 61 67 65 ac 6f 75 74 20 6f 66 20 73 70 61 63 65
+FromExtension::job_progress json {"job_progress":{"id":"job","title":"Installing","state":"failed","progress":0.75,"message":"out of space"}}
+FromExtension::request_action_catalog postcard 09
+FromExtension::request_action_catalog protobuf 52 00
+FromExtension::request_action_catalog msgpack b6 72 65 71 75 65 73 74 5f 61 63 74 69 6f 6e 5f 63 61 74 61 6c 6f 67
+FromExtension::request_action_catalog json "request_action_catalog"
+FromExtension::withdraw_pick postcard 0a 05
+FromExtension::withdraw_pick protobuf 5a 02 08 05
+FromExtension::withdraw_pick msgpack 81 ad 77 69 74 68 64 72 61 77 5f 70 69 63 6b 81 aa 69 6e 76 6f 63 61 74 69 6f 6e 05
+FromExtension::withdraw_pick json {"withdraw_pick":{"invocation":5}}
+FromFrontEnd::query postcard 00 03 66 69 72
+FromFrontEnd::query protobuf 0a 05 0a 03 66 69 72
+FromFrontEnd::query msgpack 81 a5 71 75 65 72 79 81 a4 74 65 78 74 a3 66 69 72
+FromFrontEnd::query json {"query":{"text":"fir"}}
+FromFrontEnd::viewport postcard 01 02 09
+FromFrontEnd::viewport protobuf 12 04 08 02 10 09
+FromFrontEnd::viewport msgpack 81 a8 76 69 65 77 70 6f 72 74 82 a3 74 6f 70 02 a4 72 6f 77 73 09
+FromFrontEnd::viewport json {"viewport":{"top":2,"rows":9}}
+FromFrontEnd::selection_moved postcard 02
+FromFrontEnd::selection_moved protobuf 1a 00
+FromFrontEnd::selection_moved msgpack af 73 65 6c 65 63 74 69 6f 6e 5f 6d 6f 76 65 64
+FromFrontEnd::selection_moved json "selection_moved"
+FromFrontEnd::run_action postcard 03 04 61 70 70 73 07 66 69 72 65 66 6f 78 07 05 73 68 65 6c 6c 04 6f 70 65 6e 01 07 76 65 72 73 69 6f 6e 04 31 2e 32 33
+FromFrontEnd::run_action protobuf 22 33 0a 0f 0a 04 61 70 70 73 12 07 66 69 72 65 66 6f 78 10 07 1a 0d 0a 05 73 68 65 6c 6c 12 04 6f 70 65 6e 22 0f 0a 07 76 65 72 73 69 6f 6e 12 04 31 2e 32 33
+FromFrontEnd::run_action msgpack 81 aa 72 75 6e 5f 61 63 74 69 6f 6e 84 a6 72 65 73 75 6c 74 82 a9 65 78 74 65 6e 73 69 6f 6e a4 61 70 70 73 a2 69 64 a7 66 69 72 65 66 6f 78 a5 73 68 6f 77 6e 07 a6 61 63 74 69 6f 6e 82 a9 65 78 74 65 6e 73 69 6f 6e a5 73 68 65 6c 6c a2 69 64 a4 6f 70 65 6e a9 61 72 67 75 6d 65 6e 74 73 81 a7 76 65 72 73 69 6f 6e a4 31 2e 32 33
+FromFrontEnd::run_action json {"run_action":{"result":{"extension":"apps","id":"firefox"},"shown":7,"action":{"extension":"shell","id":"open"},"arguments":{"version":"1.23"}}}
+FromFrontEnd::submit_form postcard 04 05 73 68 65 6c 6c 04 76 69 65 77 02 07 65 6e 61 62 6c 65 64 00 01 05 6c 69 6d 69 74 01 0e
+FromFrontEnd::submit_form protobuf 2a 29 0a 05 73 68 65 6c 6c 12 04 76 69 65 77 1a 0d 0a 07 65 6e 61 62 6c 65 64 12 02 08 01 1a 0b 0a 05 6c 69 6d 69 74 12 02 10 0e
+FromFrontEnd::submit_form msgpack 81 ab 73 75 62 6d 69 74 5f 66 6f 72 6d 83 a9 65 78 74 65 6e 73 69 6f 6e a5 73 68 65 6c 6c a4 76 69 65 77 a4 76 69 65 77 a6 76 61 6c 75 65 73 82 a7 65 6e 61 62 6c 65 64 c3 a5 6c 69 6d 69 74 07
+FromFrontEnd::submit_form json {"submit_form":{"extension":"shell","view":"view","values":{"enabled":true,"limit":7}}}
+FromFrontEnd::view_popped postcard 05 05 73 68 65 6c 6c 04 76 69 65 77
+FromFrontEnd::view_popped protobuf 32 0d 0a 05 73 68 65 6c 6c 12 04 76 69 65 77
+FromFrontEnd::view_popped msgpack 81 ab 76 69 65 77 5f 70 6f 70 70 65 64 82 a9 65 78 74 65 6e 73 69 6f 6e a5 73 68 65 6c 6c a4 76 69 65 77 a4 76 69 65 77
+FromFrontEnd::view_popped json {"view_popped":{"extension":"shell","view":"view"}}
+FromFrontEnd::filter_view postcard 06 05 73 68 65 6c 6c 04 76 69 65 77 03 66 69 72
+FromFrontEnd::filter_view protobuf 3a 12 0a 05 73 68 65 6c 6c 12 04 76 69 65 77 1a 03 66 69 72
+FromFrontEnd::filter_view msgpack 81 ab 66 69 6c 74 65 72 5f 76 69 65 77 83 a9 65 78 74 65 6e 73 69 6f 6e a5 73 68 65 6c 6c a4 76 69 65 77 a4 76 69 65 77 a4 74 65 78 74 a3 66 69 72
+FromFrontEnd::filter_view json {"filter_view":{"extension":"shell","view":"view","text":"fir"}}
+FromFrontEnd::closed postcard 07
+FromFrontEnd::closed protobuf 42 00
+FromFrontEnd::closed msgpack a6 63 6c 6f 73 65 64
+FromFrontEnd::closed json "closed"
+FromFrontEnd::open postcard 08 03 66 69 72 01 04 76 69 65 77
+FromFrontEnd::open protobuf 4a 0b 0a 03 66 69 72 12 04 76 69 65 77
+FromFrontEnd::open msgpack 81 a4 6f 70 65 6e 82 a5 71 75 65 72 79 a3 66 69 72 a4 76 69 65 77 a4 76 69 65 77
+FromFrontEnd::open json {"open":{"query":"fir","view":"view"}}
+FromFrontEnd::toggle postcard 09
+FromFrontEnd::toggle protobuf 52 00
+FromFrontEnd::toggle msgpack a6 74 6f 67 67 6c 65
+FromFrontEnd::toggle json "toggle"
+FromFrontEnd::undo postcard 0a 07
+FromFrontEnd::undo protobuf 5a 02 08 07
+FromFrontEnd::undo msgpack 81 a4 75 6e 64 6f 81 a6 63 68 61 6e 67 65 07
+FromFrontEnd::undo json {"undo":{"change":7}}
+FromFrontEnd::shown postcard 0b
+FromFrontEnd::shown protobuf 62 00
+FromFrontEnd::shown msgpack a5 73 68 6f 77 6e
+FromFrontEnd::shown json "shown"
+ToFrontEnd::results postcard 00 07 01 04 61 70 70 73 02 69 64 03 61 70 70 01 0f 66 69 72 65 66 6f 78 2e 64 65 73 6b 74 6f 70 00 00 00 01 13 61 70 70 3a 66 69 72 65 66 6f 78 2e 64 65 73 6b 74 6f 70 05 54 69 74 6c 65 01 08 53 75 62 74 69 74 6c 65 01 04 69 63 6f 6e 01 02 67 6f 01 07 62 72 6f 77 73 65 72 01 04 6f 70 65 6e 04 4f 70 65 6e 01 06 63 74 72 6c 2b 6f 01 07 76 65 72 73 69 6f 6e 01 04 31 2e 32 33 01 01 01 05 73 68 65 6c 6c 04 6f 70 65 6e 04 4f 70 65 6e 01 06 63 74 72 6c 2b 6f 01 07 76 65 72 73 69 6f 6e 01 04 31 2e 32 33 01 02 00 02 01 02 66 66 01 12 61 70 70 73 20 69 73 6e 27 74 20 72 75 6e 6e 69 6e 67 01 05 65 6d 6f 6a 69 05 45 6d 6f 6a 69 01 0a 66 61 63 65 2d 73 6d 69 6c 65
+ToFrontEnd::results protobuf 0a f5 01 08 07 12 d4 01 0a 04 61 70 70 73 12 7e 0a 02 69 64 12 03 61 70 70 1a 0f 66 69 72 65 66 6f 78 2e 64 65 73 6b 74 6f 70 3a 13 61 70 70 3a 66 69 72 65 66 6f 78 2e 64 65 73 6b 74 6f 70 42 05 54 69 74 6c 65 4a 08 53 75 62 74 69 74 6c 65 52 04 69 63 6f 6e 5a 02 67 6f 62 07 62 72 6f 77 73 65 72 6a 27 0a 04 6f 70 65 6e 12 04 4f 70 65 6e 1a 06 63 74 72 6c 2b 6f 22 11 0a 07 76 65 72 73 69 6f 6e 12 04 31 2e 32 33 18 01 70 01 1a 30 0a 05 73 68 65 6c 6c 12 27 0a 04 6f 70 65 6e 12 04 4f 70 65 6e 1a 06 63 74 72 6c 2b 6f 22 11 0a 07 76 65 72 73 69 6f 6e 12 04 31 2e 32 33 18 01 22 02 00 02 2a 02 66 66 32 12 61 70 70 73 20 69 73 6e 27 74 20 72 75 6e 6e 69 6e 67 1a 1a 0a 05 65 6d 6f 6a 69 12 05 45 6d 6f 6a 69 1a 0a 66 61 63 65 2d 73 6d 69 6c 65
+ToFrontEnd::results msgpack 81 a7 72 65 73 75 6c 74 73 83 a7 76 65 72 73 69 6f 6e 07 a7 72 65 73 75 6c 74 73 91 86 a9 65 78 74 65 6e 73 69 6f 6e a4 61 70 70 73 a4 69 74 65 6d 8e a2 69 64 a2 69 64 a4 6b 69 6e 64 a3 61 70 70 aa 64 65 73 6b 74 6f 70 5f 69 64 af 66 69 72 65 66 6f 78 2e 64 65 73 6b 74 6f 70 a4 70 61 74 68 c0 a7 61 64 64 72 65 73 73 c0 a3 75 72 6c c0 a8 69 64 65 6e 74 69 74 79 b3 61 70 70 3a 66 69 72 65 66 6f 78 2e 64 65 73 6b 74 6f 70 a5 74 69 74 6c 65 a5 54 69 74 6c 65 a8 73 75 62 74 69 74 6c 65 a8 53 75 62 74 69 74 6c 65 a4 69 63 6f 6e a4 69 63 6f 6e a7 6b 65 79 77 6f 72 64 a2 67 6f a8 6b 65 79 77 6f 72 64 73 91 a7 62 72 6f 77 73 65 72 a7 61 63 74 69 6f 6e 73 91 84 a2 69 64 a4 6f 70 65 6e a5 74 69 74 6c 65 a4 4f 70 65 6e a8 73 68 6f 72 74 63 75 74 a6 63 74 72 6c 2b 6f a9 61 72 67 75 6d 65 6e 74 73 91 83 a4 6e 61 6d 65 a7 76 65 72 73 69 6f 6e ab 70 6c 61 63 65 68 6f 6c 64 65 72 a4 31 2e 32 33 a8 6f 70 74 69 6f 6e 61 6c c3 a6 68 69 64 64 65 6e c3 ab 63 6f 6e 74 72 69 62 75 74 65 64 91 82 a9 65 78 74 65 6e 73 69 6f 6e a5 73 68 65 6c 6c a6 61 63 74 69 6f 6e 84 a2 69 64 a4 6f 70 65 6e a5 74 69 74 6c 65 a4 4f 70 65 6e a8 73 68 6f 72 74 63 75 74 a6 63 74 72 6c 2b 6f a9 61 72 67 75 6d 65 6e 74 73 91 83 a4 6e 61 6d 65 a7 76 65 72 73 69 6f 6e ab 70 6c 61 63 65 68 6f 6c 64 65 72 a4 31 2e 32 33 a8 6f 70 74 69 6f 6e 61 6c c3 aa 68 69 67 68 6c 69 67 68 74 73 92 00 02 a5 61 6c 69 61 73 a2 66 66 ab 75 6e 61 76 61 69 6c 61 62 6c 65 b2 61 70 70 73 20 69 73 6e 27 74 20 72 75 6e 6e 69 6e 67 a5 73 63 6f 70 65 83 a6 70 72 65 66 69 78 a5 65 6d 6f 6a 69 a5 74 69 74 6c 65 a5 45 6d 6f 6a 69 a4 69 63 6f 6e aa 66 61 63 65 2d 73 6d 69 6c 65
+ToFrontEnd::results json {"results":{"version":7,"results":[{"extension":"apps","item":{"id":"id","kind":"app","desktop_id":"firefox.desktop","path":null,"address":null,"url":null,"identity":"app:firefox.desktop","title":"Title","subtitle":"Subtitle","icon":"icon","keyword":"go","keywords":["browser"],"actions":[{"id":"open","title":"Open","shortcut":"ctrl+o","arguments":[{"name":"version","placeholder":"1.23","optional":true}]}],"hidden":true},"contributed":[{"extension":"shell","action":{"id":"open","title":"Open","shortcut":"ctrl+o","arguments":[{"name":"version","placeholder":"1.23","optional":true}]}}],"highlights":[0,2],"alias":"ff","unavailable":"apps isn't running"}],"scope":{"prefix":"emoji","title":"Emoji","icon":"face-smile"}}}
+ToFrontEnd::status postcard 01 01 05 73 68 65 6c 6c
+ToFrontEnd::status protobuf 12 07 0a 05 73 68 65 6c 6c
+ToFrontEnd::status msgpack 81 a6 73 74 61 74 75 73 81 a4 64 6f 77 6e 91 a5 73 68 65 6c 6c
+ToFrontEnd::status json {"status":{"down":["shell"]}}
+ToFrontEnd::close postcard 02
+ToFrontEnd::close protobuf 1a 00
+ToFrontEnd::close msgpack a5 63 6c 6f 73 65
+ToFrontEnd::close json "close"
+ToFrontEnd::action_failed postcard 03 02 6e 6f
+ToFrontEnd::action_failed protobuf 22 04 0a 02 6e 6f
+ToFrontEnd::action_failed msgpack 81 ad 61 63 74 69 6f 6e 5f 66 61 69 6c 65 64 81 a7 6d 65 73 73 61 67 65 a2 6e 6f
+ToFrontEnd::action_failed json {"action_failed":{"message":"no"}}
+ToFrontEnd::push_view postcard 04 05 73 68 65 6c 6c 04 76 69 65 77 06 41 20 56 69 65 77 03 03 6a 6f 62 01 04 66 69 6c 65 01 06 70 69 6e 6e 65 72 04 6f 70 65 6e 04 4f 70 65 6e 01 06 63 74 72 6c 2b 6f 01 07 76 65 72 73 69 6f 6e 01 04 31 2e 32 33 01
+ToFrontEnd::push_view protobuf 2a 5d 0a 05 73 68 65 6c 6c 12 17 0a 04 76 69 65 77 12 06 41 20 56 69 65 77 1a 07 22 05 0a 03 6a 6f 62 1a 3b 0a 04 66 69 6c 65 12 33 0a 31 0a 06 70 69 6e 6e 65 72 12 27 0a 04 6f 70 65 6e 12 04 4f 70 65 6e 1a 06 63 74 72 6c 2b 6f 22 11 0a 07 76 65 72 73 69 6f 6e 12 04 31 2e 32 33 18 01
+ToFrontEnd::push_view msgpack 81 a9 70 75 73 68 5f 76 69 65 77 83 a9 65 78 74 65 6e 73 69 6f 6e a5 73 68 65 6c 6c a4 76 69 65 77 83 a2 69 64 a4 76 69 65 77 a5 74 69 74 6c 65 a6 41 20 56 69 65 77 a7 63 6f 6e 74 65 6e 74 81 a8 70 72 6f 67 72 65 73 73 81 a3 6a 6f 62 a3 6a 6f 62 ab 63 6f 6e 74 72 69 62 75 74 65 64 81 a4 66 69 6c 65 91 82 a9 65 78 74 65 6e 73 69 6f 6e a6 70 69 6e 6e 65 72 a6 61 63 74 69 6f 6e 84 a2 69 64 a4 6f 70 65 6e a5 74 69 74 6c 65 a4 4f 70 65 6e a8 73 68 6f 72 74 63 75 74 a6 63 74 72 6c 2b 6f a9 61 72 67 75 6d 65 6e 74 73 91 83 a4 6e 61 6d 65 a7 76 65 72 73 69 6f 6e ab 70 6c 61 63 65 68 6f 6c 64 65 72 a4 31 2e 32 33 a8 6f 70 74 69 6f 6e 61 6c c3
+ToFrontEnd::push_view json {"push_view":{"extension":"shell","view":{"id":"view","title":"A View","content":{"progress":{"job":"job"}}},"contributed":{"file":[{"extension":"pinner","action":{"id":"open","title":"Open","shortcut":"ctrl+o","arguments":[{"name":"version","placeholder":"1.23","optional":true}]}}]}}}
+ToFrontEnd::update_view postcard 05 05 73 68 65 6c 6c 04 76 69 65 77 06 41 20 56 69 65 77 03 03 6a 6f 62 01 04 66 69 6c 65 01 06 70 69 6e 6e 65 72 04 6f 70 65 6e 04 4f 70 65 6e 01 06 63 74 72 6c 2b 6f 01 07 76 65 72 73 69 6f 6e 01 04 31 2e 32 33 01
+ToFrontEnd::update_view protobuf 32 5d 0a 05 73 68 65 6c 6c 12 17 0a 04 76 69 65 77 12 06 41 20 56 69 65 77 1a 07 22 05 0a 03 6a 6f 62 1a 3b 0a 04 66 69 6c 65 12 33 0a 31 0a 06 70 69 6e 6e 65 72 12 27 0a 04 6f 70 65 6e 12 04 4f 70 65 6e 1a 06 63 74 72 6c 2b 6f 22 11 0a 07 76 65 72 73 69 6f 6e 12 04 31 2e 32 33 18 01
+ToFrontEnd::update_view msgpack 81 ab 75 70 64 61 74 65 5f 76 69 65 77 83 a9 65 78 74 65 6e 73 69 6f 6e a5 73 68 65 6c 6c a4 76 69 65 77 83 a2 69 64 a4 76 69 65 77 a5 74 69 74 6c 65 a6 41 20 56 69 65 77 a7 63 6f 6e 74 65 6e 74 81 a8 70 72 6f 67 72 65 73 73 81 a3 6a 6f 62 a3 6a 6f 62 ab 63 6f 6e 74 72 69 62 75 74 65 64 81 a4 66 69 6c 65 91 82 a9 65 78 74 65 6e 73 69 6f 6e a6 70 69 6e 6e 65 72 a6 61 63 74 69 6f 6e 84 a2 69 64 a4 6f 70 65 6e a5 74 69 74 6c 65 a4 4f 70 65 6e a8 73 68 6f 72 74 63 75 74 a6 63 74 72 6c 2b 6f a9 61 72 67 75 6d 65 6e 74 73 91 83 a4 6e 61 6d 65 a7 76 65 72 73 69 6f 6e ab 70 6c 61 63 65 68 6f 6c 64 65 72 a4 31 2e 32 33 a8 6f 70 74 69 6f 6e 61 6c c3
+ToFrontEnd::update_view json {"update_view":{"extension":"shell","view":{"id":"view","title":"A View","content":{"progress":{"job":"job"}}},"contributed":{"file":[{"extension":"pinner","action":{"id":"open","title":"Open","shortcut":"ctrl+o","arguments":[{"name":"version","placeholder":"1.23","optional":true}]}}]}}}
+ToFrontEnd::replace_view postcard 07 05 73 68 65 6c 6c 04 66 6f 72 6d 04 76 69 65 77 06 41 20 56 69 65 77 03 03 6a 6f 62 01 04 66 69 6c 65 01 06 70 69 6e 6e 65 72 04 6f 70 65 6e 04 4f 70 65 6e 01 06 63 74 72 6c 2b 6f 01 07 76 65 72 73 69 6f 6e 01 04 31 2e 32 33 01
+ToFrontEnd::replace_view protobuf 42 63 0a 05 73 68 65 6c 6c 12 04 66 6f 72 6d 1a 17 0a 04 76 69 65 77 12 06 41 20 56 69 65 77 1a 07 22 05 0a 03 6a 6f 62 22 3b 0a 04 66 69 6c 65 12 33 0a 31 0a 06 70 69 6e 6e 65 72 12 27 0a 04 6f 70 65 6e 12 04 4f 70 65 6e 1a 06 63 74 72 6c 2b 6f 22 11 0a 07 76 65 72 73 69 6f 6e 12 04 31 2e 32 33 18 01
+ToFrontEnd::replace_view msgpack 81 ac 72 65 70 6c 61 63 65 5f 76 69 65 77 84 a9 65 78 74 65 6e 73 69 6f 6e a5 73 68 65 6c 6c a4 76 69 65 77 a4 66 6f 72 6d a4 77 69 74 68 83 a2 69 64 a4 76 69 65 77 a5 74 69 74 6c 65 a6 41 20 56 69 65 77 a7 63 6f 6e 74 65 6e 74 81 a8 70 72 6f 67 72 65 73 73 81 a3 6a 6f 62 a3 6a 6f 62 ab 63 6f 6e 74 72 69 62 75 74 65 64 81 a4 66 69 6c 65 91 82 a9 65 78 74 65 6e 73 69 6f 6e a6 70 69 6e 6e 65 72 a6 61 63 74 69 6f 6e 84 a2 69 64 a4 6f 70 65 6e a5 74 69 74 6c 65 a4 4f 70 65 6e a8 73 68 6f 72 74 63 75 74 a6 63 74 72 6c 2b 6f a9 61 72 67 75 6d 65 6e 74 73 91 83 a4 6e 61 6d 65 a7 76 65 72 73 69 6f 6e ab 70 6c 61 63 65 68 6f 6c 64 65 72 a4 31 2e 32 33 a8 6f 70 74 69 6f 6e 61 6c c3
+ToFrontEnd::replace_view json {"replace_view":{"extension":"shell","view":"form","with":{"id":"view","title":"A View","content":{"progress":{"job":"job"}}},"contributed":{"file":[{"extension":"pinner","action":{"id":"open","title":"Open","shortcut":"ctrl+o","arguments":[{"name":"version","placeholder":"1.23","optional":true}]}}]}}}
+ToFrontEnd::filtered_view postcard 08 05 73 68 65 6c 6c 04 76 69 65 77 03 66 69 72 01 03 02 00 02
+ToFrontEnd::filtered_view protobuf 4a 1a 0a 05 73 68 65 6c 6c 12 04 76 69 65 77 1a 03 66 69 72 22 06 08 03 12 02 00 02
+ToFrontEnd::filtered_view msgpack 81 ad 66 69 6c 74 65 72 65 64 5f 76 69 65 77 84 a9 65 78 74 65 6e 73 69 6f 6e a5 73 68 65 6c 6c a4 76 69 65 77 a4 76 69 65 77 a4 74 65 78 74 a3 66 69 72 a7 6d 61 74 63 68 65 73 91 82 a4 69 74 65 6d 03 aa 68 69 67 68 6c 69 67 68 74 73 92 00 02
+ToFrontEnd::filtered_view json {"filtered_view":{"extension":"shell","view":"view","text":"fir","matches":[{"item":3,"highlights":[0,2]}]}}
+ToFrontEnd::pop_view postcard 06 05 73 68 65 6c 6c 04 76 69 65 77
+ToFrontEnd::pop_view protobuf 3a 0d 0a 05 73 68 65 6c 6c 12 04 76 69 65 77
+ToFrontEnd::pop_view msgpack 81 a8 70 6f 70 5f 76 69 65 77 82 a9 65 78 74 65 6e 73 69 6f 6e a5 73 68 65 6c 6c a4 76 69 65 77 a4 76 69 65 77
+ToFrontEnd::pop_view json {"pop_view":{"extension":"shell","view":"view"}}
+ToFrontEnd::job_progress postcard 09 05 73 68 65 6c 6c 03 6a 6f 62 0a 49 6e 73 74 61 6c 6c 69 6e 67 02 01 00 00 40 3f 01 0c 6f 75 74 20 6f 66 20 73 70 61 63 65
+ToFrontEnd::job_progress protobuf 52 31 0a 05 73 68 65 6c 6c 12 28 0a 03 6a 6f 62 12 0a 49 6e 73 74 61 6c 6c 69 6e 67 1a 02 1a 00 25 00 00 40 3f 2a 0c 6f 75 74 20 6f 66 20 73 70 61 63 65
+ToFrontEnd::job_progress msgpack 81 ac 6a 6f 62 5f 70 72 6f 67 72 65 73 73 82 a9 65 78 74 65 6e 73 69 6f 6e a5 73 68 65 6c 6c a3 6a 6f 62 85 a2 69 64 a3 6a 6f 62 a5 74 69 74 6c 65 aa 49 6e 73 74 61 6c 6c 69 6e 67 a5 73 74 61 74 65 a6 66 61 69 6c 65 64 a8 70 72 6f 67 72 65 73 73 ca 3f 40 00 00 a7 6d 65 73 73 61 67 65 ac 6f 75 74 20 6f 66 20 73 70 61 63 65
+ToFrontEnd::job_progress json {"job_progress":{"extension":"shell","job":{"id":"job","title":"Installing","state":"failed","progress":0.75,"message":"out of space"}}}
+ToFrontEnd::open postcard 0a 03 66 69 72 01 04 76 69 65 77
+ToFrontEnd::open protobuf 5a 0b 0a 03 66 69 72 12 04 76 69 65 77
+ToFrontEnd::open msgpack 81 a4 6f 70 65 6e 82 a5 71 75 65 72 79 a3 66 69 72 a4 76 69 65 77 a4 76 69 65 77
+ToFrontEnd::open json {"open":{"query":"fir","view":"view"}}
+ToFrontEnd::toggle postcard 0b
+ToFrontEnd::toggle protobuf 62 00
+ToFrontEnd::toggle msgpack a6 74 6f 67 67 6c 65
+ToFrontEnd::toggle json "toggle"
+ToFrontEnd::offer_undo postcard 0c 07 14 46 6f 72 67 6f 74 20 e2 80 9c 46 69 72 65 66 6f 78 e2 80 9d
+ToFrontEnd::offer_undo protobuf 6a 18 08 07 12 14 46 6f 72 67 6f 74 20 e2 80 9c 46 69 72 65 66 6f 78 e2 80 9d
+ToFrontEnd::offer_undo msgpack 81 aa 6f 66 66 65 72 5f 75 6e 64 6f 82 a6 63 68 61 6e 67 65 07 a5 74 69 74 6c 65 b4 46 6f 72 67 6f 74 20 e2 80 9c 46 69 72 65 66 6f 78 e2 80 9d
+ToFrontEnd::offer_undo json {"offer_undo":{"change":7,"title":"Forgot “Firefox”"}}
+ToFrontEnd::withdraw_undo postcard 0d 07
+ToFrontEnd::withdraw_undo protobuf 72 02 08 07
+ToFrontEnd::withdraw_undo msgpack 81 ad 77 69 74 68 64 72 61 77 5f 75 6e 64 6f 81 a6 63 68 61 6e 67 65 07
+ToFrontEnd::withdraw_undo json {"withdraw_undo":{"change":7}}
+ToFrontEnd::set_query postcard 0e 06 65 6d 6f 6a 69 20
+ToFrontEnd::set_query protobuf 7a 08 0a 06 65 6d 6f 6a 69 20
+ToFrontEnd::set_query msgpack 81 a9 73 65 74 5f 71 75 65 72 79 81 a4 74 65 78 74 a6 65 6d 6f 6a 69 20
+ToFrontEnd::set_query json {"set_query":{"text":"emoji "}}
+Outcome::close postcard 00
+Outcome::close protobuf 0a 00
+Outcome::close msgpack a5 63 6c 6f 73 65
+Outcome::close json "close"
+Outcome::keep_open postcard 01
+Outcome::keep_open protobuf 12 00
+Outcome::keep_open msgpack a9 6b 65 65 70 5f 6f 70 65 6e
+Outcome::keep_open json "keep_open"
+Outcome::type postcard 02 05 74 79 70 65 64
+Outcome::type protobuf 1a 07 0a 05 74 79 70 65 64
+Outcome::type msgpack 81 a4 74 79 70 65 81 a4 74 65 78 74 a5 74 79 70 65 64
+Outcome::type json {"type":{"text":"typed"}}
+Outcome::paste postcard 03 00 06 70 61 73 74 65 64
+Outcome::paste protobuf 22 08 0a 06 70 61 73 74 65 64
+Outcome::paste msgpack 81 a5 70 61 73 74 65 81 a4 74 65 78 74 a6 70 61 73 74 65 64
+Outcome::paste json {"paste":{"text":"pasted"}}
+Outcome::copy postcard 04 00 06 63 6f 70 69 65 64
+Outcome::copy protobuf 2a 08 0a 06 63 6f 70 69 65 64
+Outcome::copy msgpack 81 a4 63 6f 70 79 81 a4 74 65 78 74 a6 63 6f 70 69 65 64
+Outcome::copy json {"copy":{"text":"copied"}}
+Outcome::failed postcard 05 02 6e 6f
+Outcome::failed protobuf 32 04 0a 02 6e 6f
+Outcome::failed msgpack 81 a6 66 61 69 6c 65 64 81 a7 6d 65 73 73 61 67 65 a2 6e 6f
+Outcome::failed json {"failed":{"message":"no"}}
+Outcome::run_catalog_action postcard 06 06 6b 75 62 61 6f 73 0c 6b 75 62 61 6f 73 2e 73 75 69 74 65 0b 6e 65 77 2d 70 72 6f 6a 65 63 74 01 04 6e 61 6d 65 04 64 65 6d 6f
+Outcome::run_catalog_action protobuf 3a 31 0a 06 6b 75 62 61 6f 73 12 0c 6b 75 62 61 6f 73 2e 73 75 69 74 65 1a 0b 6e 65 77 2d 70 72 6f 6a 65 63 74 22 0c 0a 04 6e 61 6d 65 12 04 64 65 6d 6f
+Outcome::run_catalog_action msgpack 81 b2 72 75 6e 5f 63 61 74 61 6c 6f 67 5f 61 63 74 69 6f 6e 84 a9 65 78 74 65 6e 73 69 6f 6e a6 6b 75 62 61 6f 73 a4 6b 69 6e 64 ac 6b 75 62 61 6f 73 2e 73 75 69 74 65 a6 61 63 74 69 6f 6e ab 6e 65 77 2d 70 72 6f 6a 65 63 74 a9 61 72 67 75 6d 65 6e 74 73 81 a4 6e 61 6d 65 a4 64 65 6d 6f
+Outcome::run_catalog_action json {"run_catalog_action":{"extension":"kubaos","kind":"kubaos.suite","action":"new-project","arguments":{"name":"demo"}}}
+Clipboard::text postcard 00 04 74 65 78 74
+Clipboard::text protobuf 0a 04 74 65 78 74
+Clipboard::text msgpack 81 a4 74 65 78 74 a4 74 65 78 74
+Clipboard::text json {"text":"text"}
+Clipboard::image postcard 01 09 69 6d 61 67 65 2f 70 6e 67 02 89 50
+Clipboard::image protobuf 12 0f 0a 09 69 6d 61 67 65 2f 70 6e 67 12 02 89 50
+Clipboard::image msgpack 81 a5 69 6d 61 67 65 82 a4 6d 69 6d 65 a9 69 6d 61 67 65 2f 70 6e 67 a4 64 61 74 61 a4 69 56 41 3d
+Clipboard::image json {"image":{"mime":"image/png","data":"iVA="}}
+ViewContent::list postcard 00 01 02 69 64 04 66 69 6c 65 00 01 07 2f 61 2f 66 69 6c 65 00 00 01 13 61 70 70 3a 66 69 72 65 66 6f 78 2e 64 65 73 6b 74 6f 70 05 54 69 74 6c 65 01 08 53 75 62 74 69 74 6c 65 01 04 69 63 6f 6e 01 02 67 6f 01 07 62 72 6f 77 73 65 72 01 04 6f 70 65 6e 04 4f 70 65 6e 01 06 63 74 72 6c 2b 6f 01 07 76 65 72 73 69 6f 6e 01 04 31 2e 32 33 01 01 01
+ViewContent::list protobuf 0a 7b 0a 77 0a 02 69 64 12 04 66 69 6c 65 22 07 2f 61 2f 66 69 6c 65 3a 13 61 70 70 3a 66 69 72 65 66 6f 78 2e 64 65 73 6b 74 6f 70 42 05 54 69 74 6c 65 4a 08 53 75 62 74 69 74 6c 65 52 04 69 63 6f 6e 5a 02 67 6f 62 07 62 72 6f 77 73 65 72 6a 27 0a 04 6f 70 65 6e 12 04 4f 70 65 6e 1a 06 63 74 72 6c 2b 6f 22 11 0a 07 76 65 72 73 69 6f 6e 12 04 31 2e 32 33 18 01 70 01 10 01
+ViewContent::list msgpack 81 a4 6c 69 73 74 82 a5 69 74 65 6d 73 91 8e a2 69 64 a2 69 64 a4 6b 69 6e 64 a4 66 69 6c 65 aa 64 65 73 6b 74 6f 70 5f 69 64 c0 a4 70 61 74 68 a7 2f 61 2f 66 69 6c 65 a7 61 64 64 72 65 73 73 c0 a3 75 72 6c c0 a8 69 64 65 6e 74 69 74 79 b3 61 70 70 3a 66 69 72 65 66 6f 78 2e 64 65 73 6b 74 6f 70 a5 74 69 74 6c 65 a5 54 69 74 6c 65 a8 73 75 62 74 69 74 6c 65 a8 53 75 62 74 69 74 6c 65 a4 69 63 6f 6e a4 69 63 6f 6e a7 6b 65 79 77 6f 72 64 a2 67 6f a8 6b 65 79 77 6f 72 64 73 91 a7 62 72 6f 77 73 65 72 a7 61 63 74 69 6f 6e 73 91 84 a2 69 64 a4 6f 70 65 6e a5 74 69 74 6c 65 a4 4f 70 65 6e a8 73 68 6f 72 74 63 75 74 a6 63 74 72 6c 2b 6f a9 61 72 67 75 6d 65 6e 74 73 91 83 a4 6e 61 6d 65 a7 76 65 72 73 69 6f 6e ab 70 6c 61 63 65 68 6f 6c 64 65 72 a4 31 2e 32 33 a8 6f 70 74 69 6f 6e 61 6c c3 a6 68 69 64 64 65 6e c3 ae 66 69 6c 74 65 72 73 5f 69 74 73 65 6c 66 c3
+ViewContent::list json {"list":{"items":[{"id":"id","kind":"file","desktop_id":null,"path":"/a/file","address":null,"url":null,"identity":"app:firefox.desktop","title":"Title","subtitle":"Subtitle","icon":"icon","keyword":"go","keywords":["browser"],"actions":[{"id":"open","title":"Open","shortcut":"ctrl+o","arguments":[{"name":"version","placeholder":"1.23","optional":true}]}],"hidden":true}],"filters_itself":true}}
+ViewContent::form postcard 01 01 04 6e 61 6d 65 04 4e 61 6d 65 01 01 02 47 6f
+ViewContent::form protobuf 12 18 0a 12 0a 04 6e 61 6d 65 12 04 4e 61 6d 65 1a 04 12 02 08 01 12 02 47 6f
+ViewContent::form msgpack 81 a4 66 6f 72 6d 82 a6 66 69 65 6c 64 73 91 83 a2 69 64 a4 6e 61 6d 65 a5 6c 61 62 65 6c a4 4e 61 6d 65 a5 69 6e 70 75 74 81 a8 63 68 65 63 6b 62 6f 78 81 a7 64 65 66 61 75 6c 74 c3 a6 73 75 62 6d 69 74 a2 47 6f
+ViewContent::form json {"form":{"fields":[{"id":"name","label":"Name","input":{"checkbox":{"default":true}}}],"submit":"Go"}}
+ViewContent::detail postcard 02 04 23 20 48 69 01 04 53 69 7a 65 04 33 20 4d 42
+ViewContent::detail protobuf 1a 14 0a 04 23 20 48 69 12 0c 0a 04 53 69 7a 65 12 04 33 20 4d 42
+ViewContent::detail msgpack 81 a6 64 65 74 61 69 6c 82 a8 6d 61 72 6b 64 6f 77 6e a4 23 20 48 69 a8 6d 65 74 61 64 61 74 61 91 82 a5 6c 61 62 65 6c a4 53 69 7a 65 a5 76 61 6c 75 65 a4 33 20 4d 42
+ViewContent::detail json {"detail":{"markdown":"# Hi","metadata":[{"label":"Size","value":"3 MB"}]}}
+ViewContent::progress postcard 03 03 6a 6f 62
+ViewContent::progress protobuf 22 05 0a 03 6a 6f 62
+ViewContent::progress msgpack 81 a8 70 72 6f 67 72 65 73 73 81 a3 6a 6f 62 a3 6a 6f 62
+ViewContent::progress json {"progress":{"job":"job"}}
+FormInput::text postcard 00 01 04 6e 61 6d 65 01 04 6b 75 62 61 01
+FormInput::text protobuf 0a 0e 0a 04 6e 61 6d 65 12 04 6b 75 62 61 18 01
+FormInput::text msgpack 81 a4 74 65 78 74 83 ab 70 6c 61 63 65 68 6f 6c 64 65 72 a4 6e 61 6d 65 a7 64 65 66 61 75 6c 74 a4 6b 75 62 61 a6 73 65 63 72 65 74 c3
+FormInput::text json {"text":{"placeholder":"name","default":"kuba","secret":true}}
+FormInput::checkbox postcard 01 01
+FormInput::checkbox protobuf 12 02 08 01
+FormInput::checkbox msgpack 81 a8 63 68 65 63 6b 62 6f 78 81 a7 64 65 66 61 75 6c 74 c3
+FormInput::checkbox json {"checkbox":{"default":true}}
+FormInput::select postcard 02 01 01 61 01 41 01 01 61
+FormInput::select protobuf 1a 0b 0a 06 0a 01 61 12 01 41 12 01 61
+FormInput::select msgpack 81 a6 73 65 6c 65 63 74 82 a7 6f 70 74 69 6f 6e 73 91 82 a5 76 61 6c 75 65 a1 61 a5 6c 61 62 65 6c a1 41 a7 64 65 66 61 75 6c 74 a1 61
+FormInput::select json {"select":{"options":[{"value":"a","label":"A"}],"default":"a"}}
+JobState::running postcard 00
+JobState::running protobuf 0a 00
+JobState::running msgpack a7 72 75 6e 6e 69 6e 67
+JobState::running json "running"
+JobState::succeeded postcard 01
+JobState::succeeded protobuf 12 00
+JobState::succeeded msgpack a9 73 75 63 63 65 65 64 65 64
+JobState::succeeded json "succeeded"
+JobState::failed postcard 02
+JobState::failed protobuf 1a 00
+JobState::failed msgpack a6 66 61 69 6c 65 64
+JobState::failed json "failed"
+Value::Bool postcard 00 01
+Value::Bool protobuf 08 01
+Value::Bool msgpack c3
+Value::Bool json true
+Value::Integer postcard 01 4f
+Value::Integer protobuf 10 4f
+Value::Integer msgpack d0 d8
+Value::Integer json -40
+Value::Float postcard 02 00 00 00 00 00 00 e0 3f
+Value::Float protobuf 19 00 00 00 00 00 00 e0 3f
+Value::Float msgpack cb 3f e0 00 00 00 00 00 00
+Value::Float json 0.5
+Value::String postcard 03 02 68 69
+Value::String protobuf 22 02 68 69
+Value::String msgpack a2 68 69
+Value::String json "hi"
+Value::Array postcard 04 02 01 02 03 03 74 77 6f
+Value::Array protobuf 2a 0b 0a 02 10 02 0a 05 22 03 74 77 6f
+Value::Array msgpack 92 01 a3 74 77 6f
+Value::Array json [1,"two"]
+Value::Table postcard 05 02 07 65 6e 61 62 6c 65 64 00 01 05 6c 69 6d 69 74 01 0e
+Value::Table protobuf 32 1c 0a 0d 0a 07 65 6e 61 62 6c 65 64 12 02 08 01 0a 0b 0a 05 6c 69 6d 69 74 12 02 10 0e
+Value::Table msgpack 82 a7 65 6e 61 62 6c 65 64 c3 a5 6c 69 6d 69 74 07
+Value::Table json {"enabled":true,"limit":7}
+Item::App postcard 02 69 64 03 61 70 70 01 0f 66 69 72 65 66 6f 78 2e 64 65 73 6b 74 6f 70 00 00 00 01 13 61 70 70 3a 66 69 72 65 66 6f 78 2e 64 65 73 6b 74 6f 70 05 54 69 74 6c 65 01 08 53 75 62 74 69 74 6c 65 01 04 69 63 6f 6e 01 02 67 6f 01 07 62 72 6f 77 73 65 72 01 04 6f 70 65 6e 04 4f 70 65 6e 01 06 63 74 72 6c 2b 6f 01 07 76 65 72 73 69 6f 6e 01 04 31 2e 32 33 01 01
+Item::App protobuf 0a 02 69 64 12 03 61 70 70 1a 0f 66 69 72 65 66 6f 78 2e 64 65 73 6b 74 6f 70 3a 13 61 70 70 3a 66 69 72 65 66 6f 78 2e 64 65 73 6b 74 6f 70 42 05 54 69 74 6c 65 4a 08 53 75 62 74 69 74 6c 65 52 04 69 63 6f 6e 5a 02 67 6f 62 07 62 72 6f 77 73 65 72 6a 27 0a 04 6f 70 65 6e 12 04 4f 70 65 6e 1a 06 63 74 72 6c 2b 6f 22 11 0a 07 76 65 72 73 69 6f 6e 12 04 31 2e 32 33 18 01 70 01
+Item::App msgpack 8e a2 69 64 a2 69 64 a4 6b 69 6e 64 a3 61 70 70 aa 64 65 73 6b 74 6f 70 5f 69 64 af 66 69 72 65 66 6f 78 2e 64 65 73 6b 74 6f 70 a4 70 61 74 68 c0 a7 61 64 64 72 65 73 73 c0 a3 75 72 6c c0 a8 69 64 65 6e 74 69 74 79 b3 61 70 70 3a 66 69 72 65 66 6f 78 2e 64 65 73 6b 74 6f 70 a5 74 69 74 6c 65 a5 54 69 74 6c 65 a8 73 75 62 74 69 74 6c 65 a8 53 75 62 74 69 74 6c 65 a4 69 63 6f 6e a4 69 63 6f 6e a7 6b 65 79 77 6f 72 64 a2 67 6f a8 6b 65 79 77 6f 72 64 73 91 a7 62 72 6f 77 73 65 72 a7 61 63 74 69 6f 6e 73 91 84 a2 69 64 a4 6f 70 65 6e a5 74 69 74 6c 65 a4 4f 70 65 6e a8 73 68 6f 72 74 63 75 74 a6 63 74 72 6c 2b 6f a9 61 72 67 75 6d 65 6e 74 73 91 83 a4 6e 61 6d 65 a7 76 65 72 73 69 6f 6e ab 70 6c 61 63 65 68 6f 6c 64 65 72 a4 31 2e 32 33 a8 6f 70 74 69 6f 6e 61 6c c3 a6 68 69 64 64 65 6e c3
+Item::App json {"id":"id","kind":"app","desktop_id":"firefox.desktop","path":null,"address":null,"url":null,"identity":"app:firefox.desktop","title":"Title","subtitle":"Subtitle","icon":"icon","keyword":"go","keywords":["browser"],"actions":[{"id":"open","title":"Open","shortcut":"ctrl+o","arguments":[{"name":"version","placeholder":"1.23","optional":true}]}],"hidden":true}
+Item::File postcard 02 69 64 04 66 69 6c 65 00 01 07 2f 61 2f 66 69 6c 65 00 00 01 13 61 70 70 3a 66 69 72 65 66 6f 78 2e 64 65 73 6b 74 6f 70 05 54 69 74 6c 65 01 08 53 75 62 74 69 74 6c 65 01 04 69 63 6f 6e 01 02 67 6f 01 07 62 72 6f 77 73 65 72 01 04 6f 70 65 6e 04 4f 70 65 6e 01 06 63 74 72 6c 2b 6f 01 07 76 65 72 73 69 6f 6e 01 04 31 2e 32 33 01 01
+Item::File protobuf 0a 02 69 64 12 04 66 69 6c 65 22 07 2f 61 2f 66 69 6c 65 3a 13 61 70 70 3a 66 69 72 65 66 6f 78 2e 64 65 73 6b 74 6f 70 42 05 54 69 74 6c 65 4a 08 53 75 62 74 69 74 6c 65 52 04 69 63 6f 6e 5a 02 67 6f 62 07 62 72 6f 77 73 65 72 6a 27 0a 04 6f 70 65 6e 12 04 4f 70 65 6e 1a 06 63 74 72 6c 2b 6f 22 11 0a 07 76 65 72 73 69 6f 6e 12 04 31 2e 32 33 18 01 70 01
+Item::File msgpack 8e a2 69 64 a2 69 64 a4 6b 69 6e 64 a4 66 69 6c 65 aa 64 65 73 6b 74 6f 70 5f 69 64 c0 a4 70 61 74 68 a7 2f 61 2f 66 69 6c 65 a7 61 64 64 72 65 73 73 c0 a3 75 72 6c c0 a8 69 64 65 6e 74 69 74 79 b3 61 70 70 3a 66 69 72 65 66 6f 78 2e 64 65 73 6b 74 6f 70 a5 74 69 74 6c 65 a5 54 69 74 6c 65 a8 73 75 62 74 69 74 6c 65 a8 53 75 62 74 69 74 6c 65 a4 69 63 6f 6e a4 69 63 6f 6e a7 6b 65 79 77 6f 72 64 a2 67 6f a8 6b 65 79 77 6f 72 64 73 91 a7 62 72 6f 77 73 65 72 a7 61 63 74 69 6f 6e 73 91 84 a2 69 64 a4 6f 70 65 6e a5 74 69 74 6c 65 a4 4f 70 65 6e a8 73 68 6f 72 74 63 75 74 a6 63 74 72 6c 2b 6f a9 61 72 67 75 6d 65 6e 74 73 91 83 a4 6e 61 6d 65 a7 76 65 72 73 69 6f 6e ab 70 6c 61 63 65 68 6f 6c 64 65 72 a4 31 2e 32 33 a8 6f 70 74 69 6f 6e 61 6c c3 a6 68 69 64 64 65 6e c3
+Item::File json {"id":"id","kind":"file","desktop_id":null,"path":"/a/file","address":null,"url":null,"identity":"app:firefox.desktop","title":"Title","subtitle":"Subtitle","icon":"icon","keyword":"go","keywords":["browser"],"actions":[{"id":"open","title":"Open","shortcut":"ctrl+o","arguments":[{"name":"version","placeholder":"1.23","optional":true}]}],"hidden":true}
+Item::Folder postcard 02 69 64 06 66 6f 6c 64 65 72 00 01 09 2f 61 2f 66 6f 6c 64 65 72 00 00 01 13 61 70 70 3a 66 69 72 65 66 6f 78 2e 64 65 73 6b 74 6f 70 05 54 69 74 6c 65 01 08 53 75 62 74 69 74 6c 65 01 04 69 63 6f 6e 01 02 67 6f 01 07 62 72 6f 77 73 65 72 01 04 6f 70 65 6e 04 4f 70 65 6e 01 06 63 74 72 6c 2b 6f 01 07 76 65 72 73 69 6f 6e 01 04 31 2e 32 33 01 01
+Item::Folder protobuf 0a 02 69 64 12 06 66 6f 6c 64 65 72 22 09 2f 61 2f 66 6f 6c 64 65 72 3a 13 61 70 70 3a 66 69 72 65 66 6f 78 2e 64 65 73 6b 74 6f 70 42 05 54 69 74 6c 65 4a 08 53 75 62 74 69 74 6c 65 52 04 69 63 6f 6e 5a 02 67 6f 62 07 62 72 6f 77 73 65 72 6a 27 0a 04 6f 70 65 6e 12 04 4f 70 65 6e 1a 06 63 74 72 6c 2b 6f 22 11 0a 07 76 65 72 73 69 6f 6e 12 04 31 2e 32 33 18 01 70 01
+Item::Folder msgpack 8e a2 69 64 a2 69 64 a4 6b 69 6e 64 a6 66 6f 6c 64 65 72 aa 64 65 73 6b 74 6f 70 5f 69 64 c0 a4 70 61 74 68 a9 2f 61 2f 66 6f 6c 64 65 72 a7 61 64 64 72 65 73 73 c0 a3 75 72 6c c0 a8 69 64 65 6e 74 69 74 79 b3 61 70 70 3a 66 69 72 65 66 6f 78 2e 64 65 73 6b 74 6f 70 a5 74 69 74 6c 65 a5 54 69 74 6c 65 a8 73 75 62 74 69 74 6c 65 a8 53 75 62 74 69 74 6c 65 a4 69 63 6f 6e a4 69 63 6f 6e a7 6b 65 79 77 6f 72 64 a2 67 6f a8 6b 65 79 77 6f 72 64 73 91 a7 62 72 6f 77 73 65 72 a7 61 63 74 69 6f 6e 73 91 84 a2 69 64 a4 6f 70 65 6e a5 74 69 74 6c 65 a4 4f 70 65 6e a8 73 68 6f 72 74 63 75 74 a6 63 74 72 6c 2b 6f a9 61 72 67 75 6d 65 6e 74 73 91 83 a4 6e 61 6d 65 a7 76 65 72 73 69 6f 6e ab 70 6c 61 63 65 68 6f 6c 64 65 72 a4 31 2e 32 33 a8 6f 70 74 69 6f 6e 61 6c c3 a6 68 69 64 64 65 6e c3
+Item::Folder json {"id":"id","kind":"folder","desktop_id":null,"path":"/a/folder","address":null,"url":null,"identity":"app:firefox.desktop","title":"Title","subtitle":"Subtitle","icon":"icon","keyword":"go","keywords":["browser"],"actions":[{"id":"open","title":"Open","shortcut":"ctrl+o","arguments":[{"name":"version","placeholder":"1.23","optional":true}]}],"hidden":true}
+Item::Project postcard 02 69 64 07 70 72 6f 6a 65 63 74 00 01 0a 2f 61 2f 70 72 6f 6a 65 63 74 00 00 01 13 61 70 70 3a 66 69 72 65 66 6f 78 2e 64 65 73 6b 74 6f 70 05 54 69 74 6c 65 01 08 53 75 62 74 69 74 6c 65 01 04 69 63 6f 6e 01 02 67 6f 01 07 62 72 6f 77 73 65 72 01 04 6f 70 65 6e 04 4f 70 65 6e 01 06 63 74 72 6c 2b 6f 01 07 76 65 72 73 69 6f 6e 01 04 31 2e 32 33 01 01
+Item::Project protobuf 0a 02 69 64 12 07 70 72 6f 6a 65 63 74 22 0a 2f 61 2f 70 72 6f 6a 65 63 74 3a 13 61 70 70 3a 66 69 72 65 66 6f 78 2e 64 65 73 6b 74 6f 70 42 05 54 69 74 6c 65 4a 08 53 75 62 74 69 74 6c 65 52 04 69 63 6f 6e 5a 02 67 6f 62 07 62 72 6f 77 73 65 72 6a 27 0a 04 6f 70 65 6e 12 04 4f 70 65 6e 1a 06 63 74 72 6c 2b 6f 22 11 0a 07 76 65 72 73 69 6f 6e 12 04 31 2e 32 33 18 01 70 01
+Item::Project msgpack 8e a2 69 64 a2 69 64 a4 6b 69 6e 64 a7 70 72 6f 6a 65 63 74 aa 64 65 73 6b 74 6f 70 5f 69 64 c0 a4 70 61 74 68 aa 2f 61 2f 70 72 6f 6a 65 63 74 a7 61 64 64 72 65 73 73 c0 a3 75 72 6c c0 a8 69 64 65 6e 74 69 74 79 b3 61 70 70 3a 66 69 72 65 66 6f 78 2e 64 65 73 6b 74 6f 70 a5 74 69 74 6c 65 a5 54 69 74 6c 65 a8 73 75 62 74 69 74 6c 65 a8 53 75 62 74 69 74 6c 65 a4 69 63 6f 6e a4 69 63 6f 6e a7 6b 65 79 77 6f 72 64 a2 67 6f a8 6b 65 79 77 6f 72 64 73 91 a7 62 72 6f 77 73 65 72 a7 61 63 74 69 6f 6e 73 91 84 a2 69 64 a4 6f 70 65 6e a5 74 69 74 6c 65 a4 4f 70 65 6e a8 73 68 6f 72 74 63 75 74 a6 63 74 72 6c 2b 6f a9 61 72 67 75 6d 65 6e 74 73 91 83 a4 6e 61 6d 65 a7 76 65 72 73 69 6f 6e ab 70 6c 61 63 65 68 6f 6c 64 65 72 a4 31 2e 32 33 a8 6f 70 74 69 6f 6e 61 6c c3 a6 68 69 64 64 65 6e c3
+Item::Project json {"id":"id","kind":"project","desktop_id":null,"path":"/a/project","address":null,"url":null,"identity":"app:firefox.desktop","title":"Title","subtitle":"Subtitle","icon":"icon","keyword":"go","keywords":["browser"],"actions":[{"id":"open","title":"Open","shortcut":"ctrl+o","arguments":[{"name":"version","placeholder":"1.23","optional":true}]}],"hidden":true}
+Item::Window postcard 02 69 64 06 77 69 6e 64 6f 77 00 00 01 03 30 78 31 00 01 13 61 70 70 3a 66 69 72 65 66 6f 78 2e 64 65 73 6b 74 6f 70 05 54 69 74 6c 65 01 08 53 75 62 74 69 74 6c 65 01 04 69 63 6f 6e 01 02 67 6f 01 07 62 72 6f 77 73 65 72 01 04 6f 70 65 6e 04 4f 70 65 6e 01 06 63 74 72 6c 2b 6f 01 07 76 65 72 73 69 6f 6e 01 04 31 2e 32 33 01 01
+Item::Window protobuf 0a 02 69 64 12 06 77 69 6e 64 6f 77 2a 03 30 78 31 3a 13 61 70 70 3a 66 69 72 65 66 6f 78 2e 64 65 73 6b 74 6f 70 42 05 54 69 74 6c 65 4a 08 53 75 62 74 69 74 6c 65 52 04 69 63 6f 6e 5a 02 67 6f 62 07 62 72 6f 77 73 65 72 6a 27 0a 04 6f 70 65 6e 12 04 4f 70 65 6e 1a 06 63 74 72 6c 2b 6f 22 11 0a 07 76 65 72 73 69 6f 6e 12 04 31 2e 32 33 18 01 70 01
+Item::Window msgpack 8e a2 69 64 a2 69 64 a4 6b 69 6e 64 a6 77 69 6e 64 6f 77 aa 64 65 73 6b 74 6f 70 5f 69 64 c0 a4 70 61 74 68 c0 a7 61 64 64 72 65 73 73 a3 30 78 31 a3 75 72 6c c0 a8 69 64 65 6e 74 69 74 79 b3 61 70 70 3a 66 69 72 65 66 6f 78 2e 64 65 73 6b 74 6f 70 a5 74 69 74 6c 65 a5 54 69 74 6c 65 a8 73 75 62 74 69 74 6c 65 a8 53 75 62 74 69 74 6c 65 a4 69 63 6f 6e a4 69 63 6f 6e a7 6b 65 79 77 6f 72 64 a2 67 6f a8 6b 65 79 77 6f 72 64 73 91 a7 62 72 6f 77 73 65 72 a7 61 63 74 69 6f 6e 73 91 84 a2 69 64 a4 6f 70 65 6e a5 74 69 74 6c 65 a4 4f 70 65 6e a8 73 68 6f 72 74 63 75 74 a6 63 74 72 6c 2b 6f a9 61 72 67 75 6d 65 6e 74 73 91 83 a4 6e 61 6d 65 a7 76 65 72 73 69 6f 6e ab 70 6c 61 63 65 68 6f 6c 64 65 72 a4 31 2e 32 33 a8 6f 70 74 69 6f 6e 61 6c c3 a6 68 69 64 64 65 6e c3
+Item::Window json {"id":"id","kind":"window","desktop_id":null,"path":null,"address":"0x1","url":null,"identity":"app:firefox.desktop","title":"Title","subtitle":"Subtitle","icon":"icon","keyword":"go","keywords":["browser"],"actions":[{"id":"open","title":"Open","shortcut":"ctrl+o","arguments":[{"name":"version","placeholder":"1.23","optional":true}]}],"hidden":true}
+Item::Url postcard 02 69 64 03 75 72 6c 00 00 00 01 13 68 74 74 70 73 3a 2f 2f 65 78 61 6d 70 6c 65 2e 6f 72 67 01 13 61 70 70 3a 66 69 72 65 66 6f 78 2e 64 65 73 6b 74 6f 70 05 54 69 74 6c 65 01 08 53 75 62 74 69 74 6c 65 01 04 69 63 6f 6e 01 02 67 6f 01 07 62 72 6f 77 73 65 72 01 04 6f 70 65 6e 04 4f 70 65 6e 01 06 63 74 72 6c 2b 6f 01 07 76 65 72 73 69 6f 6e 01 04 31 2e 32 33 01 01
+Item::Url protobuf 0a 02 69 64 12 03 75 72 6c 32 13 68 74 74 70 73 3a 2f 2f 65 78 61 6d 70 6c 65 2e 6f 72 67 3a 13 61 70 70 3a 66 69 72 65 66 6f 78 2e 64 65 73 6b 74 6f 70 42 05 54 69 74 6c 65 4a 08 53 75 62 74 69 74 6c 65 52 04 69 63 6f 6e 5a 02 67 6f 62 07 62 72 6f 77 73 65 72 6a 27 0a 04 6f 70 65 6e 12 04 4f 70 65 6e 1a 06 63 74 72 6c 2b 6f 22 11 0a 07 76 65 72 73 69 6f 6e 12 04 31 2e 32 33 18 01 70 01
+Item::Url msgpack 8e a2 69 64 a2 69 64 a4 6b 69 6e 64 a3 75 72 6c aa 64 65 73 6b 74 6f 70 5f 69 64 c0 a4 70 61 74 68 c0 a7 61 64 64 72 65 73 73 c0 a3 75 72 6c b3 68 74 74 70 73 3a 2f 2f 65 78 61 6d 70 6c 65 2e 6f 72 67 a8 69 64 65 6e 74 69 74 79 b3 61 70 70 3a 66 69 72 65 66 6f 78 2e 64 65 73 6b 74 6f 70 a5 74 69 74 6c 65 a5 54 69 74 6c 65 a8 73 75 62 74 69 74 6c 65 a8 53 75 62 74 69 74 6c 65 a4 69 63 6f 6e a4 69 63 6f 6e a7 6b 65 79 77 6f 72 64 a2 67 6f a8 6b 65 79 77 6f 72 64 73 91 a7 62 72 6f 77 73 65 72 a7 61 63 74 69 6f 6e 73 91 84 a2 69 64 a4 6f 70 65 6e a5 74 69 74 6c 65 a4 4f 70 65 6e a8 73 68 6f 72 74 63 75 74 a6 63 74 72 6c 2b 6f a9 61 72 67 75 6d 65 6e 74 73 91 83 a4 6e 61 6d 65 a7 76 65 72 73 69 6f 6e ab 70 6c 61 63 65 68 6f 6c 64 65 72 a4 31 2e 32 33 a8 6f 70 74 69 6f 6e 61 6c c3 a6 68 69 64 64 65 6e c3
+Item::Url json {"id":"id","kind":"url","desktop_id":null,"path":null,"address":null,"url":"https://example.org","identity":"app:firefox.desktop","title":"Title","subtitle":"Subtitle","icon":"icon","keyword":"go","keywords":["browser"],"actions":[{"id":"open","title":"Open","shortcut":"ctrl+o","arguments":[{"name":"version","placeholder":"1.23","optional":true}]}],"hidden":true}
+Item::Namespaced postcard 02 69 64 0c 6b 75 62 61 6f 73 2e 73 75 69 74 65 00 00 00 00 01 13 61 70 70 3a 66 69 72 65 66 6f 78 2e 64 65 73 6b 74 6f 70 05 54 69 74 6c 65 01 08 53 75 62 74 69 74 6c 65 01 04 69 63 6f 6e 01 02 67 6f 01 07 62 72 6f 77 73 65 72 01 04 6f 70 65 6e 04 4f 70 65 6e 01 06 63 74 72 6c 2b 6f 01 07 76 65 72 73 69 6f 6e 01 04 31 2e 32 33 01 01
+Item::Namespaced protobuf 0a 02 69 64 12 0c 6b 75 62 61 6f 73 2e 73 75 69 74 65 3a 13 61 70 70 3a 66 69 72 65 66 6f 78 2e 64 65 73 6b 74 6f 70 42 05 54 69 74 6c 65 4a 08 53 75 62 74 69 74 6c 65 52 04 69 63 6f 6e 5a 02 67 6f 62 07 62 72 6f 77 73 65 72 6a 27 0a 04 6f 70 65 6e 12 04 4f 70 65 6e 1a 06 63 74 72 6c 2b 6f 22 11 0a 07 76 65 72 73 69 6f 6e 12 04 31 2e 32 33 18 01 70 01
+Item::Namespaced msgpack 8e a2 69 64 a2 69 64 a4 6b 69 6e 64 ac 6b 75 62 61 6f 73 2e 73 75 69 74 65 aa 64 65 73 6b 74 6f 70 5f 69 64 c0 a4 70 61 74 68 c0 a7 61 64 64 72 65 73 73 c0 a3 75 72 6c c0 a8 69 64 65 6e 74 69 74 79 b3 61 70 70 3a 66 69 72 65 66 6f 78 2e 64 65 73 6b 74 6f 70 a5 74 69 74 6c 65 a5 54 69 74 6c 65 a8 73 75 62 74 69 74 6c 65 a8 53 75 62 74 69 74 6c 65 a4 69 63 6f 6e a4 69 63 6f 6e a7 6b 65 79 77 6f 72 64 a2 67 6f a8 6b 65 79 77 6f 72 64 73 91 a7 62 72 6f 77 73 65 72 a7 61 63 74 69 6f 6e 73 91 84 a2 69 64 a4 6f 70 65 6e a5 74 69 74 6c 65 a4 4f 70 65 6e a8 73 68 6f 72 74 63 75 74 a6 63 74 72 6c 2b 6f a9 61 72 67 75 6d 65 6e 74 73 91 83 a4 6e 61 6d 65 a7 76 65 72 73 69 6f 6e ab 70 6c 61 63 65 68 6f 6c 64 65 72 a4 31 2e 32 33 a8 6f 70 74 69 6f 6e 61 6c c3 a6 68 69 64 64 65 6e c3
+Item::Namespaced json {"id":"id","kind":"kubaos.suite","desktop_id":null,"path":null,"address":null,"url":null,"identity":"app:firefox.desktop","title":"Title","subtitle":"Subtitle","icon":"icon","keyword":"go","keywords":["browser"],"actions":[{"id":"open","title":"Open","shortcut":"ctrl+o","arguments":[{"name":"version","placeholder":"1.23","optional":true}]}],"hidden":true}

@@ -341,7 +341,10 @@ struct KindFieldsRef<'a> {
     url: Option<&'a str>,
 }
 
+// The renames give the published protobuf schema the type's public name; no
+// format writes struct names into the bytes.
 #[derive(Serialize)]
+#[serde(rename = "Item")]
 struct ItemWire<'a> {
     id: &'a str,
     kind: &'a str,
@@ -457,6 +460,7 @@ impl ItemOwned {
 }
 
 #[derive(Serialize)]
+#[serde(rename = "ItemRef")]
 struct ItemRefWire<'a> {
     id: &'a str,
     kind: &'a str,

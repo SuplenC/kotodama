@@ -2,8 +2,8 @@
 //! submitted form.
 //!
 //! JSON and MessagePack are self-describing, so a value there is plain data: a
-//! table is a map, a list an array. Postcard isn't, so there each value carries
-//! a tag naming its type. The two cases are told apart by serde's
+//! table is a map, a list an array. Postcard and protobuf aren't, so there each
+//! value carries a tag naming its type. The two cases are told apart by serde's
 //! `is_human_readable`, which this crate turns on for MessagePack (see
 //! [`WireFormat`](crate::WireFormat)).
 
@@ -29,8 +29,9 @@ pub enum Value {
 
 pub type Table = BTreeMap<String, Value>;
 
-/// Postcard's form: the tag picks the variant.
+/// Postcard's and protobuf's form: the tag picks the variant.
 #[derive(Serialize)]
+#[serde(rename = "Value")]
 enum TaggedRef<'a> {
     Bool(bool),
     Integer(i64),
@@ -41,6 +42,7 @@ enum TaggedRef<'a> {
 }
 
 #[derive(Deserialize)]
+#[serde(rename = "Value")]
 enum Tagged {
     Bool(bool),
     Integer(i64),
@@ -147,7 +149,7 @@ impl<'de> Visitor<'de> for PlainVisitor {
 }
 
 /// Binary data, such as an image to paste. JSON and MessagePack carry it as a
-/// base64 string; postcard as raw bytes. Decoding MessagePack also accepts its
+/// base64 string; postcard and protobuf as raw bytes. Decoding MessagePack also accepts its
 /// native binary type, which other languages' libraries produce for byte strings.
 #[derive(Clone, PartialEq, Eq, Default)]
 pub struct Bytes(pub Vec<u8>);

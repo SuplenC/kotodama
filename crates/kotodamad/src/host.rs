@@ -139,7 +139,7 @@ fn speak(
     stdin: ChildStdin,
     events: &Sender<Event>,
 ) -> Result<(), Error> {
-    let channel = Channel::handshake(stdout, stdin, &Hello::new(&WireFormat::ALL))?;
+    let channel = Channel::accept(stdout, stdin, &Hello::new(&WireFormat::ALL))?;
     pump(
         &format!("ext-{name}"),
         channel,

@@ -679,3 +679,129 @@ fn under_socket_activation_the_daemon_serves_the_socket_it_is_handed_and_the_nex
     ui.wait_for_titles("kotodama", &["Kotodama"]);
     assert!(socket.exists(), "the Daemon left systemd's socket in place");
 }
+
+// Peers on other protocol versions. Protocol 1.0 is the first released
+// version, and every Daemon after it keeps talking to a peer built for it.
+// The 1.0 peers here are recorded: the recording Extension's hello names 1.0
+// and speaks JSON, and the Front end below sends the very bytes 1.0 pinned.
+
+/// Starts the Daemon with its log in `kotodamad.log` in its home.
+fn start_logged(root: TempDir) -> Daemon {
+    let log = fs::File::create(root.path().join("kotodamad.log")).unwrap();
+    let child = with_home(
+        &mut Command::new(env!("CARGO_BIN_EXE_kotodamad")),
+        root.path(),
+    )
+    .stderr(log)
+    .spawn()
+    .unwrap();
+    Daemon { child, root }
+}
+
+fn log(daemon: &Daemon) -> String {
+    fs::read_to_string(daemon.root.path().join("kotodamad.log")).unwrap_or_default()
+}
+
+fn connect_raw(daemon: &Daemon) -> UnixStream {
+    let socket = daemon.root.path().join("runtime/kotodama.sock");
+    let stream = wait_for("the socket", || UnixStream::connect(&socket).ok());
+    stream.set_read_timeout(Some(TIMEOUT)).unwrap();
+    stream
+}
+
+#[test]
+fn a_front_end_and_an_extension_built_for_protocol_1_0_work_with_this_daemon() {
+    use std::io::BufReader;
+
+    let root = Daemon::home();
+    install(&root, "bookmarks", "", &[item("fir", "Fir")]);
+    let daemon = Daemon::start(root);
+    let mut stream = connect_raw(&daemon);
+    let mut reader = BufReader::new(stream.try_clone().unwrap());
+    let mut buf = Vec::new();
+
+    frame::write(
+        &mut stream,
+        br#"{"version":1,"minor":0,"formats":["protobuf","json"]}"#,
+    )
+    .unwrap();
+    assert!(frame::read(&mut reader, &mut buf).unwrap());
+    let hello: Hello = WireFormat::Json.decode(&buf).unwrap();
+    assert!(hello.protocol() >= Version::new(1, 0), "{hello:?}");
+
+    // `FromFrontEnd::Query { text: "fir" }` as protocol 1.0 encodes it in
+    // protobuf, copied from tests/layouts/1.0.txt in kotodama-protocol.
+    let query = [0x0a, 0x05, 0x0a, 0x03, b'f', b'i', b'r'];
+    wait_for("Fir in the Results", || {
+        frame::write(&mut stream, &query).unwrap();
+        loop {
+            assert!(
+                frame::read(&mut reader, &mut buf).unwrap(),
+                "the Daemon hung up"
+            );
+            if let ToFrontEnd::Results { results, .. } = WireFormat::Protobuf.decode(&buf).unwrap()
+            {
+                let titles: Vec<String> = results.into_iter().map(|row| row.item.title).collect();
+                return (titles == ["Fir"]).then_some(());
+            }
+        }
+    });
+}
+
+#[test]
+fn a_front_end_built_for_a_newer_major_version_is_turned_away_with_the_reason() {
+    use std::io::Read;
+
+    let daemon = start_logged(Daemon::home());
+    let newer = PROTOCOL_VERSION.major + 1;
+    let mut stream = connect_raw(&daemon);
+    frame::write(
+        &mut stream,
+        format!(r#"{{"version":{newer},"minor":0,"formats":["json"]}}"#).as_bytes(),
+    )
+    .unwrap();
+
+    // The Daemon's hello, from which the Front end can tell the same, then
+    // the end of the stream.
+    let mut received = Vec::new();
+    stream.read_to_end(&mut received).unwrap();
+    assert!(String::from_utf8_lossy(&received).contains("\"version\""));
+    let reason = format!(
+        "the peer needs protocol {newer}.0, newer than this Daemon's {PROTOCOL_VERSION}: update Kotodama"
+    );
+    wait_for("the reason in the log", || {
+        log(&daemon).contains(&reason).then_some(())
+    });
+
+    // The Daemon still serves everyone else.
+    let mut ui = daemon.connect();
+    assert_eq!(ui.titles("anything"), Vec::<String>::new());
+}
+
+#[test]
+fn an_extension_built_for_a_newer_major_version_is_turned_away_with_the_reason() {
+    let root = Daemon::home();
+    install(&root, "future", "", &[item("fir", "Fir")]);
+    let script = extension_dir(&root, "future").join("extension.sh");
+    let newer = PROTOCOL_VERSION.major + 1;
+    let recorded = fs::read_to_string(&script).unwrap();
+    let rewritten = recorded.replace(
+        r#""version":1,"minor":0"#,
+        &format!(r#""version":{newer},"minor":0"#),
+    );
+    assert_ne!(
+        recorded, rewritten,
+        "the recording Extension names its version"
+    );
+    fs::write(&script, rewritten).unwrap();
+
+    let daemon = start_logged(root);
+    let reason = format!(
+        "future: the peer needs protocol {newer}.0, newer than this Daemon's {PROTOCOL_VERSION}: update Kotodama"
+    );
+    wait_for("the reason in the log", || {
+        log(&daemon).contains(&reason).then_some(())
+    });
+    let mut ui = daemon.connect();
+    assert_eq!(ui.titles("fir"), Vec::<String>::new());
+}
