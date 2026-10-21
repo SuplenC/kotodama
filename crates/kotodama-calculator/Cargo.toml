@@ -1,6 +1,6 @@
 [package]
 name = "kotodama-calculator"
-version.workspace = true
+version = "0.1.0"
 description = "The calculator Bundled extension: arithmetic, units, currency, dates and time zones as Live query answers"
 edition.workspace = true
 license.workspace = true

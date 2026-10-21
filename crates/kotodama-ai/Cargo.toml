@@ -1,6 +1,6 @@
 [package]
 name = "kotodama-ai"
-version.workspace = true
+version = "0.1.0"
 description = "The AI Bundled extension: proposes Actions from the Action catalog for what the user asks, each confirmed before it runs"
 edition.workspace = true
 license.workspace = true

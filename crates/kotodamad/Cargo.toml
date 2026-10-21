@@ -1,6 +1,6 @@
 [package]
 name = "kotodamad"
-version.workspace = true
+version = "0.1.0"
 description = "The Kotodama Daemon: the index, the ranking and the Extension host"
 edition.workspace = true
 license.workspace = true

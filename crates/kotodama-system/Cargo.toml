@@ -1,6 +1,6 @@
 [package]
 name = "kotodama-system"
-version.workspace = true
+version = "0.1.0"
 description = "The system Bundled extension: power and session through logind, and the open windows of any wlr-foreign-toplevel compositor"
 edition.workspace = true
 license.workspace = true

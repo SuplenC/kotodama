@@ -1,6 +1,6 @@
 [package]
 name = "kotodama-folders"
-version.workspace = true
+version = "0.1.0"
 description = "The Folder source Bundled extension: projects and scripts from the folders the user names, as Indexed items"
 edition.workspace = true
 license.workspace = true

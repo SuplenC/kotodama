@@ -1,6 +1,6 @@
 [package]
 name = "kotodama-emoji"
-version.workspace = true
+version = "0.1.0"
 description = "The emoji Bundled extension: emoji, with skin tones, and symbols as Indexed items that type or copy themselves"
 edition.workspace = true
 # The code is the workspace's; data/emoji.tsv is drawn from Unicode's emoji
