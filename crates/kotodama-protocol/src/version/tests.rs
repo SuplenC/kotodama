@@ -74,6 +74,16 @@ fn versions_order_by_major_then_minor() {
 }
 
 #[test]
+fn the_crates_major_and_minor_version_are_the_protocols() {
+    let crate_version = Version::new(
+        env!("CARGO_PKG_VERSION_MAJOR").parse().unwrap(),
+        env!("CARGO_PKG_VERSION_MINOR").parse().unwrap(),
+    );
+
+    assert_eq!(crate_version, PROTOCOL_VERSION);
+}
+
+#[test]
 fn only_a_peer_on_an_older_minor_version_of_this_major_is_sent_less() {
     let Version { major, minor } = PROTOCOL_VERSION;
     assert!(!older_minor(PROTOCOL_VERSION));

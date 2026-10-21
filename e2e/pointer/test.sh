@@ -66,6 +66,22 @@ row() {
     titles=${titles,,}
     cut -d' ' -f"$1" <<<"$titles"
 }
+# rows_are <mark> <ids>: waits until the rows the menu last logged, past line
+# <mark> of its log, are the Items <ids>, in any order, sorted and
+# space-separated.
+rows_are() {
+    local shown=""
+    for _ in $(seq 50); do
+        shown=$(tail -n "+$(($1 + 1))" "$E2E_OUT/quickshell.log" | grep -F "rows: " | tail -n1)
+        shown=${shown#*rows: }
+        if [ "$(tr ' ' '\n' <<<"${shown,,}" | sort | xargs)" = "$2" ]; then
+            return 0
+        fi
+        sleep 0.2
+    done
+    echo "the rows are $shown, never $2" >&2
+    return 1
+}
 # ran <id>: waits until the Extension is asked to run an Item, and fails if
 # the Item is another.
 ran() {
@@ -82,6 +98,30 @@ ran() {
         return 1
     fi
 }
+# enter_runs <id>: presses Enter, checks it ran the Item <id>, and waits until
+# the menu has closed on the Action's outcome. The Extension is asked to run
+# the Item before the menu closes; a menu asked to open in between takes the
+# query and is then closed.
+enter_runs() {
+    local mark
+    mark=$(log_lines quickshell.log)
+    : >"$ext/received"
+    wtype -k Return
+    ran "$1"
+    wait_for_log quickshell.log "focused: false" "$mark"
+}
+# pointer_moves <y>: moves the pointer <y> pixels down and waits until the
+# menu has had the move. By 0, the menu gets a pointer-enter at the resting
+# pointer, as it would on mapping under it: Sway sends a layer surface that
+# maps under the pointer none, so a move by nothing makes it send one.
+pointer_moves() {
+    local mark
+    mark=$(log_lines quickshell.log)
+    swaymsg seat - cursor move 0 "$1" >/dev/null
+    wait_for_log quickshell.log "pointer: " "$mark"
+}
+
+fi_rows="fig files firefox fish"
 
 # The Extension may still be sending its Items; Fern is the last one.
 open --query fern
@@ -92,45 +132,35 @@ close
 # top margin, 44 pixels each.
 swaymsg seat - cursor set 320 206 >/dev/null
 
-# pointer_enters: the menu gets a pointer-enter at the resting pointer, as it
-# would on mapping under it. Sway sends a layer surface that maps under the
-# pointer none, so a move by nothing makes it send one.
-pointer_enters() {
-    swaymsg seat - cursor move 0 0 >/dev/null
-    sleep 0.5
-}
-
 # The pointer enters the menu over the third row once it shows Results.
 # wtype's first key is lost if it arrives before the compositor has taken
 # wtype's keymap, so it waits a moment first.
 open
+mark=$(log_lines quickshell.log)
 wtype -s 200 "fi"
-sleep 1
-pointer_enters
-top=$(row 1)
-wtype -k Return
-ran "$top"
+rows_are "$mark" "$fi_rows"
+pointer_moves 0
+enter_runs "$(row 1)"
 
 # Rows appear under the resting pointer: Fig alone, then Backspace brings
 # back the rest.
-: >"$ext/received"
+mark=$(log_lines quickshell.log)
 open --query fig
-sleep 1
-pointer_enters
+rows_are "$mark" fig
+pointer_moves 0
+mark=$(log_lines quickshell.log)
 wtype -s 200 -k BackSpace
-sleep 1
-top=$(row 1)
-wtype -k Return
-ran "$top"
+rows_are "$mark" "$fi_rows"
+enter_runs "$(row 1)"
 
 # Once the pointer is in the menu, moving it one row down selects the row it
-# lands on.
-: >"$ext/received"
-open --query "fi"
-sleep 1
-pointer_enters
+# lands on. Opened on the query it closed on, the menu would log no rows to
+# wait for, so the query is typed again.
+open
+mark=$(log_lines quickshell.log)
+wtype -s 200 "fi"
+rows_are "$mark" "$fi_rows"
+pointer_moves 0
 fourth=$(row 4)
-swaymsg seat - cursor move 0 44 >/dev/null
-sleep 0.5
-wtype -k Return
-ran "$fourth"
+pointer_moves 44
+enter_runs "$fourth"

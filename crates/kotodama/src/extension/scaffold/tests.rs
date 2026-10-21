@@ -23,6 +23,17 @@ fn every_scaffold_is_filled_in_with_the_name_and_runs_its_program() {
 }
 
 #[test]
+fn the_rust_scaffold_asks_for_the_crates_of_this_protocol_version() {
+    let files = files("notes", Language::Rust);
+    let cargo_toml = files.iter().find(|file| file.path == "Cargo.toml").unwrap();
+
+    for name in ["kotodama-extension", "kotodama-protocol"] {
+        let wanted = format!(r#"{name} = "{PROTOCOL_VERSION}""#);
+        assert!(cargo_toml.contents.contains(&wanted), "{}", cargo_toml.contents);
+    }
+}
+
+#[test]
 fn a_scripts_program_is_executable() {
     for language in [Language::Shell, Language::Python] {
         let files = files("notes", language);

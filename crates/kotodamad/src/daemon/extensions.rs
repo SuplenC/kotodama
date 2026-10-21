@@ -23,6 +23,7 @@ use kotodama_protocol::JobState;
 use kotodama_protocol::ToExtension;
 use kotodama_protocol::ToFrontEnd;
 use kotodama_protocol::ViewContent;
+use kotodama_protocol::is_reserved_shortcut;
 
 use super::Daemon;
 use super::Desktop;
@@ -37,11 +38,9 @@ use super::Live;
 use super::STABLE;
 use super::State;
 use super::Update;
-use super::is_fallback;
 use crate::config::extension_settings;
 use crate::discovery::Found;
 use crate::history::Store;
-use crate::reserved;
 
 impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
     pub(super) fn start(&mut self, id: ExtensionId, now: Instant) {
@@ -79,16 +78,23 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
         ext.send(ToExtension::Config(table.clone()));
         ext.config = Some(table);
 
-        // Whatever is typed already reaches it, as if just typed.
-        if let Some(debounce) = ext.debounce() {
-            let searched = self.index.searched();
-            for session in self.sessions.values_mut() {
-                if let Some((query, prefix)) = session.live_query(id, ext, searched) {
-                    session.live[id.0] = Live::asking(query, prefix, now + debounce);
-                }
+        self.ask_typed(id, now);
+        self.extensions_changed();
+    }
+
+    /// Sends the Extension `id` whatever is typed already, as if just typed,
+    /// if it takes Live queries.
+    pub(super) fn ask_typed(&mut self, id: ExtensionId, now: Instant) {
+        let ext = &self.extensions[id.0];
+        let Some(debounce) = ext.asked() else {
+            return;
+        };
+        let searched = self.index.searched();
+        for session in self.sessions.values_mut() {
+            if let Some((query, prefix)) = session.live_query(id, ext, searched) {
+                session.live[id.0] = Live::asking(query, prefix, now + debounce);
             }
         }
-        self.extensions_changed();
     }
 
     pub(super) fn extension_down(&mut self, id: ExtensionId, ended: Ended, now: Instant) {
@@ -312,13 +318,8 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             }
             for contributed in &ext.found.manifest.contributed_actions {
                 let mut action = contributed.action.clone();
-                if reserved::release_actions([&mut action]) > 0 {
-                    log::warn!(
-                        "{}: dropped the key binding of `{}`, which the menu keeps for itself",
-                        ext.name(),
-                        action.id
-                    );
-                }
+                // A Manifest problem, reported when it was read.
+                action.shortcut.take_if(|shortcut| is_reserved_shortcut(shortcut));
                 self.contributed
                     .entry(contributed.kind.as_str().to_owned())
                     .or_default()
@@ -369,8 +370,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
                     continue;
                 }
                 log::info!("extension {} changed; restarting it", found.manifest.name);
-                ext.fallback = is_fallback(&found);
-                ext.found = found;
+                ext.set_found(found);
                 ext.failures = 0;
                 if !removed {
                     self.retire(ExtensionId(id));

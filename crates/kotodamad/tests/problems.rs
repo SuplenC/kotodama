@@ -14,6 +14,7 @@ use kotodamad::config;
 use kotodamad::daemon::Ended;
 use kotodamad::daemon::Event;
 use kotodamad::daemon::ExtensionId;
+use kotodamad::discovery;
 use kotodamad::discovery::Discovered;
 
 /// What each problem in the last Status `messages` hold is about, or `None`
@@ -119,6 +120,26 @@ fn a_manifest_discovery_refused_is_a_problem() {
         last_problems(&ui.drain()),
         Some(vec!["/ext/broken/manifest.toml".to_owned()])
     );
+}
+
+#[test]
+fn a_contributed_action_bound_to_a_key_the_menu_keeps_is_a_problem_of_its_manifest() {
+    let dir = tempfile::tempdir().unwrap();
+    let forgetter = dir.path().join("forgetter");
+    std::fs::create_dir(&forgetter).unwrap();
+    std::fs::write(
+        forgetter.join("manifest.toml"),
+        "name = \"forgetter\"\ncommand = [\"x\"]\n\
+         [[contributed_actions]]\nkind = \"project\"\nid = \"drop\"\ntitle = \"Drop\"\nshortcut = \"ctrl+z\"",
+    )
+    .unwrap();
+
+    let discovered = discovery::discover(&[dir.path().to_owned()]);
+
+    assert_eq!(discovered.found.len(), 1, "the Extension is kept");
+    assert_eq!(discovered.problems.len(), 1, "{:?}", discovered.problems);
+    assert!(discovered.problems[0].message.contains("`drop`"));
+    assert!(discovered.problems[0].message.contains("`ctrl+z`"));
 }
 
 #[test]

@@ -406,7 +406,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             if !session.asks(ExtensionId(n), searched) {
                 continue;
             }
-            if let Some(debounce) = ext.debounce() {
+            if let Some(debounce) = ext.asked() {
                 let query = session.searched().to_owned();
                 session.live[n] = Live::asking(query, None, now + debounce);
             }

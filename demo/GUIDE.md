@@ -123,7 +123,10 @@ start. Typing filters the list. Enter pastes into the window the menu came
 from; Ctrl+K offers "Copy to Clipboard", "Show Details" and "Delete from
 History". Copy something in foot or FeatherPad and it joins the list. In the
 Clipboard app, entries are also found by their text: try `ssh`. The whole
-search leaves them out.
+search leaves them out. What reads as a one-time code (six digits alone) or a
+secret token (a private key, an API key) is never kept: copy `482913` and it
+stays out of the list. `ignore` in `[extensions.clipboard]` sets the regular
+expressions that leave text out, and `ignore = []` keeps everything.
 
 ## Your keywords: Aliases and Quicklinks
 

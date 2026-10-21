@@ -48,6 +48,7 @@ use crate::config::MANIFEST_KEYS;
 use crate::config::to_toml;
 use crate::discovery::Found;
 use crate::problem::Report;
+use crate::reserved;
 
 /// `installed` as the config's `[extensions.<name>]` tables have them, then
 /// the Extensions the config defines, by name. What can't be read goes in
@@ -83,7 +84,12 @@ pub fn configure(installed: &[Found], config: &Table, report: &mut Report) -> Ve
             continue;
         }
         match inline(name, table) {
-            Ok(found) => configured.push(found),
+            Ok(found) => {
+                for released in reserved::in_manifest(&found.manifest) {
+                    report.add(format!("extensions.{name}"), released.reason());
+                }
+                configured.push(found);
+            }
             Err(err) => report.add(format!("extensions.{name}"), err),
         }
     }

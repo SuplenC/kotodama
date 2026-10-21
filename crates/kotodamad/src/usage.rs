@@ -13,7 +13,9 @@
 //! - `at`: seconds since the Unix epoch.
 //! - `kind`: `query` when the user typed, `pick` when they ran an Action.
 //! - `query`: what was typed, as the Front end sent it. Typing that empties the search box isn't
-//!   logged, but a pick made with nothing typed is, with `"query":""`.
+//!   logged, but a pick made with nothing typed is, with `"query":""`. What is typed in an app kept
+//!   out of the search, as the clipboard's and the emoji's, may be private: it is never logged, and
+//!   a pick there is logged with `"query":""`.
 //! - `extension` and `id`: the picked Result's Extension and Item id.
 //! - `action`: the id of the Action run.
 //! - `row`: where the Result was in the list, from 0, or `null` if it wasn't in the list last sent.

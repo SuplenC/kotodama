@@ -7,11 +7,15 @@
 //! max_entries = 1000
 //! # Entries older than this many days go.
 //! max_age_days = 7
+//! # Copied text any of these regular expressions matches, anywhere in it,
+//! # is never kept. They replace the defaults, one-time codes and secret
+//! # tokens (`ignore::DEFAULT_IGNORE`); `[]` keeps everything.
+//! ignore = ['^secret:']
 //! ```
 //!
 //! # Owns
 //!
-//! - Reading the config table into [`Limits`].
+//! - Reading the config table into [`Settings`].
 //! - The ids of the Items, Views and Actions, and what each Item and View shows.
 //!
 //! # Not here
@@ -22,6 +26,7 @@
 use std::fmt::Write as _;
 use std::path::Path;
 
+use kotodama_extension::Chain;
 use kotodama_protocol::Action;
 use kotodama_protocol::Item;
 use kotodama_protocol::ItemKind;
@@ -36,6 +41,7 @@ use crate::history::Content;
 use crate::history::Entry;
 use crate::history::History;
 use crate::history::Limits;
+use crate::ignore::Ignore;
 use crate::pause::Pause;
 
 /// The Item that opens the history, by id. Entries' ids are numbers, so it
@@ -78,10 +84,20 @@ const DETAIL_LINES: usize = 30;
 
 const DAY_SECS: f64 = 24.0 * 60.0 * 60.0;
 
+/// The settings of the `[extensions.clipboard]` table.
+#[derive(Clone, Debug, Default)]
+pub struct Settings {
+    pub limits: Limits,
+    /// What copied text is never kept.
+    pub ignore: Ignore,
+}
+
 /// Reads the config table. A setting of the wrong shape is logged and left at
-/// its default; the others still apply.
-pub fn limits(config: &Table) -> Limits {
-    let mut limits = Limits::default();
+/// its default, and a pattern of `ignore` that isn't a regular expression is
+/// logged and left out; the others still apply.
+pub fn settings(config: &Table) -> Settings {
+    let mut settings = Settings::default();
+    let limits = &mut settings.limits;
     for (key, value) in config {
         let set = match key.as_str() {
             "max_entries" => match value {
@@ -102,13 +118,28 @@ pub fn limits(config: &Table) -> Limits {
                 }
                 _ => Err("should be a number of days above 0"),
             },
+            "ignore" => match kotodama_extension::config::strings(value) {
+                Some(patterns) => {
+                    let (ignore, errors) = Ignore::new(patterns.iter().map(String::as_str));
+                    for err in errors {
+                        kotodama_extension::config::warn(format_args!("`ignore`: {}", Chain(&err)));
+                    }
+                    settings.ignore = ignore;
+                    Ok(())
+                }
+                None => Err("should be a list of regular expressions"),
+            },
+            "ignore_apps" => Err(
+                "isn't a setting: Wayland's data-control protocols never say which app copied, so the history can't \
+                 leave out what one app copies",
+            ),
             _ => Err("isn't a setting"),
         };
         if let Err(err) = set {
             kotodama_extension::config::warn(format_args!("`{key}` {err}"));
         }
     }
-    limits
+    settings
 }
 
 /// The Item that opens the whole history and clears it.

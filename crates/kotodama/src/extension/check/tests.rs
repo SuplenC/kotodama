@@ -35,7 +35,7 @@ fn an_item_of_another_extensions_kind_is_rejected_and_its_own_kept() {
 }
 
 #[test]
-fn a_reserved_shortcut_is_a_warning() {
+fn a_reserved_shortcut_is_rejected() {
     let findings = Seen::default().take(
         &manifest(""),
         message(&format!(
@@ -43,7 +43,7 @@ fn a_reserved_shortcut_is_a_warning() {
             item("a", "notes.note", "Ctrl+K")
         )),
     );
-    assert!(matches!(&findings[..], [Finding::Warning(warning)] if warning.contains("Ctrl+K")));
+    assert!(matches!(&findings[..], [Finding::Rejected(reason)] if reason.contains("`Ctrl+K`")));
 }
 
 #[test]
@@ -62,7 +62,7 @@ fn live_results_answer_a_live_query_until_done() {
 
     seen.live.insert(1, Vec::new());
     let answered = seen.take(&manifest, results(true));
-    assert!(matches!(&answered[..], [Finding::Warning(warning)] if warning.contains("debounce_ms")));
+    assert!(matches!(&answered[..], [Finding::Rejected(reason)] if reason.contains("debounce_ms")));
     assert!(seen.finished.contains(&1));
     assert_eq!(seen.live[&1].len(), 1);
 

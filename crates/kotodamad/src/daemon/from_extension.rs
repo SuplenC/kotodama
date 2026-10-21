@@ -47,9 +47,10 @@ use crate::views::Open;
 impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
     pub(super) fn extension_message(&mut self, id: ExtensionId, mut message: FromExtension, now: Instant) {
         let name = self.extensions[id.0].name().to_owned();
-        let released = reserved::release_message(&mut message);
-        if released > 0 {
-            log::warn!("{name}: dropped {released} key bindings the menu keeps for itself");
+        for released in reserved::release_message(&mut message) {
+            let reason = released.reason();
+            log::warn!("{name}: {reason}");
+            self.extensions[id.0].send(ToExtension::Rejected { reason });
         }
         match message {
             FromExtension::AddItems { items } => self.add_items(id, &name, items, now),
@@ -74,7 +75,17 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
                     (false, Some(note)) => log::info!("{name} can't do anything now: {note}"),
                     (false, None) => log::info!("{name} can't do anything now"),
                 }
+                let asked = self.extensions[id.0].asked().is_some();
                 self.said(id, |ext| ext.status = Some(Status { usable, note }));
+                match (asked, self.extensions[id.0].asked().is_some()) {
+                    (false, true) => self.ask_typed(id, now),
+                    (true, false) => {
+                        for session in self.sessions.values_mut() {
+                            session.live[id.0].due = None;
+                        }
+                    }
+                    _ => {}
+                }
             }
             FromExtension::PushView(view) => {
                 let contributed = self.view_contributed(id, &view);
@@ -164,12 +175,14 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
 
     /// Applies `change` to what the Extension `id` said of itself. The
     /// search shows its app's entry Item from then on only if it is usable,
-    /// decided here rather than per keystroke, and the app's intro card
-    /// shows its note.
+    /// and it is sent Live queries only while it hasn't said it can't do
+    /// anything, both decided here rather than per keystroke; the app's
+    /// intro card shows its note.
     pub(super) fn said(&mut self, id: ExtensionId, change: impl FnOnce(&mut Extension)) {
         let ext = &mut self.extensions[id.0];
         let (usable, note) = (ext.usable(), ext.note().map(str::to_owned));
         change(ext);
+        ext.reask();
         if ext.usable() != usable {
             self.build_own();
         } else if ext.note() != note.as_deref() {
@@ -353,7 +366,19 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
         if ext != id {
             return;
         }
-        let answers = self.extensions[id.0].debounce() == Some(Duration::ZERO);
+        let ext = &self.extensions[id.0];
+        let answers = ext.debounce() == Some(Duration::ZERO);
+        if !answers {
+            for result in results.iter().filter(|result| result.answer) {
+                let reason = format!(
+                    "Live result `{}` is marked `answer`, which needs `debounce_ms = 0` in the Manifest's \
+                     [live_query]; it is kept as a plain result",
+                    result.item.id
+                );
+                log::warn!("{}: {reason}", ext.name());
+                ext.send(ToExtension::Rejected { reason });
+            }
+        }
         let Some(session) = self.sessions.get_mut(&front_end) else {
             return;
         };

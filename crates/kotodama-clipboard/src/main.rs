@@ -2,7 +2,8 @@
 //! so it survives a restart, and offered as Indexed items of kind
 //! `clipboard.clip` that paste it back. A `Clipboard History` Item lists
 //! them all, newest first, and clears them. What a password manager marks
-//! sensitive is never kept, nor anything copied while the history is paused.
+//! sensitive is never kept, nor text the `ignore` setting matches
+//! (`ignore.rs`), nor anything copied while the history is paused.
 //! See `items.rs` for the config table.
 //!
 //! # Owns
@@ -31,7 +32,7 @@ use std::time::UNIX_EPOCH;
 use kotodama_clipboard::copied::Copied;
 use kotodama_clipboard::history::Content;
 use kotodama_clipboard::history::History;
-use kotodama_clipboard::history::Limits;
+use kotodama_clipboard::ignore::Ignore;
 use kotodama_clipboard::items;
 use kotodama_clipboard::items::CLEAR;
 use kotodama_clipboard::items::COPY;
@@ -40,6 +41,7 @@ use kotodama_clipboard::items::DETAIL_VIEW;
 use kotodama_clipboard::items::HISTORY;
 use kotodama_clipboard::items::LIST_VIEW;
 use kotodama_clipboard::items::PAUSE;
+use kotodama_clipboard::items::Settings;
 use kotodama_clipboard::pause::Pause;
 use kotodama_clipboard::wayland::Change;
 use kotodama_clipboard::wayland::Clipboard;
@@ -79,7 +81,7 @@ fn run() -> Result<(), Error> {
     let mut extension = Extension {
         writer,
         history,
-        limits: Limits::default(),
+        settings: Settings::default(),
         watching: None,
         configured: false,
         list_open: false,
@@ -131,7 +133,7 @@ fn run() -> Result<(), Error> {
 struct Extension {
     writer: Writer,
     history: History,
-    limits: Limits,
+    settings: Settings,
     /// The watched clipboard, held so the watching goes on: dropping it stops
     /// it. The Daemon sets the clipboard, through the `copy` Outcome, so
     /// nothing calls `Clipboard::set` here.
@@ -155,8 +157,8 @@ impl Extension {
     fn message(&mut self, message: ToExtension) -> Sent {
         match message {
             ToExtension::Config(config) => {
-                self.limits = items::limits(&config);
-                let removed = self.history.expire(now(), &self.limits);
+                self.settings = items::settings(&config);
+                let removed = self.history.expire(now(), &self.settings.limits);
                 if self.configured {
                     self.removed(&removed)
                 } else {
@@ -196,13 +198,13 @@ impl Extension {
         }
     }
 
-    /// Keeps what was just copied, and tells the Daemon; while paused,
-    /// drops it.
+    /// Keeps what was just copied, and tells the Daemon; drops it while
+    /// paused, or when `ignore` matches it.
     fn copied(&mut self, copied: Copied) -> Sent {
-        if !self.pause.keeps(now()) {
+        if !self.pause.keeps(now()) || ignored(&self.settings.ignore, &copied) {
             return Ok(());
         }
-        let recorded = match self.history.record(copied, now(), &self.limits) {
+        let recorded = match self.history.record(copied, now(), &self.settings.limits) {
             Ok(recorded) => recorded,
             Err(err) => {
                 kotodama_extension::log!("couldn't keep what was copied: {err}");
@@ -220,7 +222,7 @@ impl Extension {
     }
 
     fn expire(&mut self) -> Sent {
-        let removed = self.history.expire(now(), &self.limits);
+        let removed = self.history.expire(now(), &self.settings.limits);
         self.removed(&removed)
     }
 
@@ -232,7 +234,10 @@ impl Extension {
             return None;
         }
         let now = now();
-        let expiry = self.history.next_expiry(&self.limits).map(|at| at.saturating_sub(now));
+        let expiry = self
+            .history
+            .next_expiry(&self.settings.limits)
+            .map(|at| at.saturating_sub(now));
         let pause = self.pause.next_change(now);
         let wait = match (expiry, pause) {
             (Some(expiry), Some(pause)) => expiry.min(pause),
@@ -371,6 +376,14 @@ impl Extension {
 
     fn send(&mut self, message: &FromExtension) -> Sent {
         self.writer.send(message).map_err(Error::Protocol)
+    }
+}
+
+/// Whether `copied` is text `ignore` leaves out.
+fn ignored(ignore: &Ignore, copied: &Copied) -> bool {
+    match copied {
+        Copied::Text(text) => ignore.ignores(text),
+        Copied::Image { .. } => false,
     }
 }
 

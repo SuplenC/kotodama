@@ -16,6 +16,7 @@
 
 pub mod copied;
 pub mod history;
+pub mod ignore;
 pub mod items;
 pub mod pause;
 pub mod wayland;

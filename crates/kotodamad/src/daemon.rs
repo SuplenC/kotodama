@@ -62,6 +62,7 @@ use nucleo_matcher::pattern::CaseMatching;
 use nucleo_matcher::pattern::Normalization;
 use nucleo_matcher::pattern::Pattern;
 
+use crate::apps::App;
 use crate::apps::Apps;
 use crate::clock::Clock;
 use crate::clock::When;
@@ -373,6 +374,11 @@ struct Extension {
     /// What this run last said of whether it can do anything; `None` until
     /// it says.
     status: Option<Status>,
+    /// How long a query waits before it is sent as a Live query, `None` while
+    /// none is sent: its Manifest has no `[live_query]`, or this run said it
+    /// can't do anything. Worked out when either changes
+    /// (`Extension::set_found`, `Daemon::said`), so a keystroke only reads it.
+    asked: Option<Duration>,
     /// Whether Items of this run have reached the search, or are hidden.
     has_items: bool,
     /// How its last run stopped, while it is down.
@@ -386,6 +392,13 @@ struct Status {
     note: Option<String>,
 }
 
+/// How long a query waits before it is sent to `found` as a Live query, if
+/// its Manifest asks for any.
+fn debounce(found: &Found) -> Option<Duration> {
+    let live = found.manifest.live_query.as_ref()?;
+    Some(Duration::from_millis(live.debounce_ms.into()))
+}
+
 /// Whether `found`'s Manifest makes it a fallback, such as web search.
 fn is_fallback(found: &Found) -> bool {
     found.manifest.live_query.as_ref().is_some_and(|live| live.fallback)
@@ -395,6 +408,7 @@ impl Extension {
     fn new(found: Found, now: Instant) -> Self {
         Extension {
             fallback: is_fallback(&found),
+            asked: debounce(&found),
             found,
             generation: 0,
             state: State::Down { retry_at: now },
@@ -473,8 +487,27 @@ impl Extension {
     }
 
     fn debounce(&self) -> Option<Duration> {
-        let live = self.found.manifest.live_query.as_ref()?;
-        Some(Duration::from_millis(live.debounce_ms.into()))
+        debounce(&self.found)
+    }
+
+    /// How long a query waits before it is sent as a Live query, `None`
+    /// while none is sent.
+    fn asked(&self) -> Option<Duration> {
+        self.asked
+    }
+
+    /// Works out again whether it is sent Live queries, after its Manifest or
+    /// its status changed: not while it says it can't do anything.
+    fn reask(&mut self) {
+        let unusable = self.status.as_ref().is_some_and(|status| !status.usable);
+        self.asked = if unusable { None } else { self.debounce() };
+    }
+
+    /// Takes the Manifest and config of `found`.
+    fn set_found(&mut self, found: Found) {
+        self.fallback = is_fallback(&found);
+        self.found = found;
+        self.reask();
     }
 
     /// A fallback, such as web search: also asked what real matches leave
@@ -754,6 +787,13 @@ impl Session {
             .results
             .get(n as usize)
             .is_some_and(|result| result.answer)
+    }
+
+    /// Whether the session is in an app kept out of the search, as the
+    /// clipboard's and the emoji's: what is typed there may be private, so
+    /// neither the History nor the Usage log keeps it.
+    fn in_private_app(&self, apps: &Apps) -> bool {
+        self.scope.and_then(|n| apps.get(n)).is_some_and(App::is_private)
     }
 
     /// The text searched: the query past its app's word, inside one.

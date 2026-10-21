@@ -130,6 +130,49 @@ fn only_extensions_whose_prefix_or_trigger_matches_get_a_live_query() {
     assert_eq!(live_queries(&web), []);
 }
 
+fn status(usable: bool) -> FromExtension {
+    FromExtension::Status {
+        usable,
+        note: (!usable).then(|| "no rates yet".to_owned()),
+    }
+}
+
+#[test]
+fn an_extension_that_cant_do_anything_gets_no_live_queries_until_it_can() {
+    let mut h = Harness::new(vec![calculator()]);
+    let calc = h.up(0);
+    calc.drain();
+    let ui = h.front_end();
+
+    h.send(&calc, status(false));
+    h.query(&ui, "2+2");
+    h.advance(Duration::from_secs(1));
+    let while_it_cant = live_queries(&calc);
+    h.send(&calc, status(true));
+    h.advance(Duration::ZERO);
+    let once_it_can = live_queries(&calc);
+    h.query(&ui, "2+3");
+
+    assert_eq!(while_it_cant, []);
+    assert_eq!(once_it_can.len(), 1, "what is typed reaches it once it can");
+    assert_eq!(once_it_can[0].1, "2+2");
+    assert_eq!(live_queries(&calc).len(), 1);
+}
+
+#[test]
+fn a_live_query_waiting_on_its_debounce_is_dropped_when_the_extension_cant_do_anything() {
+    let mut h = Harness::new(vec![web()]);
+    let web = h.up(0);
+    web.drain();
+    let ui = h.front_end();
+
+    h.query(&ui, "g rust");
+    h.send(&web, status(false));
+    h.advance(Duration::from_secs(1));
+
+    assert_eq!(live_queries(&web), []);
+}
+
 #[test]
 fn changing_the_query_cancels_the_live_query_in_flight_and_drops_its_results() {
     let mut h = Harness::new(vec![calculator()]);
@@ -490,6 +533,45 @@ fn an_answer_from_a_zero_debounce_extension_takes_the_top_row() {
     assert_eq!(titles(&ui.results().unwrap())[0], "= 2");
 }
 
+/// The reasons of the `rejected` messages `ext` was sent.
+fn rejections(ext: &Ext) -> Vec<String> {
+    ext.drain()
+        .into_iter()
+        .filter_map(|message| match message {
+            ToExtension::Rejected { reason } => Some(reason),
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn an_answer_from_an_extension_with_a_debounce_is_rejected_and_kept_as_a_result() {
+    let mut h = Harness::new(vec![web()]);
+    let web = h.up(0);
+    let ui = h.front_end();
+    h.query(&ui, "g rust");
+    h.advance(Duration::from_secs(1));
+    let (id, ..) = live_queries(&web)[0].clone();
+
+    h.send(
+        &web,
+        FromExtension::LiveResults {
+            live_query: id,
+            results: vec![live("rust", 0.1, true), live("rustup", 0.1, false)],
+            done: true,
+        },
+    );
+
+    let reasons = rejections(&web);
+    assert_eq!(reasons.len(), 1, "{reasons:?}");
+    assert!(
+        reasons[0].contains("`rust`") && reasons[0].contains("debounce_ms"),
+        "{reasons:?}"
+    );
+    let rows = ui.results().expect("the results are sent");
+    assert_eq!(titles(&rows), ["rust", "rustup"]);
+}
+
 /// Types `query` and has the calculator answer it with `title`.
 fn answered(h: &mut Harness, ui: &FrontEnd, calc: &Ext, query: &str, title: &str) {
     h.query(ui, query);
@@ -704,6 +786,29 @@ fn an_extension_cant_bind_a_key_the_menu_keeps_for_itself() {
     };
     assert_eq!(items[0].actions[0].shortcut, None);
     assert_eq!(items[0].actions[2].shortcut.as_deref(), Some("ctrl+w"));
+}
+
+#[test]
+fn an_extension_is_told_which_of_its_bindings_the_menu_keeps_for_itself() {
+    let mut h = Harness::new(vec![projects()]);
+    let projects = h.up(0);
+    projects.drain();
+    let mut item = project("kotodama");
+    item.actions[0].shortcut = Some("ctrl+z".into());
+    item.actions.push(Action::new("close", "close").shortcut("ctrl+w"));
+
+    h.add(&projects, vec![item]);
+
+    let reasons = rejections(&projects);
+    assert_eq!(reasons.len(), 1, "{reasons:?}");
+    assert!(reasons[0].contains("`ctrl+z`"), "{reasons:?}");
+    assert!(
+        reasons[0].contains(&format!("`{}`", project("kotodama").actions[0].id)),
+        "{reasons:?}"
+    );
+    let ui = h.front_end();
+    let row = &h.query(&ui, "kotodama")[0];
+    assert_eq!(row.item.actions.len(), 2, "the Action is kept");
 }
 
 #[test]

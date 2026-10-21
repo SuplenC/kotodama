@@ -1,10 +1,14 @@
 [package]
 name = "kotodama-protocol"
-version = "0.1.0"
+# Its major.minor is the protocol version it speaks, PROTOCOL_VERSION: see
+# README.md.
+version = "1.0.0"
 description = "The messages, framing and Manifest schema that the Kotodama Daemon, Front ends and Extensions share, and how they launch programs"
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
+keywords = ["kotodama", "launcher", "wayland", "protocol", "extension"]
+categories = ["encoding", "gui"]
 
 [dependencies]
 base64 = "0.23.1"

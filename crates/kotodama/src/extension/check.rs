@@ -34,6 +34,7 @@ use std::thread;
 use std::time::Duration;
 use std::time::Instant;
 
+use kotodama_protocol::Action;
 use kotodama_protocol::Channel;
 use kotodama_protocol::ChannelReader;
 use kotodama_protocol::ChannelWriter;
@@ -46,6 +47,7 @@ use kotodama_protocol::LiveResult;
 use kotodama_protocol::Manifest;
 use kotodama_protocol::Outcome;
 use kotodama_protocol::ToExtension;
+use kotodama_protocol::ViewContent;
 use kotodama_protocol::WireFormat;
 use kotodama_protocol::is_reserved_shortcut;
 use regex::Regex;
@@ -144,7 +146,11 @@ fn manifest(dir: &Path, report: &mut Report<'_>) -> Option<Manifest> {
         if let Some(shortcut) = &contributed.action.shortcut
             && is_reserved_shortcut(shortcut)
         {
-            report.warning(reserved(&contributed.action.id, shortcut));
+            report.problem(format!(
+                "{}; the Daemon lists it among its problems",
+                reserved(&contributed.action.id, shortcut)
+            ));
+            fine = false;
         }
     }
     if fine {
@@ -196,8 +202,12 @@ fn wire_name(format: WireFormat) -> &'static str {
     }
 }
 
+/// Why the Daemon drops a binding, in its words.
 fn reserved(action: &str, shortcut: &str) -> String {
-    format!("Action `{action}` is bound to {shortcut}, which the menu keeps for itself: the Daemon drops the binding")
+    format!(
+        "Action `{action}` is bound to `{shortcut}`, a key the menu keeps for itself; the Action is kept without the \
+         binding"
+    )
 }
 
 /// What the Daemon would make of one message.
@@ -207,7 +217,7 @@ enum Finding {
     Rejected(String),
     /// The Daemon ignores it, or the menu waits on something that never comes.
     Problem(String),
-    /// The Daemon takes it, but changes or drops part of it.
+    /// The Daemon takes it, but drops part of it without a word to the Extension.
     Warning(String),
 }
 
@@ -244,7 +254,7 @@ impl Seen {
                         )));
                         continue;
                     }
-                    findings.extend(reserved_shortcuts(&item));
+                    findings.extend(reserved_shortcuts(&item.actions));
                     self.items.insert(item.id.clone(), item);
                 }
             }
@@ -272,10 +282,11 @@ impl Seen {
                 };
                 let answers = manifest.live_query.as_ref().is_some_and(|live| live.debounce_ms == 0);
                 for result in &results {
-                    findings.extend(reserved_shortcuts(&result.item));
+                    findings.extend(reserved_shortcuts(&result.item.actions));
                     if result.answer && !answers {
-                        findings.push(Finding::Warning(format!(
-                            "Live result `{}` is marked `answer`, which the Daemon ignores unless `debounce_ms` is 0",
+                        findings.push(Finding::Rejected(format!(
+                            "Live result `{}` is marked `answer`, which needs `debounce_ms = 0` in the Manifest's \
+                             [live_query]; it is kept as a plain result",
                             result.item.id
                         )));
                     }
@@ -311,11 +322,17 @@ impl Seen {
                 ));
             }
             FromExtension::Status { usable, note } => self.status = Some((usable, note)),
+            FromExtension::PushView(view)
+            | FromExtension::UpdateView(view)
+            | FromExtension::ReplaceView { with: view, .. } => {
+                if let ViewContent::List { items, .. } = &view.content {
+                    for item in items {
+                        findings.extend(reserved_shortcuts(&item.actions));
+                    }
+                }
+            }
             FromExtension::RequestActionCatalog
-            | FromExtension::PushView(_)
-            | FromExtension::UpdateView(_)
             | FromExtension::PopView { .. }
-            | FromExtension::ReplaceView { .. }
             | FromExtension::JobProgress(_)
             | FromExtension::WithdrawPick { .. } => {}
         }
@@ -323,17 +340,14 @@ impl Seen {
     }
 }
 
-fn reserved_shortcuts(item: &Item) -> impl Iterator<Item = Finding> {
-    item.actions.iter().filter_map(|action| {
+/// A rejection for each of `actions` bound to a key the menu keeps for itself.
+fn reserved_shortcuts(actions: &[Action]) -> impl Iterator<Item = Finding> {
+    actions.iter().filter_map(|action| {
         let shortcut = action
             .shortcut
             .as_deref()
             .filter(|shortcut| is_reserved_shortcut(shortcut))?;
-        Some(Finding::Warning(format!(
-            "Item `{}`: {}",
-            item.id,
-            reserved(&action.id, shortcut)
-        )))
+        Some(Finding::Rejected(reserved(&action.id, shortcut)))
     })
 }
 
