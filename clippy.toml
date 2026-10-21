@@ -1,3 +1,6 @@
 # Settings for the lints in Cargo.toml's [workspace.lints].
-# `unwrap_used` spares tests; elsewhere the guide asks for `.expect("…")`.
+# Tests and benches may unwrap. `just check` lints them in a pass of their own
+# with `unwrap_used` off; this setting only quiets the `#[test]` functions and
+# `#[cfg(test)]` modules for a one-pass `cargo clippy --all-targets`, such as an
+# editor's.
 allow-unwrap-in-tests = true
