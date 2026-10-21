@@ -31,17 +31,20 @@
 //! # Not here
 //!
 //! - `word`, `prefix` and `in_search`: `apps.rs`.
-//! - Which keys the Extension gets of its table: `config.rs`,
-//!   `extension_settings`.
+//! - Which keys the Extension gets of its table: `config.rs`, `extension_settings`.
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
-use kotodama_protocol::{LiveQueries, Manifest, Table, Value};
+use kotodama_protocol::LiveQueries;
+use kotodama_protocol::Manifest;
+use kotodama_protocol::Table;
+use kotodama_protocol::Value;
 use regex::Regex;
 use serde::Deserialize;
 
-use crate::config::{MANIFEST_KEYS, to_toml};
+use crate::config::MANIFEST_KEYS;
+use crate::config::to_toml;
 use crate::discovery::Found;
 use crate::problem::Report;
 
@@ -63,9 +66,7 @@ pub fn configure(installed: &[Found], config: &Table, report: &mut Report) -> Ve
     for found in installed {
         let name = found.manifest.name.as_str();
         match table(name) {
-            Some(table) if enabled(table, name, report) => {
-                configured.push(overridden(found, table, report))
-            }
+            Some(table) if enabled(table, name, report) => configured.push(overridden(found, table, report)),
             Some(_) => {}
             None => configured.push(found.clone()),
         }
@@ -94,10 +95,7 @@ fn enabled(table: &Table, name: &str, report: &mut Report) -> bool {
         None | Some(Value::Bool(true)) => true,
         Some(Value::Bool(false)) => false,
         Some(_) => {
-            report.add(
-                format!("extensions.{name}.enable"),
-                "should be true or false",
-            );
+            report.add(format!("extensions.{name}.enable"), "should be true or false");
             true
         }
     }
@@ -158,8 +156,7 @@ fn inline(name: &str, table: &Table) -> Result<Found, String> {
             manifest.insert((*key).to_owned(), to_toml(value));
         }
     }
-    let manifest =
-        Manifest::deserialize(toml::Value::Table(manifest)).map_err(|err| err.to_string())?;
+    let manifest = Manifest::deserialize(toml::Value::Table(manifest)).map_err(|err| err.to_string())?;
     let program = PathBuf::from(&manifest.command[0]);
     if !program.is_absolute() && program.components().count() > 1 {
         return Err("`command` needs an absolute path, or a program on PATH".into());
@@ -231,12 +228,8 @@ fn live_query(live: Option<LiveQueries>, value: &Value) -> Result<LiveQueries, S
     };
     for (key, value) in table {
         match key.as_str() {
-            "prefixes" => {
-                live.prefixes = texts(value).ok_or("`prefixes` should be a list of strings")?
-            }
-            "triggers" => {
-                live.triggers = texts(value).ok_or("`triggers` should be a list of strings")?
-            }
+            "prefixes" => live.prefixes = texts(value).ok_or("`prefixes` should be a list of strings")?,
+            "triggers" => live.triggers = texts(value).ok_or("`triggers` should be a list of strings")?,
             "debounce_ms" => {
                 live.debounce_ms = match value {
                     Value::Integer(ms) => u32::try_from(*ms).ok(),
@@ -262,11 +255,7 @@ mod tests {
     use super::*;
 
     fn installed(toml: &str) -> Found {
-        Found::new(
-            Manifest::from_toml(toml).unwrap(),
-            PathBuf::from("/ext/calc"),
-        )
-        .unwrap()
+        Found::new(Manifest::from_toml(toml).unwrap(), PathBuf::from("/ext/calc")).unwrap()
     }
 
     fn configure_with(installed: &[Found], toml: &str) -> (Vec<Found>, Vec<String>) {
@@ -312,8 +301,7 @@ mod tests {
 
     #[test]
     fn enable_false_switches_an_installed_extension_off() {
-        let (configured, problems) =
-            configure_with(&[calculator()], "[extensions.calculator]\nenable = false\n");
+        let (configured, problems) = configure_with(&[calculator()], "[extensions.calculator]\nenable = false\n");
 
         assert!(configured.is_empty());
         assert!(problems.is_empty());
@@ -330,10 +318,7 @@ mod tests {
         assert!(problems.is_empty(), "{problems:?}");
         let calc = &configured[0];
         assert_eq!(calc.manifest.command, ["/dev/calc", "-v"]);
-        assert_eq!(
-            calc.env,
-            BTreeMap::from([("RUST_LOG".to_owned(), "debug".to_owned())])
-        );
+        assert_eq!(calc.env, BTreeMap::from([("RUST_LOG".to_owned(), "debug".to_owned())]));
         let live = calc.manifest.live_query.as_ref().unwrap();
         assert_eq!(
             (live.debounce_ms, live.prefixes.as_slice()),
@@ -354,10 +339,7 @@ mod tests {
         assert_eq!(configured[0].manifest, calculator().manifest);
         assert_eq!(
             problems,
-            [
-                "extensions.calculator.command",
-                "extensions.calculator.live_query"
-            ]
+            ["extensions.calculator.command", "extensions.calculator.live_query"]
         );
     }
 
@@ -377,10 +359,7 @@ mod tests {
         assert_eq!(notes.manifest.command, ["notes", "--kotodama"]);
         assert_eq!(notes.manifest.title.as_deref(), Some("Notes"));
         assert_eq!(notes.manifest.word.as_deref(), Some("note"));
-        assert_eq!(
-            notes.manifest.live_query.as_ref().unwrap().prefixes,
-            ["note "]
-        );
+        assert_eq!(notes.manifest.live_query.as_ref().unwrap().prefixes, ["note "]);
         assert_eq!(notes.env["NOTES_DIR"], "/tmp");
     }
 

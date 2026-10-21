@@ -12,13 +12,11 @@
 //!
 //! - `at`: seconds since the Unix epoch.
 //! - `kind`: `query` when the user typed, `pick` when they ran an Action.
-//! - `query`: what was typed, as the Front end sent it. Typing that empties
-//!   the search box isn't logged, but a pick made with nothing typed is, with
-//!   `"query":""`.
+//! - `query`: what was typed, as the Front end sent it. Typing that empties the search box isn't
+//!   logged, but a pick made with nothing typed is, with `"query":""`.
 //! - `extension` and `id`: the picked Result's Extension and Item id.
 //! - `action`: the id of the Action run.
-//! - `row`: where the Result was in the list, from 0, or `null` if it wasn't
-//!   in the list last sent.
+//! - `row`: where the Result was in the list, from 0, or `null` if it wasn't in the list last sent.
 //!
 //! When the file would grow past [`MAX_BYTES`], it is renamed to
 //! `usage.jsonl.1`, replacing the one before, and a new file is started, so
@@ -27,14 +25,24 @@
 //! both files, and clearing one Extension's History drops the picks of its
 //! Results from them. Undoing either puts back the History, never the log.
 
-use std::fs::{self, File, OpenOptions};
-use std::io::{self, BufRead, BufReader, BufWriter, Write};
-use std::path::{Path, PathBuf};
+use std::fs;
+use std::fs::File;
+use std::fs::OpenOptions;
+use std::io;
+use std::io::BufRead;
+use std::io::BufReader;
+use std::io::BufWriter;
+use std::io::Write;
+use std::path::Path;
+use std::path::PathBuf;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::mpsc::{self, Sender};
+use std::sync::atomic::AtomicUsize;
+use std::sync::atomic::Ordering;
+use std::sync::mpsc;
+use std::sync::mpsc::Sender;
 
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
+use serde::Serialize;
 
 use crate::host::spawn;
 
@@ -146,8 +154,8 @@ fn drop_picks(path: &Path, extension: &str) -> io::Result<()> {
     let mut dropped = false;
     for line in lines {
         let line = line?;
-        let picked = serde_json::from_slice::<Picked>(&line)
-            .is_ok_and(|picked| picked.extension.as_deref() == Some(extension));
+        let picked =
+            serde_json::from_slice::<Picked>(&line).is_ok_and(|picked| picked.extension.as_deref() == Some(extension));
         if picked {
             dropped = true;
         } else {
@@ -267,9 +275,7 @@ mod tests {
     fn query(at: u64, query: &str) -> Entry {
         Entry {
             at,
-            used: Used::Query {
-                query: query.into(),
-            },
+            used: Used::Query { query: query.into() },
         }
     }
 
@@ -337,9 +343,7 @@ mod tests {
         log.write(&query(10, "fi")).unwrap();
         log.write(&query(10, "fi")).unwrap();
 
-        Log::new(path.clone(), 2 * line)
-            .write(&query(10, "fi"))
-            .unwrap();
+        Log::new(path.clone(), 2 * line).write(&query(10, "fi")).unwrap();
         let older = dir.path().join("usage.jsonl.1");
         assert_eq!(fs::metadata(&older).unwrap().len(), 2 * line);
         assert_eq!(fs::metadata(&path).unwrap().len(), line);
@@ -349,12 +353,8 @@ mod tests {
     fn the_log_keeps_what_an_earlier_run_wrote() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("usage.jsonl");
-        Log::new(path.clone(), MAX_BYTES)
-            .write(&query(10, "fi"))
-            .unwrap();
-        Log::new(path.clone(), MAX_BYTES)
-            .write(&query(11, "fir"))
-            .unwrap();
+        Log::new(path.clone(), MAX_BYTES).write(&query(10, "fi")).unwrap();
+        Log::new(path.clone(), MAX_BYTES).write(&query(11, "fir")).unwrap();
         assert_eq!(fs::read_to_string(&path).unwrap().lines().count(), 2);
     }
 
@@ -424,9 +424,7 @@ mod tests {
         use std::os::unix::fs::PermissionsExt;
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("usage.jsonl");
-        Log::new(path.clone(), MAX_BYTES)
-            .write(&query(10, "fi"))
-            .unwrap();
+        Log::new(path.clone(), MAX_BYTES).write(&query(10, "fi")).unwrap();
         let mode = fs::metadata(&path).unwrap().permissions().mode();
         assert_eq!(mode & 0o777, 0o600);
     }

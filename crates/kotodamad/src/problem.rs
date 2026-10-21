@@ -10,18 +10,21 @@
 //!
 //! - [`Report`]: collects the problems found while reading something.
 //! - [`Problems`]: the Daemon's problems, by where they were found.
-//! - [`item`] and [`view`]: the Daemon's own Item that lists them, and the
-//!   View it opens.
+//! - [`item`] and [`view`]: the Daemon's own Item that lists them, and the View it opens.
 //!
 //! # Not here
 //!
-//! - The problems of Extensions that are down, and when the list is sent:
-//!   `daemon.rs`.
-//! - Reading the settings that report them: each setting's owner
-//!   (`engine.rs`, `paths.rs`, `history.rs`, `empty_query.rs`,
-//!   `kind_order.rs`, `keywords.rs`, `configured.rs`, `apps.rs`).
+//! - The problems of Extensions that are down, and when the list is sent: `daemon.rs`.
+//! - Reading the settings that report them: each setting's owner (`engine.rs`, `paths.rs`,
+//!   `history.rs`, `empty_query.rs`, `kind_order.rs`, `keywords.rs`, `configured.rs`, `apps.rs`).
 
-use kotodama_protocol::{Action, Item, ItemKind, NamespacedKind, Problem, View, ViewContent};
+use kotodama_protocol::Action;
+use kotodama_protocol::Item;
+use kotodama_protocol::ItemKind;
+use kotodama_protocol::NamespacedKind;
+use kotodama_protocol::Problem;
+use kotodama_protocol::View;
+use kotodama_protocol::ViewContent;
 
 /// The id of the Daemon's own Item that opens the list, and of the View it
 /// opens: what `Problem::list` names, for Front ends.
@@ -147,13 +150,7 @@ pub fn view(problems: &[Problem]) -> View {
     } else {
         problems
             .iter()
-            .map(|problem| {
-                format!(
-                    "- **{}**: {}\n",
-                    escape(&problem.about),
-                    escape(&problem.message)
-                )
-            })
+            .map(|problem| format!("- **{}**: {}\n", escape(&problem.about), escape(&problem.message)))
             .collect()
     };
     View {

@@ -8,13 +8,19 @@
 //! meaning, and subdirectories (such as `extensions/`) are ignored.
 
 use std::collections::BTreeMap;
-use std::path::{Path, PathBuf};
+use std::fmt;
+use std::fs;
+use std::io;
+use std::path::Path;
+use std::path::PathBuf;
 use std::sync::mpsc::Sender;
 use std::time::Duration;
-use std::{fmt, fs, io};
 
-use kotodama_extension::watch::{RecursiveMode, Watcher, notify};
-use kotodama_protocol::{Table, Value};
+use kotodama_extension::watch::RecursiveMode;
+use kotodama_extension::watch::Watcher;
+use kotodama_extension::watch::notify;
+use kotodama_protocol::Table;
+use kotodama_protocol::Value;
 
 use crate::daemon::Event;
 
@@ -76,9 +82,7 @@ fn load_from(dirs: &[PathBuf], mut sources: Option<&mut Sources>) -> Result<Tabl
 
 /// One config file's text as a table.
 pub fn parse(text: &str) -> Result<Table, String> {
-    let table: toml::Table = text
-        .parse()
-        .map_err(|err: toml::de::Error| err.message().to_owned())?;
+    let table: toml::Table = text.parse().map_err(|err: toml::de::Error| err.message().to_owned())?;
     Ok(from_toml_table(table))
 }
 
@@ -130,9 +134,7 @@ pub fn watch(dirs: Vec<PathBuf>, events: Sender<Event>) -> notify::Result<Watche
 /// ignore everything else.
 pub fn is_config_file(dirs: &[PathBuf], path: &Path) -> bool {
     path.extension().is_some_and(|ext| ext == "toml")
-        && path
-            .parent()
-            .is_some_and(|parent| dirs.iter().any(|dir| dir == parent))
+        && path.parent().is_some_and(|parent| dirs.iter().any(|dir| dir == parent))
 }
 
 /// The top-level `*.toml` files in `dir`, in filename order.
@@ -181,15 +183,7 @@ pub fn extension_table(config: &Table, name: &str) -> Table {
 
 /// The keys of `[extensions.<name>]` the Daemon reads itself, for every
 /// Extension.
-pub const DAEMON_KEYS: [&str; 7] = [
-    "word",
-    "prefix",
-    "in_search",
-    "enable",
-    "command",
-    "env",
-    "live_query",
-];
+pub const DAEMON_KEYS: [&str; 7] = ["word", "prefix", "in_search", "enable", "command", "env", "live_query"];
 /// The Manifest's keys, which an Extension defined in the config takes from
 /// its table too.
 pub const MANIFEST_KEYS: [&str; 8] = [
@@ -209,17 +203,12 @@ pub const MANIFEST_KEYS: [&str; 8] = [
 /// Manifest's keys too.
 pub fn extension_settings(config: &Table, name: &str, inline: bool) -> Table {
     let mut table = extension_table(config, name);
-    table.retain(|key, _| {
-        !DAEMON_KEYS.contains(&key.as_str()) && !(inline && MANIFEST_KEYS.contains(&key.as_str()))
-    });
+    table.retain(|key, _| !DAEMON_KEYS.contains(&key.as_str()) && !(inline && MANIFEST_KEYS.contains(&key.as_str())));
     table
 }
 
 fn from_toml_table(table: toml::Table) -> Table {
-    table
-        .into_iter()
-        .map(|(key, value)| (key, from_toml(value)))
-        .collect()
+    table.into_iter().map(|(key, value)| (key, from_toml(value))).collect()
 }
 
 /// `value` as TOML: what a Manifest is read from, and what `kotodamad config`
@@ -231,12 +220,9 @@ pub fn to_toml(value: &Value) -> toml::Value {
         Value::Float(value) => toml::Value::Float(*value),
         Value::Bool(value) => toml::Value::Boolean(*value),
         Value::Array(values) => toml::Value::Array(values.iter().map(to_toml).collect()),
-        Value::Table(table) => toml::Value::Table(
-            table
-                .iter()
-                .map(|(key, value)| (key.clone(), to_toml(value)))
-                .collect(),
-        ),
+        Value::Table(table) => {
+            toml::Value::Table(table.iter().map(|(key, value)| (key.clone(), to_toml(value))).collect())
+        }
     }
 }
 

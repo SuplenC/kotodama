@@ -3,7 +3,13 @@
 
 use std::collections::BTreeMap;
 
-use kotodama_protocol::{Argument, FormField, FormInput, Table, Value, View, ViewContent};
+use kotodama_protocol::Argument;
+use kotodama_protocol::FormField;
+use kotodama_protocol::FormInput;
+use kotodama_protocol::Table;
+use kotodama_protocol::Value;
+use kotodama_protocol::View;
+use kotodama_protocol::ViewContent;
 
 /// Fills the Arguments `wanted` that `given` lacks, or has empty, from
 /// `typed`, the text after the keyword: one word each, in order, except the
@@ -30,25 +36,14 @@ pub fn fill(wanted: &[Argument], typed: &str, given: &mut BTreeMap<String, Strin
 }
 
 /// The first required Argument in `wanted` that `given` has no value for.
-pub fn missing<'a>(
-    wanted: &'a [Argument],
-    given: &BTreeMap<String, String>,
-) -> Option<&'a Argument> {
-    wanted.iter().find(|argument| {
-        !argument.optional
-            && given
-                .get(&argument.name)
-                .is_none_or(|value| value.is_empty())
-    })
+pub fn missing<'a>(wanted: &'a [Argument], given: &BTreeMap<String, String>) -> Option<&'a Argument> {
+    wanted
+        .iter()
+        .find(|argument| !argument.optional && given.get(&argument.name).is_none_or(|value| value.is_empty()))
 }
 
 /// The form that asks for `wanted`, with what `given` has already filled in.
-pub fn form(
-    id: String,
-    title: &str,
-    wanted: &[Argument],
-    given: &BTreeMap<String, String>,
-) -> View {
+pub fn form(id: String, title: &str, wanted: &[Argument], given: &BTreeMap<String, String>) -> View {
     View {
         id,
         title: title.to_owned(),

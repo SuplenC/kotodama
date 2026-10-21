@@ -8,11 +8,16 @@
 //! Text is folded before it's compared: lowercase, with accents dropped
 //! (`Żółw` is `zolw`), so neither case nor accents in the query matter.
 
-use kotodama_protocol::Item;
-use nucleo_matcher::pattern::{AtomKind, Pattern};
-use std::ops::{BitOr, BitOrAssign};
+use std::ops::BitOr;
+use std::ops::BitOrAssign;
 
-use nucleo_matcher::{Matcher, Utf32Str, Utf32String, chars};
+use kotodama_protocol::Item;
+use nucleo_matcher::Matcher;
+use nucleo_matcher::Utf32Str;
+use nucleo_matcher::Utf32String;
+use nucleo_matcher::chars;
+use nucleo_matcher::pattern::AtomKind;
+use nucleo_matcher::pattern::Pattern;
 
 /// How well a text matches, worst first.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -168,9 +173,11 @@ impl Query {
     pub fn narrows_near_misses_of(&self, longer: &Query) -> bool {
         !self.last_is_whole
             && longer.words.len() >= self.words.len()
-            && self.words.iter().zip(&longer.words).all(|(word, longer)| {
-                typos(word.len()) == typos(longer.len()) && (word.len() > 1 || longer.len() == 1)
-            })
+            && self
+                .words
+                .iter()
+                .zip(&longer.words)
+                .all(|(word, longer)| typos(word.len()) == typos(longer.len()) && (word.len() > 1 || longer.len() == 1))
     }
 
     /// Whether the query is long enough for subtitles to be searched.
@@ -191,11 +198,7 @@ impl Query {
                 .map(|word| Letters::of(word[0]))
                 .fold(Letters::NONE, BitOr::bitor)
         });
-        let letters = self
-            .letters
-            .iter()
-            .copied()
-            .fold(Letters::NONE, BitOr::bitor);
+        let letters = self.letters.iter().copied().fold(Letters::NONE, BitOr::bitor);
         Filter {
             letter,
             subtitles,
@@ -683,12 +686,7 @@ impl Haystack {
     }
 
     /// As [`Texts::score`].
-    pub fn score(
-        &self,
-        pattern: &Pattern,
-        matcher: &mut Matcher,
-        filter: Filter,
-    ) -> Option<(u32, Matched)> {
+    pub fn score(&self, pattern: &Pattern, matcher: &mut Matcher, filter: Filter) -> Option<(u32, Matched)> {
         self.texts().score(pattern, matcher, filter)
     }
 
@@ -787,12 +785,7 @@ impl Texts<'_> {
     /// them matched. Failing both, the subtitle's, if `filter` lets subtitles
     /// be searched and the subtitle has words starting with every word of the
     /// query. `None` if none matches.
-    pub fn score(
-        &self,
-        pattern: &Pattern,
-        matcher: &mut Matcher,
-        filter: Filter,
-    ) -> Option<(u32, Matched)> {
+    pub fn score(&self, pattern: &Pattern, matcher: &mut Matcher, filter: Filter) -> Option<(u32, Matched)> {
         if let Some(letter) = filter.letter
             && !self.initials.meets(letter)
         {
@@ -879,13 +872,7 @@ pub struct Tiers {
 impl Tiers {
     /// How well an Item matches, as [`Tiers::texts`] works it out. `item`
     /// is the Item `haystack` was made from.
-    pub fn item(
-        &mut self,
-        haystack: &Haystack,
-        _item: &Item,
-        query: &Query,
-        matched: Matched,
-    ) -> Option<Tier> {
+    pub fn item(&mut self, haystack: &Haystack, _item: &Item, query: &Query, matched: Matched) -> Option<Tier> {
         self.texts(haystack.texts(), query, matched)
     }
 
@@ -904,11 +891,7 @@ impl Tiers {
             let words = self.text(texts.words, query);
             best = best.max(words.map(|tier| tier.min(Tier::Keyword)));
         }
-        if best.is_none()
-            && matched.subtitle
-            && query.searches_subtitles()
-            && !texts.subtitle.is_empty()
-        {
+        if best.is_none() && matched.subtitle && query.searches_subtitles() && !texts.subtitle.is_empty() {
             let mut starts = std::mem::take(&mut self.starts);
             starts.clear();
             word_starts(texts.subtitle, None, &mut starts);
@@ -939,8 +922,7 @@ impl Tiers {
         if !query.may_nearly_match(texts.letters, texts.initials) {
             return false;
         }
-        self.nearly(texts.title, query)
-            || (!texts.words.is_empty() && self.nearly(texts.words, query))
+        self.nearly(texts.title, query) || (!texts.words.is_empty() && self.nearly(texts.words, query))
     }
 
     /// Whether each word of the query matches one folded text, or a word of
@@ -972,16 +954,8 @@ impl Tiers {
     /// most `typos` typos, starts, and how many of its letters `word` stands
     /// for. Only the words starting with `word`'s first letter are copied
     /// out, and of each only as much as could be near it.
-    fn nearest(
-        &mut self,
-        text: Text,
-        word: &[char],
-        whole: bool,
-        typos: usize,
-    ) -> Option<(usize, usize)> {
-        let Tiers {
-            chars, distances, ..
-        } = self;
+    fn nearest(&mut self, text: Text, word: &[char], whole: bool, typos: usize) -> Option<(usize, usize)> {
+        let Tiers { chars, distances, .. } = self;
         let most = word.len() + typos + 1;
         with_chars!(text.chars, |all| {
             text.starts.iter().find_map(|&at| {
@@ -1072,19 +1046,14 @@ fn past_symbols<C: Char>(chars: &[C]) -> &[C] {
 /// How well one word of a query matches a folded text.
 fn word_tier(text: Text, word: &[char], whole: bool) -> Option<Tier> {
     debug_assert!(!word.is_empty());
-    with_chars!(text.chars, |chars| {
-        word_in(chars, text.starts, word, whole)
-    })
+    with_chars!(text.chars, |chars| { word_in(chars, text.starts, word, whole) })
 }
 
 fn word_in<C: Char>(chars: &[C], starts: &[u32], word: &[char], whole: bool) -> Option<Tier> {
     if word.len() >= 2 && !whole {
-        let initials = starts.windows(word.len()).any(|starts| {
-            starts
-                .iter()
-                .zip(word)
-                .all(|(&at, &c)| chars[at as usize].char() == c)
-        });
+        let initials = starts
+            .windows(word.len())
+            .any(|starts| starts.iter().zip(word).all(|(&at, &c)| chars[at as usize].char() == c));
         if initials {
             return Some(Tier::Initials);
         }
@@ -1120,13 +1089,7 @@ fn word_in<C: Char>(chars: &[C], starts: &[u32], word: &[char], whole: bool) -> 
 /// alignment distance): all of them with `whole`, else those of the start
 /// nearest `word`, the longest of equally near ones. `None` if none is near
 /// enough. `distances` holds the table, a row per letter of `word`.
-fn within(
-    word: &[char],
-    text: &[char],
-    typos: usize,
-    whole: bool,
-    distances: &mut Vec<usize>,
-) -> Option<usize> {
+fn within(word: &[char], text: &[char], typos: usize, whole: bool, distances: &mut Vec<usize>) -> Option<usize> {
     // A longer start has more letters than typos to spare, and a shorter text
     // too few.
     let n = text.len().min(word.len() + typos);
@@ -1181,15 +1144,12 @@ fn one_letter(letter: char, text: Text) -> Option<Tier> {
     }
     let starts = with_chars!(text.chars, |chars| {
         if letter.is_alphanumeric() {
-            text.starts
-                .iter()
-                .any(|&at| chars[at as usize].char() == letter)
+            text.starts.iter().any(|&at| chars[at as usize].char() == letter)
         } else {
             // Words start only at letters and digits; anything else counts
             // after anything but one.
-            (0..chars.len()).any(|at| {
-                chars[at].char() == letter && (at == 0 || !chars[at - 1].char().is_alphanumeric())
-            })
+            (0..chars.len())
+                .any(|at| chars[at].char() == letter && (at == 0 || !chars[at - 1].char().is_alphanumeric()))
         }
     });
     starts.then_some(Tier::WordStart)
@@ -1240,11 +1200,7 @@ mod tests {
                 let mut starts = Vec::new();
                 let initials = starts_and_initials(&folded, original, &mut starts);
                 let mut expected = Vec::new();
-                word_starts(
-                    Utf32String::from(folded.as_str()).slice(..),
-                    original,
-                    &mut expected,
-                );
+                word_starts(Utf32String::from(folded.as_str()).slice(..), original, &mut expected);
                 assert_eq!(starts, expected, "{text:?}");
                 assert_eq!(initials, self::initials(&folded, original), "{text:?}");
             }

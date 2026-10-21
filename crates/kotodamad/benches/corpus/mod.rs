@@ -1,13 +1,15 @@
 //! 10k made-up Indexed items, the same on every run: about what an apps,
 //! files and projects index holds on a busy desktop.
 
-use kotodama_protocol::{Action, Item, ItemKind};
+use kotodama_protocol::Action;
+use kotodama_protocol::Item;
+use kotodama_protocol::ItemKind;
 
 pub const ITEMS: usize = 10_000;
 
 const SYLLABLES: [&str; 24] = [
-    "fi", "re", "fox", "ter", "mi", "nal", "code", "ka", "to", "da", "ma", "set", "tings", "vol",
-    "ume", "blue", "tooth", "net", "work", "wall", "pa", "per", "dis", "play",
+    "fi", "re", "fox", "ter", "mi", "nal", "code", "ka", "to", "da", "ma", "set", "tings", "vol", "ume", "blue",
+    "tooth", "net", "work", "wall", "pa", "per", "dis", "play",
 ];
 
 pub fn items() -> Vec<Item> {

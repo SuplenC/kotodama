@@ -11,17 +11,30 @@
 //! its id, Identity, keyword and Actions. The whole Item waits on a
 //! [`Shelf`], off the heap, until a Result shows it.
 
-use std::collections::{BTreeSet, HashMap};
+use std::collections::BTreeSet;
+use std::collections::HashMap;
 use std::io;
 use std::path::Path;
 use std::sync::Arc;
 
 use kotodama_protocol::Item;
+use nucleo_matcher::Matcher;
+use nucleo_matcher::Utf32Str;
+use nucleo_matcher::Utf32String;
 use nucleo_matcher::pattern::Pattern;
-use nucleo_matcher::{Matcher, Utf32Str, Utf32String};
 
-use crate::payload::{Place, Shelf, encode};
-use crate::rank::{BLOCK, Filter, Folded, Letters, Mask, Matched, Searched, Text, Texts};
+use crate::payload::Place;
+use crate::payload::Shelf;
+use crate::payload::encode;
+use crate::rank::BLOCK;
+use crate::rank::Filter;
+use crate::rank::Folded;
+use crate::rank::Letters;
+use crate::rank::Mask;
+use crate::rank::Matched;
+use crate::rank::Searched;
+use crate::rank::Text;
+use crate::rank::Texts;
 
 /// Where an Item lives in its Segment. Stable until the Item is removed, and
 /// not taken by another Item until the change after that.
@@ -311,28 +324,29 @@ impl Segment {
             .identity
             .as_deref()
             .map(|identity| list(&mut self.identities, identity, row));
-        let actions =
-            item.actions
-                .iter()
-                .map(|action| {
-                    let n =
-                        match self.offered.iter().position(|offered| {
-                            offered.kind == kind && *offered.action == *action.id
-                        }) {
-                            Some(n) => n,
-                            None => {
-                                self.offered.push(Offered {
-                                    kind,
-                                    action: action.id.as_str().into(),
-                                    rows: BTreeSet::new(),
-                                });
-                                self.offered.len() - 1
-                            }
-                        };
-                    self.offered[n].rows.insert(row);
-                    n as u32
-                })
-                .collect();
+        let actions = item
+            .actions
+            .iter()
+            .map(|action| {
+                let n = match self
+                    .offered
+                    .iter()
+                    .position(|offered| offered.kind == kind && *offered.action == *action.id)
+                {
+                    Some(n) => n,
+                    None => {
+                        self.offered.push(Offered {
+                            kind,
+                            action: action.id.as_str().into(),
+                            rows: BTreeSet::new(),
+                        });
+                        self.offered.len() - 1
+                    }
+                };
+                self.offered[n].rows.insert(row);
+                n as u32
+            })
+            .collect();
         encode(&item, &mut shelved.item);
         let place = Place {
             at: shelved.at + shelved.bytes.len() as u64,
@@ -396,10 +410,7 @@ impl Segment {
         if shelved.bytes.is_empty() {
             return;
         }
-        let shelf = Arc::clone(
-            self.shelf
-                .get_or_insert_with(|| Shelf::new(self.dir.as_deref())),
-        );
+        let shelf = Arc::clone(self.shelf.get_or_insert_with(|| Shelf::new(self.dir.as_deref())));
         let Err(err) = shelf.put(shelved.at, &shelved.bytes) else {
             return;
         };
@@ -489,8 +500,7 @@ impl Segment {
                 continue;
             }
             let keys = self.keys[at];
-            let starts = keys.starts as usize
-                ..(keys.starts + keys.title_starts + keys.words_starts) as usize;
+            let starts = keys.starts as usize..(keys.starts + keys.title_starts + keys.words_starts) as usize;
             let moved = Keys {
                 title: self.copy_text(&ascii, &wide, keys.title),
                 words: self.copy_text(&ascii, &wide, keys.words),
@@ -576,11 +586,7 @@ impl Segment {
     /// a block in one vectorised loop; past the last row they are empty, and
     /// never found. Only the rows found are read further.
     #[inline]
-    pub fn rows_where(
-        &self,
-        test: impl Fn(&[Letters; BLOCK], &[Letters; BLOCK]) -> Mask,
-        mut found: impl FnMut(Row),
-    ) {
+    pub fn rows_where(&self, test: impl Fn(&[Letters; BLOCK], &[Letters; BLOCK]) -> Mask, mut found: impl FnMut(Row)) {
         let (letters, letters_left) = self.every_letter.as_chunks::<BLOCK>();
         let (initials, initials_left) = self.initials.as_chunks::<BLOCK>();
         for (n, (letters, initials)) in letters.iter().zip(initials).enumerate() {
@@ -591,11 +597,7 @@ impl Segment {
             last.0[..letters_left.len()].copy_from_slice(letters_left);
             last.1[..initials_left.len()].copy_from_slice(initials_left);
             let filled = (1 << letters_left.len()) - 1;
-            each_bit(
-                test(&last.0, &last.1) & filled,
-                letters.len() * BLOCK,
-                &mut found,
-            );
+            each_bit(test(&last.0, &last.1) & filled, letters.len() * BLOCK, &mut found);
         }
     }
 
@@ -631,12 +633,11 @@ impl Segment {
 
     /// The rows whose Item, of kind `kind`, offers the Action `action`, in row order.
     pub fn offering<'a>(&'a self, kind: &str, action: &str) -> impl Iterator<Item = Row> + 'a {
-        let offered = self.offered.iter().find(|offered| {
-            self.kinds[offered.kind as usize] == kind && *offered.action == *action
-        });
-        offered
-            .into_iter()
-            .flat_map(|offered| offered.rows.iter().copied())
+        let offered = self
+            .offered
+            .iter()
+            .find(|offered| self.kinds[offered.kind as usize] == kind && *offered.action == *action);
+        offered.into_iter().flat_map(|offered| offered.rows.iter().copied())
     }
 
     /// Scores the Item in `row`, if there is one, as [`Texts::score`] does,
@@ -765,8 +766,10 @@ fn unlist(lists: &mut HashMap<Arc<str>, Vec<Row>>, name: &str, row: Row) {
 
 #[cfg(test)]
 mod tests {
+    use kotodama_protocol::Action;
+    use kotodama_protocol::ItemKind;
+
     use super::*;
-    use kotodama_protocol::{Action, ItemKind};
 
     fn item(id: &str, title: &str, actions: &[&str]) -> Item {
         Item {

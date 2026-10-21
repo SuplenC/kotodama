@@ -2,13 +2,20 @@
 
 use std::io;
 use std::net::Shutdown;
-use std::os::unix::net::{UnixListener, UnixStream};
+use std::os::unix::net::UnixListener;
+use std::os::unix::net::UnixStream;
 use std::path::Path;
 use std::sync::mpsc::Sender;
 
-use kotodama_protocol::{Channel, Error, FromFrontEnd, Hello, WireFormat};
+use kotodama_protocol::Channel;
+use kotodama_protocol::Error;
+use kotodama_protocol::FromFrontEnd;
+use kotodama_protocol::Hello;
+use kotodama_protocol::WireFormat;
 
-use crate::daemon::{Event, FrontEndId, HANDSHAKE_TIMEOUT};
+use crate::daemon::Event;
+use crate::daemon::FrontEndId;
+use crate::daemon::HANDSHAKE_TIMEOUT;
 use crate::host::spawn;
 use crate::link::pump;
 
@@ -31,7 +38,9 @@ pub fn listen(path: &Path) -> io::Result<UnixListener> {
 #[cfg(target_os = "linux")]
 fn activated() -> Option<UnixListener> {
     use std::env;
-    use std::os::fd::{BorrowedFd, FromRawFd, RawFd};
+    use std::os::fd::BorrowedFd;
+    use std::os::fd::FromRawFd;
+    use std::os::fd::RawFd;
 
     const SD_LISTEN_FDS_START: RawFd = 3;
     let pid: u32 = env::var("LISTEN_PID").ok()?.parse().ok()?;
@@ -103,15 +112,9 @@ pub fn serve(listener: UnixListener, events: Sender<Event>) {
 
 fn connection(id: FrontEndId, stream: UnixStream, events: &Sender<Event>) -> Result<(), Error> {
     // A Front end that connects and never says hello mustn't hold a thread.
-    stream
-        .set_read_timeout(Some(HANDSHAKE_TIMEOUT))
-        .map_err(Error::Io)?;
-    let channel = Channel::accept(
-        stream.try_clone().map_err(Error::Io)?,
-        stream.try_clone().map_err(Error::Io)?,
-        &Hello::new(&WireFormat::ALL),
-    )?;
-    stream.set_read_timeout(None).map_err(Error::Io)?;
+    stream.set_read_timeout(Some(HANDSHAKE_TIMEOUT))?;
+    let channel = Channel::accept(stream.try_clone()?, stream.try_clone()?, &Hello::new(&WireFormat::ALL))?;
+    stream.set_read_timeout(None)?;
     pump(
         &format!("front-end-{}", id.0),
         channel,
@@ -127,10 +130,7 @@ fn connection(id: FrontEndId, stream: UnixStream, events: &Sender<Event>) -> Res
             });
         },
         |message: FromFrontEnd| {
-            let _ = events.send(Event::FromFrontEnd {
-                front_end: id,
-                message,
-            });
+            let _ = events.send(Event::FromFrontEnd { front_end: id, message });
         },
         None,
     )

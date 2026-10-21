@@ -4,22 +4,23 @@
 //!
 //! # Owns
 //!
-//! - [`KEYS`], and printing them ([`print_schema`]) or the merged config
-//!   ([`print_config`]).
+//! - [`KEYS`], and printing them ([`print_schema`]) or the merged config ([`print_config`]).
 //!
 //! # Not here
 //!
-//! - Reading each key: its table's owner (`engine.rs`, `paths.rs`,
-//!   `history.rs`, `empty_query.rs`, `kind_order.rs`, `keywords.rs`,
-//!   `configured.rs`, `apps.rs`).
+//! - Reading each key: its table's owner (`engine.rs`, `paths.rs`, `history.rs`, `empty_query.rs`,
+//!   `kind_order.rs`, `keywords.rs`, `configured.rs`, `apps.rs`).
 
 use std::io;
 use std::io::Write;
 use std::path::Path;
 
-use kotodama_protocol::{Table, Value};
+use kotodama_protocol::Table;
+use kotodama_protocol::Value;
 
-use crate::config::{self, Sources, to_toml};
+use crate::config;
+use crate::config::Sources;
+use crate::config::to_toml;
 use crate::paths::Paths;
 
 /// One key of the config.
@@ -261,12 +262,7 @@ pub fn print_schema(out: &mut impl Write) -> io::Result<()> {
 /// # Errors
 ///
 /// When `out` can't be written.
-pub fn print_config(
-    config: &Table,
-    sources: &Sources,
-    paths: &Paths,
-    out: &mut impl Write,
-) -> io::Result<()> {
+pub fn print_config(config: &Table, sources: &Sources, paths: &Paths, out: &mut impl Write) -> io::Result<()> {
     for (what, dirs) in [
         ("Config directories", &paths.config_dirs),
         ("Extension directories", &paths.extension_dirs),
@@ -311,13 +307,7 @@ fn defaults(paths: &Paths) -> Table {
 
 /// Writes `table`, whose dotted name is `name` as `sources` has it and
 /// `header` as TOML writes it.
-fn print_table(
-    table: &Table,
-    name: &str,
-    header: &str,
-    sources: &Sources,
-    out: &mut impl Write,
-) -> io::Result<()> {
+fn print_table(table: &Table, name: &str, header: &str, sources: &Sources, out: &mut impl Write) -> io::Result<()> {
     let leaves: Vec<_> = table
         .iter()
         .filter(|(_, value)| !matches!(value, Value::Table(_)))
@@ -359,10 +349,7 @@ fn dotted(prefix: &str, key: &str) -> String {
 
 /// `key` as TOML writes it: bare if it can be, else quoted.
 fn toml_key(key: &str) -> String {
-    let bare = !key.is_empty()
-        && key
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-');
+    let bare = !key.is_empty() && key.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-');
     if bare {
         key.to_owned()
     } else {
@@ -376,7 +363,8 @@ mod tests {
 
     use super::*;
     use crate::empty_query::EmptyQuery;
-    use crate::engine::{self, Engine};
+    use crate::engine;
+    use crate::engine::Engine;
     use crate::history::Settings;
     use crate::kind_order::KindOrder;
     use crate::paths::Overrides;
@@ -439,15 +427,11 @@ mod tests {
         let out = String::from_utf8(out).unwrap();
         assert!(out.contains("[search]\nfallbacks = true  # default\nnear_misses = true  # default\nrows = 6  # /home/me/.config/kotodama/config.toml\n"), "{out}");
         assert!(
-            out.contains(
-                "[aliases.ff]\nextension = \"apps\"  # /home/me/.config/kotodama/config.toml\n"
-            ),
+            out.contains("[aliases.ff]\nextension = \"apps\"  # /home/me/.config/kotodama/config.toml\n"),
             "{out}"
         );
         assert!(
-            out.contains(
-                "[aliases.\"g+\"]\nextension = \"web\"  # /home/me/.config/kotodama/config.toml\n"
-            ),
+            out.contains("[aliases.\"g+\"]\nextension = \"web\"  # /home/me/.config/kotodama/config.toml\n"),
             "{out}"
         );
         assert!(
@@ -464,13 +448,7 @@ mod tests {
         print_schema(&mut out).unwrap();
 
         let out = String::from_utf8(out).unwrap();
-        assert!(
-            out.contains("search.rows = 10\n    Rows a Front end shows"),
-            "{out}"
-        );
-        assert!(
-            out.contains("paths.socket\n    Where Front ends connect."),
-            "{out}"
-        );
+        assert!(out.contains("search.rows = 10\n    Rows a Front end shows"), "{out}");
+        assert!(out.contains("paths.socket\n    Where Front ends connect."), "{out}");
     }
 }

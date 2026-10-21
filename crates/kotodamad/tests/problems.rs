@@ -9,19 +9,16 @@ use std::time::Duration;
 use common::*;
 use kotodama_protocol::*;
 use kotodamad::config;
-use kotodamad::daemon::{Ended, Event, ExtensionId};
+use kotodamad::daemon::Ended;
+use kotodamad::daemon::Event;
+use kotodamad::daemon::ExtensionId;
 use kotodamad::discovery::Discovered;
 
 /// What each problem in the last Status `messages` hold is about, or `None`
 /// without a Status.
 fn last_problems(messages: &[ToFrontEnd]) -> Option<Vec<String>> {
     messages.iter().rev().find_map(|message| match message {
-        ToFrontEnd::Status { problems, .. } => Some(
-            problems
-                .iter()
-                .map(|problem| problem.about.clone())
-                .collect(),
-        ),
+        ToFrontEnd::Status { problems, .. } => Some(problems.iter().map(|problem| problem.about.clone()).collect()),
         _ => None,
     })
 }
@@ -29,12 +26,10 @@ fn last_problems(messages: &[ToFrontEnd]) -> Option<Vec<String>> {
 /// The Markdown of the Detail View `message` pushes or updates, if it does.
 fn markdown(message: &ToFrontEnd) -> Option<&str> {
     match message {
-        ToFrontEnd::PushView { view, .. } | ToFrontEnd::UpdateView { view, .. } => {
-            match &view.content {
-                ViewContent::Detail { markdown, .. } => Some(markdown),
-                _ => None,
-            }
-        }
+        ToFrontEnd::PushView { view, .. } | ToFrontEnd::UpdateView { view, .. } => match &view.content {
+            ViewContent::Detail { markdown, .. } => Some(markdown),
+            _ => None,
+        },
         _ => None,
     }
 }
@@ -54,10 +49,7 @@ fn a_front_end_hears_of_every_problem_as_it_connects() {
 
     assert_eq!(
         last_problems(&greeting),
-        Some(vec![
-            "history.half_life_days".to_owned(),
-            "keyword `gh`".to_owned()
-        ])
+        Some(vec!["history.half_life_days".to_owned(), "keyword `gh`".to_owned()])
     );
 }
 
@@ -140,10 +132,7 @@ fn an_extension_that_cant_start_is_a_problem_and_isnt_restarted() {
     h.advance(Duration::from_secs(600));
 
     assert_eq!(h.launches.0.borrow().len(), 1);
-    assert_eq!(
-        last_problems(&ui.drain()),
-        Some(vec!["extension apps".to_owned()])
-    );
+    assert_eq!(last_problems(&ui.drain()), Some(vec!["extension apps".to_owned()]));
 }
 
 #[test]
@@ -199,10 +188,7 @@ fn the_own_problems_item_opens_a_list_that_stays_up_to_date() {
 
     run(&mut h, &ui, "kotodama", "problems", "kotodama", "show");
     let pushed = ui.drain();
-    let list = pushed
-        .iter()
-        .find_map(markdown)
-        .expect("the list is pushed");
+    let list = pushed.iter().find_map(markdown).expect("the list is pushed");
     assert!(list.contains("history.time\\_of\\_day"), "{list}");
 
     h.event(Event::Config(Table::new()));

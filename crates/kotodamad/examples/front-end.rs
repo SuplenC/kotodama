@@ -17,9 +17,13 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 use std::time::Duration;
 
-use kotodama_protocol::{
-    ActionRef, Channel, FromFrontEnd, Hello, ResultRef, ToFrontEnd, WireFormat,
-};
+use kotodama_protocol::ActionRef;
+use kotodama_protocol::Channel;
+use kotodama_protocol::FromFrontEnd;
+use kotodama_protocol::Hello;
+use kotodama_protocol::ResultRef;
+use kotodama_protocol::ToFrontEnd;
+use kotodama_protocol::WireFormat;
 
 fn main() -> ExitCode {
     let mut args: Vec<String> = env::args().skip(1).collect();
@@ -46,17 +50,12 @@ fn main() -> ExitCode {
     }
 }
 
-fn front_end(
-    query: &str,
-    app: bool,
-    run: Option<Option<String>>,
-) -> Result<(), Box<dyn std::error::Error>> {
-    let socket = PathBuf::from(env::var_os("XDG_RUNTIME_DIR").ok_or("XDG_RUNTIME_DIR isn't set")?)
-        .join("kotodama.sock");
+fn front_end(query: &str, app: bool, run: Option<Option<String>>) -> Result<(), Box<dyn std::error::Error>> {
+    let socket =
+        PathBuf::from(env::var_os("XDG_RUNTIME_DIR").ok_or("XDG_RUNTIME_DIR isn't set")?).join("kotodama.sock");
     let stream = UnixStream::connect(&socket)?;
     stream.set_read_timeout(Some(Duration::from_secs(10)))?;
-    let mut channel =
-        Channel::handshake(stream.try_clone()?, stream, &Hello::new(&WireFormat::ALL))?;
+    let mut channel = Channel::handshake(stream.try_clone()?, stream, &Hello::new(&WireFormat::ALL))?;
 
     if app {
         let word = query.split_whitespace().next().unwrap_or_default();
@@ -68,9 +67,7 @@ fn front_end(
     channel.send(&FromFrontEnd::Query { text: query.into() })?;
     let (shown, results) = loop {
         match channel.recv()?.ok_or("the Daemon hung up")? {
-            ToFrontEnd::Results {
-                version, results, ..
-            } => break (version, results),
+            ToFrontEnd::Results { version, results, .. } => break (version, results),
             ToFrontEnd::Status { down, .. } if !down.is_empty() => {
                 eprintln!("down: {}", down.join(", "))
             }

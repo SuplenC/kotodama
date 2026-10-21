@@ -5,12 +5,16 @@
 //! - [`Pick`], what runs once the user picks, and [`view`], the list.
 //!
 //! # Not here
-//! - Showing, filtering and running a pick: `daemon.rs:Daemon::offer_pick`
-//!   and the `FromFrontEnd` arms that call `Daemon::run_pick`.
+//! - Showing, filtering and running a pick: `daemon.rs:Daemon::offer_pick` and the `FromFrontEnd`
+//!   arms that call `Daemon::run_pick`.
 
 use std::collections::BTreeMap;
 
-use kotodama_protocol::{Action, ActionRef, Item, View, ViewContent};
+use kotodama_protocol::Action;
+use kotodama_protocol::ActionRef;
+use kotodama_protocol::Item;
+use kotodama_protocol::View;
+use kotodama_protocol::ViewContent;
 
 use crate::daemon::ExtensionId;
 

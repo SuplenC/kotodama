@@ -49,9 +49,7 @@ fn parse(args: &[String]) -> Option<(Option<PathBuf>, Command)> {
     let command = match rest {
         [] => Command::Run,
         [config] if config == "config" => Command::Config { schema: false },
-        [config, schema] if config == "config" && schema == "--schema" => {
-            Command::Config { schema: true }
-        }
+        [config, schema] if config == "config" && schema == "--schema" => Command::Config { schema: true },
         _ => return None,
     };
     Some((config_dir, command))

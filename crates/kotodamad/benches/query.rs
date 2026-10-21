@@ -6,15 +6,20 @@
 //! list View of 10k Items the Daemon filters.
 
 use std::hint::black_box;
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use std::time::Instant;
 
-use criterion::{Criterion, criterion_group, criterion_main};
+use criterion::Criterion;
+use criterion::criterion_group;
+use criterion::criterion_main;
 use kotodamad::history::History;
 
 mod corpus;
 mod setup;
 
-use setup::{APPS, CLIPBOARD, Setup};
+use setup::APPS;
+use setup::CLIPBOARD;
+use setup::Setup;
 
 /// Typing on: each keystroke narrows the last one's matches.
 fn next_keystroke(setup: &mut Setup, word: &str) -> impl FnMut() -> usize {
@@ -78,10 +83,7 @@ fn bench(c: &mut Criterion) {
     let mut group = c.benchmark_group("staleness");
     let clips = corpus::long_titles(1000, 60, 1);
     let apps = corpus::items();
-    for (name, extension, batch) in [
-        ("1k_clips", CLIPBOARD, &clips),
-        ("10k_apps_rescanned", APPS, &apps),
-    ] {
+    for (name, extension, batch) in [("1k_clips", CLIPBOARD, &clips), ("10k_apps_rescanned", APPS, &apps)] {
         group.bench_function(name, |b| {
             b.iter_custom(|iters| {
                 let mut total = Duration::ZERO;
@@ -103,9 +105,7 @@ fn bench(c: &mut Criterion) {
     let mut group = c.benchmark_group("query_10k_items");
     // Opening the menu: the Results most used at this time of day.
     let mut setup = Setup::picked();
-    group.bench_function("empty_query_2k_picked", |b| {
-        b.iter(|| black_box(setup.query("")))
-    });
+    group.bench_function("empty_query_2k_picked", |b| b.iter(|| black_box(setup.query(""))));
     group.finish();
 
     // The first keystroke after the menu opens, with the CPU cache taken by

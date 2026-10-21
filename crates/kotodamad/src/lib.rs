@@ -37,12 +37,18 @@ mod views;
 
 use std::io::Write;
 use std::path::PathBuf;
-use std::sync::mpsc::{self, RecvTimeoutError, Sender};
-use std::time::{Duration, Instant};
+use std::sync::mpsc;
+use std::sync::mpsc::RecvTimeoutError;
+use std::sync::mpsc::Sender;
+use std::time::Duration;
+use std::time::Instant;
 
-use daemon::{Daemon, Event};
-use kotodama_extension::watch::{RecursiveMode, Watcher};
-use paths::{Overrides, Paths};
+use daemon::Daemon;
+use daemon::Event;
+use kotodama_extension::watch::RecursiveMode;
+use kotodama_extension::watch::Watcher;
+use paths::Overrides;
+use paths::Paths;
 use problem::Report;
 
 /// How long the directories of programs that couldn't start must stay still
@@ -101,8 +107,7 @@ pub fn run(paths: &Paths) -> Result<(), String> {
             .join(", ")
     );
 
-    let listener = server::listen(&paths.socket)
-        .map_err(|err| format!("{}: {err}", paths.socket.display()))?;
+    let listener = server::listen(&paths.socket).map_err(|err| format!("{}: {err}", paths.socket.display()))?;
     let (events_tx, events) = mpsc::channel();
     let _watcher = config::watch(paths.config_dirs.clone(), events_tx.clone())
         .map_err(|err| log::error!("not watching the config directory: {err}"))
@@ -110,10 +115,7 @@ pub fn run(paths: &Paths) -> Result<(), String> {
     let mut _extension_watcher = watch_extensions(&paths.extension_dirs, &events_tx);
     // What `[paths]` said of the Extension directories when they were last
     // read.
-    let mut extension_overrides = (
-        started_with.extension_dirs.clone(),
-        started_with.default_extension_dirs,
-    );
+    let mut extension_overrides = (started_with.extension_dirs.clone(), started_with.default_extension_dirs);
     let programs_watcher = watch_programs(events_tx.clone())
         .map_err(|err| log::error!("not watching for programs that couldn't start: {err}"))
         .ok();
@@ -147,13 +149,11 @@ pub fn run(paths: &Paths) -> Result<(), String> {
     }
     loop {
         let event = match daemon.next_wake() {
-            Some(deadline) => {
-                match events.recv_timeout(deadline.saturating_duration_since(Instant::now())) {
-                    Ok(event) => Some(event),
-                    Err(RecvTimeoutError::Timeout) => None,
-                    Err(RecvTimeoutError::Disconnected) => return Ok(()),
-                }
-            }
+            Some(deadline) => match events.recv_timeout(deadline.saturating_duration_since(Instant::now())) {
+                Ok(event) => Some(event),
+                Err(RecvTimeoutError::Timeout) => None,
+                Err(RecvTimeoutError::Disconnected) => return Ok(()),
+            },
             None => match events.recv() {
                 Ok(event) => Some(event),
                 Err(_) => return Ok(()),
@@ -172,10 +172,7 @@ pub fn run(paths: &Paths) -> Result<(), String> {
                 if (&now_says.extension_dirs, now_says.default_extension_dirs)
                     != (&extension_overrides.0, extension_overrides.1)
                 {
-                    extension_overrides = (
-                        now_says.extension_dirs.clone(),
-                        now_says.default_extension_dirs,
-                    );
+                    extension_overrides = (now_says.extension_dirs.clone(), now_says.default_extension_dirs);
                     let dirs = paths::extension_dirs(&paths.config_dirs, now_says);
                     log::info!("reading Extensions from {}", joined(&dirs));
                     _extension_watcher = watch_extensions(&dirs, &rediscover);
@@ -233,12 +230,8 @@ pub fn print_config(config_dirs: Vec<PathBuf>, schema: bool) -> Result<(), Strin
     if schema {
         return schema::print_schema(&mut out).map_err(|err| err.to_string());
     }
-    let (config, sources) =
-        config::load_with_sources(&config_dirs).map_err(|err| err.to_string())?;
-    let paths = Paths::new(
-        config_dirs,
-        &Overrides::from_config(&config, &mut Report::silent()),
-    )?;
+    let (config, sources) = config::load_with_sources(&config_dirs).map_err(|err| err.to_string())?;
+    let paths = Paths::new(config_dirs, &Overrides::from_config(&config, &mut Report::silent()))?;
     schema::print_config(&config, &sources, &paths, &mut out).map_err(|err| err.to_string())?;
     out.flush().map_err(|err| err.to_string())
 }

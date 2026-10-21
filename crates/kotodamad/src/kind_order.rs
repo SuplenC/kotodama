@@ -1,7 +1,11 @@
 //! Which kinds of Result come first when two match a query equally well: apps
 //! before projects, projects before bookmarks, and bookmarks before files.
 
-use kotodama_protocol::{ItemKind, KindName, SHARED_KINDS, Table, Value};
+use kotodama_protocol::ItemKind;
+use kotodama_protocol::KindName;
+use kotodama_protocol::SHARED_KINDS;
+use kotodama_protocol::Table;
+use kotodama_protocol::Value;
 
 use crate::problem::Report;
 
@@ -41,10 +45,7 @@ impl KindOrder {
     /// past the 255th are left out.
     fn new(kinds: &[&str]) -> Self {
         let kinds = &kinds[..kinds.len().min(usize::from(u8::MAX))];
-        let others = kinds
-            .iter()
-            .position(|&kind| kind == OTHERS)
-            .unwrap_or(kinds.len()) as u8;
+        let others = kinds.iter().position(|&kind| kind == OTHERS).unwrap_or(kinds.len()) as u8;
         let mut order = KindOrder {
             shared: [others; SHARED_KINDS.len()],
             namespaced: Vec::new(),
@@ -90,10 +91,7 @@ impl KindOrder {
                         if names.len() > kept {
                             report.add(
                                 "ranking.kinds",
-                                format!(
-                                    "names {} kinds, more than {kept}; the rest are left out",
-                                    names.len()
-                                ),
+                                format!("names {} kinds, more than {kept}; the rest are left out", names.len()),
                             );
                         }
                         order = KindOrder::new(&names);

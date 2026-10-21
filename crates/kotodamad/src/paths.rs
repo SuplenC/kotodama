@@ -25,9 +25,11 @@
 //! - Re-reading the Extension directories when `[paths]` changes: `lib.rs`.
 
 use std::env;
-use std::path::{Path, PathBuf};
+use std::path::Path;
+use std::path::PathBuf;
 
-use kotodama_protocol::{Table, Value};
+use kotodama_protocol::Table;
+use kotodama_protocol::Value;
 
 use crate::problem::Report;
 
@@ -159,8 +161,7 @@ impl Paths {
             Some(socket) => PathBuf::from(socket),
             None => match &overrides.socket {
                 Some(socket) => socket.clone(),
-                None => kotodama_protocol::socket_path()
-                    .ok_or("XDG_RUNTIME_DIR isn't set, nor `[paths] socket`")?,
+                None => kotodama_protocol::socket_path().ok_or("XDG_RUNTIME_DIR isn't set, nor `[paths] socket`")?,
             },
         };
         let state = match &overrides.state_dir {
@@ -207,17 +208,10 @@ fn path(value: &Value) -> Result<PathBuf, &'static str> {
         return Err(WANTED);
     };
     let path = match text.strip_prefix("~/") {
-        Some(rest) => {
-            PathBuf::from(env::var_os("HOME").ok_or("starts with `~/`, but HOME isn't set")?)
-                .join(rest)
-        }
+        Some(rest) => PathBuf::from(env::var_os("HOME").ok_or("starts with `~/`, but HOME isn't set")?).join(rest),
         None => PathBuf::from(text),
     };
-    if path.is_absolute() {
-        Ok(path)
-    } else {
-        Err(WANTED)
-    }
+    if path.is_absolute() { Ok(path) } else { Err(WANTED) }
 }
 
 /// `$var`, or `fallback` in the home directory when it is unset or empty.
@@ -300,10 +294,7 @@ mod tests {
         );
 
         overrides.default_extension_dirs = false;
-        assert_eq!(
-            extension_dirs(&config_dirs, &overrides),
-            [PathBuf::from("/opt/ext")]
-        );
+        assert_eq!(extension_dirs(&config_dirs, &overrides), [PathBuf::from("/opt/ext")]);
     }
 
     #[test]

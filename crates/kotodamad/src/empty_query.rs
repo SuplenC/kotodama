@@ -1,7 +1,8 @@
 //! The Empty query: the Results most used at this time of day, then the Fixed
 //! menu, or without one the apps.
 
-use kotodama_protocol::{Table, Value};
+use kotodama_protocol::Table;
+use kotodama_protocol::Value;
 
 use crate::history::ResultKey;
 use crate::keywords::string;

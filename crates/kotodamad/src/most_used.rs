@@ -4,15 +4,14 @@
 //!
 //! # Owns
 //!
-//! - [`Picked`]: the picked Indexed items and their picks, as of one Index
-//!   and History version.
+//! - [`Picked`]: the picked Indexed items and their picks, as of one Index and History version.
 //! - [`Usage`]: everything the most used Results rank by, and the ranking.
 //! - [`Ahead`]: the rankings made ahead, and when one stands for now.
 //!
 //! # Not here
 //!
-//! - Gathering the picks from the History and the Index:
-//!   `Daemon::cache_frecent` and `Daemon::usage`.
+//! - Gathering the picks from the History and the Index: `Daemon::cache_frecent` and
+//!   `Daemon::usage`.
 //! - The Fixed menu that follows them: `Daemon::empty_query`.
 
 use std::collections::HashMap;
@@ -21,8 +20,12 @@ use std::sync::Arc;
 
 use crate::clock::When;
 use crate::daemon::Source;
-use crate::history::{self, Frecent, Habit, Picks};
-use crate::index::{Slot, SlotHasher};
+use crate::history;
+use crate::history::Frecent;
+use crate::history::Habit;
+use crate::history::Picks;
+use crate::index::Slot;
+use crate::index::SlotHasher;
 
 /// What a pick the History kept counts for, for one Indexed item.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -143,8 +146,7 @@ impl Usage {
             }
         }
 
-        let mut stands_for: HashMap<Slot, usize, BuildHasherDefault<SlotHasher>> =
-            HashMap::default();
+        let mut stands_for: HashMap<Slot, usize, BuildHasherDefault<SlotHasher>> = HashMap::default();
         let mut keep = vec![true; most.len()];
         for n in 0..most.len() {
             let Some(group) = most[n].group else {
@@ -200,9 +202,7 @@ impl Ahead {
         self.ranked
             .iter()
             .find(|(ranked, _)| {
-                history::part_of_day(*ranked) == part
-                    && ranked.at <= when.at
-                    && when.at - ranked.at <= fresh_secs
+                history::part_of_day(*ranked) == part && ranked.at <= when.at && when.at - ranked.at <= fresh_secs
             })
             .map(|(_, sources)| sources.as_slice())
     }

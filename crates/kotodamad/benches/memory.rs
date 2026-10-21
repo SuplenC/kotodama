@@ -8,16 +8,28 @@
 //! them with the baseline like the Daemon's resident memory (see
 //! `scripts/bench-compare`).
 
-use std::alloc::{GlobalAlloc, Layout, System};
+use std::alloc::GlobalAlloc;
+use std::alloc::Layout;
+use std::alloc::System;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::AtomicUsize;
+use std::sync::atomic::Ordering;
 use std::sync::mpsc;
 use std::time::Instant;
 
-use kotodama_protocol::{FromExtension, Item, Manifest, Table};
-use kotodamad::daemon::{Daemon, Desktop, Event, ExtensionId, Launcher, Output};
+use kotodama_protocol::FromExtension;
+use kotodama_protocol::Item;
+use kotodama_protocol::Manifest;
+use kotodama_protocol::Table;
+use kotodamad::daemon::Daemon;
+use kotodamad::daemon::Desktop;
+use kotodamad::daemon::Event;
+use kotodamad::daemon::ExtensionId;
+use kotodamad::daemon::Launcher;
+use kotodamad::daemon::Output;
 use kotodamad::discovery::Found;
-use kotodamad::history::{History, Store};
+use kotodamad::history::History;
+use kotodamad::history::Store;
 use kotodamad::usage::Entry;
 
 mod corpus;
@@ -122,10 +134,7 @@ fn main() {
         ("index/emoji/heap", "emoji", kotodama_emoji::items),
     ];
     for (bench, name, items) in corpora {
-        if filter
-            .as_deref()
-            .is_some_and(|filter| !bench.contains(filter))
-        {
+        if filter.as_deref().is_some_and(|filter| !bench.contains(filter)) {
             continue;
         }
         let (bytes, count) = kept(name, items);

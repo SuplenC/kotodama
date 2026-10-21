@@ -56,10 +56,7 @@ fn every_extension_has_an_app_named_by_its_name_unless_its_manifest_chooses_a_wo
 
 #[test]
 fn the_search_reads_the_items_an_extension_means_for_it() {
-    assert_eq!(
-        emoji().searched(3),
-        [true, false, false, false, true, false]
-    );
+    assert_eq!(emoji().searched(3), [true, false, false, false, true, false]);
 }
 
 fn words_by_name(apps: &Apps, manifests: &[&str]) -> Vec<(String, String)> {
@@ -202,9 +199,7 @@ fn an_alias_over_a_quicklink_is_a_conflict() {
 
     assert_eq!(
         keywords.conflicts(),
-        [Conflict::QuicklinkUnderAlias {
-            keyword: "gh".into()
-        }]
+        [Conflict::QuicklinkUnderAlias { keyword: "gh".into() }]
     );
 }
 

@@ -4,8 +4,7 @@
 //!
 //! # Owns
 //!
-//! - Dropping reserved bindings from an Extension's messages and its
-//!   Contributed actions.
+//! - Dropping reserved bindings from an Extension's messages and its Contributed actions.
 //!
 //! # Not here
 //!
@@ -25,9 +24,7 @@ use kotodama_protocol::is_reserved_shortcut;
 pub fn release_message(message: &mut FromExtension) -> usize {
     match message {
         FromExtension::AddItems { items } => release_items(items),
-        FromExtension::LiveResults { results, .. } => {
-            release_items(results.iter_mut().map(|result| &mut result.item))
-        }
+        FromExtension::LiveResults { results, .. } => release_items(results.iter_mut().map(|result| &mut result.item)),
         FromExtension::PushView(view)
         | FromExtension::UpdateView(view)
         | FromExtension::ReplaceView { with: view, .. } => release_view(view),
@@ -55,10 +52,7 @@ pub fn release_actions<'a>(actions: impl IntoIterator<Item = &'a mut Action>) ->
 }
 
 fn release_items<'a>(items: impl IntoIterator<Item = &'a mut Item>) -> usize {
-    items
-        .into_iter()
-        .map(|item| release_actions(&mut item.actions))
-        .sum()
+    items.into_iter().map(|item| release_actions(&mut item.actions)).sum()
 }
 
 /// Only a list View's Items have Actions.

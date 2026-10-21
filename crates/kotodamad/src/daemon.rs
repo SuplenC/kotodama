@@ -8,47 +8,118 @@
 //! `kotodamad`.
 
 use std::cell::Cell;
-use std::collections::{BTreeMap, HashMap, HashSet};
-use std::path::{Path, PathBuf};
+use std::collections::BTreeMap;
+use std::collections::HashMap;
+use std::collections::HashSet;
+use std::path::Path;
+use std::path::PathBuf;
 use std::sync::Arc;
-use std::sync::mpsc::{Sender, SyncSender, TrySendError};
-use std::time::{Duration, Instant};
+use std::sync::mpsc::Sender;
+use std::sync::mpsc::SyncSender;
+use std::sync::mpsc::TrySendError;
+use std::time::Duration;
+use std::time::Instant;
 
-use kotodama_protocol::{
-    Action, ActionRef, CatalogEntry, Clipboard, FORGET_SHORTCUT, FromExtension, FromFrontEnd, Item,
-    ItemKind, Job, JobState, KindName, LiveResult, NamespacedKind, OfferedAction, Outcome, Problem,
-    ResultRef, Scope, ShownResult, Table, ToExtension, ToFrontEnd, View, ViewContent,
-};
-use nucleo_matcher::pattern::{CaseMatching, Normalization, Pattern};
-use nucleo_matcher::{Config, Matcher};
+use kotodama_protocol::Action;
+use kotodama_protocol::ActionRef;
+use kotodama_protocol::CatalogEntry;
+use kotodama_protocol::Clipboard;
+use kotodama_protocol::FORGET_SHORTCUT;
+use kotodama_protocol::FromExtension;
+use kotodama_protocol::FromFrontEnd;
+use kotodama_protocol::Item;
+use kotodama_protocol::ItemKind;
+use kotodama_protocol::Job;
+use kotodama_protocol::JobState;
+use kotodama_protocol::KindName;
+use kotodama_protocol::LiveResult;
+use kotodama_protocol::NamespacedKind;
+use kotodama_protocol::OfferedAction;
+use kotodama_protocol::Outcome;
+use kotodama_protocol::Problem;
+use kotodama_protocol::ResultRef;
+use kotodama_protocol::Scope;
+use kotodama_protocol::ShownResult;
+use kotodama_protocol::Table;
+use kotodama_protocol::ToExtension;
+use kotodama_protocol::ToFrontEnd;
+use kotodama_protocol::View;
+use kotodama_protocol::ViewContent;
+use nucleo_matcher::Config;
+use nucleo_matcher::Matcher;
+use nucleo_matcher::pattern::CaseMatching;
+use nucleo_matcher::pattern::Normalization;
+use nucleo_matcher::pattern::Pattern;
 
 use crate::apps::Apps;
 use crate::arguments;
-use crate::clock::{Clock, When};
-use crate::config::{self, extension_settings};
+use crate::clock::Clock;
+use crate::clock::When;
+use crate::config;
+use crate::config::extension_settings;
 use crate::configured;
-use crate::conflict::{self, Conflict};
-use crate::discovery::{Discovered, Found, Stamp};
+use crate::conflict;
+use crate::conflict::Conflict;
+use crate::discovery::Discovered;
+use crate::discovery::Found;
+use crate::discovery::Stamp;
 use crate::empty_query::EmptyQuery;
-use crate::engine::{self, DesktopSettings, Engine};
-use crate::history::{
-    self, Change, Frecent, Habit, History, IDENTITIES, Picks, ResultKey, Settings, Store, query_key,
-};
-use crate::index::{Index, ItemRef, Reach, SIDES, Slot};
-use crate::indexer::{Indexed, Indexer, Kept, Plan};
-use crate::keywords::{self, Alias, Keywords};
-use crate::kind_order::{KindOrder, KindPlaces};
-use crate::most_used::{Ahead, Counts, Other, Picked, Usage, Versions};
+use crate::engine;
+use crate::engine::DesktopSettings;
+use crate::engine::Engine;
+use crate::history;
+use crate::history::Change;
+use crate::history::Frecent;
+use crate::history::Habit;
+use crate::history::History;
+use crate::history::IDENTITIES;
+use crate::history::Picks;
+use crate::history::ResultKey;
+use crate::history::Settings;
+use crate::history::Store;
+use crate::history::query_key;
+use crate::index::Index;
+use crate::index::ItemRef;
+use crate::index::Reach;
+use crate::index::SIDES;
+use crate::index::Slot;
+use crate::indexer::Indexed;
+use crate::indexer::Indexer;
+use crate::indexer::Kept;
+use crate::indexer::Plan;
+use crate::keywords;
+use crate::keywords::Alias;
+use crate::keywords::Keywords;
+use crate::kind_order::KindOrder;
+use crate::kind_order::KindPlaces;
+use crate::most_used::Ahead;
+use crate::most_used::Counts;
+use crate::most_used::Other;
+use crate::most_used::Picked;
+use crate::most_used::Usage;
+use crate::most_used::Versions;
 use crate::narrowing::Narrowing;
-use crate::open_view::{Opening, ViewName};
+use crate::open_view::Opening;
+use crate::open_view::ViewName;
 use crate::paths::Overrides;
-use crate::pick::{self, PICK, Pick};
-use crate::problem::{self, Problems, Report};
-use crate::rank::{self, Haystack, Matched, Text, Tier, Tiers};
+use crate::pick;
+use crate::pick::PICK;
+use crate::pick::Pick;
+use crate::problem;
+use crate::problem::Problems;
+use crate::problem::Report;
+use crate::rank;
+use crate::rank::Haystack;
+use crate::rank::Matched;
+use crate::rank::Text;
+use crate::rank::Tier;
+use crate::rank::Tiers;
 use crate::reserved;
 use crate::segment::Edit;
-use crate::usage::{Entry, Used};
-use crate::views::{Open, Views};
+use crate::usage::Entry;
+use crate::usage::Used;
+use crate::views::Open;
+use crate::views::Views;
 
 /// The name the Daemon's own Results go by: Quicklinks and the Action that
 /// clears the History. No Extension may take it.
@@ -263,11 +334,7 @@ struct Status {
 
 /// Whether `found`'s Manifest makes it a fallback, such as web search.
 fn is_fallback(found: &Found) -> bool {
-    found
-        .manifest
-        .live_query
-        .as_ref()
-        .is_some_and(|live| live.fallback)
+    found.manifest.live_query.as_ref().is_some_and(|live| live.fallback)
 }
 
 impl Extension {
@@ -636,18 +703,12 @@ impl Session {
     /// prefix that routed it: in its app every query, routed by its first
     /// prefix if no prefix or trigger routes it, so the calculator answers
     /// whatever is typed in it as it does after `=`.
-    fn live_query(
-        &self,
-        id: ExtensionId,
-        ext: &Extension,
-        searched: &[bool],
-    ) -> Option<(String, Option<String>)> {
+    fn live_query(&self, id: ExtensionId, ext: &Extension, searched: &[bool]) -> Option<(String, Option<String>)> {
         if !self.asks(id, searched) {
             return None;
         }
-        ext.route(self.searched()).or_else(|| {
-            (self.reach == Reach::App(id)).then(|| (self.searched().to_owned(), ext.first_prefix()))
-        })
+        ext.route(self.searched())
+            .or_else(|| (self.reach == Reach::App(id)).then(|| (self.searched().to_owned(), ext.first_prefix())))
     }
 
     /// Sends `results`, the rows of `shown`, as the next version, for a query
@@ -692,8 +753,7 @@ impl Session {
     }
 
     fn set_filter(&mut self, extension: ExtensionId, view: &str, text: String) {
-        self.filters
-            .retain(|(ext, id, _)| !(*ext == extension && id == view));
+        self.filters.retain(|(ext, id, _)| !(*ext == extension && id == view));
         if !text.is_empty() {
             self.filters.push((extension, view.to_owned(), text));
         }
@@ -729,13 +789,7 @@ impl LastSearch {
 
     /// Remembers that `query`, folded as `folded`, matched `matched` at index
     /// version `version`.
-    fn found(
-        &mut self,
-        query: &str,
-        folded: &rank::Query,
-        version: u64,
-        matched: impl IntoIterator<Item = Slot>,
-    ) {
+    fn found(&mut self, query: &str, folded: &rank::Query, version: u64, matched: impl IntoIterator<Item = Slot>) {
         self.narrowing.found(query, folded, matched);
         self.version = version;
     }
@@ -962,11 +1016,7 @@ fn read_query(apps: &Apps, matcher: &mut Matcher, session: &mut Session) {
     session.rest = rest;
     let searched = &session.query[rest..];
     // Folded like the haystacks, so neither case nor accents matter.
-    session.pattern = Pattern::parse(
-        &rank::fold_text(searched),
-        CaseMatching::Ignore,
-        Normalization::Never,
-    );
+    session.pattern = Pattern::parse(&rank::fold_text(searched), CaseMatching::Ignore, Normalization::Never);
     session.folded = rank::Query::new(searched);
     session.max_score = session
         .pattern
@@ -1300,11 +1350,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
     /// The versions of what the Empty query and the hot Items are worked
     /// out from: the Index, the History, and the rest (`ranks_version`).
     fn versions(&self) -> Versions {
-        (
-            self.index.version(),
-            self.history.version(),
-            self.ranks_version,
-        )
+        (self.index.version(), self.history.version(), self.ranks_version)
     }
 
     /// Works out the hot Items, up to the hot capacity, and reads their
@@ -1465,9 +1511,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
                 sender,
                 disconnect,
             } => self.front_end_up(front_end, sender, disconnect),
-            Event::FromFrontEnd { front_end, message } => {
-                self.front_end_message(front_end, message, now)
-            }
+            Event::FromFrontEnd { front_end, message } => self.front_end_message(front_end, message, now),
             Event::FrontEndDown { front_end } => self.front_end_down(front_end),
             Event::Config(config) => self.set_config(config, now),
             Event::ConfigFailed(err) => self.config_failed(err),
@@ -1579,18 +1623,9 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
         self.launcher.start(id, ext.generation, &ext.found);
     }
 
-    fn extension_up(
-        &mut self,
-        id: ExtensionId,
-        generation: u64,
-        sender: SyncSender<ToExtension>,
-        now: Instant,
-    ) {
+    fn extension_up(&mut self, id: ExtensionId, generation: u64, sender: SyncSender<ToExtension>, now: Instant) {
         let ext = &mut self.extensions[id.0];
-        if ext.generation != generation
-            || ext.stopping
-            || !matches!(ext.state, State::Starting { .. })
-        {
+        if ext.generation != generation || ext.stopping || !matches!(ext.state, State::Starting { .. }) {
             return;
         }
         let table = extension_settings(&self.config, ext.name(), ext.found.inline);
@@ -1660,9 +1695,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             self.forget_run(id);
             return;
         }
-        ext.state = State::Down {
-            retry_at: now + delay,
-        };
+        ext.state = State::Down { retry_at: now + delay };
         log::warn!("extension {} {how}; restarting in {delay:?}", ext.name());
         ext.ended = Some(how);
         self.forget_run(id);
@@ -1736,8 +1769,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
                 && let Some(slot) = self.index.find(id, &alias.item)
                 && let Some(item) = self.index.item(slot)
             {
-                self.last_seen
-                    .insert((name.clone(), alias.item.clone()), item);
+                self.last_seen.insert((name.clone(), alias.item.clone()), item);
             }
         }
         if self.index.clear(id) {
@@ -1803,14 +1835,11 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
         });
         // A View it was asked to open won't come now.
         let invocations = &self.invocations;
-        let (stopped, waiting) =
-            std::mem::take(&mut self.openings)
-                .into_iter()
-                .partition(|opening| {
-                    opening
-                        .running
-                        .is_some_and(|running| !invocations.contains_key(&running))
-                });
+        let (stopped, waiting) = std::mem::take(&mut self.openings).into_iter().partition(|opening| {
+            opening
+                .running
+                .is_some_and(|running| !invocations.contains_key(&running))
+        });
         self.openings = waiting;
         for opening in stopped {
             let failure = format!("{name} stopped before its View opened");
@@ -1913,10 +1942,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
                 results,
                 done,
             } => self.live_results(id, live_query, results, done),
-            FromExtension::ActionDone {
-                invocation,
-                outcome,
-            } => self.action_done(id, invocation, outcome, now),
+            FromExtension::ActionDone { invocation, outcome } => self.action_done(id, invocation, outcome, now),
             FromExtension::WithdrawPick { invocation } => self.withdraw_pick(id, invocation),
             FromExtension::Status { usable, note } => {
                 match (usable, &note) {
@@ -1964,8 +1990,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
                 if !ext.found.manifest.action_catalog {
                     log::warn!("{name} asked for the Action catalog, but its Manifest doesn't");
                     ext.send(ToExtension::Rejected {
-                        reason: "asked for the Action catalog without `action_catalog = true` in the Manifest"
-                            .into(),
+                        reason: "asked for the Action catalog without `action_catalog = true` in the Manifest".into(),
                     });
                     return;
                 }
@@ -2040,11 +2065,8 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
         if self.extensions[id.0].has_items {
             return;
         }
-        let has_items = !self.index.first(id, 1).is_empty()
-            || self
-                .hidden
-                .get(&id)
-                .is_some_and(|hidden| !hidden.is_empty());
+        let has_items =
+            !self.index.first(id, 1).is_empty() || self.hidden.get(&id).is_some_and(|hidden| !hidden.is_empty());
         if has_items {
             self.said(id, |ext| ext.has_items = true);
         }
@@ -2055,11 +2077,8 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
     fn update_view(&mut self, id: ExtensionId, name: &str, view: View) {
         let contributed = self.view_contributed(id, &view);
         let view_id = view.id.clone();
-        let filtered = self.views.update(id, view.clone())
-            && self
-                .views
-                .get(id, &view_id)
-                .is_some_and(Open::filtered_here);
+        let filtered =
+            self.views.update(id, view.clone()) && self.views.get(id, &view_id).is_some_and(Open::filtered_here);
         if !filtered {
             self.forget_filters(id, &view_id);
         }
@@ -2115,9 +2134,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
     }
 
     fn send_filtered(&mut self, front_end: FrontEndId, id: ExtensionId, view: &str, text: String) {
-        let matches = self
-            .views
-            .filter(id, view, &text, &mut self.matcher, &mut self.tiers);
+        let matches = self.views.filter(id, view, &text, &mut self.matcher, &mut self.tiers);
         if let Some(session) = self.sessions.get(&front_end) {
             session.send(ToFrontEnd::FilteredView {
                 extension: self.extensions[id.0].name().to_owned(),
@@ -2130,11 +2147,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
 
     /// The Contributed actions on a list View's Items, by the Item kinds it
     /// has. Other Views have none.
-    fn view_contributed(
-        &self,
-        owner: ExtensionId,
-        view: &View,
-    ) -> BTreeMap<String, Vec<OfferedAction>> {
+    fn view_contributed(&self, owner: ExtensionId, view: &View) -> BTreeMap<String, Vec<OfferedAction>> {
         let mut by_kind = BTreeMap::new();
         let ViewContent::List { items, .. } = &view.content else {
             return by_kind;
@@ -2178,13 +2191,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
         }
     }
 
-    fn live_results(
-        &mut self,
-        id: ExtensionId,
-        live_query: u64,
-        results: Vec<LiveResult>,
-        done: bool,
-    ) {
+    fn live_results(&mut self, id: ExtensionId, live_query: u64, results: Vec<LiveResult>, done: bool) {
         let Some(&(front_end, ext)) = self.live_queries.get(&live_query) else {
             return;
         };
@@ -2264,10 +2271,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
                 action,
                 arguments,
             } => {
-                let action = ActionRef {
-                    extension,
-                    id: action,
-                };
+                let action = ActionRef { extension, id: action };
                 let run = self.run_catalog_action(front_end, id, &kind, action, arguments, now);
                 self.failed(front_end, run);
             }
@@ -2289,19 +2293,13 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
     ) -> Result<(), String> {
         let asking = &self.extensions[proposer.0];
         if !asking.found.manifest.action_catalog {
-            return Err(format!(
-                "{} may not run Actions from the Action catalog",
-                asking.name()
-            ));
+            return Err(format!("{} may not run Actions from the Action catalog", asking.name()));
         }
         let target = self
             .extension_named(&action.extension)
             .filter(|&target| target != proposer && self.extensions[target.0].sender().is_some())
             .ok_or_else(|| format!("{} isn't running", action.extension))?;
-        let mut offering: Vec<Slot> = self
-            .index
-            .offering(target, kind.as_str(), &action.id)
-            .collect();
+        let mut offering: Vec<Slot> = self.index.offering(target, kind.as_str(), &action.id).collect();
         let id = match offering.len() {
             1 => self
                 .index
@@ -2329,14 +2327,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             extension: action.extension.clone(),
             id,
         };
-        self.run_action(
-            front_end,
-            &result,
-            &action,
-            arguments,
-            Missing::AskInForm,
-            now,
-        )
+        self.run_action(front_end, &result, &action, arguments, Missing::AskInForm, now)
     }
 
     /// Asks `front_end` which of the Items in `offering` the Action runs on,
@@ -2389,12 +2380,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
 
     /// The user picked `result` in the list of `front_end`'s pick: the list
     /// goes, and the proposed Action runs on it.
-    fn run_pick(
-        &mut self,
-        front_end: FrontEndId,
-        result: &ResultRef,
-        now: Instant,
-    ) -> Result<(), String> {
+    fn run_pick(&mut self, front_end: FrontEndId, result: &ResultRef, now: Instant) -> Result<(), String> {
         let gone = || "that Result is gone".to_owned();
         let listed = self.picks.get(&front_end).is_some_and(|pick| {
             self.pick_lists
@@ -2435,10 +2421,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
 
     /// The user left the list of `front_end`'s pick `view`, with Esc.
     fn pick_popped(&mut self, front_end: FrontEndId, view: &str) {
-        if self
-            .picks
-            .get(&front_end)
-            .is_some_and(|pick| pick.view == view)
+        if self.picks.get(&front_end).is_some_and(|pick| pick.view == view)
             && let Some(pick) = self.picks.remove(&front_end)
         {
             self.pick_lists.pop(pick.target, &pick.view);
@@ -2453,9 +2436,9 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
         if text.is_empty() {
             return;
         }
-        let matches =
-            self.pick_lists
-                .filter(pick.target, view, &text, &mut self.matcher, &mut self.tiers);
+        let matches = self
+            .pick_lists
+            .filter(pick.target, view, &text, &mut self.matcher, &mut self.tiers);
         if let Some(session) = self.sessions.get(&front_end) {
             session.send(ToFrontEnd::FilteredView {
                 extension: OWN.to_owned(),
@@ -2520,12 +2503,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
         }
     }
 
-    fn front_end_up(
-        &mut self,
-        id: FrontEndId,
-        sender: SyncSender<ToFrontEnd>,
-        disconnect: Box<dyn FnOnce() + Send>,
-    ) {
+    fn front_end_up(&mut self, id: FrontEndId, sender: SyncSender<ToFrontEnd>, disconnect: Box<dyn FnOnce() + Send>) {
         let session = Session {
             sender,
             disconnect: Some(disconnect),
@@ -2677,16 +2655,8 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
                     self.extensions[ext.0].send(ToExtension::ViewPopped { view });
                 }
             }
-            FromFrontEnd::FilterView {
-                extension,
-                view,
-                text,
-            } if extension == OWN => self.filter_pick(id, &view, text),
-            FromFrontEnd::FilterView {
-                extension,
-                view,
-                text,
-            } => self.filter_view(id, &extension, &view, text),
+            FromFrontEnd::FilterView { extension, view, text } if extension == OWN => self.filter_pick(id, &view, text),
+            FromFrontEnd::FilterView { extension, view, text } => self.filter_view(id, &extension, &view, text),
             FromFrontEnd::Closed => self.closed(Some(id)),
             // The menu may open on the Empty query, which may have been
             // ranked hours ago.
@@ -2718,13 +2688,8 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
     /// fight over the keyboard, and the Daemon can't tell which screen has
     /// the focus without knowing the compositor.
     fn menu(&self, from: FrontEndId) -> Option<FrontEndId> {
-        let is_menu = |id: &FrontEndId| {
-            *id != from
-                && self
-                    .sessions
-                    .get(id)
-                    .is_some_and(|session| !session.asked_for_menu)
-        };
+        let is_menu =
+            |id: &FrontEndId| *id != from && self.sessions.get(id).is_some_and(|session| !session.asked_for_menu);
         self.shown_last
             .filter(is_menu)
             .or_else(|| self.sessions.keys().copied().filter(is_menu).max())
@@ -2838,14 +2803,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
         }
         let mut arguments = form.arguments;
         arguments.extend(arguments::submitted(values));
-        let run = self.run_action(
-            front_end,
-            &form.result,
-            &form.action,
-            arguments,
-            Missing::Fail,
-            now,
-        );
+        let run = self.run_action(front_end, &form.result, &form.action, arguments, Missing::Fail, now);
         self.failed(front_end, run);
     }
 
@@ -3035,19 +2993,13 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
     fn set_extensions(&mut self, found: Vec<Found>, now: Instant) {
         for id in 0..self.extensions.len() {
             let ext = &self.extensions[id];
-            if !matches!(ext.state, State::Removed)
-                && !found.iter().any(|f| f.manifest.name == ext.name())
-            {
+            if !matches!(ext.state, State::Removed) && !found.iter().any(|f| f.manifest.name == ext.name()) {
                 log::info!("extension {} was removed or switched off", ext.name());
                 self.retire(ExtensionId(id));
             }
         }
         for found in found {
-            match self
-                .extensions
-                .iter()
-                .position(|ext| ext.name() == found.manifest.name)
-            {
+            match self.extensions.iter().position(|ext| ext.name() == found.manifest.name) {
                 Some(id) => {
                     let ext = &mut self.extensions[id];
                     let removed = matches!(ext.state, State::Removed);
@@ -3084,8 +3036,8 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
     }
 
     /// Ends the current run of an Extension, leaving it removed until started
-    /// again: stops its process and forgets what it left behind. Moving on to the next generation means nothing
-    /// from the old run, its ExtensionDown included, is heard any more.
+    /// again: stops its process and forgets what it left behind. Moving on to the next generation
+    /// means nothing from the old run, its ExtensionDown included, is heard any more.
     fn retire(&mut self, id: ExtensionId) {
         let ext = &mut self.extensions[id.0];
         match ext.state {
@@ -3122,10 +3074,9 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             if ext.sender().is_none() {
                 continue;
             }
-            if let (Some(debounce), Some((query, prefix))) = (
-                ext.debounce(),
-                session.live_query(ExtensionId(ext_id), ext, searched),
-            ) {
+            if let (Some(debounce), Some((query, prefix))) =
+                (ext.debounce(), session.live_query(ExtensionId(ext_id), ext, searched))
+            {
                 session.live[ext_id] = Live::asking(query, prefix, now + debounce);
             }
         }
@@ -3318,12 +3269,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
 
     /// Forgets one Result: everything the History keeps for it. The menu
     /// stays open.
-    fn forget_result(
-        &mut self,
-        front_end: FrontEndId,
-        result: &ResultRef,
-        now: Instant,
-    ) -> Result<(), String> {
+    fn forget_result(&mut self, front_end: FrontEndId, result: &ResultRef, now: Instant) -> Result<(), String> {
         let (session, item) = self.shown_item(front_end, result)?;
         let keys = self.history_keys(session, &result.extension, &item);
         let done = Done::new(
@@ -3382,11 +3328,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
     }
 
     /// The Item of a Result shown in a Front end's session, with the session.
-    fn shown_item(
-        &self,
-        front_end: FrontEndId,
-        result: &ResultRef,
-    ) -> Result<(&Session, ItemRef<'_>), String> {
+    fn shown_item(&self, front_end: FrontEndId, result: &ResultRef) -> Result<(&Session, ItemRef<'_>), String> {
         let gone = || "that Result is gone".to_owned();
         let session = self.sessions.get(&front_end).ok_or_else(gone)?;
         let source = self
@@ -3397,11 +3339,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
     }
 
     /// The ids the picks of the Aliases that name a Result are kept under.
-    fn alias_ids<'a>(
-        &'a self,
-        extension: &'a str,
-        id: &'a str,
-    ) -> impl Iterator<Item = String> + 'a {
+    fn alias_ids<'a>(&'a self, extension: &'a str, id: &'a str) -> impl Iterator<Item = String> + 'a {
         self.keywords
             .aliases
             .iter()
@@ -3422,10 +3360,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
                 }
             }
         }
-        keys.extend(
-            self.alias_ids(extension, &item.id)
-                .map(|id| (OWN.to_owned(), id)),
-        );
+        keys.extend(self.alias_ids(extension, &item.id).map(|id| (OWN.to_owned(), id)));
         keys
     }
 
@@ -3477,9 +3412,11 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
     /// Withdraws the pick that running the Action `invocation` made, if
     /// `ext` ran it and it can still be undone.
     fn withdraw_pick(&mut self, ext: ExtensionId, invocation: u64) {
-        let Some(n) = self.undos.iter().position(|undo| {
-            undo.id == invocation && matches!(undo.by, UndoneBy::Extension(by) if by == ext)
-        }) else {
+        let Some(n) = self
+            .undos
+            .iter()
+            .position(|undo| undo.id == invocation && matches!(undo.by, UndoneBy::Extension(by) if by == ext))
+        else {
             log::debug!(
                 "{}: no pick of run {invocation} to withdraw",
                 self.extensions[ext.0].name()
@@ -3515,16 +3452,11 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
     /// Shows the Undo Item for the latest change to the History, or hides it
     /// when there is nothing left to undo, and ranks every session again.
     fn load_undo_item(&mut self) {
-        if self
-            .own
-            .last()
-            .is_some_and(|own| matches!(own.does, OwnAction::Undo))
-        {
+        if self.own.last().is_some_and(|own| matches!(own.does, OwnAction::Undo)) {
             self.own.pop();
         }
         if let Some(done) = self.latest_undo().and_then(Undoable::done) {
-            self.own
-                .push(Own::new(undo_item(&done.undo), OwnAction::Undo));
+            self.own.push(Own::new(undo_item(&done.undo), OwnAction::Undo));
         }
         self.mark_late();
     }
@@ -3535,12 +3467,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
     /// and after the Contributed actions on the rest. Only Results with
     /// a History get them, so a row costs nothing more until something is
     /// picked through it.
-    fn offer_forgetting(
-        &self,
-        extension: &str,
-        item: &mut Item,
-        contributed: &mut Vec<OfferedAction>,
-    ) {
+    fn offer_forgetting(&self, extension: &str, item: &mut Item, contributed: &mut Vec<OfferedAction>) {
         if self.history.is_empty() {
             return;
         }
@@ -3550,9 +3477,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
                 .identity
                 .as_deref()
                 .is_some_and(|identity| picked(IDENTITIES, identity))
-            || self
-                .alias_ids(extension, &item.id)
-                .any(|alias| picked(OWN, &alias));
+            || self.alias_ids(extension, &item.id).any(|alias| picked(OWN, &alias));
         if !remembered {
             return;
         }
@@ -3561,10 +3486,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             item.actions.push(forget);
             return;
         }
-        let clear = action_titled(
-            CLEAR_EXTENSION_HISTORY,
-            format!("Clear the history of {extension}"),
-        );
+        let clear = action_titled(CLEAR_EXTENSION_HISTORY, format!("Clear the history of {extension}"));
         for action in [forget, clear] {
             contributed.push(OfferedAction {
                 extension: OWN.to_owned(),
@@ -3578,23 +3500,14 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
     /// An answer goes in the Usage log only: neither Frecency nor Learned
     /// choices count it, and a Result picked below one isn't learned as
     /// picked over it. Returns the change to the History, to undo it.
-    fn picked(
-        &mut self,
-        front_end: FrontEndId,
-        result: &ResultRef,
-        action: &ActionRef,
-        now: Instant,
-    ) -> Change {
+    fn picked(&mut self, front_end: FrontEndId, result: &ResultRef, action: &ActionRef, now: Instant) -> Change {
         let when = self.when(now);
         let at = when.at;
         let Some(session) = self.sessions.get(&front_end) else {
             return Change::default();
         };
         let source = self.source_of(session, &result.extension, &result.id);
-        let row = session
-            .shown
-            .iter()
-            .position(|(shown, _)| Some(*shown) == source);
+        let row = session.shown.iter().position(|(shown, _)| Some(*shown) == source);
         if self.history.settings().usage_log {
             self.store.log(Entry {
                 at,
@@ -3607,11 +3520,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
                 },
             });
         }
-        let change = if let Some((_, alias)) = session
-            .via_alias
-            .as_ref()
-            .filter(|(named, _)| Some(*named) == source)
-        {
+        let change = if let Some((_, alias)) = session.via_alias.as_ref().filter(|(named, _)| Some(*named) == source) {
             self.history.touch(OWN, &alias_id(alias), when)
         } else if source.is_some_and(|source| session.is_answer(source)) {
             // An answer is the query worked out, a new Result for every
@@ -3719,9 +3628,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
         if engine.desktop != self.engine.desktop {
             self.desktop.configure(engine.desktop);
         }
-        if (engine.near_misses, engine.fallbacks)
-            != (self.engine.near_misses, self.engine.fallbacks)
-        {
+        if (engine.near_misses, engine.fallbacks) != (self.engine.near_misses, self.engine.fallbacks) {
             self.mark_late();
         }
         self.engine = engine;
@@ -3732,8 +3639,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
     fn configure_extensions(&mut self, now: Instant) {
         let mut report = Report::new();
         let found = configured::configure(&self.installed, &self.config, &mut report);
-        self.problems.dirty |=
-            problem::replace(&mut self.problems.extensions, report.into_problems());
+        self.problems.dirty |= problem::replace(&mut self.problems.extensions, report.into_problems());
         self.set_extensions(found, now);
     }
 
@@ -3776,9 +3682,9 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
     }
 
     /// Reads each installed Extension's app from its Manifest and the
-    /// config. Reports the keywords lost, once each time they change. When they changed, the Index reads the Segments the search
-    /// now shows, every session's query is read again, and the entry Items
-    /// are rebuilt.
+    /// config. Reports the keywords lost, once each time they change. When they changed, the Index
+    /// reads the Segments the search now shows, every session's query is read again, and the
+    /// entry Items are rebuilt.
     fn load_apps(&mut self) {
         let installed = self
             .extensions
@@ -3795,8 +3701,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
         if conflicts != self.conflicts {
             let mut report = Report::new();
             conflict::report(&conflicts, &mut report);
-            self.problems.dirty |=
-                problem::replace(&mut self.problems.conflicts, report.into_problems());
+            self.problems.dirty |= problem::replace(&mut self.problems.conflicts, report.into_problems());
             self.conflicts = conflicts;
         }
         if apps == self.apps {
@@ -3812,8 +3717,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             })
             .collect();
         self.apps = apps;
-        self.index
-            .set_searched(self.apps.searched(self.extensions.len()));
+        self.index.set_searched(self.apps.searched(self.extensions.len()));
         for (id, entered) in entered {
             if let Some(session) = self.sessions.get_mut(&id) {
                 session.entered = entered;
@@ -3845,9 +3749,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
         // The own Items' positions changed, so rows showing them can't be
         // kept where they are.
         for session in self.sessions.values_mut() {
-            session
-                .shown
-                .retain(|(source, _)| !matches!(source, Source::Own(_)));
+            session.shown.retain(|(source, _)| !matches!(source, Source::Own(_)));
         }
         self.mark_late();
     }
@@ -3944,11 +3846,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             .collect();
         for id in hung {
             log::warn!("front end {} stopped reading; disconnecting it", id.0);
-            if let Some(disconnect) = self
-                .sessions
-                .get_mut(&id)
-                .and_then(|session| session.disconnect.take())
-            {
+            if let Some(disconnect) = self.sessions.get_mut(&id).and_then(|session| session.disconnect.take()) {
                 disconnect();
             }
             self.front_end_down(id);
@@ -3988,8 +3886,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
                 let id = self.next_id;
                 self.next_id += 1;
                 live.sent = Some(id);
-                self.live_queries
-                    .insert(id, (front_end, ExtensionId(ext_id)));
+                self.live_queries.insert(id, (front_end, ExtensionId(ext_id)));
                 self.extensions[ext_id].send(ToExtension::LiveQuery {
                     id,
                     query: live.query.clone(),
@@ -4053,10 +3950,9 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
         let mut candidates = Vec::new();
         self.scored.clear();
         let version = self.index.version();
-        let within =
-            session
-                .last_search
-                .within(&session.query[session.rest..], &session.folded, version);
+        let within = session
+            .last_search
+            .within(&session.query[session.rest..], &session.folded, version);
         let narrow = within.is_some();
         self.kind_places.update(&self.kinds, self.index.kinds());
         let Daemon {
@@ -4078,13 +3974,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
                 if let Some(tier) = tiers.texts(ranked.texts(), &session.folded, matched) {
                     let kind = kind_places.place(slot.segment, ranked.kind());
                     let source = Source::Indexed(slot);
-                    candidates.push(Candidate::new(
-                        source,
-                        tier,
-                        kind,
-                        score,
-                        ranked.title_len(),
-                    ));
+                    candidates.push(Candidate::new(source, tier, kind, score, ranked.title_len()));
                 }
             },
         );
@@ -4115,13 +4005,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
                 let score = (result.score.get() * session.max_score as f32).round() as u32;
                 let len = result.item.title.chars().count() as u32;
                 let kind = self.kinds.place(&result.item.kind);
-                let mut candidate = Candidate::new(
-                    Source::Live(ExtensionId(ext), n as u32),
-                    tier,
-                    kind,
-                    score,
-                    len,
-                );
+                let mut candidate = Candidate::new(Source::Live(ExtensionId(ext), n as u32), tier, kind, score, len);
                 candidate.standing = if result.answer {
                     Standing::Answer
                 } else if fallback {
@@ -4143,12 +4027,8 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
         };
         for (n, own) in own.iter().enumerate() {
             let filter = session.folded.filter();
-            if let Some((score, matched)) =
-                own.haystack
-                    .score(&session.pattern, &mut self.matcher, filter)
-                && let Some(tier) =
-                    self.tiers
-                        .item(&own.haystack, &own.item, &session.folded, matched)
+            if let Some((score, matched)) = own.haystack.score(&session.pattern, &mut self.matcher, filter)
+                && let Some(tier) = self.tiers.item(&own.haystack, &own.item, &session.folded, matched)
             {
                 let len = own.haystack.title.len() as u32;
                 let kind = self.kinds.place(&own.item.kind);
@@ -4276,8 +4156,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
         fresh: bool,
     ) -> usize {
         let last = session.last_search.nearly_for.take();
-        let narrow =
-            narrowed && last.is_some_and(|last| last.narrows_near_misses_of(&session.folded));
+        let narrow = narrowed && last.is_some_and(|last| last.narrows_near_misses_of(&session.folded));
         let typos = session.folded.tolerates_typos();
         let look = self.engine.near_misses && typos && candidates.len() < session.rows;
         let mut nearly = std::mem::take(&mut session.last_search.nearly);
@@ -4296,10 +4175,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
         let mut near_miss = |source: Source| {
             let (texts, len, kind) = match source {
                 Source::Indexed(slot) => {
-                    if known[..indexed]
-                        .binary_search_by_key(&source, |c| c.source)
-                        .is_ok()
-                    {
+                    if known[..indexed].binary_search_by_key(&source, |c| c.source).is_ok() {
                         return None;
                     }
                     let ranked = index.ranked(slot)?;
@@ -4340,12 +4216,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
                 Reach::App(_) => 0,
             };
             let own = (0..own_reached).map(Source::Own);
-            found.extend(
-                slots
-                    .map(Source::Indexed)
-                    .chain(own)
-                    .filter_map(&mut near_miss),
-            );
+            found.extend(slots.map(Source::Indexed).chain(own).filter_map(&mut near_miss));
         } else if typos && !fresh {
             let shown = session.shown.iter().take(session.rows);
             found.extend(shown.filter_map(|&(source, _)| near_miss(source)));
@@ -4399,13 +4270,9 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             let settings = *self.history.settings();
             self.cache_frecent();
             let mut frecencies = std::mem::take(&mut self.frecencies);
-            self.frecent
-                .picks
-                .frecency(when, settings.time_of_day, &mut frecencies);
+            self.frecent.picks.frecency(when, settings.time_of_day, &mut frecencies);
             for (&(slot, counts), &frecency) in self.frecent.slots.iter().zip(&frecencies) {
-                if let Ok(n) =
-                    candidates[..indexed].binary_search_by_key(&Source::Indexed(slot), |c| c.source)
-                {
+                if let Ok(n) = candidates[..indexed].binary_search_by_key(&Source::Indexed(slot), |c| c.source) {
                     if counts != Counts::Direct {
                         candidates[n].frecency = frecency;
                     }
@@ -4555,11 +4422,9 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
                 None => true,
                 Some(passed_over) => {
                     candidate.fine.coarse() == Tier::Exact.coarse()
-                        && !self.history_key(session, candidate.source).is_some_and(
-                            |(extension, id)| {
-                                passed_over.iter().any(|(e, i)| e == extension && i == id)
-                            },
-                        )
+                        && !self
+                            .history_key(session, candidate.source)
+                            .is_some_and(|(extension, id)| passed_over.iter().any(|(e, i)| e == extension && i == id))
                 }
             };
             if named {
@@ -4589,9 +4454,8 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             if shown.len() >= MAX_RESULTS {
                 break;
             }
-            let same = |&shown: &Source| {
-                shown == source || identity(shown).is_some_and(|id| identity(source) == Some(id))
-            };
+            let same =
+                |&shown: &Source| shown == source || identity(shown).is_some_and(|id| identity(source) == Some(id));
             if !shown.iter().any(same) {
                 shown.push(source);
             }
@@ -4729,21 +4593,14 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
                 && let Some(slot) = self.index.find(ext, id)
             {
                 let group = self.group(slot);
-                let counts = if group.is_some() {
-                    Counts::Direct
-                } else {
-                    Counts::Both
-                };
+                let counts = if group.is_some() { Counts::Direct } else { Counts::Both };
                 frecent.push((slot, picks, counts, group));
             }
         }
         frecent.sort_unstable_by_key(|&(slot, ..)| slot);
         let picks: Vec<Picks> = frecent.iter().map(|&(_, picks, ..)| picks).collect();
         self.frecent = Arc::new(Picked {
-            slots: frecent
-                .iter()
-                .map(|&(slot, _, counts, _)| (slot, counts))
-                .collect(),
+            slots: frecent.iter().map(|&(slot, _, counts, _)| (slot, counts)).collect(),
             groups: frecent.iter().map(|&(.., group)| group).collect(),
             picks: Frecent::new(&picks, half_life),
         });
@@ -4871,10 +4728,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
         match source {
             Source::Indexed(slot) => {
                 let item = self.index.item(slot)?;
-                Some((
-                    self.extensions[slot.extension().0].name(),
-                    ItemRef::Resident(item),
-                ))
+                Some((self.extensions[slot.extension().0].name(), ItemRef::Resident(item)))
             }
             Source::Live(ext, n) => Some((
                 self.extensions[ext.0].name(),
@@ -4887,11 +4741,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
 
     /// A Result's id and Identity, and the name of the Extension that owns
     /// it, without reading an Indexed item off its Shelf.
-    fn names<'a>(
-        &'a self,
-        session: &'a Session,
-        source: Source,
-    ) -> Option<(&'a str, &'a str, Option<&'a str>)> {
+    fn names<'a>(&'a self, session: &'a Session, source: Source) -> Option<(&'a str, &'a str, Option<&'a str>)> {
         let item = match source {
             Source::Indexed(slot) => {
                 return Some((
@@ -4912,11 +4762,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
     }
 
     /// What the History keeps a Result under, as [`history_key`] gives it.
-    fn history_key<'a>(
-        &'a self,
-        session: &'a Session,
-        source: Source,
-    ) -> Option<(&'a str, &'a str)> {
+    fn history_key<'a>(&'a self, session: &'a Session, source: Source) -> Option<(&'a str, &'a str)> {
         let (extension, id, identity) = self.names(session, source)?;
         Some(match identity {
             Some(identity) => (IDENTITIES, identity),
@@ -4934,12 +4780,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
 
     /// One Result as the Front end gets it. `primary`, one of the Item's own
     /// Actions, is moved to the front.
-    fn row(
-        &mut self,
-        session: &Session,
-        source: Source,
-        primary: Option<&str>,
-    ) -> Option<ShownResult> {
+    fn row(&mut self, session: &Session, source: Source, primary: Option<&str>) -> Option<ShownResult> {
         let (live_title, mut live_starts);
         let (owner, item, title): (Option<ExtensionId>, ItemRef, Text) = match source {
             Source::Indexed(slot) => (
@@ -4960,11 +4801,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             }
             Source::Own(n) => {
                 let own = self.own.get(n as usize)?;
-                (
-                    None,
-                    ItemRef::Borrowed(&own.item),
-                    own.haystack.texts().title,
-                )
+                (None, ItemRef::Borrowed(&own.item), own.haystack.texts().title)
             }
             Source::Unavailable => return self.unavailable_row(session),
         };
@@ -5067,19 +4904,11 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
     /// Other running Extensions' Actions for Items of `kind`, in Extension
     /// order. When a shortcut clashes, the owner's binding in `own` wins, then
     /// the earlier Extension's.
-    fn contributed_for(
-        &self,
-        owner: ExtensionId,
-        kind: &str,
-        own: &[Action],
-    ) -> Vec<OfferedAction> {
+    fn contributed_for(&self, owner: ExtensionId, kind: &str, own: &[Action]) -> Vec<OfferedAction> {
         let Some(offered) = self.contributed.get(kind) else {
             return Vec::new();
         };
-        let mut taken: Vec<&str> = own
-            .iter()
-            .filter_map(|action| action.shortcut.as_deref())
-            .collect();
+        let mut taken: Vec<&str> = own.iter().filter_map(|action| action.shortcut.as_deref()).collect();
         offered
             .iter()
             .filter(|(ext, _)| *ext != owner)

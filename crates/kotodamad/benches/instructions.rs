@@ -13,8 +13,11 @@
 
 use std::hint::black_box;
 
-use gungraun::{library_benchmark, library_benchmark_group, main};
-use kotodama_protocol::{Table, Value};
+use gungraun::library_benchmark;
+use gungraun::library_benchmark_group;
+use gungraun::main;
+use kotodama_protocol::Table;
+use kotodama_protocol::Value;
 
 mod corpus;
 mod setup;

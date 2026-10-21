@@ -92,9 +92,6 @@ impl Conflict {
 /// Tells the user about each conflict, as a problem.
 pub fn report(conflicts: &[Conflict], report: &mut Report) {
     for conflict in conflicts {
-        report.add(
-            format!("keyword `{}`", conflict.keyword()),
-            conflict.to_string(),
-        );
+        report.add(format!("keyword `{}`", conflict.keyword()), conflict.to_string());
     }
 }

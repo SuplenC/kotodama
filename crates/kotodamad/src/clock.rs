@@ -2,7 +2,8 @@
 //! and the time of day where the user is, which Frecency learns by.
 
 use std::cell::Cell;
-use std::time::{Duration, SystemTime};
+use std::time::Duration;
+use std::time::SystemTime;
 
 /// Seconds in a day.
 pub const DAY_SECS: u64 = 24 * 60 * 60;
@@ -122,7 +123,8 @@ fn local_utc_offset(_at: u64) -> i64 {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::sync::atomic::AtomicU64;
+    use std::sync::atomic::Ordering;
 
     use super::*;
 
@@ -131,10 +133,7 @@ mod tests {
         let clock = Clock::new(Some(23 * 3600), |_| 2 * 3600);
         assert_eq!(clock.when(Duration::ZERO).time_of_day, 3600);
         let clock = Clock::new(Some(3600), |_| -2 * 3600);
-        assert_eq!(
-            clock.when(Duration::from_secs(60)).time_of_day,
-            23 * 3600 + 60
-        );
+        assert_eq!(clock.when(Duration::from_secs(60)).time_of_day, 23 * 3600 + 60);
     }
 
     #[test]

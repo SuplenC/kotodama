@@ -54,3 +54,6 @@ harness = false
 [[bench]]
 name = "instructions"
 harness = false
+
+[lints]
+workspace = true

@@ -3,15 +3,21 @@
 
 use std::collections::BTreeMap;
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::Path;
+use std::path::PathBuf;
 use std::sync::mpsc::Sender;
-use std::time::{Duration, SystemTime};
+use std::time::Duration;
+use std::time::SystemTime;
 
-use kotodama_extension::watch::{RecursiveMode, Watcher, notify};
-use kotodama_protocol::{Manifest, Problem};
+use kotodama_extension::watch::RecursiveMode;
+use kotodama_extension::watch::Watcher;
+use kotodama_extension::watch::notify;
+use kotodama_protocol::Manifest;
+use kotodama_protocol::Problem;
 use regex::Regex;
 
-use crate::daemon::{Event, OWN};
+use crate::daemon::Event;
+use crate::daemon::OWN;
 use crate::problem::Report;
 
 /// How long the Extension directories must stay still before they are read

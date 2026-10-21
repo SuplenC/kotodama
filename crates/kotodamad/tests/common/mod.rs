@@ -10,17 +10,28 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::{self, Receiver};
-use std::time::{Duration, Instant};
+use std::sync::atomic::AtomicBool;
+use std::sync::atomic::Ordering;
+use std::sync::mpsc;
+use std::sync::mpsc::Receiver;
+use std::time::Duration;
+use std::time::Instant;
 
 use kotodama_protocol::*;
-use kotodamad::clock::{Clock, DAY_SECS};
-use kotodamad::daemon::{Daemon, Desktop, Ended, Event, ExtensionId, FrontEndId, Launcher, Output};
-
+use kotodamad::clock::Clock;
+use kotodamad::clock::DAY_SECS;
+use kotodamad::daemon::Daemon;
+use kotodamad::daemon::Desktop;
+use kotodamad::daemon::Ended;
+use kotodamad::daemon::Event;
+use kotodamad::daemon::ExtensionId;
+use kotodamad::daemon::FrontEndId;
+use kotodamad::daemon::Launcher;
+use kotodamad::daemon::Output;
 use kotodamad::discovery::Found;
 use kotodamad::engine::DesktopSettings;
-use kotodamad::history::{History, Store};
+use kotodamad::history::History;
+use kotodamad::history::Store;
 use kotodamad::usage::Entry;
 
 /// The runs started and stopped, and what each run started was told to run.
@@ -341,13 +352,10 @@ impl FrontEnd {
 
     /// The latest Results sent, if any were.
     pub fn results(&self) -> Option<Vec<ShownResult>> {
-        self.drain()
-            .into_iter()
-            .rev()
-            .find_map(|message| match message {
-                ToFrontEnd::Results { results, .. } => Some(results),
-                _ => None,
-            })
+        self.drain().into_iter().rev().find_map(|message| match message {
+            ToFrontEnd::Results { results, .. } => Some(results),
+            _ => None,
+        })
     }
 }
 

@@ -27,19 +27,18 @@
 //!
 //! - [`Engine`]: the settings above, and [`Engine::from_config`].
 //! - [`DesktopSettings`] and [`Paste`]: what `desktop.rs` reads.
-//! - [`check_tables`]: the config's top-level tables, so a misspelt one is a
-//!   problem.
+//! - [`check_tables`]: the config's top-level tables, so a misspelt one is a problem.
 //!
 //! # Not here
 //!
-//! - `[history]`: `history.rs`. `[paths]`: `paths.rs`. Each Extension's
-//!   `[extensions.<name>]`: `configured.rs` and `apps.rs`.
-//! - The keys with their docs and defaults, for `kotodamad config`:
-//!   `schema.rs`.
+//! - `[history]`: `history.rs`. `[paths]`: `paths.rs`. Each Extension's `[extensions.<name>]`:
+//!   `configured.rs` and `apps.rs`.
+//! - The keys with their docs and defaults, for `kotodamad config`: `schema.rs`.
 
 use std::time::Duration;
 
-use kotodama_protocol::{Table, Value};
+use kotodama_protocol::Table;
+use kotodama_protocol::Value;
 
 use crate::problem::Report;
 

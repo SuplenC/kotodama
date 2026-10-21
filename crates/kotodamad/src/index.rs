@@ -8,20 +8,31 @@
 //! off its Shelf when a Result shows it, and stays resident while it is hot
 //! or was shown lately (ADR 0017).
 
-use std::cell::{Cell, RefCell};
-use std::collections::{HashMap, HashSet};
-use std::hash::{BuildHasherDefault, Hasher};
-use std::ops::{Deref, Range};
+use std::cell::Cell;
+use std::cell::RefCell;
+use std::collections::HashMap;
+use std::collections::HashSet;
+use std::hash::BuildHasherDefault;
+use std::hash::Hasher;
+use std::ops::Deref;
+use std::ops::Range;
 use std::path::Path;
 use std::sync::Arc;
 
-use kotodama_protocol::{Action, Item};
+use kotodama_protocol::Action;
+use kotodama_protocol::Item;
 use nucleo_matcher::Matcher;
 use nucleo_matcher::pattern::Pattern;
 
 use crate::daemon::ExtensionId;
-use crate::rank::{Filter, Letters, Matched, Texts};
-use crate::segment::{Edit, Ranked, Row, Segment};
+use crate::rank::Filter;
+use crate::rank::Letters;
+use crate::rank::Matched;
+use crate::rank::Texts;
+use crate::segment::Edit;
+use crate::segment::Ranked;
+use crate::segment::Row;
+use crate::segment::Segment;
 
 /// How many Segments each Extension has: the Items the search shows, then
 /// those its app alone shows.
@@ -60,9 +71,7 @@ pub fn split(edit: Edit, segments: [&Segment; SIDES]) -> [Vec<Edit>; SIDES] {
             } else {
                 // Within one Segment a later Item replaces an earlier one
                 // with its id. Across the two, only the last may stay.
-                let (searched, app_only) = last_of_each(items)
-                    .into_iter()
-                    .partition(|item| !item.app_only);
+                let (searched, app_only) = last_of_each(items).into_iter().partition(|item| !item.app_only);
                 [searched, app_only]
             };
             let moved: [Vec<String>; SIDES] = std::array::from_fn(|side| {
@@ -87,11 +96,7 @@ pub fn split(edit: Edit, segments: [&Segment; SIDES]) -> [Vec<Edit>; SIDES] {
         }
         Edit::Remove(ids) => {
             for (side, segment) in segments.into_iter().enumerate() {
-                let held: Vec<String> = ids
-                    .iter()
-                    .filter(|id| segment.find(id).is_some())
-                    .cloned()
-                    .collect();
+                let held: Vec<String> = ids.iter().filter(|id| segment.find(id).is_some()).cloned().collect();
                 if !held.is_empty() {
                     split[side].push(Edit::Remove(held));
                 }
@@ -331,10 +336,7 @@ impl Index {
             let rows = (0..segment.every_letter().len() as Row)
                 .filter(|&row| segment.ranked(row).is_some())
                 .take(most - first.len());
-            first.extend(rows.map(|row| Slot {
-                segment: n as u32,
-                row,
-            }));
+            first.extend(rows.map(|row| Slot { segment: n as u32, row }));
         }
         first
     }
@@ -427,12 +429,7 @@ impl Index {
             }
             segment.rows_where(
                 |_, starts| Letters::meet_block(starts, initials),
-                |row| {
-                    slots.push(Slot {
-                        segment: n as u32,
-                        row,
-                    })
-                },
+                |row| slots.push(Slot { segment: n as u32, row }),
             );
         }
         slots
@@ -518,24 +515,10 @@ impl Index {
     /// this Index holds. One read from another version is never used.
     pub fn keep(&mut self, reads: Vec<Read>) {
         let resident = self.resident.get_mut();
-        for Read {
-            slot,
-            shelf,
-            at,
-            item,
-        } in reads
-        {
+        for Read { slot, shelf, at, item } in reads {
             let read = self.reads.get() + 1;
             self.reads.set(read);
-            resident.insert(
-                slot,
-                Resident {
-                    shelf,
-                    at,
-                    item,
-                    read,
-                },
-            );
+            resident.insert(slot, Resident { shelf, at, item, read });
         }
     }
 
@@ -583,8 +566,7 @@ impl Index {
             return;
         }
         let (hot, pinned) = (&self.hot, &self.pinned);
-        let kept =
-            |slot: &Slot| hot.binary_search(slot).is_ok() || pinned.binary_search(slot).is_ok();
+        let kept = |slot: &Slot| hot.binary_search(slot).is_ok() || pinned.binary_search(slot).is_ok();
         let mut reads: Vec<u64> = resident
             .iter()
             .filter(|(slot, _)| !kept(slot))
@@ -610,10 +592,7 @@ impl Index {
     /// Reads what a search reads and the hot Items, so the first keystroke
     /// after the menu opens finds them in the CPU's cache.
     pub fn warm(&self) -> u64 {
-        let keys = self
-            .segments
-            .iter()
-            .fold(0, |read, segment| read ^ segment.touch());
+        let keys = self.segments.iter().fold(0, |read, segment| read ^ segment.touch());
         let resident = self.resident.borrow();
         let hot: usize = self
             .hot
@@ -701,8 +680,7 @@ impl Index {
                     if let (Some(&letters), Some(&initials)) =
                         (segment.every_letter().get(row), segment.initials().get(row))
                         && filter.may_match(letters, initials)
-                        && let Some((ranked, score, matched)) =
-                            segment.score(slot.row, pattern, matcher, filter)
+                        && let Some((ranked, score, matched)) = segment.score(slot.row, pattern, matcher, filter)
                     {
                         found(slot, ranked, score, matched);
                     }
@@ -720,13 +698,8 @@ impl Index {
                     segment.rows_where(
                         |letters, initials| filter.may_match_block(letters, initials),
                         |row| {
-                            if let Some((ranked, score, matched)) =
-                                segment.score(row, pattern, matcher, filter)
-                            {
-                                let slot = Slot {
-                                    segment: n as u32,
-                                    row,
-                                };
+                            if let Some((ranked, score, matched)) = segment.score(row, pattern, matcher, filter) {
+                                let slot = Slot { segment: n as u32, row };
                                 found(slot, ranked, score, matched);
                             }
                         },
@@ -739,14 +712,20 @@ impl Index {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::{BTreeMap, BTreeSet};
+    use std::collections::BTreeMap;
+    use std::collections::BTreeSet;
 
     use kotodama_protocol::ItemKind;
     use nucleo_matcher::Config;
-    use nucleo_matcher::pattern::{CaseMatching, Normalization};
+    use nucleo_matcher::pattern::CaseMatching;
+    use nucleo_matcher::pattern::Normalization;
 
     use super::*;
-    use crate::rank::{self, Haystack, Query, Tier, Tiers};
+    use crate::rank;
+    use crate::rank::Haystack;
+    use crate::rank::Query;
+    use crate::rank::Tier;
+    use crate::rank::Tiers;
 
     /// xorshift64*: the same Items and queries on every run.
     struct Random(u64);
@@ -872,18 +851,8 @@ mod tests {
     type Found = BTreeMap<(usize, String), (Option<(u32, Option<Tier>)>, bool)>;
 
     /// Matched, as on a keystroke: the Index's dense layout.
-    fn search(
-        index: &Index,
-        reach: Reach,
-        text: &str,
-        matcher: &mut Matcher,
-        tiers: &mut Tiers,
-    ) -> Found {
-        let pattern = Pattern::parse(
-            &rank::fold_text(text),
-            CaseMatching::Ignore,
-            Normalization::Never,
-        );
+    fn search(index: &Index, reach: Reach, text: &str, matcher: &mut Matcher, tiers: &mut Tiers) -> Found {
+        let pattern = Pattern::parse(&rank::fold_text(text), CaseMatching::Ignore, Normalization::Never);
         let query = Query::new(text);
         let mut out = Vec::new();
         index.search(
@@ -900,10 +869,7 @@ mod tests {
                 continue;
             }
             for row in 0..segment.every_letter().len() as Row {
-                let slot = Slot {
-                    segment: n as u32,
-                    row,
-                };
+                let slot = Slot { segment: n as u32, row };
                 let Some(texts) = index.texts(slot) else {
                     continue;
                 };
@@ -933,11 +899,7 @@ mod tests {
         matcher: &mut Matcher,
         tiers: &mut Tiers,
     ) -> Found {
-        let pattern = Pattern::parse(
-            &rank::fold_text(text),
-            CaseMatching::Ignore,
-            Normalization::Never,
-        );
+        let pattern = Pattern::parse(&rank::fold_text(text), CaseMatching::Ignore, Normalization::Never);
         let query = Query::new(text);
         items
             .iter()
@@ -974,9 +936,7 @@ mod tests {
                     }
                     index.edit(ExtensionId(extension), Edit::Remove(ids));
                 } else {
-                    let batch: Vec<Item> = (0..1 + random.below(8))
-                        .map(|_| item(&mut random))
-                        .collect();
+                    let batch: Vec<Item> = (0..1 + random.below(8)).map(|_| item(&mut random)).collect();
                     for item in &batch {
                         let other = segment_of(extension, !item.app_only);
                         items.remove(&(other, item.id.clone()));

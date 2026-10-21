@@ -10,17 +10,34 @@
 //! inside a measured query.
 
 use std::path::PathBuf;
-use std::sync::mpsc::{self, Receiver};
-use std::time::{Duration, Instant};
+use std::sync::mpsc;
+use std::sync::mpsc::Receiver;
+use std::time::Duration;
+use std::time::Instant;
 
-use kotodama_protocol::{
-    FromExtension, FromFrontEnd, Item, Manifest, PROTOCOL_VERSION, Table, ToFrontEnd, View,
-    ViewContent, WireFormat,
-};
-use kotodamad::clock::{Clock, DAY_SECS, When};
-use kotodamad::daemon::{Daemon, Desktop, Event, ExtensionId, FrontEndId, Launcher, Output};
+use kotodama_protocol::FromExtension;
+use kotodama_protocol::FromFrontEnd;
+use kotodama_protocol::Item;
+use kotodama_protocol::Manifest;
+use kotodama_protocol::PROTOCOL_VERSION;
+use kotodama_protocol::Table;
+use kotodama_protocol::ToFrontEnd;
+use kotodama_protocol::View;
+use kotodama_protocol::ViewContent;
+use kotodama_protocol::WireFormat;
+use kotodamad::clock::Clock;
+use kotodamad::clock::DAY_SECS;
+use kotodamad::clock::When;
+use kotodamad::daemon::Daemon;
+use kotodamad::daemon::Desktop;
+use kotodamad::daemon::Event;
+use kotodamad::daemon::ExtensionId;
+use kotodamad::daemon::FrontEndId;
+use kotodamad::daemon::Launcher;
+use kotodamad::daemon::Output;
 use kotodamad::discovery::Found;
-use kotodamad::history::{History, Store};
+use kotodamad::history::History;
+use kotodamad::history::Store;
 use kotodamad::usage::Entry;
 
 use crate::corpus;

@@ -1,6 +1,7 @@
 //! Indexing off the keystroke path (ADR 0017): Extensions' changes to their
 //! Items are made on a thread of their own, into a new version of each
-//! changed Segment, which the Daemon puts in whole between two events. A keystroke never waits for a change, and never sees half of one.
+//! changed Segment, which the Daemon puts in whole between two events. A keystroke never waits for
+//! a change, and never sees half of one.
 //!
 //! Changes that queue up while the thread works are made together, one new
 //! version of each Segment for all of them.
@@ -11,19 +12,34 @@
 //! version it was read from, so the thread answering keystrokes never reads
 //! a payload for them, nor plans.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
+use std::collections::HashSet;
 use std::hash::BuildHasherDefault;
 use std::path::Path;
 use std::sync::Arc;
-use std::sync::mpsc::{self, Receiver, Sender};
+use std::sync::mpsc;
+use std::sync::mpsc::Receiver;
+use std::sync::mpsc::Sender;
 use std::thread;
 
-use crate::clock::{DAY_SECS, When};
-use crate::daemon::{Event, ExtensionId};
-use crate::history::{self, Habit};
-use crate::index::{self, Index, Read, SIDES, Slot, SlotHasher};
-use crate::most_used::{Ahead, Usage, Versions};
-use crate::segment::{Edit, Row, Segment};
+use crate::clock::DAY_SECS;
+use crate::clock::When;
+use crate::daemon::Event;
+use crate::daemon::ExtensionId;
+use crate::history;
+use crate::history::Habit;
+use crate::index;
+use crate::index::Index;
+use crate::index::Read;
+use crate::index::SIDES;
+use crate::index::Slot;
+use crate::index::SlotHasher;
+use crate::most_used::Ahead;
+use crate::most_used::Usage;
+use crate::most_used::Versions;
+use crate::segment::Edit;
+use crate::segment::Row;
+use crate::segment::Segment;
 
 /// A new version of an Extension's Segments, those that changed, for the
 /// Daemon to put in together: an Item moved from one to the other is never
@@ -121,8 +137,7 @@ impl Plan {
         for by in [-HOT_GRACE_SECS, 0, HOT_LEAD_SECS] {
             let when = When {
                 at: self.when.at.saturating_add_signed(by),
-                time_of_day: (i64::from(self.when.time_of_day) + by).rem_euclid(DAY_SECS as i64)
-                    as u32,
+                time_of_day: (i64::from(self.when.time_of_day) + by).rem_euclid(DAY_SECS as i64) as u32,
             };
             picked.picks.habits(when, habits);
             for (near, habit) in near.iter_mut().zip(habits.iter()) {
@@ -261,11 +276,7 @@ impl Keeping {
             .iter()
             .filter(|(ext, _)| *ext == extension)
             .filter_map(|(_, id)| segment.find(id));
-        let hot = self
-            .hot
-            .iter()
-            .filter(|slot| slot.segment == n)
-            .map(|slot| slot.row);
+        let hot = self.hot.iter().filter(|slot| slot.segment == n).map(|slot| slot.row);
         let mut rows: Vec<Row> = keyed.chain(aliased).chain(hot).collect();
         rows.sort_unstable();
         rows.dedup();
@@ -400,11 +411,16 @@ fn work(queue: Receiver<Job>, dir: Option<Arc<Path>>, mut send: impl FnMut(Event
 
 #[cfg(test)]
 mod tests {
+    use kotodama_protocol::Action;
+    use kotodama_protocol::Item;
+    use kotodama_protocol::ItemKind;
+
     use super::*;
     use crate::daemon::Source;
-    use crate::history::{Frecent, History};
-    use crate::most_used::{Counts, Picked};
-    use kotodama_protocol::{Action, Item, ItemKind};
+    use crate::history::Frecent;
+    use crate::history::History;
+    use crate::most_used::Counts;
+    use crate::most_used::Picked;
 
     fn item(id: &str) -> Item {
         Item {
@@ -559,10 +575,7 @@ mod tests {
         Plan {
             usage: Usage {
                 picked: Arc::new(Picked {
-                    slots: rows
-                        .iter()
-                        .map(|&(row, _)| (slot(row), Counts::Both))
-                        .collect(),
+                    slots: rows.iter().map(|&(row, _)| (slot(row), Counts::Both)).collect(),
                     groups: vec![None; rows.len()],
                     picks: Frecent::new(&picked, half_life),
                 }),

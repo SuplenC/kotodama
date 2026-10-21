@@ -24,11 +24,13 @@
 //! get the CPU and answer, short enough not to be seen.
 
 use std::fmt::Write as _;
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use std::time::Instant;
 
 use kotodama_extension::Chain;
 
-use crate::daemon::{Desktop, Output};
+use crate::daemon::Desktop;
+use crate::daemon::Output;
 use crate::engine::DesktopSettings;
 use crate::host::spawn;
 
@@ -51,10 +53,7 @@ impl Keymap {
 
     /// The evdev key code that types `c`.
     pub fn code(&self, c: char) -> Option<u32> {
-        self.chars
-            .iter()
-            .position(|&known| known == c)
-            .map(|at| at as u32 + 1)
+        self.chars.iter().position(|&known| known == c).map(|at| at as u32 + 1)
     }
 
     /// The keymap in XKB's text format. Key code `n` is XKB key code `n + 8`.
@@ -119,10 +118,7 @@ fn launch(command: Vec<String>) {
 fn notify(summary: String, body: String) {
     spawn("notify".into(), move || {
         if let Err(err) = crate::notify::send(&summary, &body) {
-            log::warn!(
-                "couldn't show the notification “{summary}”: {}",
-                Chain(&err)
-            );
+            log::warn!("couldn't show the notification “{summary}”: {}", Chain(&err));
         }
     });
 }
@@ -192,24 +188,41 @@ impl Desktop for Wayland {
 mod linux {
     use std::fs::File;
     use std::io::Write;
-    use std::os::fd::{AsFd, OwnedFd};
-    use std::sync::mpsc::{self, Receiver, Sender};
+    use std::os::fd::AsFd;
+    use std::os::fd::OwnedFd;
+    use std::sync::mpsc;
+    use std::sync::mpsc::Receiver;
+    use std::sync::mpsc::Sender;
     use std::thread;
-    use std::time::{Duration, Instant};
+    use std::time::Duration;
+    use std::time::Instant;
 
-    use kotodama_extension::wayland::{DataControl, DataControlHandler, Display};
+    use kotodama_extension::wayland::DataControl;
+    use kotodama_extension::wayland::DataControlHandler;
+    use kotodama_extension::wayland::Display;
     use kotodama_protocol::Clipboard;
-    use rustix::event::{PollFd, PollFlags};
-    use wayland_client::globals::{GlobalListContents, registry_queue_init};
-    use wayland_client::protocol::{wl_keyboard::KeyState, wl_registry, wl_seat};
-    use wayland_client::{Connection, Dispatch, EventQueue, QueueHandle, delegate_noop};
-    use wayland_protocols_misc::zwp_virtual_keyboard_v1::client::{
-        zwp_virtual_keyboard_manager_v1::ZwpVirtualKeyboardManagerV1,
-        zwp_virtual_keyboard_v1::ZwpVirtualKeyboardV1,
-    };
+    use rustix::event::PollFd;
+    use rustix::event::PollFlags;
+    use wayland_client::Connection;
+    use wayland_client::Dispatch;
+    use wayland_client::EventQueue;
+    use wayland_client::QueueHandle;
+    use wayland_client::delegate_noop;
+    use wayland_client::globals::GlobalListContents;
+    use wayland_client::globals::registry_queue_init;
+    use wayland_client::protocol::wl_keyboard::KeyState;
+    use wayland_client::protocol::wl_registry;
+    use wayland_client::protocol::wl_seat;
+    use wayland_protocols_misc::zwp_virtual_keyboard_v1::client::zwp_virtual_keyboard_manager_v1::ZwpVirtualKeyboardManagerV1;
+    use wayland_protocols_misc::zwp_virtual_keyboard_v1::client::zwp_virtual_keyboard_v1::ZwpVirtualKeyboardV1;
 
-    use super::{CONTROL, Keymap, Output, SHIFT, settle_left};
-    use crate::engine::{DesktopSettings, Paste};
+    use super::CONTROL;
+    use super::Keymap;
+    use super::Output;
+    use super::SHIFT;
+    use super::settle_left;
+    use crate::engine::DesktopSettings;
+    use crate::engine::Paste;
     use crate::host::spawn;
 
     /// What to do, when the Daemon asked, once the menu had closed, and how.
@@ -232,9 +245,7 @@ mod linux {
 
         /// False once the thread has stopped.
         pub fn send(&self, output: Output, settings: DesktopSettings) -> bool {
-            self.requests
-                .send((output, Instant::now(), settings))
-                .is_ok()
+            self.requests.send((output, Instant::now(), settings)).is_ok()
                 && rustix::io::write(&self.wake, &[1]).is_ok()
         }
     }
@@ -252,10 +263,7 @@ mod linux {
             let (woken, readable) = {
                 let mut fds = vec![PollFd::new(wake, PollFlags::IN)];
                 if let Some(guard) = &guard {
-                    fds.push(PollFd::from_borrowed_fd(
-                        guard.connection_fd(),
-                        PollFlags::IN,
-                    ));
+                    fds.push(PollFd::from_borrowed_fd(guard.connection_fd(), PollFlags::IN));
                 }
                 if rustix::event::poll(&mut fds, None).is_err() {
                     continue;
@@ -311,12 +319,9 @@ mod linux {
     impl Client {
         fn connect() -> Result<Self, String> {
             let conn = Display::from_env().connect()?;
-            let (globals, mut queue) =
-                registry_queue_init::<State>(&conn).map_err(|err| err.to_string())?;
+            let (globals, mut queue) = registry_queue_init::<State>(&conn).map_err(|err| err.to_string())?;
             let qh = queue.handle();
-            let seat: wl_seat::WlSeat = globals
-                .bind(&qh, 1..=1, ())
-                .map_err(|err| format!("no seat: {err}"))?;
+            let seat: wl_seat::WlSeat = globals.bind(&qh, 1..=1, ()).map_err(|err| format!("no seat: {err}"))?;
             let manager: ZwpVirtualKeyboardManagerV1 = globals
                 .bind(&qh, 1..=1, ())
                 .map_err(|err| format!("the compositor has no virtual keyboards: {err}"))?;
@@ -336,12 +341,7 @@ mod linux {
         }
 
         /// Does what was asked at `requested`, once the menu had closed.
-        fn output(
-            &mut self,
-            output: Output,
-            requested: Instant,
-            settings: DesktopSettings,
-        ) -> Result<(), String> {
+        fn output(&mut self, output: Output, requested: Instant, settings: DesktopSettings) -> Result<(), String> {
             let wait = Wait {
                 requested,
                 settle: settings.settle,
@@ -385,10 +385,7 @@ mod linux {
         /// Puts `clipboard` on the clipboard, and serves it until something
         /// else takes it.
         fn copy(&mut self, clipboard: Clipboard) -> Result<(), String> {
-            let data_control = self
-                .data
-                .as_ref()
-                .map_err(|err| format!("can't copy: {err}"))?;
+            let data_control = self.data.as_ref().map_err(|err| format!("can't copy: {err}"))?;
             let (mimes, data) = match clipboard {
                 Clipboard::Text(text) => (
                     vec![
@@ -474,9 +471,11 @@ mod linux {
 
 #[cfg(test)]
 mod tests {
-    use std::time::{Duration, Instant};
+    use std::time::Duration;
+    use std::time::Instant;
 
-    use super::{Keymap, settle_left};
+    use super::Keymap;
+    use super::settle_left;
     use crate::engine::DEFAULT_SETTLE;
 
     #[test]
@@ -486,10 +485,7 @@ mod tests {
         assert_eq!(settle_left(closed, DEFAULT_SETTLE, closed), ms(50));
         // Connecting and uploading the keymap count towards it.
         assert_eq!(settle_left(closed, DEFAULT_SETTLE, closed + ms(20)), ms(30));
-        assert_eq!(
-            settle_left(closed, DEFAULT_SETTLE, closed + ms(80)),
-            Duration::ZERO
-        );
+        assert_eq!(settle_left(closed, DEFAULT_SETTLE, closed + ms(80)), Duration::ZERO);
         assert_eq!(settle_left(closed, ms(200), closed + ms(80)), ms(120));
     }
 

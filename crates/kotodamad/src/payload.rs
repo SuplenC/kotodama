@@ -6,13 +6,18 @@
 //! A Shelf is only appended to: the versions of a Segment built one after
 //! another share it, and each reads only what was there when it was built.
 
-use std::fs::{self, File, OpenOptions};
+use std::fs;
+use std::fs::File;
+use std::fs::OpenOptions;
 use std::io;
 use std::path::Path;
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
+use std::sync::RwLock;
+use std::sync::atomic::AtomicU64;
+use std::sync::atomic::Ordering;
 
-use kotodama_protocol::{Item, WireFormat};
+use kotodama_protocol::Item;
+use kotodama_protocol::WireFormat;
 
 /// Where one Item's payload lies on its Shelf.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -98,9 +103,7 @@ impl Shelf {
             Store::Memory(memory) => {
                 let memory = memory.read().unwrap_or_else(|err| err.into_inner());
                 let at = start as usize;
-                let bytes = memory
-                    .get(at..at + len)
-                    .ok_or(io::ErrorKind::UnexpectedEof)?;
+                let bytes = memory.get(at..at + len).ok_or(io::ErrorKind::UnexpectedEof)?;
                 buf.copy_from_slice(bytes);
                 Ok(())
             }
@@ -145,11 +148,9 @@ fn decode(bytes: &[u8]) -> Result<Item, kotodama_protocol::Error> {
 /// A new file in `dir`, already unlinked. Only its user may read it: it
 /// holds what the Extensions sent, clipboard entries among them.
 fn file_in(dir: &Path, id: u64) -> io::Result<File> {
-    use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt};
-    fs::DirBuilder::new()
-        .recursive(true)
-        .mode(0o700)
-        .create(dir)?;
+    use std::os::unix::fs::DirBuilderExt;
+    use std::os::unix::fs::OpenOptionsExt;
+    fs::DirBuilder::new().recursive(true).mode(0o700).create(dir)?;
     let path = dir.join(format!("items-{}-{id}", std::process::id()));
     let file = OpenOptions::new()
         .read(true)
@@ -163,8 +164,10 @@ fn file_in(dir: &Path, id: u64) -> io::Result<File> {
 
 #[cfg(test)]
 mod tests {
+    use kotodama_protocol::Action;
+    use kotodama_protocol::ItemKind;
+
     use super::*;
-    use kotodama_protocol::{Action, ItemKind};
 
     fn item(id: &str) -> Item {
         Item {

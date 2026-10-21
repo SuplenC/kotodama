@@ -5,7 +5,10 @@
 //! `Notify`, waits for the answer and hangs up, over the small D-Bus client
 //! in `kotodama_extension::dbus`.
 
-use kotodama_extension::dbus::{Bus, Call, Error, Marshal};
+use kotodama_extension::dbus::Bus;
+use kotodama_extension::dbus::Call;
+use kotodama_extension::dbus::Error;
+use kotodama_extension::dbus::Marshal;
 
 /// Shows a notification with `summary` and `body`. Blocks until the
 /// notification service has answered, so call it off the main loop.

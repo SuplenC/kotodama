@@ -6,18 +6,26 @@
 //! in tests as on a real clock.
 
 use std::collections::HashMap;
-use std::hash::{BuildHasherDefault, DefaultHasher};
-use std::path::{Path, PathBuf};
-use std::sync::mpsc::{self, Sender};
-use std::{fs, io};
+use std::fs;
+use std::hash::BuildHasherDefault;
+use std::hash::DefaultHasher;
+use std::io;
+use std::path::Path;
+use std::path::PathBuf;
+use std::sync::mpsc;
+use std::sync::mpsc::Sender;
 
-use kotodama_protocol::{Table, Value};
-use serde::{Deserialize, Serialize};
+use kotodama_protocol::Table;
+use kotodama_protocol::Value;
+use serde::Deserialize;
+use serde::Serialize;
 
-use crate::clock::{DAY_SECS, When};
+use crate::clock::DAY_SECS;
+use crate::clock::When;
 use crate::host::spawn;
 use crate::problem::Report;
-use crate::usage::{self, Entry};
+use crate::usage;
+use crate::usage::Entry;
 
 const DAY: f64 = DAY_SECS as f64;
 
@@ -263,9 +271,7 @@ fn parts(time_of_day: u32) -> [(usize, f64); 2] {
 /// part on another day, or the same moment in another time zone.
 pub fn part_of_day(when: When) -> (u64, u32) {
     let part_secs = (DAY_SECS / PARTS as u64) as u32;
-    let started = when
-        .at
-        .saturating_sub(u64::from(when.time_of_day % part_secs));
+    let started = when.at.saturating_sub(u64::from(when.time_of_day % part_secs));
     (started, when.time_of_day / part_secs)
 }
 
@@ -459,9 +465,7 @@ impl Frecent {
             for (column, &share) in frecent.parts.iter_mut().zip(&picks.parts) {
                 column.push(share);
             }
-            frecent
-                .most
-                .push(picks.parts.iter().copied().max().unwrap_or(0));
+            frecent.most.push(picks.parts.iter().copied().max().unwrap_or(0));
         }
         frecent
     }
@@ -513,11 +517,7 @@ impl Frecent {
         out.resize(len, T::default());
         // Sliced to one length, so the loop reads them without bounds checks.
         let (out, decayed, score) = (&mut out[..len], &self.decayed[..len], &self.score[..len]);
-        let (first, second, most) = (
-            &self.parts[first][..len],
-            &self.parts[second][..len],
-            &self.most[..len],
-        );
+        let (first, second, most) = (&self.parts[first][..len], &self.parts[second][..len], &self.most[..len]);
         // HAZARD: vectorised (NEON `fmul`/`fdiv`/`fcmgt`, SSE2
         // `mulpd`/`divpd`): no branch, call or early exit in this loop. It is
         // the empty query's per-Result work: 25k instructions for 2,000
@@ -527,11 +527,7 @@ impl Frecent {
             let count = if count < score[n] { count } else { score[n] };
             let read = near_first * f64::from(first[n]) + near_second * f64::from(second[n]);
             let usual = read / (whole * f64::from(most[n]));
-            let usual = if most[n] == 0 || usual > 1.0 {
-                1.0
-            } else {
-                usual
-            };
+            let usual = if most[n] == 0 || usual > 1.0 { 1.0 } else { usual };
             out[n] = with(count, usual);
         }
     }
@@ -622,20 +618,14 @@ impl Learned {
         when: When,
         settings: &Settings,
     ) -> Option<Learned> {
-        let made_choice = after.choice.as_ref() == Some(picked)
-            && before.and_then(|before| before.choice.as_ref()) != Some(picked);
+        let made_choice =
+            after.choice.as_ref() == Some(picked) && before.and_then(|before| before.choice.as_ref()) != Some(picked);
         if !made_choice || self.choice.as_ref() != Some(picked) {
             return self.clone().take_off(picked, when, settings.half_life_secs);
         }
         let mut restored = before.cloned().unwrap_or_else(|| Learned::empty(after.at));
         // The picks of `picked` since, as its strength grew past the pick's.
-        let grown = f64::from(self.strength)
-            - decay(
-                after.strength.into(),
-                after.at,
-                self.at,
-                settings.half_life_secs,
-            );
+        let grown = f64::from(self.strength) - decay(after.strength.into(), after.at, self.at, settings.half_life_secs);
         for _ in 0..grown.round().max(0.0) as u32 {
             restored.add(picked, &[], self.at, settings);
         }
@@ -720,30 +710,15 @@ impl History {
     /// [`Settings::picks_to_learn`] times for one query becomes its Learned
     /// choice, and one picked [`Settings::picks_to_take_over`] times since the
     /// choice was last picked replaces it. Returns the change, to undo it.
-    pub fn pick(
-        &mut self,
-        extension: &str,
-        id: &str,
-        query: &str,
-        above: &[ResultKey],
-        when: When,
-    ) -> Change {
+    pub fn pick(&mut self, extension: &str, id: &str, query: &str, above: &[ResultKey], when: When) -> Change {
         let mut change = self.bump(extension, id, when);
         let at = when.at;
 
         let key = query_key(query);
         if !key.is_empty() {
             let before = self.learned.get(&key).cloned();
-            let learned = self
-                .learned
-                .entry(key.clone())
-                .or_insert_with(|| Learned::empty(at));
-            learned.add(
-                &(extension.to_owned(), id.to_owned()),
-                above,
-                at,
-                &self.settings,
-            );
+            let learned = self.learned.entry(key.clone()).or_insert_with(|| Learned::empty(at));
+            learned.add(&(extension.to_owned(), id.to_owned()), above, at, &self.settings);
             let after = Some(learned.clone());
             change.learned.push(Replaced { key, before, after });
             if let Some(pick) = &mut change.pick {
@@ -776,10 +751,7 @@ impl History {
                 after: Some(picks),
             }],
             learned: Vec::new(),
-            pick: Some(Pick {
-                when,
-                learned: None,
-            }),
+            pick: Some(Pick { when, learned: None }),
         }
     }
 
@@ -804,9 +776,7 @@ impl History {
     /// for them or count towards one. What other Learned choices were picked
     /// over stays.
     pub fn forget(&mut self, keys: &[ResultKey]) -> Change {
-        self.forget_where(|(extension, id)| {
-            keys.iter().any(|key| key.0 == extension && key.1 == id)
-        })
+        self.forget_where(|(extension, id)| keys.iter().any(|key| key.0 == extension && key.1 == id))
     }
 
     /// Forgets every Result `forgotten` is true for, as [`forget`](Self::forget) does.
@@ -939,8 +909,7 @@ impl History {
             .learned
             .iter()
             .filter(|(learned_for, _)| {
-                !key.is_empty()
-                    && (learned_for.starts_with(key) || key.starts_with(learned_for.as_str()))
+                !key.is_empty() && (learned_for.starts_with(key) || key.starts_with(learned_for.as_str()))
             })
             .filter_map(|(learned_for, learned)| {
                 let (extension, id) = learned.choice.as_ref()?;
@@ -949,20 +918,13 @@ impl History {
                     Choice {
                         extension,
                         id,
-                        strength: decay(
-                            learned.strength.into(),
-                            learned.at,
-                            at,
-                            self.settings.half_life_secs,
-                        ),
+                        strength: decay(learned.strength.into(), learned.at, at, self.settings.half_life_secs),
                         passed_over: &learned.passed_over,
                     },
                 ))
             })
             .collect();
-        choices.sort_by(|(a_len, a), (b_len, b)| {
-            b.strength.total_cmp(&a.strength).then(b_len.cmp(a_len))
-        });
+        choices.sort_by(|(a_len, a), (b_len, b)| b.strength.total_cmp(&a.strength).then(b_len.cmp(a_len)));
         choices.into_iter().map(|(_, choice)| choice).collect()
     }
 
@@ -972,9 +934,7 @@ impl History {
         let mut change = Change::default();
         for (extension, ids) in self.picks.drain() {
             for (id, picks) in ids {
-                change
-                    .picks
-                    .push(Replaced::gone((extension.clone(), id), picks));
+                change.picks.push(Replaced::gone((extension.clone(), id), picks));
             }
         }
         for (query, learned) in self.learned.drain() {
@@ -991,10 +951,7 @@ impl History {
         if results > max_results {
             let at = self.picked().map(|(.., p)| p.at).max().unwrap_or(0);
             let half_life = self.settings.half_life_secs;
-            let mut scores: Vec<f64> = self
-                .picked()
-                .map(|(.., p)| p.count(at, half_life))
-                .collect();
+            let mut scores: Vec<f64> = self.picked().map(|(.., p)| p.count(at, half_life)).collect();
             let cut = results - max_results;
             scores.select_nth_unstable_by(cut, f64::total_cmp);
             let floor = scores[cut];
@@ -1018,9 +975,7 @@ impl History {
             self.learned.retain(|query, learned| {
                 let keep = learned.at >= floor;
                 if !keep {
-                    change
-                        .learned
-                        .push(Replaced::gone(query.clone(), learned.clone()));
+                    change.learned.push(Replaced::gone(query.clone(), learned.clone()));
                 }
                 keep
             });
@@ -1254,19 +1209,13 @@ mod tests {
                 (frecency, habit.near_now, habit.overall, id.to_owned())
             })
             .collect();
-        results.sort_by(|a, b| {
-            b.0.total_cmp(&a.0)
-                .then(b.1.total_cmp(&a.1))
-                .then(a.3.cmp(&b.3))
-        });
+        results.sort_by(|a, b| b.0.total_cmp(&a.0).then(b.1.total_cmp(&a.1)).then(a.3.cmp(&b.3)));
         let learned = (0..50)
             .flat_map(|n| history.learned(&format!("q{n}"), when.at))
             .map(|choice| format!("{}/{} {}", choice.extension, choice.id, choice.strength));
         results
             .into_iter()
-            .map(|(frecency, near_now, overall, id)| {
-                format!("{id} {frecency} {near_now} {overall}")
-            })
+            .map(|(frecency, near_now, overall, id)| format!("{id} {frecency} {near_now} {overall}"))
             .chain(learned)
             .collect()
     }
@@ -1338,10 +1287,9 @@ mod tests {
 
     #[test]
     fn picks_kept_before_times_of_day_were_count_in_full_at_any_time() {
-        let history: History = serde_json::from_str(
-            r#"{"picks":{"apps":{"firefox":{"score":2.0,"at":1792368000}}},"learned":{}}"#,
-        )
-        .unwrap();
+        let history: History =
+            serde_json::from_str(r#"{"picks":{"apps":{"firefox":{"score":2.0,"at":1792368000}}},"learned":{}}"#)
+                .unwrap();
         assert_eq!(counts(&history, "firefox", when(0, 3 * HOUR)), 1.0);
         assert_eq!(counts(&history, "firefox", when(0, 15 * HOUR)), 1.0);
     }
@@ -1503,11 +1451,7 @@ mod tests {
         second_only.pick("apps", "mail", "ma", &[], when(5, 9 * HOUR));
         let close = |a: f64, b: f64| (a - b).abs() <= 1e-3 * b.abs().max(1.0);
         for at in [when(5, 9 * HOUR), when(5, 21 * HOUR), when(9, 3 * HOUR)] {
-            let picked = [
-                (IDENTITIES, "app:firefox"),
-                ("apps", "fish"),
-                ("apps", "mail"),
-            ];
+            let picked = [(IDENTITIES, "app:firefox"), ("apps", "fish"), ("apps", "mail")];
             for (extension, id) in picked {
                 let (got, want) = (
                     withdrawn.frecency(extension, id, at),
@@ -1518,10 +1462,7 @@ mod tests {
             for query in ["fi", "sh"] {
                 let strengths = |history: &History| -> Vec<(String, f64)> {
                     let choices = history.learned(query, at.at);
-                    choices
-                        .iter()
-                        .map(|c| (c.id.to_owned(), c.strength))
-                        .collect()
+                    choices.iter().map(|c| (c.id.to_owned(), c.strength)).collect()
                 };
                 let (got, want) = (strengths(&withdrawn), strengths(&second_only));
                 assert_eq!(got.len(), want.len(), "{query}: {got:?} for {want:?}");
@@ -1531,10 +1472,7 @@ mod tests {
                 }
             }
         }
-        assert_eq!(
-            withdrawn.learned["ma"].contenders,
-            second_only.learned["ma"].contenders
-        );
+        assert_eq!(withdrawn.learned["ma"].contenders, second_only.learned["ma"].contenders);
     }
 
     #[test]
@@ -1551,8 +1489,7 @@ mod tests {
     fn undoing_a_pick_that_took_over_brings_back_the_choice_it_replaced() {
         let picks = |history: &mut History, mistaken: bool| {
             history.pick("apps", "fish", "fi", &[], when(5, 9 * HOUR));
-            let change =
-                mistaken.then(|| history.pick("apps", "fish", "fi", &[], when(5, 9 * HOUR + 1)));
+            let change = mistaken.then(|| history.pick("apps", "fish", "fi", &[], when(5, 9 * HOUR + 1)));
             // The app the user meant, picked right after.
             history.pick(IDENTITIES, "app:firefox", "fi", &[], when(5, 9 * HOUR + 2));
             change
@@ -1585,15 +1522,8 @@ mod tests {
         let fish = *history.picks("apps", "fish").unwrap();
         history.undo(change);
         assert!(history.picks("apps", "mail").is_some(), "picked since");
-        assert_eq!(
-            history.picks("apps", "fish"),
-            Some(&fish),
-            "picked again since"
-        );
-        assert!(
-            history.picks(IDENTITIES, "app:firefox").is_some(),
-            "put back"
-        );
+        assert_eq!(history.picks("apps", "fish"), Some(&fish), "picked again since");
+        assert!(history.picks(IDENTITIES, "app:firefox").is_some(), "put back");
         assert_eq!(history.learned("fi", when(4, 0).at)[0].id, "app:firefox");
     }
 
@@ -1602,9 +1532,8 @@ mod tests {
         let mut history = used();
         history.touch("files", "notes", when(0, 9 * HOUR));
         let before = kept(&history);
-        let change = history.forget_where(|(extension, id)| {
-            extension == "apps" || (extension == IDENTITIES && id == "app:firefox")
-        });
+        let change = history
+            .forget_where(|(extension, id)| extension == "apps" || (extension == IDENTITIES && id == "app:firefox"));
         let at = when(3, 0).at;
         assert!(history.learned("fi", at).is_empty());
         assert!(history.learned("sh", at).is_empty());

@@ -2,10 +2,14 @@
 //! one thread writes what the Daemon sends, leaving out what the peer's
 //! protocol version can't read, and the calling thread reads.
 
-use std::io::{Read, Write};
-use std::sync::mpsc::{self, SyncSender};
+use std::io::Read;
+use std::io::Write;
+use std::sync::mpsc;
+use std::sync::mpsc::SyncSender;
 
-use kotodama_protocol::{Channel, Error, Since};
+use kotodama_protocol::Channel;
+use kotodama_protocol::Error;
+use kotodama_protocol::Since;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 

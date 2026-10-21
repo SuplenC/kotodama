@@ -11,10 +11,14 @@ use std::time::Duration;
 
 use common::*;
 use kotodama_protocol::*;
+use kotodamad::daemon::Ended;
+use kotodamad::daemon::Event;
+use kotodamad::daemon::ExtensionId;
+use kotodamad::daemon::FrontEndId;
+use kotodamad::daemon::HANDSHAKE_TIMEOUT;
+use kotodamad::daemon::MAX_LIVE_RESULTS;
+use kotodamad::daemon::Output;
 use kotodamad::daemon::RERANK_FOR;
-use kotodamad::daemon::{
-    Ended, Event, ExtensionId, FrontEndId, HANDSHAKE_TIMEOUT, MAX_LIVE_RESULTS, Output,
-};
 use kotodamad::discovery::Found;
 use kotodamad::usage::Used;
 
@@ -24,12 +28,7 @@ fn indexed_items_are_found_by_a_fuzzy_query_best_match_first() {
     let apps = h.up(0);
     h.add(
         &apps,
-        vec![
-            app("Files"),
-            app("Firefox"),
-            app("Calculator"),
-            app("Fire Alarm"),
-        ],
+        vec![app("Files"), app("Firefox"), app("Calculator"), app("Fire Alarm")],
     );
     let ui = h.front_end();
 
@@ -60,15 +59,11 @@ fn a_near_miss_highlights_the_words_it_nearly_matches() {
 }
 
 fn calculator() -> Found {
-    manifest(
-        "name = \"calc\"\ncommand = [\"x\"]\n[live_query]\ntriggers = ['^[0-9]']\ndebounce_ms = 0",
-    )
+    manifest("name = \"calc\"\ncommand = [\"x\"]\n[live_query]\ntriggers = ['^[0-9]']\ndebounce_ms = 0")
 }
 
 fn web() -> Found {
-    manifest(
-        "name = \"web\"\ncommand = [\"x\"]\n[live_query]\nprefixes = [\"g \"]\ndebounce_ms = 100",
-    )
+    manifest("name = \"web\"\ncommand = [\"x\"]\n[live_query]\nprefixes = [\"g \"]\ndebounce_ms = 100")
 }
 
 fn live_queries(ext: &Ext) -> Vec<(u64, String, Option<String>)> {
@@ -112,10 +107,7 @@ fn a_live_query_waits_for_the_debounce_and_drops_the_routing_prefix() {
     h.advance(Duration::from_millis(40));
     let sent = live_queries(&web);
     assert_eq!(sent.len(), 1);
-    assert_eq!(
-        (sent[0].1.as_str(), sent[0].2.as_deref()),
-        ("rust", Some("g "))
-    );
+    assert_eq!((sent[0].1.as_str(), sent[0].2.as_deref()), ("rust", Some("g ")));
 }
 
 #[test]
@@ -147,10 +139,7 @@ fn changing_the_query_cancels_the_live_query_in_flight_and_drops_its_results() {
     let (id, ..) = live_queries(&calc)[0].clone();
     h.query(&ui, "2+3");
     let sent = calc.drain();
-    assert!(
-        sent.contains(&ToExtension::CancelLiveQuery { id }),
-        "{sent:?}"
-    );
+    assert!(sent.contains(&ToExtension::CancelLiveQuery { id }), "{sent:?}");
 
     // A straggler for the old query is ignored.
     h.send(
@@ -189,10 +178,7 @@ fn a_late_result_goes_below_the_visible_rows_however_well_it_scores() {
     let mut h = Harness::new(vec![plain("apps"), web()]);
     let apps = h.up(0);
     let web = h.up(1);
-    h.add(
-        &apps,
-        vec![app("g rust one"), app("g rust two"), app("g rust three")],
-    );
+    h.add(&apps, vec![app("g rust one"), app("g rust two"), app("g rust three")]);
     let ui = h.front_end();
     h.front_end_sends(&ui, FromFrontEnd::Viewport { top: 0, rows: 2 });
 
@@ -226,20 +212,14 @@ fn late_results_keep_a_near_miss_on_screen_though_real_matches_now_fill_the_rows
     let ui = h.front_end();
     h.front_end_sends(&ui, FromFrontEnd::Viewport { top: 0, rows: 2 });
 
-    assert_eq!(
-        titles(&h.query(&ui, "g stream")),
-        ["G Stream Deck", "G Steam"]
-    );
+    assert_eq!(titles(&h.query(&ui, "g stream")), ["G Stream Deck", "G Steam"]);
     h.advance(RERANK_FOR);
     let (id, ..) = live_queries(&web)[0].clone();
     h.send(
         &web,
         FromExtension::LiveResults {
             live_query: id,
-            results: vec![
-                live("stream one", 1.0, false),
-                live("stream two", 1.0, false),
-            ],
+            results: vec![live("stream one", 1.0, false), live("stream two", 1.0, false)],
             done: true,
         },
     );
@@ -256,10 +236,7 @@ fn below_the_visible_rows_live_results_compete_with_indexed_items_on_score() {
     // Of the live results' kind, so that only the score tells them apart.
     h.add(
         &apps,
-        vec![
-            live("g rust", 0.0, false).item,
-            live("g xrxuxsxt", 0.0, false).item,
-        ],
+        vec![live("g rust", 0.0, false).item, live("g xrxuxsxt", 0.0, false).item],
     );
     let ui = h.front_end();
     h.front_end_sends(&ui, FromFrontEnd::Viewport { top: 0, rows: 1 });
@@ -296,10 +273,7 @@ fn rust_on_screen() -> RustOnScreen {
     let mut h = Harness::new(vec![plain("apps"), web()]);
     let apps = h.up(0);
     let web = h.up(1);
-    h.add(
-        &apps,
-        vec![app("g rust one"), app("g rust two"), app("g rust three")],
-    );
+    h.add(&apps, vec![app("g rust one"), app("g rust two"), app("g rust three")]);
     let ui = h.front_end();
     h.front_end_sends(&ui, FromFrontEnd::Viewport { top: 0, rows: 2 });
     let shown = owned_titles(&h.query(&ui, "g rust"));
@@ -388,9 +362,7 @@ fn a_new_query_reranks_again_though_the_selection_moved_for_the_last_one() {
 
 #[test]
 fn an_answer_keeps_the_top_row_above_a_late_result_that_reranks() {
-    let notes = manifest(
-        "name = \"notes\"\ncommand = [\"x\"]\n[live_query]\ntriggers = ['^[0-9]']\ndebounce_ms = 50",
-    );
+    let notes = manifest("name = \"notes\"\ncommand = [\"x\"]\n[live_query]\ntriggers = ['^[0-9]']\ndebounce_ms = 50");
     let mut h = Harness::new(vec![plain("apps"), calculator(), notes]);
     let apps = h.up(0);
     let calc = h.up(1);
@@ -473,10 +445,7 @@ fn enter_on_a_result_a_late_update_moved_up_runs_once_a_frame_shows_it_there() {
             ids: vec!["fire-one".into()],
         },
     );
-    assert_eq!(
-        titles(&ui.results().expect("the late update is sent")),
-        ["Fire two"]
-    );
+    assert_eq!(titles(&ui.results().expect("the late update is sent")), ["Fire two"]);
 
     let after = ui.shown.replace(before);
     run(&mut h, &ui, "apps", "fire-two", "apps", "open");
@@ -542,10 +511,7 @@ fn kept(h: &Harness) -> serde_json::Value {
 
 #[test]
 fn running_answers_leaves_the_history_as_it_was_but_logs_every_run() {
-    let mut h = Harness::with_config(
-        vec![plain("apps"), calculator()],
-        config("[history]\nusage_log = true"),
-    );
+    let mut h = Harness::with_config(vec![plain("apps"), calculator()], config("[history]\nusage_log = true"));
     let apps = h.up(0);
     let calc = h.up(1);
     h.add(&apps, vec![app("2048 game")]);
@@ -607,10 +573,7 @@ fn an_answer_from_a_debounced_extension_is_ranked_like_any_late_result() {
             done: true,
         },
     );
-    assert_eq!(
-        titles(&ui.results().unwrap()),
-        ["g rust", "claims to answer"]
-    );
+    assert_eq!(titles(&ui.results().unwrap()), ["g rust", "claims to answer"]);
 }
 
 #[test]
@@ -664,10 +627,7 @@ fn contributed_actions_follow_the_owners_actions_and_are_never_primary() {
     let ui = h.front_end();
 
     let row = &h.query(&ui, "kotodama")[0];
-    assert_eq!(
-        row.item.actions[0].id, "open",
-        "the owner's Action stays primary"
-    );
+    assert_eq!(row.item.actions[0].id, "open", "the owner's Action stays primary");
     let contributed: Vec<_> = row
         .contributed
         .iter()
@@ -702,10 +662,8 @@ fn an_extension_cant_bind_a_key_the_menu_keeps_for_itself() {
     let projects = h.up(1);
     let mut item = project("kotodama");
     item.actions[0].shortcut = Some("ctrl+z".into());
-    item.actions
-        .push(Action::new("panel", "panel").shortcut("Control+K"));
-    item.actions
-        .push(Action::new("close", "close").shortcut("ctrl+w"));
+    item.actions.push(Action::new("panel", "panel").shortcut("Control+K"));
+    item.actions.push(Action::new("close", "close").shortcut("ctrl+w"));
     h.add(&projects, vec![item.clone()]);
     let ui = h.front_end();
 
@@ -802,11 +760,7 @@ fn an_action_the_result_does_not_offer_is_refused() {
     // `pin` is for projects, not apps.
     run(&mut h, &ui, "projects", "firefox", "pinner", "pin");
     assert_eq!(runs(&pinner), []);
-    assert!(
-        ui.drain()
-            .iter()
-            .any(|m| matches!(m, ToFrontEnd::ActionFailed { .. }))
-    );
+    assert!(ui.drain().iter().any(|m| matches!(m, ToFrontEnd::ActionFailed { .. })));
 }
 
 fn catalogs(ext: &Ext) -> Vec<Vec<CatalogEntry>> {
@@ -891,21 +845,13 @@ fn confirm(h: &mut Harness, ui: &FrontEnd, proposer: &Ext, name: &str, outcome: 
         vec![item(
             "ask",
             "Ask",
-            ItemKind::Namespaced(
-                NamespacedKind::new(format!("{name}.proposal")).expect("a valid kind"),
-            ),
+            ItemKind::Namespaced(NamespacedKind::new(format!("{name}.proposal")).expect("a valid kind")),
         )],
     );
     h.query(ui, "ask");
     run(h, ui, name, "ask", name, "open");
     let invocation = runs(proposer)[0].0;
-    h.send(
-        proposer,
-        FromExtension::ActionDone {
-            invocation,
-            outcome,
-        },
-    );
+    h.send(proposer, FromExtension::ActionDone { invocation, outcome });
 }
 
 fn new_go_project(arguments: &[(&str, &str)]) -> Outcome {
@@ -929,13 +875,7 @@ fn a_confirmed_proposal_runs_the_catalog_action_on_the_item_that_offers_it() {
     let ui = h.front_end();
     suites.drain();
 
-    confirm(
-        &mut h,
-        &ui,
-        &pinner,
-        "pinner",
-        new_go_project(&[("name", "demo")]),
-    );
+    confirm(&mut h, &ui, &pinner, "pinner", new_go_project(&[("name", "demo")]));
     let sent: Vec<_> = suites
         .drain()
         .into_iter()
@@ -970,11 +910,7 @@ fn a_confirmed_proposal_missing_an_argument_asks_for_it_first() {
 
     confirm(&mut h, &ui, &pinner, "pinner", new_go_project(&[]));
     assert_eq!(runs(&suites), []);
-    assert!(
-        ui.drain()
-            .iter()
-            .any(|m| matches!(m, ToFrontEnd::PushView { .. }))
-    );
+    assert!(ui.drain().iter().any(|m| matches!(m, ToFrontEnd::PushView { .. })));
 }
 
 #[test]
@@ -986,19 +922,9 @@ fn only_an_extension_that_reads_the_catalog_may_run_from_it() {
     let ui = h.front_end();
     suites.drain();
 
-    confirm(
-        &mut h,
-        &ui,
-        &guesser,
-        "guesser",
-        new_go_project(&[("name", "demo")]),
-    );
+    confirm(&mut h, &ui, &guesser, "guesser", new_go_project(&[("name", "demo")]));
     assert_eq!(runs(&suites), []);
-    assert!(
-        ui.drain()
-            .iter()
-            .any(|m| matches!(m, ToFrontEnd::ActionFailed { .. }))
-    );
+    assert!(ui.drain().iter().any(|m| matches!(m, ToFrontEnd::ActionFailed { .. })));
 }
 
 /// Two Suites offering `new-go-project`, and a proposer that confirms
@@ -1036,11 +962,7 @@ fn pick_list(messages: &[ToFrontEnd]) -> Option<(String, Listed)> {
             items
                 .iter()
                 .map(|item| {
-                    let actions = item
-                        .actions
-                        .iter()
-                        .map(|action| action.title.clone())
-                        .collect();
+                    let actions = item.actions.iter().map(|action| action.title.clone()).collect();
                     (item.id.clone(), item.title.clone(), actions)
                 })
                 .collect(),
@@ -1075,9 +997,7 @@ fn sent_runs(suites: &Ext) -> Vec<(String, String, BTreeMap<String, String>)> {
 }
 
 fn failed(messages: &[ToFrontEnd]) -> bool {
-    messages
-        .iter()
-        .any(|m| matches!(m, ToFrontEnd::ActionFailed { .. }))
+    messages.iter().any(|m| matches!(m, ToFrontEnd::ActionFailed { .. }))
 }
 
 #[test]
@@ -1225,13 +1145,7 @@ fn a_catalog_action_no_item_offers_is_refused() {
     let suites = h.up(1);
     let ui = h.front_end();
 
-    confirm(
-        &mut h,
-        &ui,
-        &pinner,
-        "pinner",
-        new_go_project(&[("name", "demo")]),
-    );
+    confirm(&mut h, &ui, &pinner, "pinner", new_go_project(&[("name", "demo")]));
 
     let messages = ui.drain();
     assert!(failed(&messages));
@@ -1259,9 +1173,11 @@ fn a_stopped_extensions_results_disappear_and_a_marker_shows_it_is_down() {
 
     h.down(&apps);
     let messages = ui.drain();
-    assert!(messages.iter().any(
-        |message| matches!(message, ToFrontEnd::Results { results, .. } if results.is_empty())
-    ));
+    assert!(
+        messages
+            .iter()
+            .any(|message| matches!(message, ToFrontEnd::Results { results, .. } if results.is_empty()))
+    );
     assert!(
         messages
             .iter()
@@ -1334,10 +1250,7 @@ fn a_config_change_reaches_only_the_extensions_whose_table_changed() {
     };
     assert_eq!(
         configs(&apps),
-        [BTreeMap::from([(
-            "terminal".into(),
-            Value::String("foot".into())
-        )])],
+        [BTreeMap::from([("terminal".into(), Value::String("foot".into()))])],
         "the first message after the handshake"
     );
     assert_eq!(configs(&web), [Table::new()]);
@@ -1347,10 +1260,7 @@ fn a_config_change_reaches_only_the_extensions_whose_table_changed() {
     )));
     assert_eq!(
         configs(&apps),
-        [BTreeMap::from([(
-            "terminal".into(),
-            Value::String("kitty".into())
-        )])]
+        [BTreeMap::from([("terminal".into(), Value::String("kitty".into()))])]
     );
     assert_eq!(configs(&web), []);
 }
@@ -1377,10 +1287,7 @@ fn the_word_in_an_extensions_table_is_the_daemons_and_never_reaches_it() {
         .collect();
     assert_eq!(
         configs,
-        [BTreeMap::from([(
-            "terminal".into(),
-            Value::String("foot".into())
-        )])]
+        [BTreeMap::from([("terminal".into(), Value::String("foot".into()))])]
     );
 }
 
@@ -1417,9 +1324,7 @@ fn typing_waits_until_every_front_end_has_closed() {
 
     h.front_end_sends(&ui, FromFrontEnd::Closed);
     assert_eq!(*h.outputs.0.borrow(), []);
-    h.event(Event::FrontEndDown {
-        front_end: other.id,
-    });
+    h.event(Event::FrontEndDown { front_end: other.id });
     assert_eq!(*h.outputs.0.borrow(), [Output::Type("hello".into())]);
 }
 
@@ -1453,10 +1358,7 @@ fn open_and_toggle_go_to_one_menu_and_say_so_to_the_one_that_asked() {
     assert_eq!(first.drain(), []);
     assert_eq!(
         command.drain(),
-        [
-            ToFrontEnd::Reached { menus: 1 },
-            ToFrontEnd::Reached { menus: 1 }
-        ]
+        [ToFrontEnd::Reached { menus: 1 }, ToFrontEnd::Reached { menus: 1 }]
     );
 }
 
@@ -1514,17 +1416,8 @@ fn a_toggle_sent_before_the_menu_connects_reaches_it_once_it_searches() {
     h.advance(Duration::from_secs(1));
 
     let menu = h.front_end();
-    assert_eq!(
-        command.drain(),
-        [],
-        "a Front end is a menu once it searches"
-    );
-    h.front_end_sends(
-        &menu,
-        FromFrontEnd::Query {
-            text: String::new(),
-        },
-    );
+    assert_eq!(command.drain(), [], "a Front end is a menu once it searches");
+    h.front_end_sends(&menu, FromFrontEnd::Query { text: String::new() });
 
     assert!(menu.drain().contains(&ToFrontEnd::Toggle));
     assert_eq!(command.drain(), [ToFrontEnd::Reached { menus: 1 }]);
@@ -1535,17 +1428,10 @@ fn a_request_from_a_front_end_that_left_reaches_no_menu() {
     let mut h = Harness::new(vec![]);
     let command = h.front_end();
     h.front_end_sends(&command, FromFrontEnd::Toggle);
-    h.event(Event::FrontEndDown {
-        front_end: command.id,
-    });
+    h.event(Event::FrontEndDown { front_end: command.id });
 
     let menu = h.front_end();
-    h.front_end_sends(
-        &menu,
-        FromFrontEnd::Query {
-            text: String::new(),
-        },
-    );
+    h.front_end_sends(&menu, FromFrontEnd::Query { text: String::new() });
 
     assert!(!menu.drain().contains(&ToFrontEnd::Toggle));
 }
@@ -1571,10 +1457,7 @@ fn copying_closes_every_front_end_and_copies_without_waiting_for_them() {
     );
     assert!(ui.drain().contains(&ToFrontEnd::Close));
     assert!(other.drain().contains(&ToFrontEnd::Close));
-    assert_eq!(
-        *h.outputs.0.borrow(),
-        [Output::Copy(Clipboard::Text("84".into()))]
-    );
+    assert_eq!(*h.outputs.0.borrow(), [Output::Copy(Clipboard::Text("84".into()))]);
 }
 
 #[test]
@@ -1606,10 +1489,7 @@ fn a_new_item_taking_a_removed_visible_items_place_in_the_index_is_still_late() 
         },
     );
     h.add(&apps, vec![app("Fire newcomer")]);
-    assert_eq!(
-        titles(&ui.results().unwrap()),
-        ["Fire two", "Fire newcomer"]
-    );
+    assert_eq!(titles(&ui.results().unwrap()), ["Fire two", "Fire newcomer"]);
 }
 
 #[test]
@@ -1633,10 +1513,7 @@ fn a_bigger_viewport_protects_the_rows_it_shows_at_once() {
             done: true,
         },
     );
-    assert_eq!(
-        titles(&ui.results().unwrap()),
-        ["g rust a", "g rust bb", "perfect"]
-    );
+    assert_eq!(titles(&ui.results().unwrap()), ["g rust a", "g rust bb", "perfect"]);
 }
 
 #[test]
@@ -1761,16 +1638,10 @@ fn rows_scrolled_past_are_protected_like_the_ones_on_screen() {
     let mut h = Harness::new(vec![plain("apps"), web()]);
     let apps = h.up(0);
     let web = h.up(1);
-    h.add(
-        &apps,
-        vec![app("g rust a"), app("g rust bb"), app("g rust ccc")],
-    );
+    h.add(&apps, vec![app("g rust a"), app("g rust bb"), app("g rust ccc")]);
     let ui = h.front_end();
     h.front_end_sends(&ui, FromFrontEnd::Viewport { top: 0, rows: 1 });
-    assert_eq!(
-        titles(&h.query(&ui, "g rust")),
-        ["g rust a", "g rust bb", "g rust ccc"]
-    );
+    assert_eq!(titles(&h.query(&ui, "g rust")), ["g rust a", "g rust bb", "g rust ccc"]);
 
     // Scrolled so the second row is the one on screen.
     h.front_end_sends(&ui, FromFrontEnd::Viewport { top: 1, rows: 1 });
@@ -1816,13 +1687,7 @@ fn live_results_for_one_query_are_capped() {
 
     for batch in 0..3 {
         let results = (0..MAX_LIVE_RESULTS / 2)
-            .map(|n| {
-                live(
-                    &format!("{batch}-{n}"),
-                    if batch == 2 { 1.0 } else { 0.5 },
-                    false,
-                )
-            })
+            .map(|n| live(&format!("{batch}-{n}"), if batch == 2 { 1.0 } else { 0.5 }, false))
             .collect();
         h.send(
             &calc,
@@ -1845,9 +1710,7 @@ fn an_extension_installed_while_running_is_started_and_searched() {
     h.up(0);
     let ui = h.front_end();
 
-    h.event(Event::Extensions(
-        vec![plain("apps"), plain("bookmarks")].into(),
-    ));
+    h.event(Event::Extensions(vec![plain("apps"), plain("bookmarks")].into()));
     assert_eq!(h.launches.0.borrow().last(), Some(&(ExtensionId(1), 1)));
     let bookmarks = h.up(1);
     h.add(&bookmarks, vec![app("Kotodama")]);
@@ -1939,11 +1802,7 @@ fn three_picks_of_a_result_for_a_query_make_it_that_querys_learned_choice() {
 
     pick(&mut h, &ui, "fi", "apps", "firefox");
     assert_eq!(first(&mut h, &ui, "fi"), "Firefox");
-    assert_eq!(
-        first(&mut h, &ui, " fi "),
-        "Firefox",
-        "spacing doesn't matter"
-    );
+    assert_eq!(first(&mut h, &ui, " fi "), "Firefox", "spacing doesn't matter");
     assert_eq!(first(&mut h, &ui, "fir"), "Firefox", "only Firefox matches");
     assert_eq!(
         first(&mut h, &ui, "f"),
@@ -1985,11 +1844,7 @@ fn frecency_breaks_a_tie_and_a_pick_only_ever_weakens() {
     let apps = h.up(0);
     h.add(&apps, launcher_apps());
     let ui = h.front_end();
-    assert_eq!(
-        first(&mut h, &ui, "fi"),
-        "Fish",
-        "the shortest title wins a tie"
-    );
+    assert_eq!(first(&mut h, &ui, "fi"), "Fish", "the shortest title wins a tie");
 
     pick(&mut h, &ui, "firefox", "apps", "firefox");
     assert_eq!(first(&mut h, &ui, "fi"), "Firefox");
@@ -2000,11 +1855,7 @@ fn frecency_breaks_a_tie_and_a_pick_only_ever_weakens() {
     assert_eq!(first(&mut h, &ui, "fi"), "Firefox", "two months later");
 
     pick(&mut h, &ui, "fish", "apps", "fish");
-    assert_eq!(
-        first(&mut h, &ui, "fi"),
-        "Fish",
-        "a recent pick counts more"
-    );
+    assert_eq!(first(&mut h, &ui, "fi"), "Fish", "a recent pick counts more");
 }
 
 #[test]
@@ -2028,10 +1879,7 @@ fn frecency_and_learned_choices_apply_to_live_query_results() {
                 done: true,
             },
         );
-        titles(&ui.results().unwrap())
-            .into_iter()
-            .map(str::to_owned)
-            .collect()
+        titles(&ui.results().unwrap()).into_iter().map(str::to_owned).collect()
     };
     assert_eq!(search(&mut h), ["Rust", "Rust lang", "Rustup"]);
     run(&mut h, &ui, "web", "Rustup", "web", "open");
@@ -2119,12 +1967,7 @@ fn a_learned_choice_follows_the_same_thing_to_another_extension() {
     assert_eq!(first(&mut h, &ui, "git"), "GitHub");
 
     // The bookmark goes; the page is still in the visited ones.
-    h.send(
-        &bookmarks,
-        FromExtension::RemoveItems {
-            ids: vec!["gh".into()],
-        },
-    );
+    h.send(&bookmarks, FromExtension::RemoveItems { ids: vec!["gh".into()] });
     assert_eq!(
         first(&mut h, &ui, "git"),
         "github.com",
@@ -2164,11 +2007,7 @@ fn the_empty_query_is_ranked_again_when_the_menu_opens() {
     h.advance_to(20);
     h.front_end_sends(&command, FromFrontEnd::Toggle);
     assert_eq!(titles(&menu.results().unwrap()), ["Music", "Mail", "apps"]);
-    assert_eq!(
-        command.drain(),
-        [ToFrontEnd::Reached { menus: 1 }],
-        "it never searched"
-    );
+    assert_eq!(command.drain(), [ToFrontEnd::Reached { menus: 1 }], "it never searched");
 }
 
 #[test]
@@ -2261,12 +2100,7 @@ fn the_clear_history_action_forgets_every_pick() {
 
 /// What the Daemon put in the usage log, without the times.
 fn logged(h: &Harness) -> Vec<Used> {
-    h.saved
-        .1
-        .borrow()
-        .iter()
-        .map(|entry| entry.used.clone())
-        .collect()
+    h.saved.1.borrow().iter().map(|entry| entry.used.clone()).collect()
 }
 
 #[test]
@@ -2310,12 +2144,7 @@ fn the_usage_log_is_off_until_the_config_turns_it_on() {
     h.query(&ui, "fis");
     h.event(Event::Config(config("")));
     h.query(&ui, "fish");
-    assert_eq!(
-        logged(&h),
-        [Used::Query {
-            query: "fis".into()
-        }]
-    );
+    assert_eq!(logged(&h), [Used::Query { query: "fis".into() }]);
 }
 
 #[test]
@@ -2333,11 +2162,7 @@ fn an_alias_puts_its_result_first_and_follows_config_reloads() {
     let apps = h.up(0);
     h.add(&apps, launcher_apps());
     let ui = h.front_end();
-    assert_eq!(
-        first(&mut h, &ui, "web"),
-        "Firefox",
-        "even though it doesn't match"
-    );
+    assert_eq!(first(&mut h, &ui, "web"), "Firefox", "even though it doesn't match");
     assert_eq!(first(&mut h, &ui, "WEB"), "Firefox");
 
     h.event(Event::Config(config(
@@ -2353,9 +2178,7 @@ fn an_alias_puts_its_result_first_and_follows_config_reloads() {
 fn an_alias_for_an_action_makes_it_primary() {
     let mut h = Harness::with_config(
         vec![plain("apps")],
-        config(
-            "[aliases]\npriv = { extension = \"apps\", item = \"firefox\", action = \"private\" }",
-        ),
+        config("[aliases]\npriv = { extension = \"apps\", item = \"firefox\", action = \"private\" }"),
     );
     let apps = h.up(0);
     let mut firefox = app("Firefox");
@@ -2383,11 +2206,7 @@ fn an_alias_for_a_live_result_not_yet_answered_shows_no_row() {
 
     let rows = h.query(&ui, "ddg");
 
-    assert_eq!(
-        titles(&rows),
-        Vec::<&str>::new(),
-        "its Extension may still answer"
-    );
+    assert_eq!(titles(&rows), Vec::<&str>::new(), "its Extension may still answer");
 }
 
 #[test]
@@ -2432,10 +2251,7 @@ fn an_alias_whose_item_is_gone_shows_a_row_saying_so() {
     assert_eq!(gone.unavailable.as_deref(), Some("No longer in apps"));
     assert_eq!(gone.item.actions, [], "nothing to run");
     assert_eq!(no_extension.item.title, "todo");
-    assert_eq!(
-        no_extension.unavailable.as_deref(),
-        Some("No Extension notes")
-    );
+    assert_eq!(no_extension.unavailable.as_deref(), Some("No Extension notes"));
 }
 
 #[test]
@@ -2503,14 +2319,7 @@ fn a_quicklink_opens_with_its_own_opener_or_else_the_default() {
     h.query(&ui, "yt cats");
     run(&mut h, &ui, "kotodama", "quicklink:yt", "kotodama", "open");
     h.query(&ui, "mail");
-    run(
-        &mut h,
-        &ui,
-        "kotodama",
-        "quicklink:mail",
-        "kotodama",
-        "open",
-    );
+    run(&mut h, &ui, "kotodama", "quicklink:mail", "kotodama", "open");
 
     assert_eq!(
         *h.outputs.1.borrow(),
@@ -2569,14 +2378,7 @@ fn a_quicklink_keyword_takes_the_rest_of_the_query_into_its_template() {
     assert!(ui.drain().contains(&ToFrontEnd::Close));
 
     h.query(&ui, "logs kotodamad.service");
-    run(
-        &mut h,
-        &ui,
-        "kotodama",
-        "quicklink:logs",
-        "kotodama",
-        "open",
-    );
+    run(&mut h, &ui, "kotodama", "quicklink:logs", "kotodama", "open");
 
     h.query(&ui, "gh");
     run(&mut h, &ui, "kotodama", "quicklink:gh", "kotodama", "open");
@@ -2604,9 +2406,7 @@ fn quicklinks_follow_config_reloads() {
     let ui = h.front_end();
     assert_eq!(h.query(&ui, "gh"), []);
 
-    h.event(Event::Config(config(
-        "[quicklinks.gh]\nurl = \"https://github.com\"",
-    )));
+    h.event(Event::Config(config("[quicklinks.gh]\nurl = \"https://github.com\"")));
     assert_eq!(first(&mut h, &ui, "gh"), "gh", "titled by its keyword");
 
     h.event(Event::Config(config(
