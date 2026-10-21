@@ -141,10 +141,17 @@ pkgs.testers.runNixOSTest {
         machine.wait_until_succeeds(
             as_alice(f"{front_end} power off") + " | grep -qP '^system\tpower-off\tPower Off$'"
         )
-        machine.wait_until_succeeds(
-            "journalctl --no-pager --user-unit kotodamad.service"
-            + " | grep -q 'leaving the windows to the Hyprland Extension'"
-        )
+        # Without this line the system Extension may not have met the
+        # compositor yet, and the counts below would pass for that reason.
+        # `--user-unit` as root reads root's own units, so match alice's.
+        daemon_log = "journalctl --no-pager _UID=1000 _SYSTEMD_USER_UNIT=kotodamad.service"
+        try:
+            machine.wait_until_succeeds(
+                daemon_log + " | grep -q 'leaving the windows to the Hyprland Extension'",
+                timeout=60,
+            )
+        finally:
+            print(machine.execute(daemon_log)[1])
         rows = user(f"{front_end} vm-one")
         assert rows.count("\tvm-one\n") == 1, f"vm-one shows other than once:\n{rows}"
         assert "\nsystem\twindow-" not in "\n" + rows, f"the system Extension sent a window:\n{rows}"
@@ -190,6 +197,6 @@ pkgs.testers.runNixOSTest {
             user("kotodama toggle")
             machine.wait_until_fails(menu_shown)
         finally:
-            print(machine.execute("journalctl --no-pager --user-unit kotodama-menu.service")[1])
+            print(machine.execute("journalctl --no-pager _UID=1000 _SYSTEMD_USER_UNIT=kotodama-menu.service")[1])
   '';
 }
