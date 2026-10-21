@@ -8,7 +8,7 @@ Kotodama is a command menu for Wayland desktops. You type, and it finds and does
 - **A Quickshell QML module** written in Rust (cxx-qt) gives QML a native result model. QML only draws the results.
 - **Extensions** are separate processes in any language. They speak a protocol whose wire format is negotiated (JSON, MessagePack or postcard), so a crashing Extension never takes down the menu.
 
-Status: early. The protocol, the Daemon, the Quickshell Front end and the apps, clipboard history, calculator, emoji, folders, Hyprland, web search and AI Bundled extensions work; Views, the Action panel and the other Bundled extensions are next. See `docs/adr/0001-architecture.md` and the issues.
+Status: early. The protocol, the Daemon, the Quickshell Front end and the apps, clipboard history, calculator, emoji, folders, Hyprland, system, web search and AI Bundled extensions work; Views, the Action panel and the other Bundled extensions are next. See `docs/adr/0001-architecture.md` and the issues.
 
 ## Installing
 
@@ -58,7 +58,7 @@ Every config table below also has typed options, so a typo or a value of the wro
 | `extensions.ai.{apiKeyCommand, apiKeyFile, url, model, effort, debounceMs}` | `[extensions.ai]` (see [AI](#ai)) |
 | `extensions.folders.{folders, terminal, open, shell, lazygit, fileManager, copyPath}` | `[extensions.folders]` |
 
-Each option is the key in camelCase. `decimalSeparator`, `skinTone` and a folder's `kind` take only the values their Extension knows, a `prefix` only one word or `""`, and numbers are checked against the ranges the tables below give. The Hyprland Extension has no settings.
+Each option is the key in camelCase. `decimalSeparator`, `skinTone` and a folder's `kind` take only the values their Extension knows, a `prefix` only one word or `""`, and numbers are checked against the ranges the tables below give. The Hyprland and system Extensions have no settings.
 
 ```nix
 programs.kotodama = {
@@ -474,6 +474,24 @@ bind = SUPER, F1, exec, kotodama open --view hyprland/shortcuts
 Outside Hyprland (no `HYPRLAND_INSTANCE_SIGNATURE`) the Extension sends nothing and waits, using no CPU. The Daemon, a systemd user service, finds Hyprland through the user manager's environment, so Hyprland's config should import it: `exec-once = systemctl --user import-environment HYPRLAND_INSTANCE_SIGNATURE WAYLAND_DISPLAY`. If Hyprland exits, its windows and binds are taken away.
 
 Its `manifest.toml` runs `./kotodama-hyprland`, so a package installs the binary next to it in `$XDG_DATA_DIRS/kotodama/extensions/hyprland/`.
+
+### System
+
+`kotodama-system` (`crates/kotodama-system`, Extension name `system`) powers the machine and the session through logind, and lists the open windows of any compositor with wlr-foreign-toplevel-management. It knows no compositor and no distro: logind is on every systemd system, and sway, river, labwc, niri, Wayfire and Hyprland all speak the protocol.
+
+**Power and session**: "Power Off", "Reboot", "Suspend", "Hibernate", "Lock Screen" and "Log Out" are Items of kind `system.power`, found by the words people type for them too: `shutdown`, `restart`, `sleep`, `lock`, `logout`, `sign out`. Each calls logind (`org.freedesktop.login1`) on the system bus. "Power Off", "Reboot" and "Log Out" close every app, so Enter on them opens a small form first, and a second Enter runs it; Esc leaves it. "Suspend" and "Lock Screen" lose nothing and run at once. "Hibernate" is listed only when logind's `CanHibernate` says `yes`, read once when the Extension starts. "Log Out" ends the session with logind's `TerminateSession`, whichever compositor runs it. The calls are not interactive: when polkit wants a password, as it does with another user logged in, the menu says it was turned down instead of waiting for a prompt. Without logind the Items are still listed, and running one says why it failed.
+
+"Lock Screen" asks logind to lock the session, and logind tells the session's screen locker. Kotodama ships no locker; connect yours to logind's lock signal:
+
+- **hypridle** runs your locker on it: `general { lock_cmd = pidof hyprlock || hyprlock }` in `hypridle.conf`.
+- **swayidle** does too: `swayidle -w lock 'swaylock -f'`.
+- **A Quickshell lock screen** (`WlSessionLock`) can lock when logind's session emits `Lock`, for example from a `Process` running `dbus-monitor --system "type='signal',interface='org.freedesktop.login1.Session',member='Lock'"`.
+
+**Windows**: every toplevel the compositor reports is an Item of the shared kind `window`, titled by its title, with its app id beside and as its icon. The compositor pushes every window opened, retitled or closed, so a window's Item is sent again alone, and focus or maximizing sends nothing. Its primary Action, "Focus Window", focuses it; "Close Window", "Minimize", "Toggle Maximized" and "Toggle Fullscreen" follow. What no Wayland protocol offers, such as moving a window to a workspace or floating it, belongs to a compositor's own Extension, as the Hyprland Extension does it. On Hyprland the Extension leaves the windows to that Extension, so a window never shows twice (see `docs/adr/0025-the-generic-windows-step-aside-on-hyprland.md`). On a compositor without the protocol, such as GNOME or KDE, it lists no windows. Either way the windows part then stops, and the Extension uses no CPU.
+
+Idle, with a few windows open, the Extension holds about 2.5 MiB resident and runs no thread but the ones blocked on the Daemon's pipe and the compositor's socket.
+
+Its `manifest.toml` runs `./kotodama-system`, so a package installs the binary next to it in `$XDG_DATA_DIRS/kotodama/extensions/system/`.
 
 ## The Quickshell Front end
 

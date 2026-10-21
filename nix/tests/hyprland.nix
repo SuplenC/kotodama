@@ -3,8 +3,10 @@
 # needs a DRM device, which a container doesn't have, so it runs here the way
 # Hyprland tests itself: a virtio GPU, rendered in software, and Hyprland
 # started for a user logged in on a tty. It checks that an opened window is an
-# Item whose focus Action works, that a bind added at runtime is in the
-# Shortcuts View that `kotodama open --view hyprland/shortcuts` opens, and that
+# Item whose focus Action works, that it shows once though the system
+# Extension could list it too through wlr-foreign-toplevel, that a bind added
+# at runtime is in the Shortcuts View that `kotodama open --view
+# hyprland/shortcuts` opens, and that
 # the module's ready Front end starts with the session, loads the QML module
 # from the Nix output, and shows and hides on `kotodama toggle`.
 {
@@ -135,6 +137,25 @@ pkgs.testers.runNixOSTest {
             + " | grep -q '\"title\": \"vm-one\"'"
         )
 
+    with subtest("the system Extension leaves the windows to the Hyprland Extension, so none shows twice"):
+        machine.wait_until_succeeds(
+            as_alice(f"{front_end} power off") + " | grep -qP '^system\tpower-off\tPower Off$'"
+        )
+        # Without this line the system Extension may not have met the
+        # compositor yet, and the counts below would pass for that reason.
+        # `--user-unit` as root reads root's own units, so match alice's.
+        daemon_log = "journalctl --no-pager _UID=1000 _SYSTEMD_USER_UNIT=kotodamad.service"
+        try:
+            machine.wait_until_succeeds(
+                daemon_log + " | grep -q 'leaving the windows to the Hyprland Extension'",
+                timeout=60,
+            )
+        finally:
+            print(machine.execute(daemon_log)[1])
+        rows = user(f"{front_end} vm-one")
+        assert rows.count("\tvm-one\n") == 1, f"vm-one shows other than once:\n{rows}"
+        assert "\nsystem\twindow-" not in "\n" + rows, f"the system Extension sent a window:\n{rows}"
+
     with subtest("a closed window is gone"):
         # foot closes its window once the program in it exits.
         machine.succeed("pkill -u alice -f '^sleep 1002$'")
@@ -176,6 +197,6 @@ pkgs.testers.runNixOSTest {
             user("kotodama toggle")
             machine.wait_until_fails(menu_shown)
         finally:
-            print(machine.execute("journalctl --no-pager --user-unit kotodama-menu.service")[1])
+            print(machine.execute("journalctl --no-pager _UID=1000 _SYSTEMD_USER_UNIT=kotodama-menu.service")[1])
   '';
 }

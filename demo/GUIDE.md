@@ -126,6 +126,22 @@ Both live in the demo's config file.
 There is no browser in the demo: whatever would open a web page shows a
 terminal saying what it would have opened.
 
+## Windows and power (the system Extension)
+
+Every open window is a Result, found by its title or app id, on any
+compositor with wlr-foreign-toplevel-management; this desktop is sway. Open a
+terminal or two (Ctrl+Return), then type `foot`: the app comes first, its
+windows after it. Enter focuses a window; Ctrl+K offers "Close Window",
+"Minimize", "Toggle Maximized" and "Toggle Fullscreen" (sway has no minimizing,
+so that one does nothing here). Close a window and its Result goes.
+
+"Power Off", "Reboot", "Suspend", "Lock Screen" and "Log Out" are Results too,
+found by `shutdown`, `restart`, `sleep`, `lock` or `logout` as well. Power Off,
+Reboot and Log Out ask first in a small form: a second Enter runs them, Esc
+leaves. They go through logind, which the demo's container doesn't run, so here
+each says why it failed, and Hibernate isn't listed (it is only when logind can
+hibernate).
+
 ## Views
 
 Extensions push Views on top of the search: lists, forms, details and
@@ -171,8 +187,11 @@ off.
 
 ## What the demo can't show
 
-- Windows and keyboard shortcuts: those come from the Hyprland Extension, and
-  this desktop is sway.
+- Hyprland's keyboard shortcuts, and moving windows between workspaces or
+  floating them: those come from the Hyprland Extension, and this desktop is
+  sway.
+- Powering off, suspending, locking or logging out: the container has no
+  logind.
 - Web pages: there is no browser.
 - Notifications: there is no notification daemon, so a finished job or timer
   says so only in the menu.

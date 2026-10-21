@@ -1,0 +1,6 @@
+# The system Bundled extension. A package installs this directory as
+# `$XDG_DATA_DIRS/kotodama/extensions/system/`, with the `kotodama-system`
+# binary next to this file (or `command` rewritten to its absolute path).
+name = "system"
+description = "Power off, reboot, suspend, hibernate, lock and log out through logind, and the open windows of any compositor with wlr-foreign-toplevel-management"
+command = ["./kotodama-system"]

@@ -233,6 +233,18 @@ ShellRoot {
                     does: "dates"
                 }
             }
+            Card {
+                title: "Windows and power"
+                hue: "#eba0ac"
+                Example {
+                    query: "foot"
+                    does: "its open windows; Enter focuses"
+                }
+                Example {
+                    query: "shutdown"
+                    does: "asks first; no logind here"
+                }
+            }
         }
 
         // Right of the menu.

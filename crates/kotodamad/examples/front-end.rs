@@ -1,10 +1,12 @@
 //! A bare Front end for trying the Daemon from a terminal: it prints the Results
-//! for a query, and with `--run` runs the top Result's primary Action, answering
-//! the Daemon's Close as a real menu would.
+//! for a query, and with `--run` runs the top Result's primary Action, or with
+//! `--action <id>` its Action `id`, answering the Daemon's Close as a real menu
+//! would.
 //!
 //! ```sh
 //! cargo run -p kotodamad --example front-end -- firefox
 //! cargo run -p kotodamad --example front-end -- --run firefox
+//! cargo run -p kotodamad --example front-end -- --action close firefox
 //! ```
 
 use std::env;
@@ -19,9 +21,14 @@ use kotodama_protocol::{
 
 fn main() -> ExitCode {
     let mut args: Vec<String> = env::args().skip(1).collect();
-    let run = args.first().is_some_and(|arg| arg == "--run");
-    if run {
+    // `None` prints the Results; `Some(None)` runs the primary Action.
+    let mut run = None;
+    if args.first().is_some_and(|arg| arg == "--run") {
         args.remove(0);
+        run = Some(None);
+    } else if args.first().is_some_and(|arg| arg == "--action") && args.len() > 1 {
+        args.remove(0);
+        run = Some(Some(args.remove(0)));
     }
     let query = args.join(" ");
     match front_end(&query, run) {
@@ -33,7 +40,7 @@ fn main() -> ExitCode {
     }
 }
 
-fn front_end(query: &str, run: bool) -> Result<(), Box<dyn std::error::Error>> {
+fn front_end(query: &str, run: Option<Option<String>>) -> Result<(), Box<dyn std::error::Error>> {
     let socket = PathBuf::from(env::var_os("XDG_RUNTIME_DIR").ok_or("XDG_RUNTIME_DIR isn't set")?)
         .join("kotodama.sock");
     let stream = UnixStream::connect(&socket)?;
@@ -56,11 +63,20 @@ fn front_end(query: &str, run: bool) -> Result<(), Box<dyn std::error::Error>> {
     for row in &results {
         println!("{}\t{}\t{}", row.extension, row.item.id, row.item.title);
     }
-    if !run {
+    let Some(action) = run else {
         return Ok(());
-    }
+    };
 
     let top = results.first().ok_or("nothing to run")?;
+    let action = match action {
+        Some(id) => top
+            .item
+            .actions
+            .iter()
+            .find(|action| action.id == id)
+            .ok_or_else(|| format!("the top Result has no Action `{id}`"))?,
+        None => &top.item.actions[0],
+    };
     channel.send(&FromFrontEnd::RunAction {
         result: ResultRef {
             extension: top.extension.clone(),
@@ -69,7 +85,7 @@ fn front_end(query: &str, run: bool) -> Result<(), Box<dyn std::error::Error>> {
         shown,
         action: ActionRef {
             extension: top.extension.clone(),
-            id: top.item.actions[0].id.clone(),
+            id: action.id.clone(),
         },
         arguments: Default::default(),
     })?;

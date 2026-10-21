@@ -1,0 +1,23 @@
+[package]
+name = "kotodama-system"
+version.workspace = true
+description = "The system Bundled extension: power and session through logind, and the open windows of any wlr-foreign-toplevel compositor"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+kotodama-extension = { path = "../kotodama-extension", features = ["wayland"] }
+kotodama-protocol = { path = "../kotodama-protocol" }
+thiserror = "2.0.21"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+wayland-client = "0.31.15"
+wayland-protocols-wlr = { version = "0.3.12", features = ["client"] }
+
+[dev-dependencies]
+kotodama-extension = { path = "../kotodama-extension", features = ["testing", "wayland"] }
+tempfile = "3.27.0"
+
+[lints]
+workspace = true

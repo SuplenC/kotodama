@@ -2,21 +2,21 @@
 //! method and reading the messages that come back, on a socket that lives as
 //! long as the calls.
 //!
-//! Kotodama calls D-Bus only on rare events, a notification when a job ends
-//! and a scope for a program it starts, so a D-Bus library would keep a
-//! connection and a thread for the process's whole life to save a few
-//! milliseconds on each.
+//! Kotodama calls D-Bus only on rare events, a notification when a job ends,
+//! a scope for a program it starts, or logind when the user powers off, so a
+//! D-Bus library would keep a connection and a thread for the process's
+//! whole life to save a few milliseconds on each.
 //!
 //! # Owns
 //!
-//! Finding and connecting to the session bus and to the systemd user
-//! manager, the EXTERNAL authentication, marshalling method calls, and
-//! reading replies and signals.
+//! Finding and connecting to the session bus, the system bus and the systemd
+//! user manager, the EXTERNAL authentication, marshalling method calls and
+//! their returns, and reading calls, replies and signals.
 //!
 //! # Not here
 //!
 //! What is called: notifications are `kotodamad`'s `notify`, scopes
-//! `crate::scope`.
+//! `crate::scope`, logind the `system` Extension's.
 
 use std::io::{self, Read, Write};
 use std::os::unix::net::UnixStream;
@@ -28,6 +28,7 @@ const TIMEOUT: Duration = Duration::from_secs(2);
 /// A message from the bus larger than this isn't one we are waiting for.
 const MAX_MESSAGE: usize = 1 << 20;
 
+const METHOD_CALL: u8 = 1;
 const METHOD_RETURN: u8 = 2;
 const ERROR: u8 = 3;
 const SIGNAL: u8 = 4;
@@ -38,14 +39,20 @@ const MEMBER: u8 = 3;
 const ERROR_NAME: u8 = 4;
 const REPLY_SERIAL: u8 = 5;
 const DESTINATION: u8 = 6;
+const SENDER: u8 = 7;
 const SIGNATURE: u8 = 8;
+
+/// Where the system bus listens when `DBUS_SYSTEM_BUS_ADDRESS` is unset, as
+/// the D-Bus specification fixes it.
+const SYSTEM_BUS: &str = "unix:path=/var/run/dbus/system_bus_socket";
 
 /// What went wrong talking over D-Bus.
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum Error {
-    /// Neither `DBUS_SESSION_BUS_ADDRESS` nor `XDG_RUNTIME_DIR` is set.
-    #[error("no address for the session bus")]
+    /// Neither `DBUS_SESSION_BUS_ADDRESS` nor `XDG_RUNTIME_DIR` is set, or
+    /// the address names no Unix socket.
+    #[error("no address for the bus")]
     NoAddress,
     #[error("connecting to the bus")]
     Connect(#[source] io::Error),
@@ -95,7 +102,35 @@ impl Bus {
     ///
     /// When there is no session bus, or it can't be reached or refuses us.
     pub fn session() -> Result<Bus, Error> {
-        let mut bus = Bus::authenticated(session_stream()?)?;
+        Bus::hello(session_stream()?)
+    }
+
+    /// Connects to the system bus, at `DBUS_SYSTEM_BUS_ADDRESS` or where the
+    /// D-Bus specification puts it, and says hello as [`Bus::session`] does.
+    ///
+    /// # Errors
+    ///
+    /// When there is no system bus ([`Error::is_absent`]), or it can't be
+    /// reached or refuses us.
+    pub fn system() -> Result<Bus, Error> {
+        let address = std::env::var("DBUS_SYSTEM_BUS_ADDRESS");
+        Bus::at(address.as_deref().unwrap_or(SYSTEM_BUS))
+    }
+
+    /// Connects to the bus at `address`, a D-Bus address such as
+    /// `unix:path=/run/dbus/system_bus_socket`, and says hello as
+    /// [`Bus::session`] does.
+    ///
+    /// # Errors
+    ///
+    /// When `address` names no Unix socket, or the bus can't be reached or
+    /// refuses us.
+    pub fn at(address: &str) -> Result<Bus, Error> {
+        Bus::hello(connect_address(address)?)
+    }
+
+    fn hello(stream: UnixStream) -> Result<Bus, Error> {
+        let mut bus = Bus::authenticated(stream)?;
         let hello = bus.call_message(&Call::new(
             "/org/freedesktop/DBus",
             "org.freedesktop.DBus",
@@ -156,6 +191,46 @@ impl Bus {
             ));
         }
         self.stream.write_all(b"BEGIN\r\n").map_err(Error::Io)
+    }
+
+    /// Waits for messages without a time limit from now on, as a service
+    /// waiting for calls does.
+    ///
+    /// # Errors
+    ///
+    /// When the socket refuses the change.
+    pub fn wait_forever(&mut self) -> Result<(), Error> {
+        self.stream.set_read_timeout(None).map_err(Error::Io)
+    }
+
+    /// Answers the method call `to` with a return whose body, of type
+    /// `signature`, is `body`.
+    ///
+    /// # Errors
+    ///
+    /// When it can't be written.
+    pub fn reply(&mut self, to: &Message, signature: &str, body: Marshal) -> Result<(), Error> {
+        self.serial += 1;
+        let mut m = Marshal::default();
+        // Little-endian, a method return, no flags, protocol version 1.
+        m.0.extend_from_slice(&[b'l', METHOD_RETURN, 0, 1]);
+        m.u32(body.0.len() as u32);
+        m.u32(self.serial);
+        m.array(8, |m| {
+            m.pad(8);
+            m.byte(REPLY_SERIAL);
+            m.signature("u");
+            m.u32(to.serial);
+            if let Some(sender) = &to.sender {
+                m.field(DESTINATION, "s", sender);
+            }
+            if !signature.is_empty() {
+                m.field(SIGNATURE, "g", signature);
+            }
+        });
+        m.pad(8);
+        m.0.extend_from_slice(&body.0);
+        self.write(&m.0)
     }
 
     /// Sends `call` and returns its serial, without waiting for the answer.
@@ -234,7 +309,11 @@ impl Bus {
         let mut message = Message {
             kind: fixed[1],
             little,
+            serial: word(8),
             reply_serial: None,
+            path: None,
+            interface: None,
+            sender: None,
             member: None,
             error_name: None,
             signature: String::new(),
@@ -375,12 +454,18 @@ impl Marshal {
     }
 }
 
-/// A message read from a bus: a method's return or error, or a signal.
+/// A message read from a bus: a method call, a method's return or error, or
+/// a signal.
 #[derive(Debug)]
 pub struct Message {
     kind: u8,
     little: bool,
+    serial: u32,
     reply_serial: Option<u32>,
+    path: Option<String>,
+    interface: Option<String>,
+    /// The unique name of the connection that sent it; the bus fills it in.
+    sender: Option<String>,
     member: Option<String>,
     error_name: Option<String>,
     signature: String,
@@ -392,6 +477,15 @@ impl Message {
     #[must_use]
     pub fn is_signal(&self, member: &str, signature: &str) -> bool {
         self.kind == SIGNAL && self.member.as_deref() == Some(member) && self.signature == signature
+    }
+
+    /// Whether it is a call of `interface.member` on the object `path`.
+    #[must_use]
+    pub fn is_call(&self, path: &str, interface: &str, member: &str) -> bool {
+        self.kind == METHOD_CALL
+            && self.path.as_deref() == Some(path)
+            && self.interface.as_deref() == Some(interface)
+            && self.member.as_deref() == Some(member)
     }
 
     /// Reads its body, which starts at an 8-byte boundary.
@@ -435,8 +529,11 @@ impl Message {
                     }
                 }),
                 "s" | "o" => read.string().map(|value| match code {
+                    PATH => self.path = Some(value.to_owned()),
+                    INTERFACE => self.interface = Some(value.to_owned()),
                     MEMBER => self.member = Some(value.to_owned()),
                     ERROR_NAME => self.error_name = Some(value.to_owned()),
+                    SENDER => self.sender = Some(value.to_owned()),
                     _ => {}
                 }),
                 "g" => read.signature().map(|value| {
@@ -506,7 +603,12 @@ fn session_stream() -> Result<UnixStream, Error> {
         let dir = std::env::var_os("XDG_RUNTIME_DIR").ok_or(Error::NoAddress)?;
         return UnixStream::connect(Path::new(&dir).join("bus")).map_err(Error::Connect);
     };
-    let addresses = addresses.to_string_lossy();
+    connect_address(&addresses.to_string_lossy())
+}
+
+/// Connects to the first Unix socket in `addresses`, a D-Bus address list
+/// separated by `;`.
+fn connect_address(addresses: &str) -> Result<UnixStream, Error> {
     let mut last = Error::NoAddress;
     for address in addresses.split(';') {
         let Some(params) = address.strip_prefix("unix:") else {
