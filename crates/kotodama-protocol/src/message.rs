@@ -115,6 +115,20 @@ pub enum FromExtension {
         /// The `invocation` of the [`ToExtension::RunAction`] that ran it.
         invocation: u64,
     },
+    /// Whether the Extension can do anything now, sent whenever that changes.
+    /// The search shows its app's entry Item only while it can, so a user on
+    /// another compositor, or before setting the Extension up, never enters
+    /// an app with nothing in it. Until an Extension sends one, it counts as
+    /// able once it has sent Items or if its Manifest asks for Live queries.
+    Status {
+        usable: bool,
+        /// What the user should know as they enter the app, which its intro
+        /// card shows: why it can't do anything, such as `Hyprland isn't
+        /// running`, or what it isn't doing, such as a paused clipboard
+        /// history.
+        #[serde(default)]
+        note: Option<String>,
+    },
 }
 
 /// One Live query result.

@@ -88,13 +88,17 @@ impl App {
 
     /// What a Front end shows for a query inside it: the intro card too
     /// while nothing is typed, so it comes with the first frame and costs
-    /// later keystrokes nothing.
-    pub fn scope(&self, typed: bool) -> Scope {
+    /// later keystrokes nothing, with `note`, what the Extension last said
+    /// the user should know.
+    pub fn scope(&self, typed: bool, note: Option<&str>) -> Scope {
         Scope {
             word: self.word.clone(),
             title: self.title.clone(),
             icon: self.icon.clone(),
-            intro: (!typed).then(|| self.intro.clone()),
+            intro: (!typed).then(|| Intro {
+                note: note.map(str::to_owned),
+                ..self.intro.clone()
+            }),
         }
     }
 }
@@ -234,6 +238,7 @@ impl App {
             intro: Intro {
                 about,
                 examples: manifest.examples.clone(),
+                note: None,
             },
             commands: manifest.commands.clone(),
             searched,

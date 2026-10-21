@@ -7,7 +7,7 @@ A Bundled extension. Maintained by hand: fix stale lines when you find them, and
 - `scripts.rs` (executables and header options), with its unit tests in `scripts/tests.rs`
 - `scan.rs` (`Scanner` thread, settling changes from a thread-less `Watcher::new`)
 - `items.rs` (the Items and their Action ids)
-- `main.rs`: the protocol loop; a script without a terminal runs as a Job. `RunError` is why an Action failed, the failed Outcome's message.
+- `main.rs`: the protocol loop; after each scan it says whether it can do anything (`SentStatus`): not without folders, or without a project or script in them; a script without a terminal runs as a Job. `RunError` is why an Action failed, the failed Outcome's message.
 - `../tests/folders.rs`: the Extension over stdio, on a temporary home.
 - `../tests/projects.rs`: finding projects and naming them as `tms` does.
 - `../tests/daemon.rs`: the Extension under the real Daemon, with the shell example.

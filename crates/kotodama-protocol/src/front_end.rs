@@ -275,6 +275,11 @@ pub struct Intro {
     /// What the app does and how to use it, in a sentence or two.
     pub about: String,
     pub examples: Vec<Example>,
+    /// What the Extension says the user should know now, from its
+    /// [`FromExtension::Status`](crate::FromExtension::Status), such as why it
+    /// can't do anything.
+    #[serde(default)]
+    pub note: Option<String>,
 }
 
 /// A query to type in an app, and what it gives, such as `15min in sec` and

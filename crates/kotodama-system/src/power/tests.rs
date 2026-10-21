@@ -1,5 +1,3 @@
-use kotodama_protocol::ViewContent;
-
 use super::Power;
 use super::items;
 
@@ -20,24 +18,13 @@ fn power_off_reboot_and_log_out_ask_first_and_the_rest_do_not() {
 }
 
 #[test]
-fn a_confirmation_is_a_form_without_fields_that_names_what_it_asks_about() {
-    let view = Power::PowerOff.confirmation();
+fn the_items_that_ask_first_have_the_front_end_confirm_their_action() {
+    let confirmed: Vec<Power> = Power::ALL
+        .into_iter()
+        .filter(|power| power.item().actions.iter().all(|action| action.confirm))
+        .collect();
 
-    assert_eq!(
-        view.content,
-        ViewContent::Form {
-            fields: Vec::new(),
-            submit: "Power Off".into(),
-        }
-    );
-    assert_eq!(Power::from_confirmation(&view.id), Some(Power::PowerOff));
-}
-
-#[test]
-fn only_the_views_that_ask_name_a_power_item() {
-    assert_eq!(Power::from_confirmation("confirm-suspend"), None);
-    assert_eq!(Power::from_confirmation("power-off"), None);
-    assert_eq!(Power::from_confirmation("confirm-log-out"), Some(Power::LogOut));
+    assert_eq!(confirmed, [Power::PowerOff, Power::Reboot, Power::LogOut]);
 }
 
 #[test]

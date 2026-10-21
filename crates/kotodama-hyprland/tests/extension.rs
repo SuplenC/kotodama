@@ -391,7 +391,26 @@ fn without_hyprland_the_extension_starts_and_stays_quiet() {
         .env_remove("HYPRLAND_INSTANCE_SIGNATURE");
     let mut extension = Spawned::start(&mut command, WAIT);
     extension.send(ToExtension::Config(Table::new()));
+    assert_eq!(extension.status(), not_running());
     stays_quiet_and_idle(extension);
+}
+
+fn not_running() -> (bool, Option<String>) {
+    (false, Some("Hyprland isn't running".to_owned()))
+}
+
+#[test]
+fn the_extension_is_usable_only_while_hyprland_runs() {
+    let hyprland = FakeHyprland::start();
+    let extension = hyprland.extension();
+    started(&extension);
+    let at_start = [extension.status(), extension.status()];
+
+    hyprland.exit();
+    let _gone = [extension.removed(), extension.removed()].concat();
+
+    assert_eq!(at_start, [not_running(), (true, None)]);
+    assert_eq!(extension.status(), not_running());
 }
 
 #[test]

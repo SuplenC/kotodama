@@ -24,6 +24,9 @@ pub struct Spawned {
     /// `None` once the test has hung up.
     writer: Option<ChannelWriter<ChildStdin>>,
     received: Receiver<FromExtension>,
+    /// The `status` messages, apart from the rest, so a test of the Items
+    /// never meets one.
+    statuses: Receiver<FromExtension>,
     wait: Duration,
 }
 
@@ -40,8 +43,13 @@ impl Spawned {
         let channel = Channel::accept(stdout, stdin, &Hello::new(&WireFormat::ALL)).unwrap();
         let (mut reader, writer) = channel.split();
         let (sender, received) = mpsc::channel();
+        let (status_sender, statuses) = mpsc::channel();
         thread::spawn(move || {
             while let Ok(Some(message)) = reader.recv::<FromExtension>() {
+                let sender = match message {
+                    FromExtension::Status { .. } => &status_sender,
+                    _ => &sender,
+                };
                 if sender.send(message).is_err() {
                     break;
                 }
@@ -51,6 +59,7 @@ impl Spawned {
             child,
             writer: Some(writer),
             received,
+            statuses,
             wait,
         }
     }
@@ -92,6 +101,17 @@ impl Spawned {
         match self.recv() {
             FromExtension::RemoveItems { ids } => ids,
             other => panic!("expected remove_items, got {other:?}"),
+        }
+    }
+
+    /// The next `status` message, as whether the Extension is usable and its
+    /// note; panics if none comes in time. The other messages never hold
+    /// one.
+    pub fn status(&self) -> (bool, Option<String>) {
+        match self.statuses.recv_timeout(self.wait) {
+            Ok(FromExtension::Status { usable, note }) => (usable, note),
+            Ok(other) => unreachable!("only statuses arrive here, got {other:?}"),
+            Err(_) => panic!("the Extension said nothing of whether it is usable"),
         }
     }
 

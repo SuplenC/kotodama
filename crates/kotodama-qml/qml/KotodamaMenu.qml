@@ -72,6 +72,7 @@ PanelWindow {
     // jobs keep running, and the menu opens again where it was. Only Esc pops.
     function hide() {
         menu.actions = [];
+        search.cancelConfirm();
         visible = false;
     }
 
@@ -111,6 +112,12 @@ PanelWindow {
         return (event.modifiers & (Qt.ControlModifier | Qt.ShiftModifier | Qt.AltModifier | Qt.MetaModifier)) === Qt.ControlModifier;
     }
 
+    // Whether `event` is a modifier pressed on its own, as on the way to a
+    // key binding.
+    function modifierAlone(event) {
+        return [Qt.Key_Shift, Qt.Key_Control, Qt.Key_Alt, Qt.Key_Meta, Qt.Key_Super_L, Qt.Key_Super_R].includes(event.key);
+    }
+
     // While the Toast shows, its key undoes what it offers to, whatever has
     // the keys; otherwise the key is the text box's own undo. True if
     // `event` was it.
@@ -127,6 +134,18 @@ PanelWindow {
         const enter = event.key === Qt.Key_Return || event.key === Qt.Key_Enter;
         if (menu.undoKey(event))
             return true;
+        // An Action that asks first waits in the footer: Enter runs it, Esc
+        // drops it, and any other key drops it and does what it does.
+        if (search.confirming !== "" && !menu.modifierAlone(event)) {
+            if (enter) {
+                menu.failure = "";
+                search.confirm();
+                return true;
+            }
+            search.cancelConfirm();
+            if (event.key === Qt.Key_Escape)
+                return true;
+        }
         if (event.key === Qt.Key_Escape) {
             // One rule everywhere, so Esc never throws away more than the
             // user can see: it clears the text if there is any, else pops
@@ -453,6 +472,22 @@ PanelWindow {
                 topPadding: 10
                 bottomPadding: 10
                 spacing: 4
+
+                // What the Extension says now, such as that it is paused or
+                // why it can't do anything, above what it always says.
+                Text {
+                    x: 18
+                    width: intro.width - 36
+                    visible: search.introNote !== ""
+                    wrapMode: Text.Wrap
+                    maximumLineCount: 2
+                    elide: Text.ElideRight
+                    textFormat: Text.PlainText
+                    text: search.introNote
+                    color: menu.accent
+                    font.family: menu.fontFamily
+                    font.pixelSize: menu.fontSize - 1
+                }
 
                 Text {
                     x: 18
@@ -881,10 +916,10 @@ PanelWindow {
             height: text === "" ? 0 : menu.rowHeight * 0.7
             verticalAlignment: Text.AlignVCenter
             elide: Text.ElideRight
-            color: menu.failure !== "" ? menu.error : menu.dimmed
+            color: search.confirming !== "" || menu.failure !== "" ? menu.error : menu.dimmed
             font.family: menu.fontFamily
             font.pixelSize: menu.fontSize - 3
-            text: menu.failure !== "" ? menu.failure : search.down.length > 0 ? "Unavailable: " + search.down.join(", ") : menu.hints
+            text: search.confirming !== "" ? search.confirming : menu.failure !== "" ? menu.failure : search.down.length > 0 ? "Unavailable: " + search.down.join(", ") : menu.hints
         }
 
         // The Toast: what Forget or "Clear history" just did, and the key that

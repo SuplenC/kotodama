@@ -14,5 +14,5 @@ about = "Everything copied this week. Type to find a clip; Enter pastes it into 
 examples = [
     { query = "https", result = "The links copied" },
 ]
-commands = ["history"]
+commands = ["history", "pause"]
 in_search = false

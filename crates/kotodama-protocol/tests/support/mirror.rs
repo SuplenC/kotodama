@@ -30,6 +30,8 @@ pub mod prost {
         pub shortcut: Option<String>,
         #[prost(message, repeated, tag = "4")]
         pub arguments: Vec<Argument>,
+        #[prost(bool, tag = "5")]
+        pub confirm: bool,
     }
 
     #[derive(Clone, PartialEq, ::prost::Message)]
@@ -175,6 +177,7 @@ pub mod prost {
                     optional: argument.optional,
                 })
                 .collect(),
+            confirm: action.confirm,
         }
     }
 
@@ -287,6 +290,7 @@ pub mod musli {
         pub title: String,
         pub shortcut: Option<String>,
         pub arguments: Vec<Argument>,
+        pub confirm: bool,
     }
 
     #[derive(Clone, Debug, PartialEq, Encode, Decode, Serialize, Deserialize)]
@@ -364,6 +368,7 @@ pub mod musli {
                     optional: argument.optional,
                 })
                 .collect(),
+            confirm: action.confirm,
         }
     }
 
@@ -459,6 +464,7 @@ pub mod bilrost {
         pub title: String,
         pub shortcut: Option<String>,
         pub arguments: Vec<Argument>,
+        pub confirm: bool,
     }
 
     #[derive(Clone, Debug, PartialEq, ::bilrost::Message)]
@@ -571,6 +577,7 @@ pub mod bilrost {
                     optional: argument.optional,
                 })
                 .collect(),
+            confirm: action.confirm,
         }
     }
 

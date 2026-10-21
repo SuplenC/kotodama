@@ -206,6 +206,23 @@ fn nothing_is_sent_before_the_config_and_folders_come_from_it() {
 }
 
 #[test]
+fn the_extension_is_usable_only_with_something_in_its_folders() {
+    let home = home();
+    let mut folders = Folders::configured(home, "");
+    let (no_folders, why) = folders.status();
+
+    folders.configure(r#"folders = [{ path = "~/Projects", kind = "projects" }]"#);
+    let (empty, empty_why) = folders.status();
+    repo(&folders.path().join("Projects/kotodama"));
+
+    assert!(!no_folders);
+    assert!(why.is_some_and(|why| why.contains("folders")));
+    assert!(!empty);
+    assert!(empty_why.is_some_and(|why| why.contains("No projects")));
+    assert_eq!(folders.status(), (true, None));
+}
+
+#[test]
 fn without_lazygit_on_the_path_a_project_has_no_lazygit_action() {
     let home = home();
     repo(&home.path().join("Projects/app"));

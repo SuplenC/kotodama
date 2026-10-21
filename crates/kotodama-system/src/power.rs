@@ -1,30 +1,25 @@
 //! Power and session: an Item for each of Power Off, Reboot, Suspend,
-//! Hibernate, Lock Screen and Log Out, and the form View that asks before the
-//! three that end the session.
+//! Hibernate, Lock Screen and Log Out. The three that end the session ask
+//! first: their Actions carry `confirm`, and the Front end asks.
 //!
 //! # Owns
 //!
 //! - The power Items, their keywords, and which of them ask first.
-//! - The confirmation View, and finding the Item it asks about from its id.
 //!
 //! # Not here
 //!
 //! - Calling logind: [`crate::logind`].
-//! - When the Items are sent and what answers a run or a submitted form: `main.rs`.
+//! - When the Items are sent and what answers a run: `main.rs`.
 
 use kotodama_protocol::Action;
 use kotodama_protocol::Item;
 use kotodama_protocol::ItemKind;
 use kotodama_protocol::NamespacedKind;
-use kotodama_protocol::View;
-use kotodama_protocol::ViewContent;
 
 /// The Item kind of every power Item.
 pub const KIND: &str = "system.power";
-/// The primary Action of every power Item: runs it, or asks first.
+/// The primary Action of every power Item.
 pub const RUN: &str = "run";
-/// What the id of a confirmation View starts with; the Item's id follows.
-const CONFIRM: &str = "confirm-";
 
 /// One thing logind does to the machine or the session.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -121,32 +116,11 @@ impl Power {
         matches!(self, Power::PowerOff | Power::Reboot | Power::LogOut)
     }
 
-    /// The form View that asks before it runs: no fields, and its title on
-    /// the submit button, so a second Enter runs it and Esc doesn't.
-    #[must_use]
-    pub fn confirmation(self) -> View {
-        let question = match self {
-            Power::PowerOff => "Power off the computer?",
-            Power::Reboot => "Reboot the computer?",
-            Power::LogOut => "Log out? Apps that are open close.",
-            Power::Suspend | Power::Hibernate | Power::Lock => self.title(),
-        };
-        View {
-            id: format!("{CONFIRM}{}", self.id()),
-            title: question.to_owned(),
-            content: ViewContent::Form {
-                fields: Vec::new(),
-                submit: self.title().to_owned(),
-            },
-        }
-    }
-
-    /// The one the confirmation View `view` asks about.
-    #[must_use]
-    pub fn from_confirmation(view: &str) -> Option<Power> {
-        view.strip_prefix(CONFIRM)
-            .and_then(Power::from_id)
-            .filter(|power| power.asks_first())
+    /// Its Item's Action, which the Front end asks the user to confirm if it
+    /// asks first.
+    fn action(self) -> Action {
+        let action = Action::new(RUN, self.title());
+        if self.asks_first() { action.confirm() } else { action }
     }
 
     /// Its Item.
@@ -163,7 +137,7 @@ impl Power {
             keywords: self.keywords().iter().map(|&keyword| keyword.to_owned()).collect(),
             hidden: false,
             app_only: false,
-            actions: vec![Action::new(RUN, self.title())],
+            actions: vec![self.action()],
         }
     }
 }

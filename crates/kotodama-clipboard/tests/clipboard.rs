@@ -383,3 +383,71 @@ fn an_entry_gone_since_it_was_shown_fails_gently() {
         other => panic!("expected a failure, got {other:?}"),
     }
 }
+
+/// The pause Item among `items`, by its title and its Actions' ids.
+fn pause_item(items: &[Item]) -> (String, Vec<String>) {
+    let pause = items.iter().find(|item| item.id == "pause").expect("the pause Item");
+    let actions = pause.actions.iter().map(|action| action.id.clone()).collect();
+    (pause.title.clone(), actions)
+}
+
+#[test]
+fn pausing_the_history_says_so_on_the_apps_intro_card_until_it_is_resumed() {
+    let state = tempfile::tempdir().unwrap();
+    let mut extension = Extension::start(state.path(), Table::new());
+    let before = pause_item(&extension.added());
+    let usable = extension.status();
+
+    extension.start_run("pause", "clipboard.pause", "pause-until-resumed");
+    let paused = pause_item(&extension.added());
+    let noted = extension.status();
+    let outcome = extension.outcome();
+    drop(extension);
+    let mut again = Extension::start(state.path(), Table::new());
+    let after_a_restart = (pause_item(&again.added()), again.status());
+    again.start_run("pause", "clipboard.pause", "resume");
+    let resumed = pause_item(&again.added());
+
+    assert_eq!(usable, (true, None));
+    assert_eq!(
+        before,
+        (
+            "Pause Clipboard History".to_owned(),
+            vec![
+                "pause-5-minutes".to_owned(),
+                "pause-hour".to_owned(),
+                "pause-until-resumed".to_owned()
+            ]
+        )
+    );
+    let note = "Paused until you resume it: nothing copied is kept";
+    assert_eq!(
+        paused,
+        ("Resume Clipboard History".to_owned(), vec!["resume".to_owned()])
+    );
+    assert_eq!(noted, (true, Some(note.to_owned())));
+    assert_eq!(outcome, Outcome::Close);
+    assert_eq!(after_a_restart, (paused, (true, Some(note.to_owned()))));
+    assert_eq!(resumed, before);
+    assert_eq!(again.status(), (true, None));
+}
+
+#[test]
+fn a_timed_pause_counts_down_its_minutes() {
+    let state = tempfile::tempdir().unwrap();
+    let mut extension = Extension::start(state.path(), Table::new());
+    extension.added();
+    extension.status();
+
+    extension.start_run("pause", "clipboard.pause", "pause-5-minutes");
+    extension.added();
+
+    assert_eq!(
+        extension.status(),
+        (
+            true,
+            Some("Paused for 5 more minutes: nothing copied is kept".to_owned())
+        )
+    );
+    assert_eq!(extension.outcome(), Outcome::Close);
+}

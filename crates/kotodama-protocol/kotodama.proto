@@ -17,6 +17,7 @@ message Action {
   string title = 2;
   optional string shortcut = 3;
   repeated Argument arguments = 4;
+  bool confirm = 5;
 }
 
 message ActionRef {
@@ -98,6 +99,7 @@ message FromExtension {
     Job job_progress = 9;
     Empty request_action_catalog = 10;
     FromExtension.WithdrawPick withdraw_pick = 11;
+    FromExtension.Status status = 12;
   }
 
   message ActionDone {
@@ -126,6 +128,11 @@ message FromExtension {
   message ReplaceView {
     string view = 1;
     View with = 2;
+  }
+
+  message Status {
+    bool usable = 1;
+    optional string note = 2;
   }
 
   message WithdrawPick {
@@ -195,6 +202,7 @@ message FromFrontEnd {
 message Intro {
   string about = 1;
   repeated Example examples = 2;
+  optional string note = 3;
 }
 
 message Item {

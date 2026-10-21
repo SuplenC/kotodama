@@ -425,6 +425,7 @@ mod tests {
                 title: "Open".into(),
                 shortcut: None,
                 arguments: vec![],
+                confirm: false,
             }],
         }
     }

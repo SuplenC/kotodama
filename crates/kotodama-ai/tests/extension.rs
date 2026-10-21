@@ -429,3 +429,16 @@ fn the_ask_ai_result_shows_the_proposals_in_a_view_to_confirm_from() {
         Outcome::RunCatalogAction { action, .. } if action == "install-go"
     ));
 }
+
+#[test]
+fn the_extension_is_usable_only_once_configured() {
+    let dir = tempfile::tempdir().expect("make a temporary directory");
+    let mut ai = start(dir.path(), Table::new());
+    let (unconfigured, why) = ai.status();
+
+    ai.send(ToExtension::Config(configured()));
+
+    assert!(!unconfigured);
+    assert!(why.is_some_and(|why| why.contains("api_key_command")));
+    assert_eq!(ai.status(), (true, None));
+}

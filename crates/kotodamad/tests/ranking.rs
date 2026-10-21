@@ -890,7 +890,16 @@ fn beside_an_app(titles: &[&str], title: &str, word: &str, query: &str) -> Vec<(
     ));
     let mut h = Harness::with_config(vec![plain("apps"), other], config(""));
     let apps = h.up(0);
-    h.up(1);
+    let other = h.up(1);
+    // It sends no Items, so its app's entry Item shows once it says it can
+    // do something.
+    h.send(
+        &other,
+        FromExtension::Status {
+            usable: true,
+            note: None,
+        },
+    );
     h.add(&apps, titles.iter().map(|title| app(title)).collect());
     let ui = h.front_end();
     h.query(&ui, query)

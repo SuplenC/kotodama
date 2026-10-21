@@ -36,7 +36,8 @@ pub fn release_message(message: &mut FromExtension) -> usize {
         | FromExtension::PopView { .. }
         | FromExtension::JobProgress(_)
         | FromExtension::RequestActionCatalog
-        | FromExtension::WithdrawPick { .. } => 0,
+        | FromExtension::WithdrawPick { .. }
+        | FromExtension::Status { .. } => 0,
     }
 }
 

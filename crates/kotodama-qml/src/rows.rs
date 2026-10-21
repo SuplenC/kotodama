@@ -161,6 +161,17 @@ impl Row {
         hints
     }
 
+    /// What the footer asks before the `n`th entry of the Action panel
+    /// runs, such as `Power Off? ↵ Confirm · Esc Cancel`; `None` for an
+    /// Action that runs at once.
+    pub fn confirmation(&self, n: usize) -> Option<String> {
+        let entry = self.actions().nth(n)?;
+        entry
+            .action
+            .confirm
+            .then(|| format!("{}? ↵ Confirm · Esc Cancel", entry.action.title))
+    }
+
     /// What runs the `n`th entry of the Action panel. Nothing runs on an
     /// unavailable row.
     pub fn action(&self, n: usize) -> Option<ActionRef> {
@@ -568,6 +579,30 @@ mod tests {
 
         assert_eq!(unavailable.hints(), "");
         assert_eq!(row("Nothing to do", &[]).hints(), "");
+    }
+
+    #[test]
+    fn an_action_that_asks_first_names_itself_and_the_keys_that_answer() {
+        let mut clipboard = row("Clipboard History", &[]);
+        clipboard.own = vec![
+            Action::new("open", "Show Clipboard History"),
+            Action::new("clear", "Clear Clipboard History").confirm(),
+        ];
+        clipboard.contributed = Arc::new([OfferedAction {
+            extension: "notes".into(),
+            action: Action::new("forget", "Forget").confirm(),
+        }]);
+
+        assert_eq!(clipboard.confirmation(0), None);
+        assert_eq!(
+            clipboard.confirmation(1).as_deref(),
+            Some("Clear Clipboard History? ↵ Confirm · Esc Cancel")
+        );
+        assert_eq!(
+            clipboard.confirmation(2).as_deref(),
+            Some("Forget? ↵ Confirm · Esc Cancel")
+        );
+        assert_eq!(clipboard.confirmation(3), None);
     }
 
     fn offered(extension: &str, id: &str, title: &str) -> OfferedAction {

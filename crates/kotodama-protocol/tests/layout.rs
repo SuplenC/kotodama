@@ -566,6 +566,7 @@ fn action() -> Action {
             placeholder: Some("1.23".into()),
             optional: true,
         }],
+        confirm: true,
     }
 }
 
@@ -739,6 +740,10 @@ fn from_extension() -> Vec<FromExtension> {
         FromExtension::JobProgress(job()),
         FromExtension::RequestActionCatalog,
         FromExtension::WithdrawPick { invocation: 5 },
+        FromExtension::Status {
+            usable: true,
+            note: Some("Paused for an hour".into()),
+        },
     ]
 }
 
@@ -809,6 +814,7 @@ fn to_front_end() -> Vec<ToFrontEnd> {
                         query: "fire".into(),
                         result: "🔥".into(),
                     }],
+                    note: Some("Paused for an hour".into()),
                 }),
             }),
         },

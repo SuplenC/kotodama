@@ -62,6 +62,7 @@ use kotodama_ai::request_body;
 use kotodama_extension::Connection;
 use kotodama_extension::Event;
 use kotodama_extension::STACK_SIZE;
+use kotodama_extension::SentStatus;
 use kotodama_extension::Writer;
 use kotodama_protocol::CatalogEntry;
 use kotodama_protocol::FromExtension;
@@ -82,6 +83,10 @@ const KEPT_ANSWERS: usize = 4;
 
 /// What an Action or the View says with neither a key nor an endpoint set.
 const NOT_CONFIGURED: &str = "the AI isn't configured";
+
+/// What the app's intro card says with neither a key nor an endpoint set.
+const NOT_CONFIGURED_NOTE: &str =
+    "Not set up yet: set `api_key_command` or `url` in `[extensions.ai]`";
 
 type Error = kotodama_protocol::Error;
 
@@ -107,6 +112,7 @@ fn run() -> Result<(), Error> {
         next_request: 1,
         answers: VecDeque::new(),
         view_open: false,
+        status: SentStatus::default(),
     };
     loop {
         let event = match extension.pending.as_ref().map(|pending| pending.due) {
@@ -180,6 +186,8 @@ struct Extension {
     /// The last answers, by request, which the user confirms proposals from.
     answers: VecDeque<(u64, Vec<Proposal>)>,
     view_open: bool,
+    /// Usable once configured.
+    status: SentStatus,
 }
 
 impl Extension {
@@ -198,9 +206,14 @@ impl Extension {
                 self.cancel();
                 if !self.settings.enabled() {
                     self.pending = None;
-                } else if !self.asked_catalog {
-                    self.asked_catalog = true;
-                    self.writer.send(&FromExtension::RequestActionCatalog)?;
+                    self.status
+                        .unusable(&mut self.writer, NOT_CONFIGURED_NOTE)?;
+                } else {
+                    self.status.usable(&mut self.writer)?;
+                    if !self.asked_catalog {
+                        self.asked_catalog = true;
+                        self.writer.send(&FromExtension::RequestActionCatalog)?;
+                    }
                 }
                 // The open View would wait on the cancelled request forever,
                 // so it asks again under the new settings, or says it can't.
