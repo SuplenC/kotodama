@@ -166,6 +166,12 @@
                 foot
                 featherpad
                 htop
+                # What the seeded projects and the folders Extension's Actions
+                # use, and what fills the clipboard history at the start.
+                git
+                tmux
+                lazygit
+                wl-clipboard
                 # The theme the apps' icons are in, which they ship no index for.
                 hicolor-icon-theme
               ]);

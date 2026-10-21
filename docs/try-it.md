@@ -8,18 +8,27 @@ How to run Kotodama on your own Hyprland desktop with home-manager, and what to 
 
 ```sh
 just demo           # state starts fresh every run
-just demo --keep    # History and clipboard history kept between runs
+just demo --keep    # History, clipboard history and the made-up folders kept between runs
 ```
 
 The first run fetches the toolchain and builds a release, which takes a while. Then Screen Sharing opens `vnc://localhost:5900`; log in as `kotodama`, password `kotodama`. The server listens on localhost only. Ctrl+C in the terminal stops everything.
 
-What's on the desktop: headless sway with the Daemon, the Bundled extensions, the [shell example Extension](../examples/shell-extension/README.md) and the shipped Front end. The menu is open at the start.
+What's on the desktop: headless sway with the Daemon, the Bundled extensions, the [shell example Extension](../examples/shell-extension/README.md) and the shipped menu. The menu is open at the start, over a background that explains how Kotodama works and lists queries to try for each feature, each one written to work in the demo.
 
 - **Alt+Space** or **Ctrl+Space** opens and closes the menu. Super doesn't make it through Screen Sharing, and macOS may keep Ctrl+Space for switching input sources.
-- **Alt+V** opens the clipboard history.
+- **Alt+V** opens the clipboard history; **Alt+B** the shell example's bookmarks View.
 - **Alt+Return** opens a terminal (foot); **Alt+Shift+Q** closes a window.
 
-Things to find: apps (foot, FeatherPad, htop, which opens in foot), the calculator (`12 km in mi`), emoji (`smile`), the shell example's bookmarks and `timer 5`, and web searches. Copy something in foot or FeatherPad and it shows up in the clipboard history.
+Type `guide` in the menu for the whole list: the "Kotodama demo guide" Quicklink opens [demo/GUIDE.md](../demo/GUIDE.md) in FeatherPad, with every feature and something to try for each.
+
+The demo makes up things for every Extension to find, in a home directory of its own:
+
+- apps: foot, FeatherPad and htop, which opens in foot;
+- `~/Projects`: a few git repositories, one with a linked worktree and two both named `api`, opened in tmux, lazygit or foot from the Action panel;
+- `~/Scripts`: scripts that show each header option (a name, a background job, arguments asked for in a form);
+- a few clipboard entries;
+- Aliases (`ed`, `aur`) and Quicklinks (`gh`, `yt`, `say`, `guide`), in [demo/config.toml](../demo/config.toml);
+- the shell example's bookmarks and timer.
 
 For the AI Extension, pass your Claude API key; it reaches the container's environment and nothing else, and the demo's config reads it from there:
 
@@ -32,7 +41,7 @@ Then type `?` and a request in plain words, such as `? open a terminal`.
 What doesn't work in the demo:
 
 - The Hyprland Extension: the desktop is sway, so there are no windows or Hyprland shortcuts to find.
-- Anything that leaves the desktop: there's no browser, so opening a web search or a bookmark does nothing, and no notification daemon.
+- Anything that leaves the desktop: there's no browser, so a web search, a bookmark or a URL Quicklink opens a terminal that names the page it would have opened, and there's no notification daemon.
 - Your own desktop: apps, files and clipboard are the demo's, not your Mac's.
 - The feel: the menu is drawn in software and sent over VNC, so it is slower than on real hardware.
 
