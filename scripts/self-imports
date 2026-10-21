@@ -1,0 +1,57 @@
+#!/usr/bin/env bash
+# Rewrites `use foo::{self};` as `use foo;`, and `use foo::{self as bar};` as
+# `use foo as bar;`, in the Rust files under each PATH (a file or a directory).
+# `imports_granularity = "Item"` (.config/rustfmt.toml) splits
+# `use foo::{self, Bar};` into `use foo::{self};` and `use foo::Bar;`, and no
+# rustfmt option writes the first as `use foo;`. rustfmt leaves `use foo;` as it
+# is, so the rewrite holds; `scripts/fmt` runs rustfmt again afterwards to sort it.
+# With --check, rewrites nothing: prints each such import as `file:line: what`
+# and fails if there is one.
+# Usage: self-imports [--check] PATH...
+set -euo pipefail
+
+check=false
+if [ "${1:-}" = --check ]; then
+    check=true
+    shift
+fi
+
+files=()
+for path in "$@"; do
+    if [ -d "$path" ]; then
+        while IFS= read -r file; do
+            files+=("$file")
+        done < <(find "$path" -name '*.rs' -type f | LC_ALL=C sort)
+    else
+        files+=("$path")
+    fi
+done
+if [ ${#files[@]} -eq 0 ]; then
+    exit 0
+fi
+
+# A `use` (optionally `pub`, `pub(crate)`, …) whose last segment is `{self}` or
+# `{self as name}`, the only shapes the Item granularity leaves.
+lead='^([[:space:]]*(pub(\([^)]*\))?[[:space:]]+)?use[[:space:]][^;{}]*)'
+pattern="$lead::\\{self( as [A-Za-z_][A-Za-z0-9_]*)?\\};"
+
+if $check; then
+    found=0
+    for file in "${files[@]}"; do
+        while IFS=: read -r line _; do
+            echo "$file:$line: write \`use foo;\`, not \`use foo::{self};\`"
+            found=1
+        done < <(grep -nE "$pattern" "$file" || true)
+    done
+    exit "$found"
+fi
+
+for file in "${files[@]}"; do
+    if grep -qE "$pattern" "$file"; then
+        sed -E \
+            -e "s/$lead::\\{self\\};/\\1;/" \
+            -e "s/$lead::\\{self as ([A-Za-z_][A-Za-z0-9_]*)\\};/\\1 as \\4;/" \
+            "$file" >"$file.self-imports"
+        mv "$file.self-imports" "$file"
+    fi
+done
