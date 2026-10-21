@@ -39,3 +39,17 @@ manual_let_else = "warn"
 mod_module_files = "warn"
 return_self_not_must_use = "warn"
 unwrap_used = "warn"
+
+# What ships: the Nix package (crane builds with --release), the e2e latency
+# test, and every benchmark, as `bench` inherits it. Measured in #137 against
+# Cargo's defaults (16 codegen units, no LTO): 8% fewer instructions over the
+# keystroke benchmarks, kotodamad 22% smaller and 4% less resident. One codegen
+# unit also keeps an edit off the keystroke path from moving the instruction
+# counts: one that moved them 0.7% with the defaults moves them 0.03%. A
+# workspace rebuild takes about 2.5 times as long. `cargo test` uses the dev
+# profile, which this leaves alone. panic stays `unwind`: a panicking thread
+# then kills only itself, not the Daemon, nor the Quickshell that loads the QML
+# module.
+[profile.release]
+lto = "fat"
+codegen-units = 1
