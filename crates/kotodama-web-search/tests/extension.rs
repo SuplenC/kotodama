@@ -5,6 +5,8 @@ use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 use std::process::Command;
+use std::sync::mpsc;
+use std::sync::mpsc::Receiver;
 use std::thread;
 use std::time::Duration;
 
@@ -41,6 +43,20 @@ fn ask(web: &mut Spawned, id: u64, query: &str) -> Vec<LiveResult> {
         } if live_query == id => results,
         other => panic!("expected live_results for {id}, got {other:?}"),
     }
+}
+
+/// Makes `path` a named pipe, and reads it on a thread: what a program
+/// writes there arrives whole, once it closes the pipe. A plain file can be
+/// read between the shell creating it and writing to it.
+fn written(path: &Path) -> Receiver<String> {
+    let made = Command::new("mkfifo").arg(path).status().expect("run mkfifo");
+    assert!(made.success(), "mkfifo {}", path.display());
+    let (sender, receiver) = mpsc::channel();
+    let path = path.to_owned();
+    thread::spawn(move || {
+        let _ = sender.send(fs::read_to_string(path).expect("read the pipe"));
+    });
+    receiver
 }
 
 fn titles(results: &[LiveResult]) -> Vec<&str> {
@@ -92,19 +108,14 @@ fn opening_a_row_runs_xdg_open_on_its_url() {
     )
     .unwrap();
     fs::set_permissions(&opener, fs::Permissions::from_mode(0o755)).unwrap();
+    let given = written(&out);
     let mut web = start("", dir.path());
     let row = ask(&mut web, 1, "żółw & co").remove(0).item;
 
     web.start_run(2, "open", row.to_ref(), BTreeMap::default());
     assert_eq!(web.outcome(2, |_| false), Outcome::Close);
-    for _ in 0..100 {
-        if out.exists() {
-            break;
-        }
-        thread::sleep(Duration::from_millis(50));
-    }
     assert_eq!(
-        fs::read_to_string(&out).unwrap(),
+        given.recv_timeout(WAIT).expect("xdg-open ran"),
         "https://duckduckgo.com/?q=%C5%BC%C3%B3%C5%82w%20%26%20co\n"
     );
 
