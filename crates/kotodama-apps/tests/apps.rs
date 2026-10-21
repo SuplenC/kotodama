@@ -3,10 +3,13 @@
 
 use std::collections::BTreeMap;
 use std::fs;
-use std::ops::{Deref, DerefMut};
-use std::os::unix::fs::{PermissionsExt, symlink};
+use std::ops::Deref;
+use std::ops::DerefMut;
+use std::os::unix::fs::PermissionsExt;
+use std::os::unix::fs::symlink;
 use std::os::unix::process::CommandExt;
-use std::path::{Path, PathBuf};
+use std::path::Path;
+use std::path::PathBuf;
 use std::process::Command;
 use std::thread;
 use std::time::Duration;
@@ -178,10 +181,7 @@ fn keywords_generic_names_and_ids_make_an_app_findable() {
     let files = find(&items, "org.gnome.Nautilus");
     // The Extension runs in Polish.
     assert_eq!(files.title, "Pliki");
-    assert_eq!(
-        files.keywords,
-        ["katalog", "File Manager", "org.gnome.Nautilus"]
-    );
+    assert_eq!(files.keywords, ["katalog", "File Manager", "org.gnome.Nautilus"]);
 }
 
 #[test]
@@ -194,10 +194,7 @@ fn an_app_without_a_generic_name_shows_its_comment() {
         "[Desktop Entry]\nType=Application\nName=btop++\nComment=Resource monitor\nExec=btop\n",
     );
     let apps = Apps::configured(dir, Table::new());
-    assert_eq!(
-        apps.added()[0].subtitle.as_deref(),
-        Some("Resource monitor")
-    );
+    assert_eq!(apps.added()[0].subtitle.as_deref(), Some("Resource monitor"));
 }
 
 #[test]
@@ -273,22 +270,14 @@ fn entries_that_ask_not_to_be_shown_are_left_out() {
     system("not-an-app.txt", &app("Not a desktop file", "x"));
     let apps = Apps::configured(dir, Table::new());
 
-    assert_eq!(
-        titles(&apps.added()),
-        ["Hyprland only", "Installed", "Shown"]
-    );
+    assert_eq!(titles(&apps.added()), ["Hyprland only", "Installed", "Shown"]);
 }
 
 #[test]
 fn the_users_entry_replaces_or_hides_the_systems() {
     let dir = data_dirs();
     install(dir.path(), "system", "editor.desktop", &app("Editor", "ed"));
-    install(
-        dir.path(),
-        "home",
-        "editor.desktop",
-        &app("My Editor", "ed"),
-    );
+    install(dir.path(), "home", "editor.desktop", &app("My Editor", "ed"));
     install(dir.path(), "system", "game.desktop", &app("Game", "game"));
     install(
         dir.path(),
@@ -304,12 +293,7 @@ fn the_users_entry_replaces_or_hides_the_systems() {
 #[test]
 fn an_entry_in_a_subdirectory_has_the_subdirectory_in_its_id() {
     let dir = data_dirs();
-    install(
-        dir.path(),
-        "system",
-        "kde/konsole.desktop",
-        &app("Konsole", "konsole"),
-    );
+    install(dir.path(), "system", "kde/konsole.desktop", &app("Konsole", "konsole"));
     let apps = Apps::configured(dir, Table::new());
 
     let items = apps.added();
@@ -392,40 +376,17 @@ fn an_app_a_profile_switch_brings_is_added_without_a_restart() {
 #[test]
 fn config_hides_and_renames_apps_by_desktop_id() {
     let dir = data_dirs();
-    install(
-        dir.path(),
-        "system",
-        "nvim.desktop",
-        &app("Neovim wrapper", "nvim"),
-    );
-    install(
-        dir.path(),
-        "system",
-        "qt5ct.desktop",
-        &app("Qt5 Settings", "qt5ct"),
-    );
-    install(
-        dir.path(),
-        "system",
-        "qt6ct.desktop",
-        &app("Qt6 Settings", "qt6ct"),
-    );
-    install(
-        dir.path(),
-        "system",
-        "firefox.desktop",
-        &app("Firefox", "firefox"),
-    );
+    install(dir.path(), "system", "nvim.desktop", &app("Neovim wrapper", "nvim"));
+    install(dir.path(), "system", "qt5ct.desktop", &app("Qt5 Settings", "qt5ct"));
+    install(dir.path(), "system", "qt6ct.desktop", &app("Qt6 Settings", "qt6ct"));
+    install(dir.path(), "system", "firefox.desktop", &app("Firefox", "firefox"));
     let apps = Apps::configured(
         dir,
         Table::from([
             ("hidden".into(), strings(&["qt5ct", "qt6ct.desktop"])),
             (
                 "names".into(),
-                Value::Table(Table::from([(
-                    "nvim".into(),
-                    Value::String("Neovim".into()),
-                )])),
+                Value::Table(Table::from([("nvim".into(), Value::String("Neovim".into()))])),
             ),
         ]),
     );
@@ -433,11 +394,7 @@ fn config_hides_and_renames_apps_by_desktop_id() {
     let items = apps.added();
     assert_eq!(titles(&items), ["Firefox", "Neovim"]);
     // Still found by its own name.
-    assert!(
-        find(&items, "nvim")
-            .keywords
-            .contains(&"Neovim wrapper".to_owned())
-    );
+    assert!(find(&items, "nvim").keywords.contains(&"Neovim wrapper".to_owned()));
 }
 
 #[test]
@@ -551,15 +508,8 @@ fn an_action_on_a_missing_app_or_program_fails_with_a_message() {
     let mut apps = Apps::configured(dir, Table::new());
     apps.added();
 
-    for (id, action) in [
-        ("broken", "open"),
-        ("broken", "desktop-action:nope"),
-        ("gone", "open"),
-    ] {
-        assert!(
-            matches!(apps.run(id, action), Outcome::Failed { .. }),
-            "{id} {action}"
-        );
+    for (id, action) in [("broken", "open"), ("broken", "desktop-action:nope"), ("gone", "open")] {
+        assert!(matches!(apps.run(id, action), Outcome::Failed { .. }), "{id} {action}");
     }
 }
 
@@ -595,19 +545,13 @@ fn apps_start_through_the_launch_prefix_and_a_missing_program_still_fails() {
     );
     let mut apps = Apps::start_with(
         dir,
-        &[(
-            "KOTODAMA_LAUNCH_PREFIX",
-            &format!("{} --scope", wrapper.display()),
-        )],
+        &[("KOTODAMA_LAUNCH_PREFIX", &format!("{} --scope", wrapper.display()))],
     );
     apps.send(ToExtension::Config(Table::new()));
     apps.added();
 
     assert_eq!(apps.run("app", "open"), Outcome::Close);
-    assert_eq!(
-        wait_for(&out),
-        format!("--scope\ntouch\n{}\n", ran.display())
-    );
+    assert_eq!(wait_for(&out), format!("--scope\ntouch\n{}\n", ran.display()));
     for _ in 0..100 {
         if ran.exists() {
             break;
@@ -689,18 +633,10 @@ fn an_app_that_exits_right_after_it_starts_has_its_pick_withdrawn() {
 #[test]
 fn an_app_that_runs_longer_than_withdraw_within_keeps_its_pick() {
     let dir = data_dirs();
-    install(
-        dir.path(),
-        "system",
-        "slow.desktop",
-        &app("Slow", "sleep 0.6"),
-    );
+    install(dir.path(), "system", "slow.desktop", &app("Slow", "sleep 0.6"));
     let quick = script(dir.path(), "kotodama-quick", "exit 0");
     install(dir.path(), "system", "quick.desktop", &app("Quick", &quick));
-    let mut apps = Apps::configured(
-        dir,
-        Table::from([("withdraw_within".into(), Value::Float(0.3))]),
-    );
+    let mut apps = Apps::configured(dir, Table::from([("withdraw_within".into(), Value::Float(0.3))]));
     apps.added();
 
     assert_eq!(apps.run_as(1, "slow", "open"), Outcome::Close);
@@ -720,12 +656,7 @@ fn an_app_that_runs_longer_than_withdraw_within_keeps_its_pick() {
 #[test]
 fn an_app_still_running_keeps_its_pick() {
     let dir = data_dirs();
-    install(
-        dir.path(),
-        "system",
-        "long.desktop",
-        &app("Long", "sleep 3"),
-    );
+    install(dir.path(), "system", "long.desktop", &app("Long", "sleep 3"));
     let mut apps = Apps::configured(dir, Table::new());
     apps.added();
 
@@ -739,16 +670,8 @@ fn a_launcher_that_leaves_the_app_running_and_exits_keeps_its_pick() {
     // Starts the "app" in the background, as a launcher script does, and
     // exits at once.
     let launcher = script(dir.path(), "kotodama-launcher", "sleep 3 &\nexit 0");
-    install(
-        dir.path(),
-        "system",
-        "launched.desktop",
-        &app("Launched", &launcher),
-    );
-    let mut apps = Apps::configured(
-        dir,
-        Table::from([("withdraw_within".into(), Value::Integer(1))]),
-    );
+    install(dir.path(), "system", "launched.desktop", &app("Launched", &launcher));
+    let mut apps = Apps::configured(dir, Table::from([("withdraw_within".into(), Value::Integer(1))]));
     apps.added();
 
     assert_eq!(apps.run_as(6, "launched", "open"), Outcome::Close);
@@ -763,12 +686,7 @@ fn a_launch_that_hands_off_to_a_copy_already_running_keeps_its_pick() {
     // The second launch of a single-instance app: it tells the copy that
     // runs already to open a window, and exits at once.
     let handoff = script(dir.path(), "kotodama-handoff", "exit 0");
-    install(
-        dir.path(),
-        "system",
-        "single.desktop",
-        &app("Single", &handoff),
-    );
+    install(dir.path(), "system", "single.desktop", &app("Single", &handoff));
     let mut running = Command::new("sh")
         .arg0("kotodama-handoff")
         // Not `exec`ed away by the shell, so the name it runs under stays.
@@ -792,10 +710,7 @@ fn a_launch_that_hands_off_to_a_copy_already_running_keeps_its_pick() {
 fn a_withdraw_within_of_zero_never_withdraws_a_pick() {
     let dir = data_dirs();
     install(dir.path(), "system", "oops.desktop", &app("Oops", "true"));
-    let mut apps = Apps::configured(
-        dir,
-        Table::from([("withdraw_within".into(), Value::Integer(0))]),
-    );
+    let mut apps = Apps::configured(dir, Table::from([("withdraw_within".into(), Value::Integer(0))]));
     apps.added();
 
     assert_eq!(apps.run_as(3, "oops", "open"), Outcome::Close);
@@ -804,10 +719,9 @@ fn a_withdraw_within_of_zero_never_withdraws_a_pick() {
 
 #[test]
 fn the_manifest_names_the_extension_apps() {
-    let manifest = Manifest::from_toml(
-        &fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("manifest.toml")).unwrap(),
-    )
-    .unwrap();
+    let manifest =
+        Manifest::from_toml(&fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("manifest.toml")).unwrap())
+            .unwrap();
     assert_eq!(manifest.name, "apps");
     assert!(manifest.live_query.is_none());
 }

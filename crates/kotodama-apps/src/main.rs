@@ -15,12 +15,19 @@ use std::process::ExitCode;
 use std::sync::mpsc::Sender;
 use std::time::Duration;
 
-use kotodama_extension::watch::{RecursiveMode, Watcher};
-use kotodama_extension::{Connection, Event, SentItems, Writer, launch};
-use kotodama_protocol::{FromExtension, Outcome, ToExtension};
-
 use items::Settings;
-use scan::{App, Environment};
+use kotodama_extension::Connection;
+use kotodama_extension::Event;
+use kotodama_extension::SentItems;
+use kotodama_extension::Writer;
+use kotodama_extension::launch;
+use kotodama_extension::watch::RecursiveMode;
+use kotodama_extension::watch::Watcher;
+use kotodama_protocol::FromExtension;
+use kotodama_protocol::Outcome;
+use kotodama_protocol::ToExtension;
+use scan::App;
+use scan::Environment;
 
 /// How long the `applications` directories must stay still before they are
 /// read again, so a package install that writes many files is read once,
@@ -91,9 +98,7 @@ fn run() -> Result<(), kotodama_protocol::Error> {
                 extension.publish()?;
             }
             Event::Own(Own::ExitedSoon { invocation }) => {
-                extension
-                    .writer
-                    .send(&FromExtension::WithdrawPick { invocation })?;
+                extension.writer.send(&FromExtension::WithdrawPick { invocation })?;
             }
             Event::Hangup => break,
         }
@@ -130,10 +135,7 @@ impl Extension {
                     Ok(()) => Outcome::Close,
                     Err(message) => Outcome::Failed { message },
                 };
-                self.writer.send(&FromExtension::ActionDone {
-                    invocation,
-                    outcome,
-                })
+                self.writer.send(&FromExtension::ActionDone { invocation, outcome })
             }
             _ => Ok(()),
         }
@@ -144,8 +146,7 @@ impl Extension {
         if !self.configured {
             return Ok(());
         }
-        self.sent
-            .publish(&mut self.writer, self.settings.items(&self.apps))
+        self.sent.publish(&mut self.writer, self.settings.items(&self.apps))
     }
 
     /// Starts the app, after the terminal if it runs in one, in its working
@@ -153,17 +154,9 @@ impl Extension {
     /// [`Settings::withdraw_within`], everything it started gone, and no
     /// copy of it ran before, the run's pick is withdrawn.
     fn run(&self, invocation: u64, id: &str, action: &str) -> Result<(), String> {
-        let app = self
-            .apps
-            .get(id)
-            .ok_or_else(|| format!("the app `{id}` is gone"))?;
-        let command = items::command(app, action)
-            .ok_or_else(|| format!("{} has no Action `{action}`", app.name))?;
-        let terminal: &[String] = if app.terminal {
-            &self.settings.terminal
-        } else {
-            &[]
-        };
+        let app = self.apps.get(id).ok_or_else(|| format!("the app `{id}` is gone"))?;
+        let command = items::command(app, action).ok_or_else(|| format!("{} has no Action `{action}`", app.name))?;
+        let terminal: &[String] = if app.terminal { &self.settings.terminal } else { &[] };
         let argv: Vec<String> = terminal.iter().chain(command).cloned().collect();
         let exits = self.exits.clone();
         // The app's own program, not the terminal's: the terminal runs
@@ -172,10 +165,7 @@ impl Extension {
         launch::launch_watched(
             &argv,
             app.dir.as_deref(),
-            launch::App {
-                id: &app.id,
-                program,
-            },
+            launch::App { id: &app.id, program },
             self.settings.withdraw_within,
             move || {
                 let _ = exits.send(Event::Own(Own::ExitedSoon { invocation }));

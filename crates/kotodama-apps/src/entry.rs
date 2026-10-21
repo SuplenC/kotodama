@@ -80,11 +80,7 @@ impl Locale {
     fn rank(&self, key: Option<&str>) -> Option<usize> {
         match key {
             None => Some(0),
-            Some(key) => self
-                .0
-                .iter()
-                .position(|ours| ours == key)
-                .map(|at| self.0.len() - at),
+            Some(key) => self.0.iter().position(|ours| ours == key).map(|at| self.0.len() - at),
         }
     }
 }

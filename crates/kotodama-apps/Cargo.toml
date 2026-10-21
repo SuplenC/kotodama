@@ -13,3 +13,6 @@ kotodama-protocol = { path = "../kotodama-protocol" }
 [dev-dependencies]
 kotodama-extension = { path = "../kotodama-extension", features = ["testing"] }
 tempfile = "3.27.0"
+
+[lints]
+workspace = true

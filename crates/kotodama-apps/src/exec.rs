@@ -121,10 +121,7 @@ mod tests {
             run(r#"sh -c "echo \"hi\" \$HOME \\ \`x\`" end"#),
             ["sh", "-c", r#"echo "hi" $HOME \ `x`"#, "end"]
         );
-        assert_eq!(
-            run(r#""/opt/My App/app"  --flag"#),
-            ["/opt/My App/app", "--flag"]
-        );
+        assert_eq!(run(r#""/opt/My App/app"  --flag"#), ["/opt/My App/app", "--flag"]);
     }
 
     #[test]
@@ -141,10 +138,7 @@ mod tests {
                 "100%"
             ]
         );
-        let fields = Fields {
-            icon: None,
-            ..FIELDS
-        };
+        let fields = Fields { icon: None, ..FIELDS };
         assert_eq!(command("app %i", &fields).unwrap(), ["app"]);
     }
 

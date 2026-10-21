@@ -14,13 +14,20 @@
 //! withdraw_within = 5
 //! ```
 
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::BTreeMap;
+use std::collections::HashMap;
+use std::collections::HashSet;
 use std::time::Duration;
 
 use kotodama_extension::config;
-use kotodama_protocol::{Action, Item, ItemKind, Table, Value};
+use kotodama_protocol::Action;
+use kotodama_protocol::Item;
+use kotodama_protocol::ItemKind;
+use kotodama_protocol::Table;
+use kotodama_protocol::Value;
 
-use crate::scan::{App, app_id};
+use crate::scan::App;
+use crate::scan::app_id;
 
 /// The primary Action, which starts the app.
 pub const OPEN: &str = "open";
@@ -96,9 +103,7 @@ impl Settings {
         if let Some(value) = config.get("withdraw_within") {
             match seconds(value) {
                 Some(within) => settings.withdraw_within = within,
-                None => {
-                    config::warn("`withdraw_within` should be a number of seconds from 0 to 30")
-                }
+                None => config::warn("`withdraw_within` should be a number of seconds from 0 to 30"),
             }
         }
         settings
@@ -126,12 +131,11 @@ impl Settings {
         }
         let mut actions = Vec::with_capacity(1 + app.actions.len());
         actions.push(Action::new(OPEN, "Open"));
-        actions.extend(app.actions.iter().map(|desktop| {
-            Action::new(
-                format!("{DESKTOP_ACTION}{}", desktop.id),
-                desktop.name.clone(),
-            )
-        }));
+        actions.extend(
+            app.actions
+                .iter()
+                .map(|desktop| Action::new(format!("{DESKTOP_ACTION}{}", desktop.id), desktop.name.clone())),
+        );
         Item {
             id: app.id.clone(),
             kind: ItemKind::App {
