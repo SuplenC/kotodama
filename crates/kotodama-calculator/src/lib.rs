@@ -1,6 +1,17 @@
-//! The calculator Bundled extension's evaluation: arithmetic, units and
-//! currency through fend, and dates and time zones of its own (see
-//! [`dates`]). `main.rs` speaks the protocol around it.
+//! The calculator Bundled extension's evaluation: what a query comes to, and
+//! the Live query result that shows it.
+//!
+//! # Owns
+//!
+//! - [`Calculator`]: trying a query as a date or time, then as math.
+//! - [`Answer`] and its Live query result, with the Actions that copy it.
+//!
+//! # Not here
+//!
+//! - Arithmetic, units and currency through fend: `math.rs`.
+//! - Dates and time zones: `dates.rs`.
+//! - Fetching and caching exchange rates: `rates.rs`.
+//! - The protocol loop, settings and Actions: `main.rs`.
 
 #![forbid(unsafe_code)]
 
@@ -16,8 +27,9 @@ use kotodama_protocol::Item;
 use kotodama_protocol::ItemKind;
 use kotodama_protocol::LiveResult;
 use kotodama_protocol::NamespacedKind;
-pub use locale::DecimalSeparator;
-pub use rates::Rates;
+
+pub use crate::locale::DecimalSeparator;
+pub use crate::rates::Rates;
 
 /// The primary Action: copies the result.
 pub const COPY: &str = "copy";
@@ -27,6 +39,7 @@ pub const COPY_EXPRESSION: &str = "copy-expression";
 /// What a query evaluates to.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Evaluation {
+    /// The query comes to something worth showing.
     Answer(Answer),
     /// The query converts currency, and no exchange rates are loaded yet.
     NeedsRates,
@@ -46,22 +59,26 @@ pub struct Answer {
 }
 
 /// Evaluates queries. One lives as long as the Extension.
+#[derive(Debug)]
 pub struct Calculator {
     math: math::Math,
 }
 
 impl Calculator {
+    /// A calculator that converts currency with `rates`, and reads decimals
+    /// with a dot.
+    #[must_use]
     pub fn new(rates: Rates) -> Self {
         Calculator {
             math: math::Math::new(rates),
         }
     }
 
-    /// Reads and writes decimals with `separator` from now on: `3,5` is three
-    /// and a half with [`DecimalSeparator::Comma`], and a thousands
-    /// separator anywhere but between groups of a thousand (`3,5` with
-    /// [`DecimalSeparator::Dot`]) leaves a query unanswered. A new
-    /// `Calculator` uses [`DecimalSeparator::Dot`].
+    /// Reads and writes decimals with `separator`: `3,5` is three and a half
+    /// with [`DecimalSeparator::Comma`], and a thousands separator anywhere
+    /// but between groups of a thousand (`3,5` with [`DecimalSeparator::Dot`])
+    /// leaves a query unanswered. A new `Calculator` uses
+    /// [`DecimalSeparator::Dot`].
     pub fn set_decimal_separator(&mut self, separator: DecimalSeparator) {
         self.math.set_decimal_separator(separator);
     }
@@ -94,11 +111,12 @@ impl Calculator {
 
 impl Answer {
     /// The answer as the Live query result the Daemon shows in the top row.
+    #[must_use]
     pub fn live_result(&self) -> LiveResult {
         LiveResult {
             item: Item {
                 id: self.expression.clone(),
-                kind: ItemKind::Namespaced(NamespacedKind::new("calculator.answer").expect("a valid kind")),
+                kind: ItemKind::Namespaced(kind()),
                 identity: None,
                 title: self.value.clone(),
                 subtitle: Some(self.expression.clone()),
@@ -111,8 +129,17 @@ impl Answer {
                     Action::new(COPY_EXPRESSION, "Copy Expression and Answer"),
                 ],
             },
-            score: Fraction::new(1.0).expect("1 is a fraction"),
+            score: certain(),
             answer: true,
         }
     }
+}
+
+fn kind() -> NamespacedKind {
+    NamespacedKind::new("calculator.answer").expect("`calculator.answer` is a valid kind")
+}
+
+/// An answer's score: the highest there is.
+fn certain() -> Fraction {
+    Fraction::new(1.0).expect("1 is a fraction")
 }

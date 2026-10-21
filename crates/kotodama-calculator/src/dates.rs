@@ -9,6 +9,16 @@
 //! `25 december`, with or without a year. A zone is an abbreviation from
 //! [`ABBREVIATIONS`], an IANA name, or the city an IANA name ends in. Zones
 //! come from the system's time zone database.
+//!
+//! # Owns
+//!
+//! - Reading the three forms above, and answering them as of a given instant.
+//! - The zone abbreviations people type.
+//!
+//! # Not here
+//!
+//! - Durations and units that need no calendar (`3 weeks in days`): `math.rs`, through fend.
+//! - The time zone database: the system's, read by jiff.
 
 use jiff::Span;
 use jiff::Zoned;
@@ -41,16 +51,12 @@ fn words(query: &str) -> Vec<&str> {
                 words.push(rest);
                 break;
             }
-            match rest.find(['+', '-']) {
-                Some(at) => {
-                    words.push(&rest[..at]);
-                    rest = &rest[at..];
-                }
-                None => {
-                    words.push(rest);
-                    break;
-                }
-            }
+            let Some(at) = rest.find(['+', '-']) else {
+                words.push(rest);
+                break;
+            };
+            words.push(&rest[..at]);
+            rest = &rest[at..];
         }
     }
     words
@@ -159,6 +165,7 @@ fn date(words: &[&str], today: Date, lean: Lean) -> Option<(Date, usize)> {
     Some((date, 2))
 }
 
+/// A date written `2026-12-25`, or `2026-1-5`.
 fn iso_date(word: &str) -> Option<Date> {
     let mut parts = word.splitn(3, '-');
     let (year, month, day) = (parts.next()?, parts.next()?, parts.next()?);
@@ -168,6 +175,8 @@ fn iso_date(word: &str) -> Option<Date> {
     Date::new(year.parse().ok()?, month.parse().ok()?, day.parse().ok()?).ok()
 }
 
+/// The month, 1 to 12, that a word names with at least its first three
+/// letters (`dec`, `sept.`, `december,`).
 fn month(word: &str) -> Option<i8> {
     const MONTHS: [&str; 12] = [
         "january",
@@ -251,9 +260,8 @@ fn time(words: &[&str]) -> Option<(Option<Time>, usize)> {
     };
     let (hour, minute) = match clock.split_once(':') {
         Some((hour, minute)) if minute.len() == 2 => (hour, minute.parse().ok()?),
-        Some(_) => return None,
         None if meridiem.is_some() => (clock, 0),
-        None => return None,
+        Some(_) | None => return None,
     };
     let hour: i8 = hour.parse().ok()?;
     let hour = match meridiem {

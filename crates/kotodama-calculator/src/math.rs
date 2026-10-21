@@ -1,5 +1,20 @@
 //! Arithmetic, units and currency, through fend, and what counts as math.
+//!
+//! # Owns
+//!
+//! - Which queries typed without the `=` prefix are math.
+//! - Turning away a thousands separator fend would misread, before fend sees it.
+//! - Evaluating within a time budget, and telling a currency query that waits for rates from one
+//!   that fails.
+//! - Rounding fend's approximate numbers to what is shown.
+//!
+//! # Not here
+//!
+//! - Dates and time zones, tried before math: `dates.rs`.
+//! - The exchange rates fend converts with: `rates.rs`.
+//! - Which character separates decimals: `locale.rs`.
 
+use std::fmt;
 use std::time::Duration;
 use std::time::Instant;
 
@@ -19,18 +34,32 @@ const MAX_RESULT: usize = 100;
 /// numbers down to what anyone reads.
 const SIGNIFICANT_DIGITS: usize = 12;
 
+/// What fend made of a query.
 pub enum Outcome {
+    /// The answer, as it is shown.
     Value(String),
+    /// The query converts currency, and no exchange rates are loaded yet.
     NeedsRates,
+    /// The query isn't math, doesn't parse, or comes to nothing worth showing.
     Nothing,
 }
 
+/// fend, set up with the exchange rates and the decimal separator.
 pub struct Math {
     /// Cloned for each query, so nothing one query defines (`a = 2`) leaks
     /// into the next.
     context: fend_core::Context,
     rates: Rates,
     separator: DecimalSeparator,
+}
+
+impl fmt::Debug for Math {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Math")
+            .field("rates", &self.rates)
+            .field("separator", &self.separator)
+            .finish_non_exhaustive()
+    }
 }
 
 impl Math {
@@ -49,6 +78,8 @@ impl Math {
         self.context.set_decimal_separator_style(separator.fend());
     }
 
+    /// Evaluates `query`. A `routed` query, typed after the `=` prefix, need
+    /// not look like math.
     pub fn evaluate(&mut self, query: &str, routed: bool) -> Outcome {
         if !routed && !looks_like_math(query) {
             return Outcome::Nothing;
@@ -190,16 +221,13 @@ fn round_number(out: &mut String, whole: &[u8], decimals: &[u8], decimal: u8) {
     let up = digits.get(kept).is_some_and(|&digit| digit >= b'5');
     digits.truncate(kept);
     if up {
-        let carried = match digits.iter().rposition(|&digit| digit != b'9') {
-            Some(at) => {
-                digits[at] += 1;
-                at + 1
-            }
-            None => {
-                digits.insert(0, b'1');
-                whole_len += 1;
-                1
-            }
+        let carried = if let Some(at) = digits.iter().rposition(|&digit| digit != b'9') {
+            digits[at] += 1;
+            at + 1
+        } else {
+            digits.insert(0, b'1');
+            whole_len += 1;
+            1
         };
         digits[carried..].fill(b'0');
     }
@@ -216,6 +244,7 @@ fn round_number(out: &mut String, whole: &[u8], decimals: &[u8], decimal: u8) {
     }
 }
 
+/// Interrupts fend once its instant has passed.
 struct Deadline(Instant);
 
 impl fend_core::Interrupt for Deadline {

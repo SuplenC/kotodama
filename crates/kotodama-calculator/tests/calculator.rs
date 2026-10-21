@@ -284,7 +284,7 @@ fn a_query_given_up_while_rates_are_fetched_gets_no_results() {
 #[test]
 fn rates_cached_today_are_used_without_fetching() {
     let endpoint = Endpoint::start();
-    let mut calc = Calculator::start(cached(Duration::from_secs(60 * 60)), online(&endpoint));
+    let mut calc = Calculator::start(cached(Duration::from_hours(1)), online(&endpoint));
     assert_eq!(calc.answer("100 usd to eur").as_deref(), Some("80 EUR"));
     endpoint.quiet();
 }
@@ -292,7 +292,7 @@ fn rates_cached_today_are_used_without_fetching() {
 #[test]
 fn rates_older_than_a_day_are_used_and_fetched_again() {
     let endpoint = Endpoint::start();
-    let mut calc = Calculator::start(cached(Duration::from_secs(25 * 60 * 60)), online(&endpoint));
+    let mut calc = Calculator::start(cached(Duration::from_hours(25)), online(&endpoint));
     assert_eq!(calc.answer("100 usd to eur").as_deref(), Some("80 EUR"));
     assert!(endpoint.requested());
 }
@@ -300,7 +300,7 @@ fn rates_older_than_a_day_are_used_and_fetched_again() {
 #[test]
 fn with_the_network_off_cached_rates_still_answer() {
     let endpoint = Endpoint::start();
-    let mut calc = Calculator::start(cached(Duration::from_secs(30 * 24 * 60 * 60)), offline(&endpoint));
+    let mut calc = Calculator::start(cached(Duration::from_hours(30 * 24)), offline(&endpoint));
     assert_eq!(calc.answer("100 usd to eur").as_deref(), Some("80 EUR"));
     endpoint.quiet();
 }

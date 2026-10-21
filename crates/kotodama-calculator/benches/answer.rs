@@ -96,7 +96,7 @@ fn main() {
         Some(bytes) => {
             println!(
                 "calculator, after {QUERIES} answers: {:.1} MiB resident",
-                bytes as f64 / (1 << 20) as f64
+                bytes as f64 / f64::from(1 << 20)
             );
             println!("test calculator/resident ... bench: {bytes} bytes (+/- 0)");
         }
