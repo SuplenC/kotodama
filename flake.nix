@@ -34,13 +34,19 @@
           kotodama = pkgs.callPackage ./nix/package.nix { craneLib = crane.mkLib pkgs; };
         in
         {
-          default = kotodama;
-          inherit kotodama;
-          # Each part on its own: the command and the Daemon with its systemd
-          # units, the QML module, and the Bundled extensions.
-          kotodamad = kotodama.out;
+          # The core, the Front end and every Bundled extension, as before the
+          # split into packages: outputs out, qml and extensions.
+          default = kotodama.full;
+          kotodama = kotodama.full;
+          kotodama-full = kotodama.full;
+          # Its outputs, each a package of its own.
+          kotodamad = kotodama.full.out;
+          kotodama-extensions = kotodama.full.extensions;
+          # The packages Kotodama is released as: the core (the command, the
+          # Daemon and its systemd units), the Front end, and one per Bundled
+          # extension, `kotodama-<name>`.
+          kotodama-core = kotodama.core;
           kotodama-qml = kotodama.qml;
-          kotodama-extensions = kotodama.extensions;
           # Development only: `scripts/fmt` fetches it on demand. The dev shell's
           # rustfmt, built in nightly mode, so it reads the unstable options in
           # .config/rustfmt.toml. It comes from the same source as the shell's
@@ -48,12 +54,17 @@
           # of the dev shell, so only the jobs that format pay for it.
           rustfmt-nightly = pkgs.rustfmt.override { asNightly = true; };
         }
+        // pkgs.lib.mapAttrs' (
+          name: package: pkgs.lib.nameValuePair "kotodama-${name}" package
+        ) kotodama.extensions
       );
 
       # `pkgs.kotodama`, built with the nixpkgs it is applied to: with the
       # nixpkgs a Quickshell comes from, the QML module uses that Quickshell's Qt.
+      # `pkgs.kotodamaPackages` holds the separate packages.
       overlays.default = final: _prev: {
-        kotodama = final.callPackage ./nix/package.nix { craneLib = crane.mkLib final; };
+        kotodamaPackages = final.callPackage ./nix/package.nix { craneLib = crane.mkLib final; };
+        kotodama = final.kotodamaPackages.full;
       };
 
       homeModules.default = import ./nix/home-manager.nix self;
@@ -215,6 +226,10 @@
         # Socket activation and the home-manager module, in a NixOS VM. CI runs
         # it on x86_64, which has KVM.
         nixos-vm = import ./nix/tests/vm.nix { inherit pkgs self home-manager; };
+        # Which Bundled extensions the home-manager module installs.
+        home-manager-extensions = import ./nix/tests/home-manager-extensions.nix {
+          inherit pkgs self home-manager;
+        };
         # The `[extensions.ai]` the home-manager module's typed options write.
         home-manager-ai = import ./nix/tests/home-manager-ai.nix { inherit pkgs self home-manager; };
         # The tables the rest of the module's typed options write.

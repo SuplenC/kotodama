@@ -57,6 +57,10 @@ pkgs.testers.runNixOSTest {
       programs.kotodama = {
         enable = true;
         frontEnd.enable = true;
+        # Off by default. The system Extension could list Hyprland's windows
+        # too, which the test checks it leaves to the hyprland one.
+        extensions.hyprland.enable = true;
+        extensions.system.enable = true;
       };
       # The session, as uwsm or home-manager's Hyprland module would start it
       # once Hyprland has handed its environment to the user manager.

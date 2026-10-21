@@ -1,6 +1,7 @@
-# The home-manager module: `programs.kotodama`. It installs Kotodama, writes the
-# user's settings into ~/.config/kotodama/, and enables the Daemon's socket, so
-# the first `kotodama toggle` starts the Daemon. With `frontEnd.enable`, a
+# The home-manager module: `programs.kotodama`. It installs Kotodama with the
+# enabled Bundled extensions, writes the user's settings into
+# ~/.config/kotodama/, and enables the Daemon's socket, so the first
+# `kotodama toggle` starts the Daemon. With `frontEnd.enable`, a
 # systemd user service runs the ready Front end, the menu in a Quickshell of its
 # own, with the graphical session.
 self:
@@ -146,6 +147,9 @@ let
     config.programs.quickshell.enable or false && config.programs.quickshell.systemd.enable;
 in
 {
+  # `extensions.<name>.enable` and `finalPackage`.
+  imports = [ ./home-manager-extensions.nix ];
+
   options.programs.kotodama = {
     enable = lib.mkEnableOption "Kotodama, a command menu for Wayland";
 
@@ -153,7 +157,12 @@ in
       type = lib.types.package;
       default = self.packages.${pkgs.stdenv.hostPlatform.system}.default;
       defaultText = lib.literalExpression "kotodama.packages.\${system}.default";
-      description = "The Kotodama package, with its `qml` and `extensions` outputs.";
+      description = ''
+        The Kotodama package, with its `qml` and `extensions` outputs. The
+        module installs it with the enabled Bundled extensions alone
+        (`extensions.<name>.enable`), through its `withExtensions`; a package
+        without `withExtensions` is installed as it is.
+      '';
     };
 
     settings = lib.mkOption {
@@ -497,19 +506,19 @@ in
 
     programs.kotodama.settings = nonEmpty typed;
 
-    # The command, the QML module and the ready Front end.
-    home.packages = [ cfg.package ];
+    # The command, the QML module, the ready Front end and the enabled Extensions.
+    home.packages = [ cfg.finalPackage ];
 
     xdg.configFile = {
       "kotodama/home-manager.toml" = lib.mkIf (cfg.settings != { }) {
         source = toml.generate "kotodama-settings.toml" cfg.settings;
       };
-      # The package's own units. Its `kotodamad` puts the Bundled extensions on
+      # The package's own units. Its `kotodamad` puts the enabled Extensions on
       # XDG_DATA_DIRS for itself, so the session's stays as it was.
-      "systemd/user/kotodamad.socket".source = "${cfg.package}/lib/systemd/user/kotodamad.socket";
-      "systemd/user/kotodamad.service".source = "${cfg.package}/lib/systemd/user/kotodamad.service";
+      "systemd/user/kotodamad.socket".source = "${cfg.finalPackage}/lib/systemd/user/kotodamad.socket";
+      "systemd/user/kotodamad.service".source = "${cfg.finalPackage}/lib/systemd/user/kotodamad.service";
       "systemd/user/sockets.target.wants/kotodamad.socket".source =
-        "${cfg.package}/lib/systemd/user/kotodamad.socket";
+        "${cfg.finalPackage}/lib/systemd/user/kotodamad.socket";
     };
 
     systemd.user.services = lib.mkMerge [

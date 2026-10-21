@@ -1,6 +1,6 @@
 [package]
 name = "kotodama-extension"
-version.workspace = true
+version = "0.1.0"
 description = "What every Rust Extension of Kotodama needs: the protocol over stdio, lean memory, config readers, sending only changed Items, starting programs and watching directories"
 edition.workspace = true
 license.workspace = true

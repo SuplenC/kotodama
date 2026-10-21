@@ -1,6 +1,6 @@
 [package]
 name = "kotodama-web-search"
-version.workspace = true
+version = "0.1.0"
 description = "The web search Bundled extension: searches the web for what nothing else matches, and opens what looks like an address"
 edition.workspace = true
 license.workspace = true

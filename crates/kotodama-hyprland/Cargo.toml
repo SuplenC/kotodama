@@ -1,6 +1,6 @@
 [package]
 name = "kotodama-hyprland"
-version.workspace = true
+version = "0.1.0"
 description = "The Hyprland Bundled extension: open windows to focus, close, move or float, and the keyboard shortcuts, read from Hyprland's sockets"
 edition.workspace = true
 license.workspace = true

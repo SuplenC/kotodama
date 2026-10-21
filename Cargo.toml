@@ -2,8 +2,9 @@
 resolver = "3"
 members = ["crates/kotodama", "crates/kotodama-ai", "crates/kotodama-apps", "crates/kotodama-calculator", "crates/kotodama-clipboard", "crates/kotodama-emoji", "crates/kotodama-extension", "crates/kotodama-folders", "crates/kotodama-hyprland", "crates/kotodama-protocol", "crates/kotodama-qml", "crates/kotodama-system", "crates/kotodama-web-search", "crates/kotodamad"]
 
+# No shared version: each crate is a package of its own, which release-please
+# versions and releases on its own (release-please-config.json).
 [workspace.package]
-version = "0.1.0"
 edition = "2024"
 license = "Apache-2.0"
 repository = "https://github.com/SuplenC/kotodama"
