@@ -143,6 +143,9 @@ pub fn follow(report: impl Fn(Change) -> bool + Send + Sync + 'static) -> io::Re
         .stack_size(STACK_SIZE)
         .spawn(move || {
             let report: Report = Arc::new(report);
+            // Counted on across compositors, so a window after a restart never
+            // takes an earlier one's Item id.
+            let mut next = 0;
             loop {
                 let bound = Display::from_env().wait(bind, |err| log!("waiting for the compositor: {err}"));
                 let (mut queue, compositor) = match bound {
@@ -160,7 +163,7 @@ pub fn follow(report: impl Fn(Change) -> bool + Send + Sync + 'static) -> io::Re
                     report: Arc::clone(&report),
                     handles: Arc::clone(&compositor.handles),
                     pending: HashMap::new(),
-                    next: 0,
+                    next,
                     live: true,
                 };
                 if !report(Change::Up(compositor)) {
@@ -172,6 +175,7 @@ pub fn follow(report: impl Fn(Change) -> bool + Send + Sync + 'static) -> io::Re
                         break;
                     }
                 }
+                next = state.next;
                 if !state.live || !report(Change::Lost) {
                     return;
                 }
