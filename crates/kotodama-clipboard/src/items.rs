@@ -8,6 +8,16 @@
 //! # Entries older than this many days go.
 //! max_age_days = 7
 //! ```
+//!
+//! # Owns
+//!
+//! - Reading the config table into [`Limits`].
+//! - The ids of the Items, Views and Actions, and what each Item and View shows.
+//!
+//! # Not here
+//!
+//! - Running the Actions and sending the Items: `main.rs`.
+//! - The entries themselves: `history.rs`.
 
 use std::fmt::Write as _;
 use std::path::Path;
@@ -35,16 +45,23 @@ pub const LIST_VIEW: &str = "history";
 /// The detail View of one entry.
 pub const DETAIL_VIEW: &str = "clip";
 
-/// Actions, by id.
+/// A clip's Action that pastes it.
 pub const PASTE: &str = "paste";
+/// A clip's Action that puts it on the clipboard.
 pub const COPY: &str = "copy";
+/// A clip's Action that opens its detail View.
 pub const SHOW: &str = "show";
+/// A clip's Action that deletes it from the history.
 pub const DELETE: &str = "delete";
+/// The history Item's Action that opens the list View.
 pub const OPEN: &str = "open";
+/// The history Item's Action that clears the history.
 pub const CLEAR: &str = "clear";
 
-/// How much of a text the detail View shows; pasting gives all of it.
+/// How many characters of a text the detail View shows at most; pasting
+/// gives all of it.
 const DETAIL_CHARS: usize = 2000;
+/// How many lines of a text the detail View shows at most.
 const DETAIL_LINES: usize = 30;
 
 const DAY_SECS: f64 = 24.0 * 60.0 * 60.0;
@@ -261,6 +278,7 @@ fn count(n: u64, what: &str) -> String {
     }
 }
 
+/// `512 bytes`, `2 KB`, `1.5 MB`.
 fn bytes(n: u64) -> String {
     const KB: f64 = 1024.0;
     match n as f64 {
@@ -281,37 +299,4 @@ fn ago(secs: u64) -> String {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn a_code_block_fence_outlasts_the_backticks_inside() {
-        assert_eq!(code_block("a ``` b", 7, 7), "````\na ``` b\n````\n");
-        assert_eq!(code_block("plain\n", 6, 6), "```\nplain\n```\n");
-    }
-
-    #[test]
-    fn a_long_text_is_cut_with_a_note() {
-        let text = "line\n".repeat(100);
-        let block = code_block(&text, 500, 500);
-        assert_eq!(block.matches("line").count(), DETAIL_LINES);
-        assert!(block.ends_with("pasting gives all 500 characters."), "{block}");
-    }
-
-    #[test]
-    fn a_file_url_escapes_what_markdown_would_split_on() {
-        assert_eq!(
-            file_url(Path::new("/home/a b/thumbs/1.png")),
-            "file:///home/a%20b/thumbs/1.png"
-        );
-    }
-
-    #[test]
-    fn numbers_read_as_words() {
-        assert_eq!(count(1, "character"), "1 character");
-        assert_eq!(count(1234567, "character"), "1,234,567 characters");
-        assert_eq!(bytes(2048), "2 KB");
-        assert_eq!(ago(30), "just now");
-        assert_eq!(ago(3 * 3600 + 5), "3 hours ago");
-    }
-}
+mod tests;

@@ -1,7 +1,19 @@
 //! What to read from a clipboard offer, and what the read bytes become.
+//!
+//! # Owns
+//!
+//! - Which MIME type of an offer to read, and leaving a sensitive offer unread.
+//! - Turning the read bytes into text, or an image with its thumbnail.
+//!
+//! # Not here
+//!
+//! - Reading the offer off the compositor: `wayland.rs`.
+//! - Keeping what was read: `history.rs`.
 
+use std::fmt;
 use std::io::Cursor;
 
+use image::ImageError;
 use image::ImageFormat;
 use image::ImageReader;
 use image::Limits;
@@ -66,12 +78,15 @@ pub fn choose<'a>(mimes: impl IntoIterator<Item = &'a str>) -> Choice {
 
 /// What was read off the clipboard, ready to keep. Making one does the slow
 /// part, decoding an image for its thumbnail, so it can happen off the thread
-/// that answers the Daemon.
-#[derive(Debug)]
+/// that answers the Daemon. Its `Debug` leaves out what was copied, which
+/// may be a secret no password manager marked.
 pub enum Copied {
+    /// Text, never blank.
     Text(String),
+    /// A PNG or JPEG image, `width` by `height` pixels.
     Image {
         mime: String,
+        /// The image as copied, in `mime`.
         data: Vec<u8>,
         width: u32,
         height: u32,
@@ -81,32 +96,34 @@ pub enum Copied {
 }
 
 impl Copied {
-    /// The bytes read as `mime`, which [`choose`] picked. Fails for blank
-    /// text, and for an image that doesn't decode.
-    pub fn read(mime: &str, data: Vec<u8>) -> Result<Copied, String> {
+    /// The bytes read as `mime`, which [`choose`] picked.
+    ///
+    /// # Errors
+    ///
+    /// [`ReadError`] for blank text, a type that is neither text nor a kept
+    /// image, and an image that doesn't decode or thumbnail.
+    pub fn read(mime: &str, data: Vec<u8>) -> Result<Copied, ReadError> {
         if TEXT.contains(&mime) {
             let text =
                 String::from_utf8(data).unwrap_or_else(|err| String::from_utf8_lossy(err.as_bytes()).into_owned());
             if text.trim().is_empty() {
-                return Err("blank text".into());
+                return Err(ReadError::Blank);
             }
             return Ok(Copied::Text(text));
         }
-        let format = ImageFormat::from_mime_type(mime).ok_or_else(|| format!("{mime} isn't kept"))?;
+        let format = ImageFormat::from_mime_type(mime).ok_or_else(|| ReadError::not_kept(mime))?;
         let mut reader = ImageReader::with_format(Cursor::new(&data), format);
         let mut limits = Limits::default();
         limits.max_alloc = Some(DECODE_LIMIT);
         reader.limits(limits);
-        let image = reader
-            .decode()
-            .map_err(|err| format!("the {mime} doesn't decode: {err}"))?;
+        let image = reader.decode().map_err(|err| ReadError::decode(mime, err))?;
         let (width, height) = (image.width(), image.height());
         let small = image.thumbnail(THUMBNAIL, THUMBNAIL);
         drop(image);
         let mut thumbnail = Cursor::new(Vec::new());
         small
             .write_to(&mut thumbnail, ImageFormat::Png)
-            .map_err(|err| format!("couldn't make a thumbnail: {err}"))?;
+            .map_err(ReadError::Thumbnail)?;
         Ok(Copied::Image {
             mime: mime.to_owned(),
             data,
@@ -121,6 +138,52 @@ impl Copied {
         match self {
             Copied::Text(text) => text.as_bytes(),
             Copied::Image { data, .. } => data,
+        }
+    }
+}
+
+impl fmt::Debug for Copied {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Copied::Text(_) => f.debug_tuple("Text").field(&format_args!("<redacted>")).finish(),
+            Copied::Image {
+                mime, width, height, ..
+            } => f
+                .debug_struct("Image")
+                .field("mime", mime)
+                .field("width", width)
+                .field("height", height)
+                .finish_non_exhaustive(),
+        }
+    }
+}
+
+/// Why what was read off the clipboard isn't kept.
+#[derive(Debug, thiserror::Error)]
+pub enum ReadError {
+    #[error("blank text")]
+    Blank,
+    #[error("{0} isn't kept")]
+    NotKept(String),
+    #[error("the {mime} doesn't decode")]
+    Decode {
+        mime: String,
+        #[source]
+        source: ImageError,
+    },
+    #[error("couldn't make a thumbnail")]
+    Thumbnail(#[source] ImageError),
+}
+
+impl ReadError {
+    fn not_kept(mime: &str) -> Self {
+        ReadError::NotKept(mime.to_owned())
+    }
+
+    fn decode(mime: &str, source: ImageError) -> Self {
+        ReadError::Decode {
+            mime: mime.to_owned(),
+            source,
         }
     }
 }

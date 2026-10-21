@@ -6,6 +6,7 @@
 //! Extension's own resident memory with that history, in the bencher format
 //! with `bytes` as its unit, so CI compares it with the baseline.
 
+use std::fmt::Write as _;
 use std::hint::black_box;
 use std::path::Path;
 use std::path::PathBuf;
@@ -128,14 +129,12 @@ fn items(dir: &Path) -> Vec<Item> {
                 if next() % 4 == 0 {
                     COMMON[next() % COMMON.len()].to_owned()
                 } else {
-                    (0..1 + next() % 3)
-                        .map(|_| SYLLABLES[next() % SYLLABLES.len()])
-                        .collect()
+                    (0..=next() % 3).map(|_| SYLLABLES[next() % SYLLABLES.len()]).collect()
                 }
             })
             .collect::<Vec<String>>()
             .join(" ");
-        text.push_str(&format!(" {n}"));
+        write!(text, " {n}").unwrap();
         history
             .record(
                 Copied::read("text/plain;charset=utf-8", text.into_bytes()).unwrap(),
@@ -228,21 +227,21 @@ fn bench(c: &mut Criterion) {
         b.iter(|| {
             alternate = !alternate;
             black_box(setup.query(if alternate { "c" } else { "t" }))
-        })
+        });
     });
     group.bench_function("next_keystroke", |b| {
         let mut len = 1;
         b.iter(|| {
             len = len % TYPED.len() + 1;
             black_box(setup.query(&TYPED[..len]))
-        })
+        });
     });
     group.finish();
 
     // Every keystroke of typing, then clearing, many times over.
     let mut times: Vec<Duration> = (0..2000)
         .map(|n| {
-            let typed = &TYPED[..n % TYPED.len() + 1];
+            let typed = &TYPED[..=n % TYPED.len()];
             let start = Instant::now();
             black_box(setup.query(typed));
             start.elapsed()
@@ -277,7 +276,7 @@ fn resident(state: &Path) {
         Some(bytes) => {
             println!(
                 "kotodama-clipboard, {ENTRIES} entries: {:.1} MiB resident",
-                bytes as f64 / (1 << 20) as f64
+                bytes as f64 / f64::from(1 << 20)
             );
             println!("test clipboard/1k_entries/resident ... bench: {bytes} bytes (+/- 0)");
         }

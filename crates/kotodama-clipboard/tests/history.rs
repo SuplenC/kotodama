@@ -186,9 +186,9 @@ fn an_image_is_kept_with_a_small_thumbnail() {
     let entry = history.entries().next().unwrap();
     match &entry.content {
         Content::Image { mime, width, height } => {
-            assert_eq!((mime.as_str(), *width, *height), ("image/png", 1200, 600))
+            assert_eq!((mime.as_str(), *width, *height), ("image/png", 1200, 600));
         }
-        other => panic!("expected an image, got {other:?}"),
+        other @ Content::Text { .. } => panic!("expected an image, got {other:?}"),
     }
     assert_eq!(history.read(id).unwrap(), data);
     let thumbnail = image::open(history.thumbnail(id)).unwrap();

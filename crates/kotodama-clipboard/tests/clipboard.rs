@@ -329,7 +329,7 @@ fn a_longer_age_in_the_config_keeps_what_the_default_would_expire() {
             assert_eq!(
                 titles(&clips(&items).into_iter().cloned().collect::<Vec<_>>()),
                 ["eight days old"]
-            )
+            );
         }
         other => panic!("expected add_items, got {other:?}"),
     }
