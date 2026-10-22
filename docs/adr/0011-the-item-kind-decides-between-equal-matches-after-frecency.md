@@ -1,6 +1,6 @@
 # 11. The Item kind decides between equal matches, after Frecency
 
-Status: accepted (2026-10-20)
+Status: accepted (2026-10-20); its order superseded by ADR 0032 (the kind stays a tie-break below the points)
 
 On an equal match, users expect an app before a project, a project before a bookmark, and a bookmark before a file (M9), yet a file they use often should still beat an app they never open (M10). Within a Tier (ADR 0006), Results now rank by Frecency, then initials over a word start, then an Alias's Result last on a tie, then the Item kind, then nucleo's score and the shorter title. This amends the order ADR 0006 gives. The kind is a tie-break: it never beats a better match, and any use beats it.
 

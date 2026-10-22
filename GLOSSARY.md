@@ -129,8 +129,16 @@ The Results the user lists in the config for the Empty query to show after the m
 _Avoid_: Pinned menu, favorites, default list
 
 **Tier**:
-How well a Result matches a query, ranked before anything else: exact, initials or word start, inside a word, letters scattered, or a Near miss.
+How well a Result matches a query: exact, initials or word start, inside a word, letters scattered, or a Near miss. Each is worth a step of Points.
 _Avoid_: Match quality, bucket
+
+**Points**:
+A Result's rank among the matches as one number: its Tier, plus what its Frecency adds, times its Extension's Boost, held to bounds so habit never lifts a match inside a word past an exact title and a Near miss stays below every real match.
+_Avoid_: Score, weight, rank
+
+**Boost**:
+An Extension's multiplier on its Results' Points, `boost` in its `[extensions.<name>]` table, 1 unless the user sets it.
+_Avoid_: Priority, weight
 
 **Near miss**:
 A Result that matches the query only with typos in it, at most one per 4 letters of each word; it ranks below every real match.

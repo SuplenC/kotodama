@@ -1,6 +1,6 @@
 # 6. Results rank by Tier before usage, and usage only ever lifts one Tier
 
-Status: accepted (2026-10-19)
+Status: accepted (2026-10-19); its order superseded by ADR 0032 (Results rank by points that blend Tier and habit, within bounds)
 
 nucleo's score alone ranked `Determinate` above `Terminal` for `term`, and a Frecency boost added to it let a well-used app with the query's letters scattered in its name beat one whose title was the query. Users expect the kind of match to come first, so Results now rank by Tier (exact, initials or word start, inside a word, scattered), then Frecency, then nucleo's score, then the shorter title. Usage still matters, but only by lifting a Result one Tier, and never above an exact title.
 
