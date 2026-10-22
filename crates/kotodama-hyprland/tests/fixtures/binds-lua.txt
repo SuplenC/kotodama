@@ -1,0 +1,60 @@
+bind
+	modmask: 64
+	submap: 
+	key: Return
+	keycode: 0
+	catchall: false
+	description: 
+	dispatcher: __lua
+	arg: 3
+
+bindd
+	modmask: 64
+	submap: 
+	key: Q
+	keycode: 0
+	catchall: false
+	description: Close the window
+	dispatcher: __lua
+	arg: 4
+
+bindd
+	modmask: 65
+	submap: 
+	key: SUPER + SHIFT + code:12
+	keycode: 0
+	catchall: false
+	description: Move window to workspace 3
+	dispatcher: __lua
+	arg: 5
+
+bindd
+	modmask: 64
+	submap: 
+	key: SUPER+code:10
+	keycode: 0
+	catchall: false
+	description: Go to workspace 1
+	dispatcher: __lua
+	arg: 6
+
+bindmd
+	modmask: 64
+	submap: 
+	key: mouse:272
+	keycode: 0
+	catchall: false
+	description: Drag a window
+	dispatcher: __lua
+	arg: 7
+
+bindd
+	modmask: 0
+	submap: resize
+	key: escape
+	keycode: 0
+	catchall: false
+	description: Leave resize mode
+	dispatcher: __lua
+	arg: 8
+

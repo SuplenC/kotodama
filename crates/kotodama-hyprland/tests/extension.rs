@@ -1,5 +1,6 @@
 //! Drives the Hyprland Extension the way the Daemon does, over its stdio,
-//! with a fake Hyprland serving its two sockets from recorded output.
+//! with a fake Hyprland serving its two sockets from recorded output, under a
+//! hyprlang config or a Lua one.
 
 use std::cell::RefCell;
 use std::collections::BTreeMap;
@@ -28,6 +29,9 @@ const BINDS: &str = include_str!("fixtures/binds.json");
 #[derive(Default)]
 struct State {
     binds: String,
+    /// The plain `binds` listing.
+    listing: String,
+    status: String,
     requests: Vec<String>,
     events: Option<UnixStream>,
 }
@@ -44,6 +48,18 @@ impl FakeHyprland {
         FakeHyprland::start_in(Arc::new(tempfile::tempdir().expect("make the runtime dir")), SIGNATURE)
     }
 
+    /// One whose config is Lua, as Hyprland 0.56's `hyprland.lua`.
+    fn lua() -> Self {
+        let hyprland = FakeHyprland::start();
+        {
+            let mut state = hyprland.state.0.lock().expect("fake Hyprland mutex poisoned");
+            include_str!("fixtures/binds-lua.json").clone_into(&mut state.binds);
+            include_str!("fixtures/binds-lua.txt").clone_into(&mut state.listing);
+            include_str!("fixtures/status-lua.json").clone_into(&mut state.status);
+        }
+        hyprland
+    }
+
     /// A Hyprland instance `signature` in `runtime`, which another may have
     /// run in before.
     fn start_in(runtime: Arc<TempDir>, signature: &str) -> Self {
@@ -52,6 +68,7 @@ impl FakeHyprland {
         let state = Arc::new((
             Mutex::new(State {
                 binds: BINDS.to_owned(),
+                status: include_str!("fixtures/status-hyprlang.json").to_owned(),
                 ..State::default()
             }),
             Condvar::new(),
@@ -70,6 +87,9 @@ impl FakeHyprland {
                 let reply = match request.as_str() {
                     "j/clients" => include_str!("fixtures/clients.json").to_owned(),
                     "j/binds" => state.binds.clone(),
+                    "/binds" => state.listing.clone(),
+                    "j/status" => state.status.clone(),
+                    "j/devices" => include_str!("fixtures/devices.json").to_owned(),
                     dispatch if dispatch.starts_with("/dispatch ") => "ok".to_owned(),
                     _ => "unknown request".to_owned(),
                 };
@@ -122,6 +142,12 @@ impl FakeHyprland {
 
     fn set_binds(&self, json: &str) {
         json.clone_into(&mut self.state.0.lock().expect("fake Hyprland mutex poisoned").binds);
+    }
+
+    /// How many times `request` was made so far.
+    fn asked(&self, request: &str) -> usize {
+        let state = self.state.0.lock().expect("fake Hyprland mutex poisoned");
+        state.requests.iter().filter(|made| *made == request).count()
     }
 
     /// The `/dispatch` requests so far, without the prefix.
@@ -339,6 +365,84 @@ fn a_config_reload_sends_the_binds_that_changed() {
     assert_eq!(changed.len(), 1);
     assert_eq!(changed[0].title, "Pick a color");
     assert_eq!(changed[0].subtitle.as_deref(), Some("SUPER + P"));
+}
+
+#[test]
+fn under_lua_a_windows_actions_dispatch_hl_dsp_functions() {
+    let hyprland = FakeHyprland::lua();
+    let mut extension = hyprland.extension();
+    started(&extension);
+
+    assert_eq!(run(&mut extension, 1, "focus", window(FIREFOX)), Outcome::Close);
+    assert_eq!(run(&mut extension, 2, "float", window(FOOT)), Outcome::Close);
+    let workspace = [("Workspace".to_owned(), "3".to_owned())].into();
+    assert_eq!(
+        run_with(&mut extension, 3, "move", window(FOOT), workspace),
+        Outcome::Close
+    );
+    assert_eq!(run(&mut extension, 4, "close", window(FIREFOX)), Outcome::Close);
+
+    assert_eq!(
+        hyprland.dispatched(),
+        [
+            r#"hl.dsp.focus({ window = "address:0x55d0c6a1b2c0" })"#,
+            r#"hl.dsp.window.float({ window = "address:0x55d0c6b3e1c0" })"#,
+            r#"hl.dsp.window.move({ workspace = "3", follow = false, window = "address:0x55d0c6b3e1c0" })"#,
+            r#"hl.dsp.window.close({ window = "address:0x55d0c6a1b2c0" })"#,
+        ]
+    );
+    // Asked once, when Hyprland was found, not for each Action.
+    assert_eq!(hyprland.asked("j/status"), 1);
+}
+
+#[test]
+fn under_lua_a_binds_item_runs_its_function() {
+    let hyprland = FakeHyprland::lua();
+    let mut extension = hyprland.extension();
+    let items = started(&extension);
+    let close = items.iter().find(|item| item.title == "Close the window").unwrap();
+
+    assert_eq!(run(&mut extension, 1, "run", close.to_ref()), Outcome::Close);
+
+    assert_eq!(hyprland.dispatched(), ["debug.getregistry()[4]"]);
+}
+
+#[test]
+fn a_bind_on_a_keycode_without_a_keymap_shows_its_keycode() {
+    // The fake Hyprland writes no lock file naming a Wayland socket, so
+    // there is no keymap to name the key from.
+    let hyprland = FakeHyprland::lua();
+    let mut extension = hyprland.extension();
+
+    let items = started(&extension);
+
+    let to_three = items
+        .iter()
+        .find(|item| item.title == "Move window to workspace 3")
+        .unwrap();
+    assert_eq!(to_three.id, "/65/code:12");
+    assert_eq!(to_three.subtitle.as_deref(), Some("SUPER + SHIFT + code:12"));
+    assert_eq!(hyprland.asked("j/devices"), 1);
+    // Reading the binds again names their keys again only once the keys may
+    // have other names.
+    open_shortcuts(&mut extension, 1);
+    assert_eq!(hyprland.asked("j/devices"), 1);
+    let added = include_str!("fixtures/binds-lua.json").replacen(
+        '[',
+        r#"[{"modmask": 64, "submap": "", "key": "P", "keycode": 0, "mouse": false,
+            "description": "Pick a color", "dispatcher": "__lua", "arg": "9"},"#,
+        1,
+    );
+    let listing = format!(
+        "bindd\n\tmodmask: 64\n\tsubmap: \n\tkey: P\n\tkeycode: 0\n\tcatchall: false\n\tdescription: Pick a \
+         color\n\tdispatcher: __lua\n\targ: 9\n\n{}",
+        include_str!("fixtures/binds-lua.txt")
+    );
+    hyprland.set_binds(&added);
+    listing.clone_into(&mut hyprland.state.0.lock().expect("fake Hyprland mutex poisoned").listing);
+    hyprland.emit("configreloaded>>");
+    assert_eq!(ids(&extension.added()), ["/64/P"]);
+    assert_eq!(hyprland.asked("j/devices"), 2);
 }
 
 /// The CPU time a process has used, in clock ticks.

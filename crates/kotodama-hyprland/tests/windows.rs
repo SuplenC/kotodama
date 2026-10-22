@@ -2,6 +2,7 @@
 //! recorded stream of Hyprland's events.
 
 use kotodama_hyprland::events::Change;
+use kotodama_hyprland::hyprland::Language;
 use kotodama_hyprland::windows;
 use kotodama_hyprland::windows::Windows;
 use kotodama_protocol::Item;
@@ -114,26 +115,75 @@ fn a_config_reload_is_a_change_of_its_own() {
 }
 
 #[test]
+fn a_layout_change_is_a_change_of_its_own_that_changes_no_window() {
+    let change = Change::parse("activelayout>>at-translated-set-2-keyboard,French");
+    assert_eq!(change, Some(Change::LayoutChanged));
+
+    let mut windows = recorded();
+    assert!(!windows.apply(&Change::LayoutChanged));
+}
+
+#[test]
 fn an_action_is_the_dispatch_it_runs_on_its_window() {
     let address = "0x55d0c6a1b2c0";
+    let dispatch = |action, workspace| windows::dispatch(action, address, workspace, Language::Hyprlang);
     assert_eq!(
-        windows::dispatch(windows::FOCUS, address, None).unwrap(),
+        dispatch(windows::FOCUS, None).unwrap(),
         "focuswindow address:0x55d0c6a1b2c0"
     );
     assert_eq!(
-        windows::dispatch(windows::CLOSE, address, None).unwrap(),
+        dispatch(windows::CLOSE, None).unwrap(),
         "closewindow address:0x55d0c6a1b2c0"
     );
     assert_eq!(
-        windows::dispatch(windows::FLOAT, address, None).unwrap(),
+        dispatch(windows::FLOAT, None).unwrap(),
         "togglefloating address:0x55d0c6a1b2c0"
     );
     assert_eq!(
-        windows::dispatch(windows::MOVE, address, Some("3")).unwrap(),
+        dispatch(windows::MOVE, Some("3")).unwrap(),
         "movetoworkspacesilent 3,address:0x55d0c6a1b2c0"
     );
-    assert!(windows::dispatch(windows::MOVE, address, Some(" ")).is_err());
+    assert!(dispatch(windows::MOVE, Some(" ")).is_err());
     // A comma would end the workspace and start the window's selector.
-    assert!(windows::dispatch(windows::MOVE, address, Some("1,address:0x1")).is_err());
-    assert!(windows::dispatch("dance", address, None).is_err());
+    assert!(dispatch(windows::MOVE, Some("1,address:0x1")).is_err());
+    assert!(dispatch("dance", None).is_err());
+}
+
+#[test]
+fn under_lua_an_action_is_the_hl_dsp_function_it_runs_on_its_window() {
+    let address = "0x55d0c6a1b2c0";
+    let dispatch = |action, workspace| windows::dispatch(action, address, workspace, Language::Lua);
+    assert_eq!(
+        dispatch(windows::FOCUS, None).unwrap(),
+        r#"hl.dsp.focus({ window = "address:0x55d0c6a1b2c0" })"#
+    );
+    assert_eq!(
+        dispatch(windows::CLOSE, None).unwrap(),
+        r#"hl.dsp.window.close({ window = "address:0x55d0c6a1b2c0" })"#
+    );
+    assert_eq!(
+        dispatch(windows::FLOAT, None).unwrap(),
+        r#"hl.dsp.window.float({ window = "address:0x55d0c6a1b2c0" })"#
+    );
+    assert_eq!(
+        dispatch(windows::MOVE, Some(" 3 ")).unwrap(),
+        r#"hl.dsp.window.move({ workspace = "3", follow = false, window = "address:0x55d0c6a1b2c0" })"#
+    );
+    assert!(dispatch(windows::MOVE, Some(" ")).is_err());
+    assert!(dispatch("dance", None).is_err());
+}
+
+#[test]
+fn under_lua_a_workspace_is_a_string_it_cant_end() {
+    let dispatch = |workspace| windows::dispatch(windows::MOVE, "0x1", Some(workspace), Language::Lua);
+
+    // A comma is only a character of the name.
+    assert_eq!(
+        dispatch("name:a,b").unwrap(),
+        r#"hl.dsp.window.move({ workspace = "name:a,b", follow = false, window = "address:0x1" })"#
+    );
+    assert_eq!(
+        dispatch(r#"x" }) hl.exec_cmd("rm"#).unwrap(),
+        r#"hl.dsp.window.move({ workspace = "x\" }) hl.exec_cmd(\"rm", follow = false, window = "address:0x1" })"#
+    );
 }

@@ -5,7 +5,7 @@
 //! # Owns
 //!
 //! - Parsing `j/clients`, and applying a [`Change`] to the windows.
-//! - The windows' Items, and the dispatch each window Action runs.
+//! - The windows' Items, and the dispatch each window Action runs, in hyprlang or in Lua.
 //!
 //! # Not here
 //!
@@ -21,6 +21,8 @@ use kotodama_protocol::ItemKind;
 use serde::Deserialize;
 
 use crate::events::Change;
+use crate::hyprland::Language;
+use crate::lua;
 
 /// The Action that focuses a window.
 pub const FOCUS: &str = "focus";
@@ -50,7 +52,7 @@ pub enum DispatchError {
     /// [`MOVE`] was run with a blank [`WORKSPACE`] Argument, or none.
     #[error("Name a workspace to move the window to")]
     NoWorkspace,
-    /// The workspace would end the dispatcher's argument early.
+    /// The workspace would end hyprlang's dispatcher argument early.
     #[error("`{workspace}` isn't a workspace: it has a comma")]
     Comma { workspace: String },
     #[error("A window has no Action `{action}`")]
@@ -146,7 +148,7 @@ impl Windows {
                 set(self.0.get_mut(address).map(|window| &mut window.workspace), workspace)
             }
             Change::Retitled { address, title } => set(self.0.get_mut(address).map(|window| &mut window.title), title),
-            Change::ConfigReloaded => false,
+            Change::ConfigReloaded | Change::LayoutChanged => false,
         }
     }
 
@@ -200,28 +202,53 @@ fn item(address: &str, window: &Window) -> Item {
     }
 }
 
-/// What `dispatch` runs for `action` on the window at `address`; `workspace`
-/// is the [`MOVE`] Action's Argument.
+/// What `dispatch` runs for `action` on the window at `address`, written in
+/// `language`; `workspace` is the [`MOVE`] Action's Argument.
 ///
 /// # Errors
 ///
-/// [`DispatchError`] when `action` is not a window Action, or [`MOVE`]'s workspace is blank or
-/// has a comma.
-pub fn dispatch(action: &str, address: &str, workspace: Option<&str>) -> Result<String, DispatchError> {
-    Ok(match action {
-        FOCUS => format!("focuswindow address:{address}"),
-        CLOSE => format!("closewindow address:{address}"),
-        FLOAT => format!("togglefloating address:{address}"),
-        MOVE => {
-            let workspace = workspace
-                .map(str::trim)
-                .filter(|workspace| !workspace.is_empty())
-                .ok_or(DispatchError::NoWorkspace)?;
-            if workspace.contains(',') {
-                return Err(DispatchError::comma(workspace));
+/// [`DispatchError`] when `action` is not a window Action, or [`MOVE`]'s workspace is blank, or
+/// has a comma in hyprlang, where it would end the workspace.
+pub fn dispatch(
+    action: &str,
+    address: &str,
+    workspace: Option<&str>,
+    language: Language,
+) -> Result<String, DispatchError> {
+    let workspace = || {
+        workspace
+            .map(str::trim)
+            .filter(|workspace| !workspace.is_empty())
+            .ok_or(DispatchError::NoWorkspace)
+    };
+    Ok(match language {
+        Language::Hyprlang => match action {
+            FOCUS => format!("focuswindow address:{address}"),
+            CLOSE => format!("closewindow address:{address}"),
+            FLOAT => format!("togglefloating address:{address}"),
+            MOVE => {
+                let workspace = workspace()?;
+                if workspace.contains(',') {
+                    return Err(DispatchError::comma(workspace));
+                }
+                format!("movetoworkspacesilent {workspace},address:{address}")
             }
-            format!("movetoworkspacesilent {workspace},address:{address}")
+            _ => return Err(DispatchError::unknown_action(action)),
+        },
+        // The `hl.dsp` functions of Hyprland's Lua config, each taking the
+        // window as a selector, as hyprlang's `address:` one.
+        Language::Lua => {
+            let window = lua::string(&format!("address:{address}"));
+            match action {
+                FOCUS => format!("hl.dsp.focus({{ window = {window} }})"),
+                CLOSE => format!("hl.dsp.window.close({{ window = {window} }})"),
+                FLOAT => format!("hl.dsp.window.float({{ window = {window} }})"),
+                MOVE => {
+                    let workspace = lua::string(workspace()?);
+                    format!("hl.dsp.window.move({{ workspace = {workspace}, follow = false, window = {window} }})")
+                }
+                _ => return Err(DispatchError::unknown_action(action)),
+            }
         }
-        _ => return Err(DispatchError::unknown_action(action)),
     })
 }
