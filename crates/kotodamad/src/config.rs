@@ -24,6 +24,9 @@ use std::fs;
 use std::io;
 use std::path::Path;
 use std::path::PathBuf;
+use std::sync::Arc;
+use std::sync::Mutex;
+use std::sync::PoisonError;
 use std::sync::mpsc::Sender;
 use std::time::Duration;
 
@@ -138,30 +141,111 @@ fn note_sources(table: &Table, prefix: &str, path: &Path, sources: &mut Sources)
 /// Daemon keeps the last good config. Watching stops when the watcher is
 /// dropped.
 ///
+/// A config file that is a symlink is read through it, so the files it leads
+/// to are watched too, where they sit: an edit there, or a link on the way
+/// replaced, is a change of the config. Where the links lead is read again on
+/// every reload, so a link added, removed or pointed elsewhere is followed.
+///
 /// # Errors
 ///
 /// When the watcher can't start.
-pub fn watch(dirs: Vec<PathBuf>, events: Sender<Event>) -> notify::Result<Watcher> {
-    let filter = dirs.clone();
+pub fn watch(dirs: &[PathBuf], events: Sender<Event>) -> notify::Result<Watcher> {
+    let first = link_targets(dirs);
+    let to_watch = watched_dirs(dirs, &first);
+    let targets = Arc::new(Mutex::new(with_real_names(first)));
+    let filter = dirs.to_vec();
+    let matters_targets = Arc::clone(&targets);
     let watcher = Watcher::start(
         "config",
         RecursiveMode::NonRecursive,
         SETTLE,
-        move |event, _| event.paths.iter().any(|path| is_config_file(&filter, path)),
+        move |event, _| {
+            let targets = matters_targets.lock().unwrap_or_else(PoisonError::into_inner);
+            event
+                .paths
+                .iter()
+                .any(|path| is_config_file(&filter, path) || targets.contains(path))
+        },
         {
-            let dirs = dirs.clone();
-            move |_| match load(&dirs) {
-                Ok(config) => {
-                    let _ = events.send(Event::Config(config));
-                }
-                Err(err) => {
-                    let _ = events.send(Event::ConfigFailed(err));
+            let dirs = dirs.to_vec();
+            let targets = Arc::clone(&targets);
+            move |watcher| {
+                let now = link_targets(&dirs);
+                watcher.watch(watched_dirs(&dirs, &now));
+                *targets.lock().unwrap_or_else(PoisonError::into_inner) = with_real_names(now);
+                match load(&dirs) {
+                    Ok(config) => {
+                        let _ = events.send(Event::Config(config));
+                    }
+                    Err(err) => {
+                        let _ = events.send(Event::ConfigFailed(err));
+                    }
                 }
             }
         },
     )?;
-    watcher.watch(dirs);
+    watcher.watch(to_watch);
     Ok(watcher)
+}
+
+/// The config dirs, and the directory of each file a symlinked config file
+/// leads to, once each. Only those directories: never one above them.
+fn watched_dirs(dirs: &[PathBuf], targets: &[PathBuf]) -> Vec<PathBuf> {
+    let mut watched = dirs.to_vec();
+    for parent in targets.iter().filter_map(|target| target.parent()) {
+        if !watched.iter().any(|dir| dir == parent) {
+            watched.push(parent.to_owned());
+        }
+    }
+    watched
+}
+
+/// Every path a symlinked `*.toml` in `dirs` leads through, link after link
+/// to the file itself, as an event there names it.
+fn link_targets(dirs: &[PathBuf]) -> Vec<PathBuf> {
+    // Where the kernel gives up with ELOOP.
+    const MAX_FOLLOWED: usize = 40;
+    let mut targets = Vec::new();
+    for dir in dirs {
+        let Ok(entries) = fs::read_dir(dir) else {
+            continue;
+        };
+        for entry in entries.filter_map(Result::ok) {
+            let mut at = entry.path();
+            if at.extension().is_none_or(|ext| ext != "toml") {
+                continue;
+            }
+            for _ in 0..MAX_FOLLOWED {
+                let Ok(target) = fs::read_link(&at) else {
+                    break;
+                };
+                // A relative target goes on from the link's directory.
+                let next = at
+                    .parent()
+                    .map_or_else(|| target.clone(), |parent| parent.join(&target));
+                if !targets.contains(&next) {
+                    targets.push(next.clone());
+                }
+                at = next;
+            }
+        }
+    }
+    targets
+}
+
+/// `targets`, and each through its directory's real path where that differs,
+/// as macOS's watch names it.
+fn with_real_names(mut targets: Vec<PathBuf>) -> Vec<PathBuf> {
+    let real: Vec<PathBuf> = targets
+        .iter()
+        .filter_map(|path| Some(fs::canonicalize(path.parent()?).ok()?.join(path.file_name()?)))
+        .collect();
+    for path in real {
+        if !targets.contains(&path) {
+            targets.push(path);
+        }
+    }
+    targets
 }
 
 /// Whether `path` is a file `load` reads from one of `dirs`, so a watcher can
