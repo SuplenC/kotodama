@@ -1,13 +1,18 @@
 name: CI
 
+# Release lines (docs/releasing.md) are branches like main: a push to one runs
+# every job, and a pull request into one is checked against it. Pull requests
+# run whichever branch they target, so `pull_request` names none.
 on:
   push:
-    branches: [main]
+    branches: [main, 'release/**']
   pull_request:
 
+# A push to main or a release line runs to the end, so every commit there is
+# checked; a newer push to a pull request cancels the older run.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' && !startsWith(github.ref, 'refs/heads/release/') }}
 
 permissions:
   contents: read
@@ -18,8 +23,8 @@ defaults:
 
 jobs:
   # On pull requests, decides which jobs the change needs. It lists the paths
-  # that can be ignored, so a path nobody listed runs everything. Pushes to main
-  # skip this and run every job. `bench` (and `instructions`) also ignores the
+  # that can be ignored, so a path nobody listed runs everything. Pushes skip
+  # this and run every job. `bench` (and `instructions`) also ignores the
   # crates no benchmark builds on (scripts/bench-crates lists the ones that
   # matter) and the files only the other jobs, the dev image or releases read.
   # `latency`, the e2e test, runs for the crates the Daemon, the `kotodama`
@@ -68,7 +73,7 @@ jobs:
               nix/home-manager.nix | nix/home-manager-extensions.nix | nix/tests/*) rust=true e2e=true nix=true ;;
               docker/* | .config/nextest.toml | scripts/dev-image | scripts/tests/* | \
                 .github/workflows/release-please.yml | release-please-config.json | \
-                .release-please-manifest.json | .gitignore)
+                .release-please-manifest.json | .release-line | .gitignore)
                 rust=true e2e=true
                 ;;
               *) rust=true e2e=true bench=true latency=true nix=true ;;
@@ -83,8 +88,9 @@ jobs:
   # on main save it, so PRs start from main's build without filling the
   # repository's cache quota.
   linear:
-    # A branch is rebased onto main, never merged with it: main gets one
-    # merge commit per pull request and none from inside a branch.
+    # A branch is rebased onto the branch it targets (main or a release line),
+    # never merged with it: the target gets one merge commit per pull request
+    # and none from inside a branch.
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     steps:
@@ -93,11 +99,12 @@ jobs:
           fetch-depth: 0
       - env:
           BASE: ${{ github.event.pull_request.base.sha }}
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
           HEAD: ${{ github.event.pull_request.head.sha }}
         run: |
           merges=$(git log --merges --oneline "$BASE..$HEAD")
           if [ -n "$merges" ]; then
-            echo "::error::The branch has merge commits. Rebase it onto main instead (git rebase origin/main):"
+            echo "::error::The branch has merge commits. Rebase it onto $BASE_REF instead (git rebase origin/$BASE_REF):"
             echo "$merges"
             exit 1
           fi
@@ -203,9 +210,11 @@ jobs:
   # as bench-results-<sha>.
   #
   # On a PR, saved results stand in for running the base commit: the base
-  # commit's own, or else main's latest (the base's are often not saved yet,
-  # since main's run for it is still going), so only this commit builds and
-  # runs, with shorter criterion times. Shared runners differ in speed by up to
+  # commit's own, or else, for a PR into main, main's latest (the base's are
+  # often not saved yet, since main's run for it is still going), so only this
+  # commit builds and runs, with shorter criterion times. A PR into a release
+  # line takes only its base commit's own: only main saves results, and main's
+  # latest measure code the line may be far behind. Shared runners differ in speed by up to
   # 2x, so a timing over the limit against saved results is confirmed by running
   # the base commit here and comparing again. Resident memory doesn't depend on
   # the runner. Without any saved results, both commits run here, as on main.
@@ -234,7 +243,7 @@ jobs:
         with:
           path: bench-saved.txt
           key: bench-results-${{ github.event.pull_request.base.sha }}
-          restore-keys: bench-results-
+          restore-keys: ${{ github.base_ref == 'main' && 'bench-results-' || '' }}
       - name: Check out the base commit
         id: base
         env:

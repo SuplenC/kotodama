@@ -2,6 +2,11 @@
 # Checks that every workspace crate is a release-please package of its own: a
 # package in release-please-config.json whose Cargo.lock entry it bumps, and a
 # version in .release-please-manifest.json.
+#
+# A release line (docs/releasing.md) is the exception. Its branch has a
+# .release-line file and releases only its own packages, so there the check is
+# that each package in the manifest is a workspace member with a package in the
+# config, and that the config has no other.
 set -euo pipefail
 
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
@@ -15,6 +20,34 @@ members=$(sed -n 's/^members = \[\(.*\)\]/\1/p' "$root/Cargo.toml" | tr -d '" ' 
 if [ -z "$members" ]; then
     echo "FAIL no workspace members found in $root/Cargo.toml" >&2
     exit 1
+fi
+
+if [ -f "$root/.release-line" ]; then
+    line=$(cat "$root/.release-line")
+    packages=$(sed -n 's/^ *"\(crates\/[^"]*\)": .*/\1/p' "$manifest")
+    configured=$(sed -n 's/^ *"\(crates\/[^"]*\)": {.*/\1/p' "$config")
+    if [ -z "$packages" ]; then
+        echo "FAIL release line $line: .release-please-manifest.json lists no package"
+        exit 1
+    fi
+    for dir in $packages; do
+        if ! grep -qx "$dir" <<<"$members"; then
+            echo "FAIL release line $line: $dir is in .release-please-manifest.json but no workspace member"
+            failed=1
+        elif ! grep -qx "$dir" <<<"$configured"; then
+            echo "FAIL release line $line: $dir is in .release-please-manifest.json but no package in release-please-config.json"
+            failed=1
+        else
+            echo "ok   release line $line releases $dir"
+        fi
+    done
+    for dir in $configured; do
+        if ! grep -qx "$dir" <<<"$packages"; then
+            echo "FAIL release line $line: $dir is a package in release-please-config.json but not in .release-please-manifest.json"
+            failed=1
+        fi
+    done
+    exit $failed
 fi
 
 for dir in $members; do
