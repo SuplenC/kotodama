@@ -143,6 +143,13 @@ pub const KEYS: &[Key] = &[
         "Whether the Extension's Items are in the search, or in its app alone, replacing the Manifest's.",
     ),
     key(
+        "extensions.<name>.boost",
+        Some("1"),
+        "How much the Extension's Results' points count: a number above 0. Above 1 ranks them above \
+         equal matches, below 1 below them; it never takes a Result past an exact title on its own, \
+         nor a real match below a near miss.",
+    ),
+    key(
         "desktop.settle_ms",
         Some("50"),
         "How long keys wait after the menu closes, so the window that gets the keyboard back takes \
@@ -177,7 +184,7 @@ pub const KEYS: &[Key] = &[
     key(
         "history.lift_threshold",
         Some("5.0"),
-        "The Frecency that lifts a Result one Tier: about a week of daily use.",
+        "The Frecency worth one Tier: about a week of daily use. Each further Tier takes 1 + this times as much.",
     ),
     key(
         "history.time_of_day",

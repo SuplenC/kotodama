@@ -37,6 +37,7 @@ use super::Source;
 use super::Standing;
 use super::Update;
 use super::alias_id;
+use super::key_candidates;
 use super::take_answers;
 use crate::clock::When;
 use crate::history;
@@ -230,6 +231,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
         let primary = self.learn(&mut session, &mut candidates, indexed, now);
         self.add_fallbacks(&mut session, &mut candidates, fallbacks, now);
 
+        key_candidates(&mut candidates);
         let answers = take_answers(&mut candidates);
 
         let mut kept: Vec<Candidate> = Vec::new();
@@ -385,8 +387,8 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
     /// the Daemon learned is applied to the real matches there, if those
     /// leave rows on screen empty, and asks the query of every fallback not
     /// asked it yet. With the rows full, its results would sit below them
-    /// unseen. Frecency orders them among themselves, but takes no other part:
-    /// a fallback is never a Learned choice, nor lifted a Tier.
+    /// unseen. Their points order them among themselves, below every real
+    /// match: a fallback is never a Learned choice.
     pub(super) fn add_fallbacks(
         &self,
         session: &mut Session,
@@ -415,10 +417,11 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             let when = self.when(now);
             for fallback in &mut fallbacks {
                 if let Some((extension, item)) = self.item(session, fallback.source) {
-                    (fallback.frecency, fallback.direct) = self.frecency(extension, &item, when);
+                    fallback.picked(self.frecency(extension, &item, when));
                 }
             }
         }
+        self.add_points(&mut fallbacks);
         candidates.append(&mut fallbacks);
     }
 
@@ -531,12 +534,12 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
     }
 
     /// Applies what the Daemon learned from the user, and the user's
-    /// keywords, to the candidates. Frecency breaks ties within a tier and,
-    /// from [`Settings::lift_threshold`](crate::history::Settings::lift_threshold), lifts a Result
-    /// a tier. What the query names by an Alias goes first, with exact matches the Learned
-    /// choice wasn't picked over, then the Learned choice. The candidates before
-    /// `indexed` must be the Indexed items, in slot order. Returns the Action
-    /// an Alias makes primary, with the Result it is for.
+    /// keywords, to the candidates: each gets its points, from how well it
+    /// matches and its Frecency (see [`crate::points`]). What the query names
+    /// by an Alias goes first, with exact matches the Learned choice wasn't
+    /// picked over, then the Learned choice. The candidates before `indexed`
+    /// must be the Indexed items, in slot order. Returns the Action an Alias
+    /// makes primary, with the Result it is for.
     pub(super) fn learn(
         &mut self,
         session: &mut Session,
@@ -546,6 +549,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
     ) -> Option<(Source, String)> {
         session.via_alias = None;
         if session.key.is_empty() {
+            self.add_points(candidates);
             return None;
         }
         let when = self.when(now);
@@ -553,13 +557,13 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             self.add_frecency(session, candidates, indexed, when);
         }
         let primary = self.add_named(session, candidates, when);
+        self.add_points(candidates);
         self.add_learned(session, candidates, when.at);
         primary
     }
 
-    /// Gives each candidate its Frecency, and lifts a Tier those used enough,
-    /// from [`Settings::lift_threshold`](crate::history::Settings::lift_threshold). The candidates
-    /// before `indexed` must be the Indexed items, in slot order.
+    /// Gives each candidate its Frecency. The candidates before `indexed`
+    /// must be the Indexed items, in slot order.
     pub(super) fn add_frecency(&mut self, session: &Session, candidates: &mut [Candidate], indexed: usize, when: When) {
         let settings = *self.history.settings();
         self.cache_frecent();
@@ -568,23 +572,33 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
         for (&(slot, counts), &frecency) in self.frecent.slots.iter().zip(&frecencies) {
             if let Ok(n) = candidates[..indexed].binary_search_by_key(&Source::Indexed(slot), |c| c.source) {
                 if counts != Counts::Direct {
-                    candidates[n].frecency = frecency;
+                    candidates[n].frecency = frecency as f32;
                 }
                 if counts != Counts::Shared {
-                    candidates[n].direct = frecency;
+                    candidates[n].direct = frecency as f32;
                 }
             }
         }
         self.frecencies = frecencies;
         for candidate in &mut candidates[indexed..] {
             if let Some((extension, item)) = self.item(session, candidate.source) {
-                (candidate.frecency, candidate.direct) = self.frecency(extension, &item, when);
+                candidate.picked(self.frecency(extension, &item, when));
             }
         }
-        for candidate in candidates.iter_mut() {
-            if candidate.frecency >= settings.lift_threshold {
-                candidate.tier = rank::lift(candidate.tier);
-            }
+    }
+
+    /// Works out each candidate's points, and the Tier band they reach,
+    /// once its Frecency and what the query names are known.
+    pub(super) fn add_points(&self, candidates: &mut [Candidate]) {
+        let lift_threshold = self.history.settings().lift_threshold;
+        for candidate in candidates {
+            let extension = match candidate.source {
+                Source::Indexed(slot) => Some(slot.extension()),
+                Source::Live(extension, _) => Some(extension),
+                Source::Own(_) | Source::Unavailable => None,
+            };
+            let boost = extension.and_then(|extension| self.boosts.get(extension.0).copied());
+            candidate.score(lift_threshold, boost.unwrap_or_default());
         }
     }
 
@@ -672,7 +686,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
                         session.max_score,
                         item.title.chars().count() as u32,
                     );
-                    (candidate.frecency, candidate.direct) = self.frecency(extension, &item, when);
+                    candidate.picked(self.frecency(extension, &item, when));
                     candidates.push(candidate);
                     candidates.len() - 1
                 }
@@ -682,10 +696,9 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
                 candidate.class = Class::Named;
                 candidate.by_alias = true;
             }
-            candidate.tier = candidate.tier.max(tier.coarse());
             candidate.fine = candidate.fine.max(tier);
             if let Some(frecency) = frecency {
-                candidate.frecency = frecency;
+                candidate.frecency = frecency as f32;
             }
         }
         primary
@@ -718,8 +731,8 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             }
         }
         // Exact matches go first, unless the Learned choice was picked over
-        // them. With a Learned choice, only a true exact match does: one that
-        // Frecency lifted to the tier doesn't.
+        // them. With a Learned choice, only a true exact match does: one whose
+        // habit lifted it to the band doesn't.
         for candidate in candidates.iter_mut() {
             if candidate.class != Class::Rest || candidate.tier != Tier::Exact.coarse() {
                 continue;

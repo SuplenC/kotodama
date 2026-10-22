@@ -62,7 +62,7 @@ pub const DEFAULT_UNDO_SECS: u64 = 60;
 /// picks_to_learn = 3      # picks of one Result for one query that make it the query's Learned choice
 /// picks_to_take_over = 2  # picks of another Result, since the choice was last picked, that replace it
 /// half_life_days = 14     # how long a pick takes to count half as much
-/// lift_threshold = 5.0    # the Frecency that lifts a Result one Tier: about a week of daily use
+/// lift_threshold = 5.0    # the Frecency worth one Tier: about a week of daily use
 /// time_of_day = 0.5       # how much less a pick counts at a time of day it is seldom made: 0 to 1
 /// usage_log = false       # log queries and picks, to tune ranking from real use
 /// undo_seconds = 60       # how long Forget and Clear history can be undone
@@ -82,10 +82,11 @@ pub struct Settings {
     /// How long a pick takes to count half as much. A pick never counts for
     /// nothing: it only gets weaker.
     pub half_life_secs: f64,
-    /// The Frecency from which a Result ranks one Tier above how well it
-    /// matches. The default, about a week of daily use, lets something used
-    /// daily whose title starts with the query beat an exact title, but not a
-    /// few picks.
+    /// The Frecency worth one Tier of how well a Result matches; each
+    /// further Tier takes `1 + lift_threshold` times as much (see
+    /// `crate::points`). The default, about a week of daily use, lets
+    /// something used daily whose title starts with the query beat an exact
+    /// title, but not a few picks.
     pub lift_threshold: f64,
     /// How much less a Result's picks count at a time of day it is seldom
     /// picked: 0 not at all, 1 for nothing at a time it is never picked. At

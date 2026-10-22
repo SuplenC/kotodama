@@ -45,7 +45,7 @@ let
       default = null;
       inherit description;
     };
-  # `word` and `in_search`, the Daemon's own keys in every
+  # `word`, `in_search` and `boost`, the Daemon's own keys in every
   # `[extensions.<name>]`. `default` and `searched` say what the Extension's
   # Manifest gives.
   app = default: searched: {
@@ -61,10 +61,15 @@ let
       `true`, or none of them, `false`, and only its app does. Unset,
       ${searched}.
     '';
+    boost = optional lib.types.numbers.positive ''
+      `boost`: how much the Extension's Results' points count. Above 1 ranks
+      them above equal matches from other Extensions, below 1 below them; it
+      never takes a Result past an exact title on its own. Unset, 1.
+    '';
   };
   # The `[extensions.<name>]` keys of `app`, as set.
   appSettings = options: {
-    inherit (options) word;
+    inherit (options) word boost;
     in_search = options.inSearch;
   };
   webSearch = app "`web`" "true";
@@ -270,8 +275,8 @@ in
         `half_life_days`: how long a pick takes to count half as much. Unset, 14.
       '';
       liftThreshold = optional lib.types.numbers.positive ''
-        `lift_threshold`: the Frecency that lifts a Result one tier, about a
-        week of daily use. Unset, 5.0.
+        `lift_threshold`: the Frecency worth one tier, about a week of daily
+        use; each further tier takes 1 + this times as much. Unset, 5.0.
       '';
       timeOfDay = optional (lib.types.numbers.between 0 1) ''
         `time_of_day`: how much less picks count at a time of day the Result
@@ -559,6 +564,7 @@ in
         "`engines`: searched in this order; an empty list leaves only addresses. Unset, DuckDuckGo, Google and Wikipedia.";
     extensions.web-search.word = webSearch.word;
     extensions.web-search.inSearch = webSearch.inSearch;
+    extensions.web-search.boost = webSearch.boost;
     extensions.system = app "`system`" "true";
     extensions.hyprland = app "`hyprland`" "true, but for the binds, which only its app shows";
 

@@ -67,7 +67,7 @@ Every config table below also has typed options, so a typo or a value of the wro
 | `emptyQuery.{mostUsed, menu}` | `[empty_query]` |
 | `ranking.kinds` | `[ranking]` |
 | `quicklinkDefaults.opener` | `[quicklink_defaults]` |
-| `extensions.<name>.{word, inSearch}`, for every Extension above and below, and `system` and `hyprland` (`prefix` is the old name of `word`, still read) | `word` and `in_search` in `[extensions.<name>]` (see [Apps](#apps)) |
+| `extensions.<name>.{word, inSearch, boost}`, for every Extension above and below, and `system` and `hyprland` (`prefix` is the old name of `word`, still read) | `word`, `in_search` and `boost` in `[extensions.<name>]` (see [Apps](#apps) and [Ranking that learns](#ranking-that-learns)) |
 | `extensions.apps.{terminal, hidden, names, withdrawWithin}` | `[extensions.apps]` |
 | `extensions.clipboard.{maxEntries, maxAgeDays}` | `[extensions.clipboard]` |
 | `extensions.calculator.{network, ratesUrl, decimalSeparator}` | `[extensions.calculator]` |
@@ -178,7 +178,7 @@ level = "info"  # "error", "warn", "info" or "debug"; KOTODAMA_LOG wins
 
 A path in `[paths]` is absolute or starts with `~/`. An Extension in a later directory replaces one of the same name before it, so `extension_dirs` can hold a build of a Bundled extension. `[paths]` wins over the XDG variables, and an environment variable named for one setting, `KOTODAMA_SOCKET`, wins over `[paths]`, so Front ends started with it find a moved socket.
 
-`[extensions.<name>]` holds an Extension's own settings, which it gets, and the Daemon's keys, which it doesn't: `enable`, `command`, `env`, `live_query`, `word`, `prefix` and `in_search`.
+`[extensions.<name>]` holds an Extension's own settings, which it gets, and the Daemon's keys, which it doesn't: `enable`, `command`, `env`, `live_query`, `word`, `prefix`, `in_search` and `boost`.
 
 ```toml
 [extensions.emoji]
@@ -188,6 +188,7 @@ enable = false  # never started, though still installed
 command = ["/home/me/src/kotodama/target/debug/kotodama-apps"]  # replaces the Manifest's
 env = { RUST_LOG = "debug" }
 live_query = { debounce_ms = 0 }  # replaces the Manifest's `prefixes`, `triggers` or `debounce_ms`
+boost = 1.5                       # its Results' points count 1.5 times; see Ranking that learns
 
 # No Extension named notes is installed, so this table defines one: the
 # Manifest's keys go here too, and the rest are its settings.
@@ -206,7 +207,7 @@ Results rank by how well they match before anything else, in tiers: the whole ti
 
 A query with a typo still finds what was meant: `fierfox`, `firfox` and `firefx` find Firefox. Each word of the query may have one typo per 4 letters (a letter missing, extra or wrong, or two letters swapped), but never in its first letter. A Result found only with typos is a near miss, the tier below scattered letters. Use never lifts it, so every real match ranks above it. Near misses are looked for only when the real matches leave rows on screen empty.
 
-Every Action the user runs is recorded in the History, `$XDG_STATE_HOME/kotodama/history.json` (by default `~/.local/state/kotodama/`), except on an answer, such as the calculator's: an answer takes the top row whatever its Frecency, and is a new Result for every expression, so the History keeps nothing of it. A picked Result gets a Frecency boost, which halves every 14 days but never quite reaches zero. Frecency also learns the time of day: picks count in full at the times of day the Result is usually picked, and half as much at a time of day it never is, so something used every morning ranks higher in the morning. A Result used about daily for a week ranks one tier higher, but never above an exact title. When the user picks the same Result 3 times for one query, it becomes that query's Learned choice: it ranks first for that query and for the queries that extend it or that it extends (`fi`, `fir`, `fire`), but only over the Results that ranked above it when it was picked, so a new app with exactly that title still wins. Two picks of another Result since the Learned choice was last picked take over from it. Learning fades with Frecency's half-life; when two Learned choices apply, the one picked more often wins, then the one learned for the closer query. Both apply to Indexed items and Live query results. Items that several Extensions offer with the same Identity (a page from bookmarks and from browser history) share their Frecency and Learned choices: picking one raises the others. Each still shows as a Result of its own, and the one the user picks through most takes the best place any of them ranks in. The "Clear history" Result empties the History.
+Every Action the user runs is recorded in the History, `$XDG_STATE_HOME/kotodama/history.json` (by default `~/.local/state/kotodama/`), except on an answer, such as the calculator's: an answer takes the top row whatever its Frecency, and is a new Result for every expression, so the History keeps nothing of it. A picked Result gets a Frecency boost, which halves every 14 days but never quite reaches zero. Frecency also learns the time of day: picks count in full at the times of day the Result is usually picked, and half as much at a time of day it never is, so something used every morning ranks higher in the morning. A Result used about daily for a week ranks one tier higher, and two tiers after about six times as much use, but a match inside a word or scattered never passes an exact title: only a title that starts with the query does. When the user picks the same Result 3 times for one query, it becomes that query's Learned choice: it ranks first for that query and for the queries that extend it or that it extends (`fi`, `fir`, `fire`), but only over the Results that ranked above it when it was picked, so a new app with exactly that title still wins. Two picks of another Result since the Learned choice was last picked take over from it. An Extension's `boost` in `[extensions.<name>]` (default 1, any number above 0) multiplies its Results' points, the blend of their tier and their Frecency: `1.5` puts its Results above equal matches from other Extensions, `0.5` below them. A boost never takes a Result past an exact title on its own, nor a real match below a near miss. Learning fades with Frecency's half-life; when two Learned choices apply, the one picked more often wins, then the one learned for the closer query. Both apply to Indexed items and Live query results. Items that several Extensions offer with the same Identity (a page from bookmarks and from browser history) share their Frecency and Learned choices: picking one raises the others. Each still shows as a Result of its own, and the one the user picks through most takes the best place any of them ranks in. The "Clear history" Result empties the History.
 
 The Action panel of a Result the History keeps anything for offers "Forget", which drops its Frecency, every Learned choice for it, the picks of the Aliases that name it and, for a Result with an Identity, the History of that thing from every Extension. It also offers "Clear the history of" its Extension, which forgets every Result of that Extension, the Aliases that name them, and the shared History of the Identities its Items carry, though another Extension offers them too: the History doesn't know which Extension a pick of a shared thing came through. Another Extension's Result of such a thing keeps only its own picks, which decide its place among the Results of that thing. Ctrl+Shift+Backspace forgets the selected Result without opening the panel. For a minute (`undo_seconds`) after Forget, clearing an Extension's History or "Clear history", the menu shows a Toast such as "Forgot “Firefox”", and Ctrl+Z puts back what was forgotten; typing `undo` finds a Result that does the same, latest first. Anything picked since stays as it is.
 
@@ -217,7 +218,7 @@ These numbers are settings in the config's `[history]` table, which reloads with
 picks_to_learn = 3      # picks of one Result for one query that make it the query's Learned choice
 picks_to_take_over = 2  # picks of another Result, since the choice was last picked, that replace it
 half_life_days = 14     # how long a pick takes to count half as much; above 0
-lift_threshold = 5.0    # the Frecency that lifts a Result one tier, about a week of daily use; above 0
+lift_threshold = 5.0    # the Frecency worth one tier, about a week of daily use; each further tier takes 1 + this times as much; above 0
 time_of_day = 0.5       # how much less picks count at a time of day the Result is never picked; 0 to 1
 usage_log = false       # log queries and picks, to tune ranking from real use
 undo_seconds = 60       # how long Forget and Clear history can be undone; 0 to 86400

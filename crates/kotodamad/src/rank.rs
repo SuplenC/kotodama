@@ -55,7 +55,7 @@ pub enum Tier {
 
 impl Tier {
     /// The tier as ranking compares it, where initials count as a word start.
-    pub fn coarse(self) -> u8 {
+    pub const fn coarse(self) -> u8 {
         match self {
             Tier::NearMiss => 0,
             Tier::Scattered => 1,
@@ -64,15 +64,6 @@ impl Tier {
             Tier::Keyword | Tier::Exact => 4,
         }
     }
-}
-
-/// The coarse tier one above `coarse`: where a Result the user picks often
-/// ranks. A near miss stays one, so every real match ranks above it.
-pub fn lift(coarse: u8) -> u8 {
-    if coarse == Tier::NearMiss.coarse() {
-        return coarse;
-    }
-    (coarse + 1).min(Tier::Exact.coarse())
 }
 
 /// How many letters of a query's word allow it one typo. A shorter word

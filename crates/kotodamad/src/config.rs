@@ -217,7 +217,16 @@ pub fn extension_table(config: &Table, name: &str) -> Table {
 
 /// The keys of `[extensions.<name>]` the Daemon reads itself, for every
 /// Extension.
-pub const DAEMON_KEYS: [&str; 7] = ["word", "prefix", "in_search", "enable", "command", "env", "live_query"];
+pub const DAEMON_KEYS: [&str; 8] = [
+    "word",
+    "prefix",
+    "in_search",
+    "boost",
+    "enable",
+    "command",
+    "env",
+    "live_query",
+];
 /// The Manifest's keys, which an Extension defined in the config takes from
 /// its table too.
 pub const MANIFEST_KEYS: [&str; 8] = [

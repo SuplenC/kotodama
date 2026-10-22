@@ -723,6 +723,67 @@ fn heavy_use_lifts_a_match_inside_a_word_only_to_a_word_start() {
     assert_eq!(rows(&mut w, "fire"), ["Firefox", "Fire"]);
 }
 
+/// Habit climbs Tiers as the evidence grows: a week of daily use is worth
+/// one, and each further Tier takes six times as much.
+#[test]
+fn of_two_heavily_used_matches_inside_a_word_the_one_used_more_comes_first() {
+    let mut w = World::new(&["Determinate", "Waterm"]);
+    w.picks(300, "determinate", "Determinate");
+    w.picks(60, "waterm", "Waterm");
+
+    assert_eq!(rows(&mut w, "term"), ["Determinate", "Waterm"]);
+}
+
+#[test]
+fn habit_climbs_tiers_as_picks_accumulate() {
+    let mut w = World::new(&["Terminal", "Determinate", "Tuner Remote Monitor"]);
+    assert_eq!(
+        rows(&mut w, "term"),
+        ["Terminal", "Determinate", "Tuner Remote Monitor"],
+        "a word start, a match inside a word, letters scattered"
+    );
+
+    w.daily(7, "tuner", "Tuner Remote Monitor");
+    assert_eq!(
+        rows(&mut w, "term"),
+        ["Terminal", "Tuner Remote Monitor", "Determinate"],
+        "a week of daily use: one Tier"
+    );
+
+    for _ in 0..30 {
+        w.picks(3, "tuner", "Tuner Remote Monitor");
+        w.later(DAY);
+    }
+    assert_eq!(
+        rows(&mut w, "term"),
+        ["Tuner Remote Monitor", "Terminal", "Determinate"],
+        "a month of use three times a day: two Tiers"
+    );
+}
+
+/// However much it is used, a match inside a word or scattered stops
+/// below an exact title.
+#[test]
+fn no_amount_of_use_lifts_a_scattered_match_past_an_exact_title() {
+    let mut w = World::with(
+        vec![app("Term"), app("Terminal"), app("Tuner Remote Monitor")],
+        "[history]\nlift_threshold = 0.1",
+    );
+    w.daily(30, "tuner", "Tuner Remote Monitor");
+    assert_eq!(rows(&mut w, "term"), ["Term", "Tuner Remote Monitor", "Terminal"]);
+}
+
+/// However much it is used, a near miss stays below letters scattered.
+#[test]
+fn no_amount_of_use_lifts_a_near_miss_above_letters_scattered() {
+    let mut w = World::with(
+        vec![app("Steam"), app("Sticky Remote Editor Amp Monitor")],
+        "[history]\nlift_threshold = 0.1",
+    );
+    w.daily(30, "steam", "Steam");
+    assert_eq!(rows(&mut w, "stream"), ["Sticky Remote Editor Amp Monitor", "Steam"]);
+}
+
 // Aliases.
 
 const FF: &str = "[aliases]\nff = { extension = \"apps\", item = \"firefox\" }";
@@ -1509,6 +1570,110 @@ fn an_address_opens_in_the_first_row_with_its_searches_last() {
     assert_eq!(rows[0], "Open example.com");
     // The rows are full, so no search is offered.
     assert!(rows[1..].iter().all(|row| row.starts_with("Example.com")), "{rows:?}");
+}
+
+// Boost, from an Extension's `[extensions.<name>]` table.
+
+/// The rows for `query` of a desktop with two Extensions, `first` and
+/// `second`, holding the apps titled `firsts` and `seconds`, under `toml`.
+fn boosted(toml: &str, firsts: &[&str], seconds: &[&str], query: &str) -> Vec<String> {
+    let mut h = Harness::with_config(vec![plain("first"), plain("second")], config(toml));
+    let (first, second) = (h.up(0), h.up(1));
+    h.add(&first, firsts.iter().map(|title| app(title)).collect());
+    h.add(&second, seconds.iter().map(|title| app(title)).collect());
+    let ui = h.front_end();
+    titles(&h.query(&ui, query)).into_iter().map(str::to_owned).collect()
+}
+
+#[test]
+fn a_boost_above_1_puts_an_extensions_results_above_equal_matches() {
+    assert_eq!(
+        boosted("", &["Terminal"], &["Terminus"], "termin"),
+        ["Terminal", "Terminus"]
+    );
+    assert_eq!(
+        boosted(
+            "[extensions.second]\nboost = 1.5\n",
+            &["Terminal"],
+            &["Terminus"],
+            "termin"
+        ),
+        ["Terminus", "Terminal"]
+    );
+}
+
+#[test]
+fn a_boost_below_1_puts_an_extensions_results_below_equal_matches() {
+    assert_eq!(
+        boosted(
+            "[extensions.first]\nboost = 0.5\n",
+            &["Terminal"],
+            &["Terminus"],
+            "termin"
+        ),
+        ["Terminus", "Terminal"]
+    );
+}
+
+#[test]
+fn no_boost_lifts_a_result_past_an_exact_title() {
+    let toml = "[extensions.second]\nboost = 1000\n";
+
+    assert_eq!(boosted(toml, &["Term"], &["Terminal"], "term"), ["Term", "Terminal"]);
+    assert_eq!(
+        boosted(toml, &["Term"], &["Determinate"], "term"),
+        ["Term", "Determinate"]
+    );
+}
+
+#[test]
+fn no_boost_takes_a_real_match_below_a_near_miss() {
+    let toml = "[extensions.first]\nboost = 0.001\n[extensions.second]\nboost = 1000\n";
+
+    assert_eq!(
+        boosted(toml, &["Streamer"], &["Steam"], "stream"),
+        ["Streamer", "Steam"]
+    );
+}
+
+#[test]
+fn a_boost_counts_for_live_query_results() {
+    let rows = |toml: &str| {
+        let notes = manifest(
+            "name = \"notes\"\ncommand = [\"x\"]\n\
+             [live_query]\ntriggers = ['.']\ndebounce_ms = 50",
+        );
+        let mut h = Harness::with_config(vec![plain("apps"), notes], config(toml));
+        let (apps, notes) = (h.up(0), h.up(1));
+        h.add(&apps, vec![app("Zebra one")]);
+        let ui = h.front_end();
+        h.query(&ui, "zebra");
+        h.advance(Duration::from_millis(50));
+        let Some(ToExtension::LiveQuery { id, .. }) = notes.drain().pop() else {
+            panic!("notes wasn't asked");
+        };
+        let note = LiveResult {
+            item: item("zebra", "Zebra two", ItemKind::Url { url: "x".into() }),
+            score: Fraction::new(1.0).unwrap(),
+            answer: false,
+        };
+        let (results, done) = (vec![note], true);
+        h.send(
+            &notes,
+            FromExtension::LiveResults {
+                live_query: id,
+                results,
+                done,
+            },
+        );
+        titles(&ui.results().unwrap())
+            .into_iter()
+            .map(str::to_owned)
+            .collect::<Vec<_>>()
+    };
+
+    assert_eq!(rows(""), ["Zebra one", "Zebra two"]);
+    assert_eq!(rows("[extensions.notes]\nboost = 2\n"), ["Zebra two", "Zebra one"]);
 }
 
 // Invariants, over a desktop's worth of apps and a range of queries.
