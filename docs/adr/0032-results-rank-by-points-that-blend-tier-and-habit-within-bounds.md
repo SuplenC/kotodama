@@ -9,7 +9,7 @@ ADR 0006 ranked Results by Tier, then Frecency, and let usage lift a Result one 
 A Result's **points** blend how well it matches with how much the user picks it:
 
 ```
-points = clamp((coarse Tier × TIER + habit) × boost)
+points = squeeze((coarse Tier × TIER + habit) × boost) into the Tier's band
 ```
 
 - **A Tier is worth `TIER` = 4,096 points.** The coarse Tiers count 0 (Near miss), 1 (scattered), 2 (inside a word), 3 (word start or initials) and 4 (exact title or keyword).
@@ -21,7 +21,9 @@ The order is then one `u64` per Candidate, highest first, computed once per Cand
 
 ### The bounds
 
-The clamp holds these whatever the Frecency and the Boost:
+Each Tier's points have a floor and a ceiling: a Near miss `[0, TIER − 1]`; a scattered match, a match inside a word, and a word start or initials with less than a Tier of habit `[TIER, 4 × TIER − 1]`; the rest `[TIER, 2²⁶ − 1]`, all the key holds. Past `ceiling − room` the points are squeezed into the room left, `ceiling − room² / (room + excess)`, rising ever more slowly towards the ceiling and never reaching it. The room is half a Tier, or 4,096 Tiers in the top band, so a boost of 1,000 still counts in full. A hard clamp would tie every Result past the ceiling, and those are the most used ones, the Results the blend is for; squeezed, they keep their order by use as far as a point tells them apart. Below the floor, which only a Boost below 1 reaches, the points are held at the floor.
+
+The floors and ceilings hold these whatever the Frecency and the Boost:
 
 - **A Near miss stays below every real match**, and every real match above every Near miss: a Near miss's points stay in `[0, TIER − 1]`, a real match's start at `TIER` (ADR 0013).
 - **A match inside a word or scattered never reaches the exact band**, on habit or Boost: its points stay below `4 × TIER`. Heavy use lifts it at most to a word start.
@@ -33,7 +35,7 @@ Each bound has a test: `crates/kotodamad/src/points/tests.rs` over every Tier, a
 
 ### Why these weights
 
-- **4,096 points a Tier** makes a habit point a 4,096th of a Tier, fine enough that a pick made months ago still counts for something, and it leaves room: the key keeps 26 bits of points, 16,383 Tiers' worth, where a Frecency at `f32::MAX` is worth about 50.
+- **4,096 points a Tier** makes a habit point a 4,096th of a Tier, fine enough that a pick made months ago still counts for something, and it leaves room: the key keeps 26 bits of points, 16,383 Tiers' worth, and the top band's squeeze keeps any Boost within them, while a Frecency at `f32::MAX` is worth about 50.
 - **A logarithmic curve** gives every pick a say and no streak of picks a runaway lead. A curve linear in Frecency would let a month of use bury every better match. Anchoring one Tier at `lift_threshold` keeps the setting's meaning and the old rule's first step: a week of daily use lifts a match one Tier, as ADR 0006 had it. The ranking tests pass unchanged.
 - **The kind, nucleo's score and the length stay out of the points.** Weighed into them, each would have to be worth less than one habit point, or a kind would beat a pick, which M10 rules out. Below the points they do exactly that, at no cost. The same goes for a Live query result's 0–1 score: an Extension rating its own Results shouldn't outweigh what the user picks. The Boost is the user's lever for that.
 - **Standing and class stay hard bands above the points.** An answer, a Fallback, an Alias and a Learned choice are promises about which Result ranks first, not evidence to weigh (ADR 0006, 0016).
@@ -42,7 +44,8 @@ Each bound has a test: `crates/kotodamad/src/points/tests.rs` over every Tier, a
 ## Considered options
 
 - **Keep the chain and let habit lift more Tiers.** Rejected: each Tier would need a threshold of its own, and a Boost would still have nothing to multiply.
-- **A blend with no clamp, the bounds left to the weights.** Rejected: a large enough Boost or Frecency would break any bound weights alone keep, and nobody could tell from the config which ones it breaks.
+- **A hard clamp at each ceiling.** Rejected: every Result past it ties, and the most used Results lose the order their use gives them.
+- **A blend with no ceilings, the bounds left to the weights.** Rejected: a large enough Boost or Frecency would break any bound weights alone keep, and nobody could tell from the config which ones it breaks.
 - **Exempt a Result picked for this very query from the exact-title bound.** Rejected for now: per-query picks already have the Learned choice, which outranks the exact title it was picked over.
 - **Boost as an addition rather than a multiplier.** Rejected: an addition the size of a Tier moves a Result whatever its habit, while a multiplier scales the evidence the Result already has.
 

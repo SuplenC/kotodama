@@ -118,3 +118,37 @@ fn a_boost_is_a_finite_number_above_0() {
     assert_eq!(Boost::new(0.25).map(Boost::get), Some(0.25));
     assert_eq!(Boost::default(), Boost::new(DEFAULT_BOOST).unwrap());
 }
+
+/// Whether the points of a match at `tier` boosted by `b` rise strictly
+/// with `frecencies`, rising themselves.
+fn rising(tier: Tier, b: f64, frecencies: &[f32]) -> bool {
+    let points: Vec<u32> = frecencies
+        .iter()
+        .map(|&frecency| points(tier, habit(frecency, THRESHOLD), boost(b)))
+        .collect();
+    points.is_sorted_by(|a, b| a < b)
+}
+
+#[test]
+fn heavy_use_past_a_bands_ceiling_still_orders_by_frecency() {
+    let heavy = [50.0, 500.0, 5e3, 1e5, 1e7];
+    for tier in [Tier::Scattered, Tier::Inside, Tier::WordStart] {
+        for b in [0.5, 1.0, 2.0] {
+            assert!(rising(tier, b, &heavy), "{tier:?} {b}");
+        }
+    }
+}
+
+#[test]
+fn heavily_boosted_exact_matches_still_order_by_habit() {
+    for b in [1000.0, 1e6, 1e9] {
+        assert!(rising(Tier::Exact, b, &[0.0, 1.0, 10.0, 100.0, 1e4]), "{b}");
+    }
+}
+
+#[test]
+fn points_stay_within_what_the_rank_key_holds() {
+    for frecency in FRECENCIES {
+        assert!(points(Tier::Exact, habit(frecency, THRESHOLD), boost(f64::MAX)) <= MAX);
+    }
+}

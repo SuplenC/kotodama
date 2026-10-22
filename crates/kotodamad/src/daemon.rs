@@ -633,6 +633,7 @@ mod key_bits {
     pub const LEN: u32 = 10;
 
     const _: () = assert!(STANDING + CLASS + POINTS + FINE + BY_ALIAS + KIND + SCORE + LEN == 64);
+    const _: () = assert!(crate::points::MAX == (1 << POINTS) - 1);
 }
 
 impl Candidate {

@@ -5,7 +5,9 @@
 //! A Tier is worth [`TIER`] points. Habit adds points along a curve that
 //! grows with the evidence: a Frecency of `lift_threshold` is worth one Tier,
 //! and each further Tier takes `1 + lift_threshold` times as much. An
-//! Extension's boost multiplies the sum. The bounds then hold:
+//! Extension's boost multiplies the sum, squeezed into the Tier's band so
+//! that the most used Results keep their order below its ceiling. The
+//! bounds then hold:
 //!
 //! - A near miss stays below every real match, and a real match above every near miss.
 //! - Only an exact match, or a word start (or initials) whose habit is worth a Tier, reaches the
@@ -14,7 +16,7 @@
 //!
 //! # Owns
 //!
-//! - [`TIER`], [`habit`], [`points`] and [`band`].
+//! - [`TIER`], [`habit`], [`points`] (and its most, [`MAX`]) and [`band`].
 //! - [`Boost`], an Extension's multiplier on its Results' points.
 //!
 //! # Not here
@@ -82,14 +84,39 @@ pub fn habit(frecency: f32, lift_threshold: f64) -> u32 {
 pub fn points(tier: Tier, habit: u32, boost: Boost) -> u32 {
     let earned = (u32::from(tier.coarse()) * TIER).saturating_add(habit);
     // Exact at a boost of 1: every `u32` is an `f64`.
-    let boosted = (f64::from(earned) * boost.get()) as u32;
-    let (floor, ceiling) = match tier {
-        Tier::NearMiss => (0, TIER - 1),
-        Tier::Scattered | Tier::Inside => (TIER, EXACT - 1),
-        Tier::WordStart | Tier::Initials if habit < TIER => (TIER, EXACT - 1),
-        Tier::WordStart | Tier::Initials | Tier::Keyword | Tier::Exact => (TIER, u32::MAX),
+    let boosted = f64::from(earned) * boost.get();
+    let (floor, ceiling, room) = match tier {
+        Tier::NearMiss => (0, TIER - 1, ROOM),
+        Tier::Scattered | Tier::Inside => (TIER, EXACT - 1, ROOM),
+        Tier::WordStart | Tier::Initials if habit < TIER => (TIER, EXACT - 1, ROOM),
+        Tier::WordStart | Tier::Initials | Tier::Keyword | Tier::Exact => (TIER, MAX, TOP_ROOM),
     };
-    boosted.clamp(floor, ceiling)
+    (squeeze(boosted, ceiling, room) as u32).clamp(floor, ceiling)
+}
+
+/// The most points a Result has: what the rank key holds.
+pub const MAX: u32 = (1 << 26) - 1;
+
+/// The points below a band's ceiling that hold every Result past them,
+/// squeezed: half a Tier, so habit that lifted a match to a word start
+/// doesn't take it further.
+const ROOM: u32 = TIER / 2;
+
+/// [`ROOM`] for the top band: 4,096 Tiers, so a boost of 1,000 is still
+/// counted as earned.
+const TOP_ROOM: u32 = 1 << 24;
+
+/// `points`, or, past `ceiling - room`, squeezed into the room left
+/// below `ceiling`, rising ever more slowly towards it. The most used
+/// Results still order by their use, as far as a point tells them apart,
+/// rather than tie at the ceiling.
+fn squeeze(points: f64, ceiling: u32, room: u32) -> f64 {
+    let knee = f64::from(ceiling - room);
+    if points <= knee {
+        return points;
+    }
+    let room = f64::from(room);
+    f64::from(ceiling) - room * room / (room + (points - knee))
 }
 
 /// The Tier band `points` reach, as [`Tier::coarse`] numbers them: a word

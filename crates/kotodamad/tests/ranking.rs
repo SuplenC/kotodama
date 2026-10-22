@@ -726,6 +726,15 @@ fn heavy_use_lifts_a_match_inside_a_word_only_to_a_word_start() {
 /// Habit climbs Tiers as the evidence grows: a week of daily use is worth
 /// one, and each further Tier takes six times as much.
 #[test]
+fn of_two_heavily_used_matches_inside_a_word_the_one_used_more_comes_first() {
+    let mut w = World::new(&["Determinate", "Waterm"]);
+    w.picks(300, "determinate", "Determinate");
+    w.picks(60, "waterm", "Waterm");
+
+    assert_eq!(rows(&mut w, "term"), ["Determinate", "Waterm"]);
+}
+
+#[test]
 fn habit_climbs_tiers_as_picks_accumulate() {
     let mut w = World::new(&["Terminal", "Determinate", "Tuner Remote Monitor"]);
     assert_eq!(
