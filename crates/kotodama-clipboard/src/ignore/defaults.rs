@@ -1,16 +1,15 @@
-//! [`DEFAULT_IGNORE`](super::DEFAULT_IGNORE), matched by hand. Compiling
-//! even one expression with the `regex` crate pages in its parser and
-//! compilers and costs the Extension about 600 KB resident, measured with a
-//! 1000-entry history; these few loops over the bytes cost nothing until a
-//! copy arrives. Each function here matches what its expression in
-//! `DEFAULT_IGNORE` matches, byte for byte: the expressions are ASCII-only
-//! (`(?-u)`), so `\s`, `\b` and the classes are about bytes, and a byte of a
-//! multi-byte character is never in one.
+//! [`DEFAULT_IGNORE`](super::DEFAULT_IGNORE), matched by hand. Compiling the
+//! expressions would page in the engine's parser and compilers and keep
+//! their programs on the heap at every start; these few loops over the bytes
+//! cost nothing until a copy arrives. Each function here matches what its
+//! expression in `DEFAULT_IGNORE` matches, byte for byte: in `regex-lite`,
+//! `\s`, `\w` and `\b` are about ASCII and the classes list ASCII alone, so a
+//! byte of a multi-byte character is never in one.
 //!
 //! # Owns
 //!
 //! - [`matches`]: whether any default expression matches a text, in time linear in its length, as
-//!   `regex` would: copied text has no size limit.
+//!   `regex-lite` would: copied text has no size limit.
 //!
 //! # Not here
 //!
@@ -164,7 +163,7 @@ fn run(text: &[u8], allowed: fn(u8) -> bool, max: usize) -> usize {
 }
 
 /// `\s` without Unicode: Rust's `u8::is_ascii_whitespace` leaves out the
-/// vertical tab, which `regex` counts.
+/// vertical tab, which `regex-lite` counts.
 fn space(b: u8) -> bool {
     matches!(b, b'\t' | b'\n' | 0x0b | 0x0c | b'\r' | b' ')
 }

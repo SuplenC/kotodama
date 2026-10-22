@@ -7,8 +7,8 @@
 //! max_entries = 1000
 //! # Entries older than this many days go.
 //! max_age_days = 7
-//! # Copied text any of these regular expressions matches, anywhere in it,
-//! # is never kept. They replace the defaults, one-time codes and secret
+//! # Copied text any of these regular expressions (`regex-lite` syntax)
+//! # matches, anywhere in it, is never kept. They replace the defaults, one-time codes and secret
 //! # tokens (`ignore::DEFAULT_IGNORE`); `[]` keeps everything.
 //! ignore = ['^secret:']
 //! ```

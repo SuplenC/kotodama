@@ -88,13 +88,28 @@ fn the_configured_patterns_replace_the_defaults() {
 fn a_pattern_that_isnt_a_regular_expression_is_left_out_and_the_rest_apply() {
     let (ignore, errors) = Ignore::new(["(unclosed", "^pin [0-9]{4}$"]);
 
-    assert!(matches!(&errors[..], [PatternError::Invalid { pattern, .. }] if pattern == "(unclosed"));
+    assert!(matches!(&errors[..], [error] if error.pattern() == "(unclosed"));
     assert!(ignore.ignores("pin 1234"));
+}
+
+/// `DEFAULT_IGNORE` compiled, one by one.
+fn expressions() -> Vec<Regex> {
+    DEFAULT_IGNORE
+        .iter()
+        .map(|expression| Regex::new(expression).unwrap())
+        .collect()
+}
+
+/// `ignore` set to `DEFAULT_IGNORE`.
+fn configured_defaults() -> Ignore {
+    let (ignore, errors) = Ignore::new(DEFAULT_IGNORE);
+    assert!(errors.is_empty(), "{errors:?}");
+    ignore
 }
 
 #[test]
 fn the_defaults_match_what_their_expressions_match() {
-    let expressions = RegexSet::new(DEFAULT_IGNORE).unwrap();
+    let expressions = expressions();
     // Pieces of the defaults' shapes, cut short or run long, around the
     // bytes that end a word, a part or a line.
     let pieces = [
@@ -174,12 +189,13 @@ fn the_defaults_match_what_their_expressions_match() {
     for _ in 0..200_000 {
         let text: String = (0..=next() % 6).map(|_| pieces[next() % pieces.len()]).collect();
 
-        assert_eq!(
-            Ignore::default().ignores(&text),
-            expressions.is_match(&text),
-            "{text:?}"
-        );
-        expressions.matches(&text).iter().for_each(|at| matched[at] = true);
+        let mut any = false;
+        for (matched, expression) in matched.iter_mut().zip(&expressions) {
+            let hit = expression.is_match(&text);
+            *matched |= hit;
+            any |= hit;
+        }
+        assert_eq!(Ignore::default().ignores(&text), any, "{text:?}");
     }
     assert_eq!(
         matched,
@@ -190,7 +206,7 @@ fn the_defaults_match_what_their_expressions_match() {
 
 #[test]
 fn the_defaults_match_a_long_run_of_token_starts_as_their_expressions_do() {
-    let expressions = RegexSet::new(DEFAULT_IGNORE).unwrap();
+    let configured = configured_defaults();
     let texts = [
         "sk-".repeat(100_000),
         "eyJ-".repeat(100_000),
@@ -204,7 +220,7 @@ fn the_defaults_match_a_long_run_of_token_starts_as_their_expressions_do() {
     for text in texts {
         assert_eq!(
             Ignore::default().ignores(&text),
-            expressions.is_match(&text),
+            configured.ignores(&text),
             "{}",
             &text[..40]
         );

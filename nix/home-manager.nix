@@ -470,8 +470,9 @@ in
         `max_age_days`: entries older than this many days go. Unset, 7.
       '';
       ignore = optional (lib.types.listOf lib.types.str) ''
-        `ignore`: copied text any of these regular expressions (Rust's `regex`
-        syntax) matches, anywhere in it, is never kept. Unset, one-time codes
+        `ignore`: copied text any of these regular expressions (Rust's
+        `regex-lite` syntax: `regex`'s, with ASCII-only `\w`, `\d`, `\s` and
+        `\b` and no `\p{…}`) matches, anywhere in it, is never kept. Unset, one-time codes
         (six digits alone) and secret tokens (private keys, GitHub, GitLab,
         Slack, AWS, Stripe, OpenAI and Anthropic keys, JSON Web Tokens);
         `[ ]` keeps everything.
