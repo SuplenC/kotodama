@@ -175,3 +175,7 @@ _Avoid_: Error, warning, diagnostic
 **Protocol version**:
 The version of the messages a peer was built for, `major.minor`, named in its hello. A minor version only adds; the Daemon speaks every version from 1.0 on and sends a peer nothing its version lacks.
 _Avoid_: API version, layout version
+
+**Release line**:
+A branch, `release/<package>-<major>.<minor>`, that patches one minor version of one package after main has moved past it; the core's two crates share one. It is cut from that minor's latest tag only when a fix needs it, and releases only its own package.
+_Avoid_: Maintenance branch, stable branch, LTS
