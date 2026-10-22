@@ -1,27 +1,30 @@
 use super::Keymap;
 use super::active_layout;
 
-/// A `us,fr` keymap, as `xkbcli compile-keymap --format 1` writes it: the
-/// text xkbcommon makes of a keymap for Wayland clients.
+/// A `us,fr` keymap, as `xkbcli compile-keymap --output-format 1
+/// --no-pretty` writes it: the text xkbcommon makes of a keymap for Wayland
+/// clients, each keysym written as its number.
 const US_FR: &str = include_str!("../../tests/fixtures/keymap.xkb");
 
 #[test]
 fn a_keycode_is_named_by_the_keysym_it_types_in_the_layout() {
     let keymap = Keymap::parse(US_FR);
 
-    assert_eq!(keymap.keysym(12, 0), Some("3"));
-    assert_eq!(keymap.keysym(12, 1), Some("quotedbl"));
-    assert_eq!(keymap.keysym(24, 0), Some("q"));
-    assert_eq!(keymap.keysym(24, 1), Some("a"));
+    assert_eq!(keymap.keysym(12, 0).as_deref(), Some("3"));
+    assert_eq!(keymap.keysym(12, 1).as_deref(), Some("\""));
+    assert_eq!(keymap.keysym(24, 0).as_deref(), Some("q"));
+    assert_eq!(keymap.keysym(24, 1).as_deref(), Some("a"));
+    // `0xe9`, in Latin-1.
+    assert_eq!(keymap.keysym(11, 1).as_deref(), Some("é"));
 }
 
 #[test]
 fn a_key_with_one_layout_types_the_same_in_every_layout() {
     let keymap = Keymap::parse(US_FR);
 
-    assert_eq!(keymap.keysym(9, 0), Some("Escape"));
-    assert_eq!(keymap.keysym(9, 1), Some("Escape"));
-    assert_eq!(keymap.keysym(372, 1), Some("XF86Favorites"));
+    assert_eq!(keymap.keysym(9, 0).as_deref(), Some("Escape"));
+    assert_eq!(keymap.keysym(9, 1).as_deref(), Some("Escape"));
+    assert_eq!(keymap.keysym(372, 1).as_deref(), Some("XF86Favorites"));
 }
 
 #[test]
@@ -29,7 +32,8 @@ fn a_keys_other_statements_dont_hide_its_keysyms() {
     let keymap = Keymap::parse(US_FR);
 
     // `type= "CTRL+ALT",` comes before its list.
-    assert_eq!(keymap.keysym(67, 0), Some("F1"));
+    assert_eq!(keymap.keysym(67, 0).as_deref(), Some("F1"));
+    assert_eq!(keymap.keysym(96, 0).as_deref(), Some("F12"));
 }
 
 #[test]
@@ -43,7 +47,9 @@ fn a_key_that_types_nothing_or_isnt_there_has_no_name() {
 }
 
 #[test]
-fn older_xkbcommon_names_the_layouts_group1() {
+fn a_pretty_printed_keymap_names_its_keysyms() {
+    // As older xkbcommon writes a keymap, and newer when asked to
+    // pretty-print: by name, its layouts as `Group1`, or as bare lists.
     let text = "xkb_keymap {
 xkb_keycodes \"evdev\" {
 	minimum = 8;
@@ -71,9 +77,39 @@ xkb_symbols \"pc+us+fr:2\" {
 ";
     let keymap = Keymap::parse(text);
 
-    assert_eq!(keymap.keysym(12, 0), Some("3"));
-    assert_eq!(keymap.keysym(12, 1), Some("quotedbl"));
-    assert_eq!(keymap.keysym(24, 1), Some("a"));
+    assert_eq!(keymap.keysym(12, 0).as_deref(), Some("3"));
+    assert_eq!(keymap.keysym(12, 1).as_deref(), Some("quotedbl"));
+    assert_eq!(keymap.keysym(24, 1).as_deref(), Some("a"));
+}
+
+#[test]
+fn a_keysym_written_as_a_number_is_its_character_or_its_name() {
+    let text = "xkb_keymap {
+xkb_keycodes \"evdev\" {
+	<AE01> = 10;
+	<SPCE> = 65;
+	<AC01> = 38;
+	<I248> = 248;
+	<I249> = 249;
+};
+xkb_symbols \"pc+ru\" {
+	key <AE01> {	[ 0x31, 0x21 ] };
+	key <SPCE> {	[ 0x20 ] };
+	key <AC01> {	[ 0x6c6 ] };
+	key <I248> {	[ 0x10003c0 ] };
+	key <I249> {	[ 0x1008ff99 ] };
+};
+};
+";
+    let keymap = Keymap::parse(text);
+
+    assert_eq!(keymap.keysym(10, 0).as_deref(), Some("1"));
+    assert_eq!(keymap.keysym(65, 0).as_deref(), Some("space"));
+    // A Unicode keysym is its code point plus 0x01000000.
+    assert_eq!(keymap.keysym(248, 0).as_deref(), Some("π"));
+    // Neither a character's nor one with a known name: the keycode stays.
+    assert_eq!(keymap.keysym(38, 0), None);
+    assert_eq!(keymap.keysym(249, 0), None);
 }
 
 #[test]

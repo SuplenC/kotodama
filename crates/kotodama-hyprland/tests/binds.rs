@@ -2,6 +2,8 @@
 //! and under Lua, as Indexed items and as the Shortcuts View, with the keys
 //! of the binds on a keycode named by a recorded keymap.
 
+use std::borrow::Cow;
+
 use kotodama_hyprland::binds;
 use kotodama_hyprland::binds::Bind;
 use kotodama_hyprland::keymap::Keymap;
@@ -111,7 +113,7 @@ fn keys_by_summary(binds: &[Bind]) -> Vec<(String, String)> {
 /// keymap, in `layout`.
 fn name_keys(binds: &mut [Bind], layout: u32) {
     let keymap = Keymap::parse(include_str!("fixtures/keymap.xkb"));
-    binds::name_keys(binds, |code| keymap.keysym(code, layout).map(str::to_owned));
+    binds::name_keys(binds, |code| keymap.keysym(code, layout).map(Cow::into_owned));
 }
 
 #[test]
@@ -210,7 +212,7 @@ fn a_lua_bind_on_a_keycode_shows_the_key_of_the_current_layout() {
     );
     assert!(us.contains(&("Go to workspace 1", "SUPER + 1")), "{us:?}");
     assert!(
-        fr.contains(&("Move window to workspace 3", "SUPER + SHIFT + quotedbl")),
+        fr.contains(&("Move window to workspace 3", "SUPER + SHIFT + \"")),
         "{fr:?}"
     );
 }

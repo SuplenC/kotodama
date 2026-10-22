@@ -24,6 +24,7 @@
 
 #![forbid(unsafe_code)]
 
+use std::borrow::Cow;
 use std::collections::BTreeMap;
 use std::collections::HashMap;
 #[cfg(target_os = "linux")]
@@ -337,7 +338,7 @@ impl Extension {
         codes
             .iter()
             .map(|&code| {
-                let name = keymap.keysym(code, layout).map(str::to_owned);
+                let name = keymap.keysym(code, layout).map(Cow::into_owned);
                 if name.is_none()
                     && let Some(text) = &text
                 {

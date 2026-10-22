@@ -8,6 +8,10 @@
 //! needed. The current layout is the index `j/devices` gives the main
 //! keyboard.
 //!
+//! Hyprland serializes its keymap without pretty-printing, which writes each
+//! keysym as its number (`0x31`), not its name (`1`). A character's keysym
+//! maps to the character, and a few common others to their names.
+//!
 //! # Owns
 //!
 //! - Reading a keymap's keycodes and the keysym each key types without modifiers, per layout.
@@ -18,6 +22,7 @@
 //! - Fetching the keymap over Wayland: `crate::keyboard`.
 //! - Naming a bind's key: [`crate::binds::name_keys`].
 
+use std::borrow::Cow;
 use std::collections::HashMap;
 
 use serde::Deserialize;
@@ -42,17 +47,82 @@ impl<'a> Keymap<'a> {
         }
     }
 
-    /// The keysym's name the key `keycode` types without modifiers in
-    /// `layout` (0 is the first), as `3` or `quotedbl`. A key with fewer
-    /// layouts than that wraps around, as xkb does. `None` for a key the
-    /// keymap doesn't have, or one that types nothing.
-    pub fn keysym(&self, keycode: u32, layout: u32) -> Option<&'a str> {
+    /// What the key `keycode` types without modifiers in `layout` (0 is the
+    /// first), as `3`, `"` or `Escape`. A key with fewer layouts than that
+    /// wraps around, as xkb does. `None` for a key the keymap doesn't have,
+    /// one that types nothing, or a keysym written as a number this doesn't
+    /// know.
+    pub fn keysym(&self, keycode: u32, layout: u32) -> Option<Cow<'a, str>> {
         let name = self.names.get(&keycode)?;
         let groups = groups(self.keys.get(name)?);
         let count = u32::try_from(groups.len()).ok().filter(|&count| count > 0)?;
         let group = usize::try_from(layout % count).ok()?;
-        groups[group].filter(|&keysym| keysym != "NoSymbol")
+        let keysym = groups[group].filter(|&keysym| keysym != "NoSymbol")?;
+        match keysym.strip_prefix("0x") {
+            Some(hex) => name_of(u32::from_str_radix(hex, 16).ok()?),
+            None => Some(Cow::Borrowed(keysym)),
+        }
     }
+}
+
+/// The keysyms with a name that isn't the character they type, among those
+/// a bind is likely made on.
+const NAMED: [(u32, &str); 32] = [
+    (0x20, "space"),
+    (0xff08, "BackSpace"),
+    (0xff09, "Tab"),
+    (0xff0d, "Return"),
+    (0xff13, "Pause"),
+    (0xff14, "Scroll_Lock"),
+    (0xff1b, "Escape"),
+    (0xff50, "Home"),
+    (0xff51, "Left"),
+    (0xff52, "Up"),
+    (0xff53, "Right"),
+    (0xff54, "Down"),
+    (0xff55, "Prior"),
+    (0xff56, "Next"),
+    (0xff57, "End"),
+    (0xff61, "Print"),
+    (0xff63, "Insert"),
+    (0xff67, "Menu"),
+    (0xff7f, "Num_Lock"),
+    (0xff8d, "KP_Enter"),
+    (0xffe5, "Caps_Lock"),
+    (0xffff, "Delete"),
+    (0x1008_ff02, "XF86MonBrightnessUp"),
+    (0x1008_ff03, "XF86MonBrightnessDown"),
+    (0x1008_ff11, "XF86AudioLowerVolume"),
+    (0x1008_ff12, "XF86AudioMute"),
+    (0x1008_ff13, "XF86AudioRaiseVolume"),
+    (0x1008_ff14, "XF86AudioPlay"),
+    (0x1008_ff15, "XF86AudioStop"),
+    (0x1008_ff16, "XF86AudioPrev"),
+    (0x1008_ff17, "XF86AudioNext"),
+    (0x1008_ff30, "XF86Favorites"),
+];
+
+/// The first function key's keysym, `F1`; `F35`'s is 34 past it.
+const F1: u32 = 0xffbe;
+
+/// The name of the keysym `value`, as xkbcommon writes a keysym when it
+/// serializes a keymap without pretty-printing, as it does for Wayland
+/// clients: a character's keysym is that character.
+fn name_of(value: u32) -> Option<Cow<'static, str>> {
+    if let Some((_, name)) = NAMED.iter().find(|(keysym, _)| *keysym == value) {
+        return Some(Cow::Borrowed(name));
+    }
+    if (F1..F1 + 35).contains(&value) {
+        return Some(Cow::Owned(format!("F{}", value - F1 + 1)));
+    }
+    // Latin-1 keysyms are their code points, and every other character's
+    // is its code point plus 0x0100_0000.
+    let code = match value {
+        0x21..=0x7e | 0xa1..=0xff => value,
+        0x0100_0100..=0x0110_ffff => value - 0x0100_0000,
+        _ => return None,
+    };
+    char::from_u32(code).map(|c| Cow::Owned(c.to_string()))
 }
 
 /// The body of the `xkb_<kind>` section of a keymap, between its braces.
