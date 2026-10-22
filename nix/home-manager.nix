@@ -564,6 +564,7 @@ in
         "`engines`: searched in this order; an empty list leaves only addresses. Unset, DuckDuckGo, Google and Wikipedia.";
     extensions.web-search.word = webSearch.word;
     extensions.web-search.inSearch = webSearch.inSearch;
+    extensions.web-search.boost = webSearch.boost;
     extensions.system = app "`system`" "true";
     extensions.hyprland = app "`hyprland`" "true, but for the binds, which only its app shows";
 
