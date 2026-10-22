@@ -310,6 +310,73 @@ fn a_config_change_reaches_the_extension_without_a_restart_and_a_broken_file_kee
     );
 }
 
+/// Saves `text` to `path` as an editor does: a new file renamed over the old.
+fn save_by_rename(path: &Path, text: &str) {
+    let temp = path.with_extension("toml.tmp");
+    fs::write(&temp, text).unwrap();
+    fs::rename(&temp, path).unwrap();
+}
+
+fn last_config_is(dir: &Path, v: i64) -> Option<()> {
+    let want = format!(r#"{{"config":{{"v":{v}}}}}"#);
+    (received(dir).last() == Some(&want)).then_some(())
+}
+
+#[test]
+fn an_edit_to_the_file_a_symlinked_config_file_leads_to_reloads_the_config() {
+    let root = Daemon::home();
+    install(&root, "bookmarks", "", &[]);
+    // As KubaOS links the user's file in from a directory of its own.
+    let elsewhere = root.path().join("config/kubaos/kotodama");
+    fs::create_dir_all(&elsewhere).unwrap();
+    let target = elsewhere.join("user.toml");
+    fs::write(&target, "[extensions.bookmarks]\nv = 1\n").unwrap();
+    symlink(&target, root.path().join("config/kotodama/user.toml")).unwrap();
+    let daemon = Daemon::start(root);
+    let dir = daemon.extension_dir("bookmarks");
+    wait_for("the first config", || last_config_is(&dir, 1));
+
+    save_by_rename(&target, "[extensions.bookmarks]\nv = 2\n");
+    wait_for("the config after a save by rename", || last_config_is(&dir, 2));
+
+    fs::write(&target, "[extensions.bookmarks]\nv = 3\n").unwrap();
+    wait_for("the config after a write in place", || last_config_is(&dir, 3));
+}
+
+#[test]
+fn a_symlinked_config_file_pointed_elsewhere_is_followed_there() {
+    let root = Daemon::home();
+    install(&root, "bookmarks", "", &[]);
+    let elsewhere = root.path().join("elsewhere");
+    let further = root.path().join("further");
+    fs::create_dir_all(&elsewhere).unwrap();
+    fs::create_dir_all(&further).unwrap();
+    let first = elsewhere.join("first.toml");
+    let second = further.join("second.toml");
+    fs::write(&first, "[extensions.bookmarks]\nv = 1\n").unwrap();
+    fs::write(&second, "[extensions.bookmarks]\nv = 2\n").unwrap();
+    // A link to a link: the config file leads to `hop`, which leads on.
+    let hop = elsewhere.join("hop.toml");
+    symlink(&first, &hop).unwrap();
+    symlink(&hop, root.path().join("config/kotodama/zz.toml")).unwrap();
+    let daemon = Daemon::start(root);
+    let dir = daemon.extension_dir("bookmarks");
+    wait_for("the first config", || last_config_is(&dir, 1));
+
+    // The link in the middle is pointed at a file in another directory.
+    let new_hop = elsewhere.join("hop.toml.new");
+    symlink(&second, &new_hop).unwrap();
+    fs::rename(&new_hop, &hop).unwrap();
+    wait_for("the config the link leads to now", || last_config_is(&dir, 2));
+
+    // Its new target is watched, and the old one counts for nothing.
+    save_by_rename(&second, "[extensions.bookmarks]\nv = 3\n");
+    wait_for("the config after an edit of the new target", || last_config_is(&dir, 3));
+    fs::write(&first, "[extensions.bookmarks]\nv = 9\n").unwrap();
+    thread::sleep(Duration::from_millis(500));
+    assert_eq!(last_config_is(&dir, 3), Some(()), "{:?}", received(&dir));
+}
+
 #[test]
 fn an_extension_that_never_says_hello_is_killed_restarted_and_dies_with_the_daemon() {
     let root = Daemon::home();

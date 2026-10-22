@@ -167,7 +167,7 @@ pub fn run(paths: &Paths) -> Result<(), Error> {
 
     let listener = server::listen(&paths.socket).map_err(|err| Error::listen(&paths.socket, err))?;
     let (events_tx, events) = mpsc::channel();
-    let _watcher = config::watch(paths.config_dirs.clone(), events_tx.clone())
+    let _watcher = config::watch(&paths.config_dirs, events_tx.clone())
         .map_err(|err| log::error!("not watching the config directory: {err}"))
         .ok();
     let mut _extension_watcher = watch_extensions(&paths.extension_dirs, &events_tx);
