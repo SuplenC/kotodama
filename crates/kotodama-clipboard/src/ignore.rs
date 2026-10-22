@@ -8,9 +8,11 @@
 //! protocols offer a copy's MIME types and its bytes, and never say which
 //! client made it, so there is no `ignore_apps`.
 //!
-//! The expressions are compiled once, when the config is read, and matched
-//! when a copy arrives, on the Extension's own thread; nothing of it runs
-//! while the user types in the menu.
+//! Configured expressions are compiled once, when the config is read; the
+//! defaults are matched by hand (`ignore/defaults.rs`), so the Extension
+//! loads nothing of `regex` unless the config sets `ignore`. Either is
+//! matched when a copy arrives, on the Extension's own thread; nothing of it
+//! runs while the user types in the menu.
 //!
 //! # Owns
 //!
@@ -19,6 +21,7 @@
 //!
 //! # Not here
 //!
+//! - Matching the defaults: `ignore/defaults.rs`.
 //! - Reading the config table: `items.rs`.
 //! - Dropping the copy: `main.rs`.
 
@@ -29,8 +32,9 @@ use regex::RegexSet;
 /// Each expression asks for the whole text to be a code, or for a token's
 /// fixed prefix and length, so ordinary short text, numbers of other
 /// lengths, hashes and words that merely start like a token are kept. They
-/// match ASCII alone (`(?-u)`), as codes and tokens are, which keeps the
-/// Unicode tables out of the compiled set.
+/// match ASCII alone (`(?-u)`), as codes and tokens are. Unset, `ignore`
+/// matches these by hand, with the same result; a config that sets `ignore`
+/// and wants them too lists them.
 pub const DEFAULT_IGNORE: [&str; 10] = [
     // A one-time code: six digits and nothing else, or two groups of three.
     // Eight digits are left alone, as a date such as 20261021 reads the same.
@@ -56,18 +60,19 @@ pub const DEFAULT_IGNORE: [&str; 10] = [
 ];
 
 /// The expressions copied text is matched against, compiled once.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct Ignore {
-    /// `None` when there are none, so a copy costs no match at all.
-    set: Option<RegexSet>,
+    patterns: Patterns,
 }
 
-impl Default for Ignore {
+#[derive(Clone, Debug, Default)]
+enum Patterns {
     /// [`DEFAULT_IGNORE`].
-    fn default() -> Self {
-        let set = RegexSet::new(DEFAULT_IGNORE).expect("the default ignore patterns compile");
-        Ignore { set: Some(set) }
-    }
+    #[default]
+    Default,
+    Configured(RegexSet),
+    /// So a copy costs no match at all.
+    None,
 }
 
 impl Ignore {
@@ -83,20 +88,28 @@ impl Ignore {
                 Err(err) => errors.push(PatternError::invalid(pattern, err)),
             }
         }
-        let set = if kept.is_empty() {
-            None
+        let patterns = if kept.is_empty() {
+            Patterns::None
         } else {
-            RegexSet::new(&kept)
-                .map_err(|err| errors.push(PatternError::TooLarge(err)))
-                .ok()
+            RegexSet::new(&kept).map_or_else(
+                |err| {
+                    errors.push(PatternError::TooLarge(err));
+                    Patterns::None
+                },
+                Patterns::Configured,
+            )
         };
-        (Ignore { set }, errors)
+        (Ignore { patterns }, errors)
     }
 
     /// Whether the history leaves out `text`.
     #[must_use]
     pub fn ignores(&self, text: &str) -> bool {
-        self.set.as_ref().is_some_and(|set| set.is_match(text))
+        match &self.patterns {
+            Patterns::Default => defaults::matches(text),
+            Patterns::Configured(set) => set.is_match(text),
+            Patterns::None => false,
+        }
     }
 }
 
@@ -123,6 +136,8 @@ impl PatternError {
         }
     }
 }
+
+mod defaults;
 
 #[cfg(test)]
 mod tests;

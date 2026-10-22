@@ -91,3 +91,122 @@ fn a_pattern_that_isnt_a_regular_expression_is_left_out_and_the_rest_apply() {
     assert!(matches!(&errors[..], [PatternError::Invalid { pattern, .. }] if pattern == "(unclosed"));
     assert!(ignore.ignores("pin 1234"));
 }
+
+#[test]
+fn the_defaults_match_what_their_expressions_match() {
+    let expressions = RegexSet::new(DEFAULT_IGNORE).unwrap();
+    // Pieces of the defaults' shapes, cut short or run long, around the
+    // bytes that end a word, a part or a line.
+    let pieces = [
+        "",
+        " ",
+        "  ",
+        "\t",
+        "\n",
+        "\x0b",
+        "\x0c",
+        "\r",
+        "-",
+        "_",
+        ".",
+        "..",
+        "=",
+        "é",
+        "x",
+        "Z",
+        "7",
+        "0",
+        "123",
+        "456",
+        "1234",
+        "123 ",
+        "123-",
+        "-----BEGIN ",
+        "RSA ",
+        "OPENSSH ",
+        "ENCRYPTED  ",
+        "rsa ",
+        "PRIVATE KEY-----",
+        "PRIVATE KEY",
+        "PUBLIC KEY-----",
+        "ghp_",
+        "gho_",
+        "ghx_",
+        "github_pat_",
+        "glpat-",
+        "xoxb-",
+        "xoxz-",
+        "AKIA",
+        "ASIA",
+        "sk_live_",
+        "rk_test_",
+        "sk_prod_",
+        "sk-",
+        "sk-ant-",
+        "eyJ",
+        "eyJ-",
+        ".eyJ",
+        "eyJaBcDeFgH",
+        "eyJaBcDeFg",
+        ".eyJaBcDeFgH.",
+        ".eyJaBcDeFg.",
+        "aBcDeFg",
+        "aBcDeFgH",
+        "ABCDEFGH",
+        "01234567",
+        "abc-_def",
+        "aBcDeFgHiJkLmNoPqRsTuVwXyZ0123456789",
+        "aBcDeFgHiJkLmNoPqRsTuVwXyZ_0123456789-aBcDeFgHiJkLmNoPqRsTuVwX",
+        "IOSFODNN7EXAMPLE",
+        "IOSFODNN7EXAMPL",
+        "IOSFODNN7EXAMPLEX",
+    ];
+    let mut seed: u32 = 0x2545_f491;
+    let mut next = move || {
+        seed ^= seed << 13;
+        seed ^= seed >> 17;
+        seed ^= seed << 5;
+        seed as usize
+    };
+
+    let mut matched = [false; DEFAULT_IGNORE.len()];
+
+    for _ in 0..200_000 {
+        let text: String = (0..=next() % 6).map(|_| pieces[next() % pieces.len()]).collect();
+
+        assert_eq!(
+            Ignore::default().ignores(&text),
+            expressions.is_match(&text),
+            "{text:?}"
+        );
+        expressions.matches(&text).iter().for_each(|at| matched[at] = true);
+    }
+    assert_eq!(
+        matched,
+        [true; DEFAULT_IGNORE.len()],
+        "each expression matches some text"
+    );
+}
+
+#[test]
+fn the_defaults_match_a_long_run_of_token_starts_as_their_expressions_do() {
+    let expressions = RegexSet::new(DEFAULT_IGNORE).unwrap();
+    let texts = [
+        "sk-".repeat(100_000),
+        "eyJ-".repeat(100_000),
+        format!("{}.eyJ{}.", "eyJ-".repeat(50_000), "a".repeat(8)),
+        "ghp_".repeat(100_000),
+        "-----BEGIN ".repeat(100_000),
+        "-----BEGIN A ".repeat(100_000),
+        format!("{}{}", "eyJ.".repeat(100_000), "x".repeat(8)),
+    ];
+
+    for text in texts {
+        assert_eq!(
+            Ignore::default().ignores(&text),
+            expressions.is_match(&text),
+            "{}",
+            &text[..40]
+        );
+    }
+}
