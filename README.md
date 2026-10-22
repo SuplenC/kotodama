@@ -54,8 +54,9 @@ Which compositors it works on is in [Compositor support](docs/try-it.md#composit
 | `extensions.{apps, calculator, clipboard, emoji, web-search}.enable` | on |
 | `extensions.{folders, hyprland, ai, system}.enable` | off |
 | `extraExtensions` | `[ ]` |
+| `strictExtensions` | `false` |
 
-`extraExtensions` installs Extensions that aren't Bundled, a distro's or your own, each a package holding `share/kotodama/extensions/<name>/` with its manifest: `extraExtensions = [ pkgs.kotodama-notes ];`. They go in beside the enabled Bundled ones, through the package's `withExtensions`, which checks them as it checks those: it refuses, by name, an Extension that needs at run time what none may, such as a runpath to GCC's `lib` output (a Rust binary needs only `stdenv.cc.cc.libgcc`'s libgcc_s), a shell, the build-time Qt or the full curl. A script Extension, whose `#!` line names a shell, can go in `home.packages` instead: the Daemon finds it on the profile's `XDG_DATA_DIRS` (below).
+`extraExtensions` installs Extensions that aren't Bundled, a distro's or your own, in any language, each a package holding `share/kotodama/extensions/<name>/` with its manifest: `extraExtensions = [ pkgs.kotodama-notes ];`. They go in beside the enabled Bundled ones, through the package's `withExtensions`, which refuses, by name, one that needs the build-time Qt at run time. Anything else it needs, such as a shell for a script or libstdc++ for C++, it may have. `strictExtensions = true` holds them to the check the Bundled extensions pass: it also refuses one that needs a runpath to GCC's `lib` output (a Rust binary needs only `stdenv.cc.cc.libgcc`'s libgcc_s), a shell or the full curl.
 
 Every config table below also has typed options, so a typo or a value of the wrong type fails the build rather than being logged at runtime. They merge into `settings`, and an option left unset is left out, so the default applies. The Quicklinks and Aliases, keyed by your own names, stay in `settings`.
 

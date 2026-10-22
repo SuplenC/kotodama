@@ -2,8 +2,9 @@
 # evaluates home configurations with the defaults, with some switched and with
 # an Extension that isn't Bundled, and checks which Extensions the installed
 # package holds, that the Daemon its units start finds those and no other, that
-# one needing what no Extension may at run time is refused as a Bundled one
-# would be, and the warning for settings of an Extension left off.
+# a script Extension installs but is refused with `strictExtensions`, that one
+# needing the build-time Qt is refused either way, and the warning for
+# settings of an Extension left off.
 # nix/tests/vm.nix checks an Extension left off isn't started.
 {
   pkgs,
@@ -69,11 +70,32 @@ let
       ${files}
     '';
   hello = outOfTree "hello" "";
-  # One whose files name GCC's lib output, which holds libstdc++, as a binary's
-  # runpath does when the stdenv's compiler linked it and nothing dropped it.
-  needsGccLib = outOfTree "needs-gcc-lib" "echo ${lib.getLib pkgs.stdenv.cc.cc}/lib >$dir/runpath";
+  # A script, run by the shell no Extension of Kotodama's may need.
+  script = outOfTree "script" ''
+    printf '%s\n' '#!${pkgs.runtimeShell}' 'exit 0' >$dir/kotodama-script
+    chmod +x $dir/kotodama-script
+  '';
+  # One whose files name the build-time Qt, a build environment.
+  needsQt = outOfTree "needs-qt" "echo ${kotodama.buildQt} >$dir/qt";
   extra = home { extraExtensions = [ hello ]; };
-  refusing = home { extraExtensions = [ needsGccLib ]; };
+  withScript = home { extraExtensions = [ script ]; };
+  strictScript = home {
+    extraExtensions = [ script ];
+    strictExtensions = true;
+  };
+  qtRelaxed = home { extraExtensions = [ needsQt ]; };
+  qtStrict = home {
+    extraExtensions = [ needsQt ];
+    strictExtensions = true;
+  };
+  # The build of a configuration's package, which the builder's own check
+  # fails. The outputs' checks are left off: the log testBuildFailure keeps in
+  # `out` names the path refused, and the builder's shell, which they refuse.
+  refused =
+    config:
+    pkgs.testers.testBuildFailure (
+      config.programs.kotodama.finalPackage.overrideAttrs { outputChecks = { }; }
+    );
   # With a package that has no `withExtensions` to install it with, which
   # `ownPackage` shows evaluates alone.
   extraWithoutWithExtensions = home {
@@ -129,12 +151,10 @@ pkgs.runCommand "kotodama-home-manager-extensions-test"
     daemon = defaults.programs.kotodama.finalPackage;
     service = defaults.xdg.configFile."systemd/user/kotodamad.service".source;
     withHello = extra.programs.kotodama.finalPackage;
-    # The build of the package, which the builder's own check fails. The
-    # outputs' checks are left off: the log testBuildFailure keeps in `out`
-    # names the path refused, and the builder's shell, which they refuse.
-    refused = pkgs.testers.testBuildFailure (
-      refusing.programs.kotodama.finalPackage.overrideAttrs { outputChecks = { }; }
-    );
+    scriptExtensions = withScript.programs.kotodama.finalPackage.extensions;
+    strictScript = refused strictScript;
+    qtRelaxed = refused qtRelaxed;
+    qtStrict = refused qtStrict;
   }
   ''
     # extensions PACKAGE NAME...: PACKAGE's extensions output holds these, each
@@ -173,7 +193,15 @@ pkgs.runCommand "kotodama-home-manager-extensions-test"
     test -f "$share/kotodama/extensions/hello/manifest.toml"
     grep -qaF "$share" "$withHello/bin/kotodamad"
 
-    # One that needs GCC's lib output at run time is refused, by name.
-    grep -qF "refusing the Extension kotodama-needs-gcc-lib: it needs ${lib.getLib pkgs.stdenv.cc.cc} at run time" "$refused/testBuildFailure.log"
+    # A script Extension installs, its manifest where the Daemon looks, but
+    # is refused, by name, with strictExtensions.
+    test -f "$scriptExtensions/share/kotodama/extensions/script/manifest.toml"
+    test -x "$scriptExtensions/share/kotodama/extensions/script/kotodama-script"
+    grep -qF "refusing the Extension kotodama-script: it needs ${pkgs.runtimeShellPackage} at run time" "$strictScript/testBuildFailure.log"
+
+    # One that needs the build-time Qt is refused either way.
+    for log in "$qtRelaxed" "$qtStrict"; do
+      grep -qF "refusing the Extension kotodama-needs-qt: it needs ${kotodama.buildQt} at run time" "$log/testBuildFailure.log"
+    done
     touch $out
   ''
