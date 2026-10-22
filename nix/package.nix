@@ -16,6 +16,7 @@
   runCommand,
   qt6,
   pkg-config,
+  callPackage,
   libGL,
   makeBinaryWrapper,
   jq,
@@ -81,7 +82,11 @@ let
       ];
     };
     strictDeps = true;
-    nativeBuildInputs = [ pkg-config ];
+    nativeBuildInputs = [
+      pkg-config
+      # The QML module's linker (nix/lld.nix).
+      (callPackage ./lld.nix { })
+    ];
     buildInputs = [
       qt
       libGL

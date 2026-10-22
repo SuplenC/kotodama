@@ -83,16 +83,7 @@
               qtwayland
             ]
           );
-          # cxx-qt-build links the QML module with lld when it finds an `lld`
-          # command, else with the deprecated gold; gcc's -fuse-ld=lld then runs
-          # `ld.lld`. Both names point at Nix's wrapped lld, so the binary keeps
-          # its runpath to Qt (bare pkgs.lld drops it, #32). Only these two
-          # names: `ld`, `ar` and the rest stay GNU.
-          wrappedLld = pkgs.runCommand "kotodama-lld" { } ''
-            mkdir -p $out/bin
-            ln -s ${pkgs.llvmPackages.bintools}/bin/ld.lld $out/bin/ld.lld
-            ln -s ld.lld $out/bin/lld
-          '';
+          wrappedLld = pkgs.callPackage ./nix/lld.nix { };
         in
         rec {
           default = pkgs.mkShell {
