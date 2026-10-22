@@ -5,7 +5,7 @@ A Bundled extension. Maintained by hand: fix stale lines when you find them, and
 - `wayland.rs` (`Clipboard::watch`: waits for the compositor, then watches through `kotodama_extension::wayland`; `set`, used by `examples/copy.rs`; Copy to Clipboard returns the `copy` Outcome instead; `Change`, `WatchError`, `SetError`), with the Linux threads in `wayland/linux.rs`
 - `copied.rs` (MIME choice, `Copied`, `ReadError`)
 - `history.rs` (`History` on disk, `Limits` and their `DEFAULT_…` consts)
-- `ignore.rs` (`Ignore`: the `ignore` setting's regular expressions, compiled at config load and matched when a copy arrives; `DEFAULT_IGNORE`, one-time codes and secret tokens; why there is no `ignore_apps`), with its unit tests in `ignore/tests.rs`
+- `ignore.rs` (`Ignore`: the `ignore` setting's regular expressions, compiled at config load and matched when a copy arrives; `DEFAULT_IGNORE`, one-time codes and secret tokens; why there is no `ignore_apps`), with the defaults matched by hand, without `regex`, in `ignore/defaults.rs`, and its unit tests in `ignore/tests.rs`
 - `items.rs` (`Settings`, read from the config table by `settings`; Items, list and detail Views; the pause Item, `pause_item` and `paused_by`), with its unit tests in `items/tests.rs`
 - `pause.rs` (`Pause`: whether a copy is kept, the note the app's intro card shows while paused, counting down the minutes, and the `paused` file in the state directory that keeps a pause through a restart), with its unit tests in `pause/tests.rs`
 - `../tests/history.rs`: the history on disk through the library, on a made-up clock.
