@@ -262,12 +262,23 @@ let
   # ones (`exts: [ exts.apps exts.emoji ]`; any package with
   # share/kotodama/extensions/<name> will do), as the outputs out, qml and
   # extensions. Its `kotodamad` finds those Extensions and no other Bundled one.
-  # An Extension that needs any of `notAtRunTime` at run time is refused, by
-  # name, whether it is Bundled or not.
+  # It also takes `{ select, extra, strict }`, where `extra` lists Extensions
+  # that aren't Bundled, installed after those `select` picks. An Extension is
+  # refused, by name, when it needs at run time any of `notAtRunTime`, which is
+  # Kotodama's policy for what it ships, or, when it is in `extra` and `strict`
+  # is false, the build-time Qt: a script or C++ Extension rightly needs a
+  # shell or libstdc++, but none a build environment.
   withExtensions =
-    select:
+    arg:
     let
-      chosen = select extensions;
+      args = if lib.isFunction arg then { select = arg; } else arg;
+      chosen = args.select extensions;
+      extra = args.extra or [ ];
+      strict = args.strict or false;
+      installed = chosen ++ extra;
+      # The Bundled extensions passed `notAtRunTime` in their own builds, so
+      # the outputs need check only what the extra ones are held to.
+      requisites = if strict || extra == [ ] then notAtRunTime else [ qt ];
     in
     runCommand "kotodama-${core.version}"
       {
@@ -283,23 +294,31 @@ let
           jq
         ];
         __structuredAttrs = true;
-        # Each chosen Extension's closure, as `closure<i>` in the attributes'
-        # JSON, with its name at index i of `chosenNames`.
+        # Each Extension's closure, as `closure<i>` in the attributes' JSON,
+        # with its name at index i of `names`. The first `checkedFully` are
+        # checked against `notAtRunTime`, the rest against `qt` alone.
         exportReferencesGraph = lib.listToAttrs (
-          lib.imap0 (i: package: lib.nameValuePair "closure${toString i}" [ package ]) chosen
+          lib.imap0 (i: package: lib.nameValuePair "closure${toString i}" [ package ]) installed
         );
-        chosenNames = map lib.getName chosen;
-        inherit notAtRunTime;
+        names = map lib.getName installed;
+        checkedFully = lib.length (if strict then installed else chosen);
+        inherit notAtRunTime qt;
         outputChecks = {
-          out.disallowedRequisites = notAtRunTime;
-          extensions.disallowedRequisites = notAtRunTime;
+          out = {
+            # The wrapper built here.
+            disallowedReferences = notAtRunTime;
+            disallowedRequisites = requisites;
+          };
+          extensions.disallowedRequisites = requisites;
         };
         passthru = {
           inherit quickshell withExtensions;
           inherit core;
           # Every Bundled extension's package, by name, and those this one holds.
           extensionPackages = extensions;
-          installedExtensions = chosen;
+          installedExtensions = installed;
+          # The build-time Qt, which no Extension may need at run time.
+          buildQt = qt;
         };
         meta = core.meta // {
           description = "A fast, extensible command menu for Wayland";
@@ -313,18 +332,25 @@ let
       ''
         # Before anything is written. The outputs' checks would refuse such an
         # Extension too, after the build, naming only the path it brings in.
-        for i in "''${!chosenNames[@]}"; do
+        for i in "''${!names[@]}"; do
           closure=$(jq -r --arg graph "closure$i" '.[$graph][].path' "$NIX_ATTRS_JSON_FILE")
-          for path in "''${notAtRunTime[@]}"; do
+          if [ "$i" -lt "$checkedFully" ]; then
+            disallowed=("''${notAtRunTime[@]}")
+            why="as no Extension of Kotodama's or under strictExtensions may (a runpath to GCC's lib output, which holds libstdc++, instead of stdenv.cc.cc.libgcc; a shell; the build-time Qt; the full curl)"
+          else
+            disallowed=("$qt")
+            why="the build-time Qt, which no Extension may"
+          fi
+          for path in "''${disallowed[@]}"; do
             if grep -qxF "$path" <<<"$closure"; then
-              echo "refusing the Extension ''${chosenNames[$i]}: it needs $path at run time, as no Extension may (a runpath to GCC's lib output, which holds libstdc++, instead of stdenv.cc.cc.libgcc; a shell; the build-time Qt; the full curl)" >&2
+              echo "refusing the Extension ''${names[$i]}: it needs $path at run time, $why" >&2
               exit 1
             fi
           done
         done
 
         mkdir -p $extensions/share/kotodama/extensions
-        for package in ${lib.escapeShellArgs chosen}; do
+        for package in ${lib.escapeShellArgs installed}; do
           ln -s "$package"/share/kotodama/extensions/* $extensions/share/kotodama/extensions/
         done
 
