@@ -11,7 +11,8 @@
 //!
 //! Finding and connecting to the session bus, the system bus and the systemd
 //! user manager, the EXTERNAL authentication, marshalling method calls and
-//! their returns, and reading calls, replies and signals.
+//! their returns, and reading calls, replies and signals and the values in
+//! them, variants, arrays and dict entries included, as properties come.
 //!
 //! # Not here
 //!
@@ -404,6 +405,42 @@ impl Marshal {
         self.0.extend_from_slice(&value.to_le_bytes());
     }
 
+    /// A D-Bus `b`: a `u32`, 0 or 1.
+    pub fn bool(&mut self, value: bool) {
+        self.u32(u32::from(value));
+    }
+
+    /// A D-Bus `n`.
+    pub fn i16(&mut self, value: i16) {
+        self.word(value.to_le_bytes());
+    }
+
+    /// A D-Bus `q`.
+    pub fn u16(&mut self, value: u16) {
+        self.word(value.to_le_bytes());
+    }
+
+    /// A D-Bus `x`.
+    pub fn i64(&mut self, value: i64) {
+        self.word(value.to_le_bytes());
+    }
+
+    /// A D-Bus `t`.
+    pub fn u64(&mut self, value: u64) {
+        self.word(value.to_le_bytes());
+    }
+
+    /// A D-Bus `d`.
+    pub fn f64(&mut self, value: f64) {
+        self.word(value.to_le_bytes());
+    }
+
+    /// `N` bytes at an `N`-byte boundary.
+    fn word<const N: usize>(&mut self, bytes: [u8; N]) {
+        self.pad(N);
+        self.0.extend_from_slice(&bytes);
+    }
+
     /// A string or an object path.
     pub fn string(&mut self, value: &str) {
         self.u32(value.len() as u32);
@@ -547,52 +584,284 @@ impl Message {
     }
 }
 
-/// Reads marshalled values in order.
+/// Reads marshalled values in order, in the byte order of the message they
+/// came in.
+///
+/// Each reader returns `None` past the end or on a value the D-Bus
+/// specification doesn't allow, such as a boolean other than 0 or 1; it
+/// never panics, whatever the bytes. After a `None`, what the next reader
+/// returns means nothing.
+///
+/// # Examples
+///
+/// The answer to `org.freedesktop.DBus.Properties.GetAll`, an `a{sv}`:
+///
+/// ```no_run
+/// use kotodama_extension::dbus::Message;
+///
+/// fn wireless_enabled(answer: &Message) -> Option<bool> {
+///     let mut properties = answer.body().array("{sv}")?;
+///     while !properties.is_empty() {
+///         properties.align_struct();
+///         let name = properties.string()?;
+///         let signature = properties.variant()?;
+///         if (name, signature) == ("WirelessEnabled", "b") {
+///             return properties.bool();
+///         }
+///         properties.skip(signature)?;
+///     }
+///     None
+/// }
+/// ```
 #[derive(Debug)]
 pub struct Unmarshal<'a> {
+    /// From the start of the body, so offsets, and so alignment, are the
+    /// message's. An array's reader ends this where the array ends.
     bytes: &'a [u8],
     at: usize,
     little: bool,
 }
+
+/// How deep containers may nest in a value, arrays, structs and variants
+/// together, as the D-Bus specification limits it. A deeper value read with
+/// [`Unmarshal::skip`] would otherwise recurse as deep as the message is long.
+const MAX_DEPTH: u8 = 64;
 
 impl<'a> Unmarshal<'a> {
     fn align(&mut self, align: usize) {
         self.at = self.at.next_multiple_of(align);
     }
 
-    fn byte(&mut self) -> Option<u8> {
+    /// The next `N` bytes, at an `N`-byte boundary, in the message's order
+    /// turned little-endian.
+    fn word<const N: usize>(&mut self) -> Option<[u8; N]> {
+        self.align(N);
+        let mut word: [u8; N] = self.bytes.get(self.at..self.at.checked_add(N)?)?.try_into().ok()?;
+        self.at += N;
+        if !self.little {
+            word.reverse();
+        }
+        Some(word)
+    }
+
+    /// The next `len` bytes and the nul after them.
+    fn text(&mut self, len: usize) -> Option<&'a str> {
+        let end = self.at.checked_add(len)?;
+        let text = self.bytes.get(self.at..end)?;
+        if self.bytes.get(end) != Some(&0) {
+            return None;
+        }
+        self.at = end + 1;
+        std::str::from_utf8(text).ok()
+    }
+
+    /// Whether everything is read: an array's reader is at its end.
+    pub fn is_empty(&self) -> bool {
+        self.at >= self.bytes.len()
+    }
+
+    /// The next byte, a D-Bus `y`.
+    pub fn byte(&mut self) -> Option<u8> {
         let byte = *self.bytes.get(self.at)?;
         self.at += 1;
         Some(byte)
     }
 
-    /// The next `u32`, or `None` past the end.
-    pub fn u32(&mut self) -> Option<u32> {
-        self.align(4);
-        let word: [u8; 4] = self.bytes.get(self.at..self.at + 4)?.try_into().ok()?;
-        self.at += 4;
-        Some(if self.little {
-            u32::from_le_bytes(word)
-        } else {
-            u32::from_be_bytes(word)
-        })
+    /// The next boolean, a D-Bus `b`: a `u32` that must be 0 or 1.
+    pub fn bool(&mut self) -> Option<bool> {
+        match self.u32()? {
+            0 => Some(false),
+            1 => Some(true),
+            _ => None,
+        }
     }
 
-    /// The next string or object path, or `None` past the end or if it
+    /// The next `i16`, a D-Bus `n`.
+    pub fn i16(&mut self) -> Option<i16> {
+        self.word().map(i16::from_le_bytes)
+    }
+
+    /// The next `u16`, a D-Bus `q`.
+    pub fn u16(&mut self) -> Option<u16> {
+        self.word().map(u16::from_le_bytes)
+    }
+
+    /// The next `i32`, a D-Bus `i`.
+    pub fn i32(&mut self) -> Option<i32> {
+        self.word().map(i32::from_le_bytes)
+    }
+
+    /// The next `u32`, a D-Bus `u`.
+    pub fn u32(&mut self) -> Option<u32> {
+        self.word().map(u32::from_le_bytes)
+    }
+
+    /// The next `i64`, a D-Bus `x`.
+    pub fn i64(&mut self) -> Option<i64> {
+        self.word().map(i64::from_le_bytes)
+    }
+
+    /// The next `u64`, a D-Bus `t`.
+    pub fn u64(&mut self) -> Option<u64> {
+        self.word().map(u64::from_le_bytes)
+    }
+
+    /// The next double, a D-Bus `d`.
+    pub fn f64(&mut self) -> Option<f64> {
+        self.word().map(f64::from_le_bytes)
+    }
+
+    /// The next string or object path, a D-Bus `s` or `o`, or `None` if it
     /// isn't UTF-8.
     pub fn string(&mut self) -> Option<&'a str> {
         let len = self.u32()? as usize;
-        let text = self.bytes.get(self.at..self.at + len)?;
-        self.at += len + 1;
-        std::str::from_utf8(text).ok()
+        self.text(len)
     }
 
-    fn signature(&mut self) -> Option<&'a str> {
+    /// The next signature, a D-Bus `g`, or `None` if it isn't UTF-8.
+    pub fn signature(&mut self) -> Option<&'a str> {
         let len = usize::from(self.byte()?);
-        let text = self.bytes.get(self.at..self.at + len)?;
-        self.at += len + 1;
-        std::str::from_utf8(text).ok()
+        self.text(len)
     }
+
+    /// The next variant, a D-Bus `v`: returns its value's signature, such as
+    /// `b` or `as`, and the value is read next with the reader that
+    /// signature calls for, or passed over with [`Unmarshal::skip`]. `None`
+    /// when the signature isn't one single type.
+    pub fn variant(&mut self) -> Option<&'a str> {
+        let signature = self.signature()?;
+        match single_type(signature.as_bytes(), 0)? {
+            (_, []) if !signature.starts_with('{') => Some(signature),
+            _ => None,
+        }
+    }
+
+    /// The next array, a D-Bus `a` whose elements are of type `element`,
+    /// such as `s` or `{sv}`: returns a reader of its elements, which is
+    /// [empty](Unmarshal::is_empty) once they are read, and moves past it.
+    /// `element` gives the elements' alignment, so a struct or a dict entry
+    /// still starts with [`Unmarshal::align_struct`].
+    pub fn array(&mut self, element: &str) -> Option<Unmarshal<'a>> {
+        let len = self.u32()? as usize;
+        self.align(alignment(*element.as_bytes().first()?));
+        let end = self.at.checked_add(len)?;
+        let elements = Unmarshal {
+            bytes: self.bytes.get(..end)?,
+            at: self.at,
+            little: self.little,
+        };
+        self.at = end;
+        Some(elements)
+    }
+
+    /// Moves to where a struct or a dict entry starts, a D-Bus `(` or `{`:
+    /// the next 8-byte boundary. Its fields follow in order.
+    pub fn align_struct(&mut self) {
+        self.align(8);
+    }
+
+    /// Passes over the values of the types in `signature`, as `skip("a{sv}")`
+    /// passes over a whole `a{sv}`.
+    pub fn skip(&mut self, signature: &str) -> Option<()> {
+        let mut rest = signature.as_bytes();
+        while !rest.is_empty() {
+            rest = self.skip_one(rest, 0)?;
+        }
+        Some(())
+    }
+
+    /// Passes over one value of the first type in `signature`, nested in
+    /// `depth` containers, and returns the rest of the signature.
+    fn skip_one<'s>(&mut self, signature: &'s [u8], depth: u8) -> Option<&'s [u8]> {
+        let (single, rest) = single_type(signature, depth)?;
+        let read = match single[0] {
+            b'y' => self.byte().is_some(),
+            b'b' => self.bool().is_some(),
+            b'n' | b'q' => self.word::<2>().is_some(),
+            b'i' | b'u' | b'h' => self.word::<4>().is_some(),
+            b'x' | b't' | b'd' => self.word::<8>().is_some(),
+            b's' | b'o' => self.string().is_some(),
+            b'g' => self.signature().is_some(),
+            b'v' => {
+                let inner = self.variant()?;
+                self.skip_one(inner.as_bytes(), depth + 1).is_some()
+            }
+            b'a' => {
+                let element = &single[1..];
+                let mut elements = self.array(std::str::from_utf8(element).ok()?)?;
+                while !elements.is_empty() {
+                    elements.skip_one(element, depth + 1)?;
+                }
+                true
+            }
+            // A struct or a dict entry: its fields between the brackets.
+            _ => {
+                self.align_struct();
+                let mut fields = &single[1..single.len() - 1];
+                while !fields.is_empty() {
+                    fields = self.skip_one(fields, depth + 1)?;
+                }
+                true
+            }
+        };
+        read.then_some(rest)
+    }
+}
+
+/// The alignment of a value whose type starts with `code`.
+fn alignment(code: u8) -> usize {
+    match code {
+        b'n' | b'q' => 2,
+        b'b' | b'i' | b'u' | b'h' | b's' | b'o' | b'a' => 4,
+        b'x' | b't' | b'd' | b'(' | b'{' => 8,
+        _ => 1,
+    }
+}
+
+/// Splits the first single complete type off `signature`, nested in `depth`
+/// containers: `a{sv}` off `a{sv}u`. `None` for an unknown code, an empty
+/// struct, a dict entry whose key isn't a basic type, or nesting deeper than
+/// [`MAX_DEPTH`].
+fn single_type(signature: &[u8], depth: u8) -> Option<(&[u8], &[u8])> {
+    if depth > MAX_DEPTH {
+        return None;
+    }
+    let first = *signature.first()?;
+    let len = match first {
+        b'v' => 1,
+        _ if is_basic(first) => 1,
+        b'a' => 1 + single_type(&signature[1..], depth + 1)?.0.len(),
+        b'{' => {
+            if !is_basic(*signature.get(1)?) {
+                return None;
+            }
+            let (value, rest) = single_type(&signature[2..], depth + 1)?;
+            if rest.first() != Some(&b'}') {
+                return None;
+            }
+            2 + value.len() + 1
+        }
+        b'(' => {
+            let mut fields = &signature[1..];
+            if fields.first() == Some(&b')') {
+                return None;
+            }
+            while *fields.first()? != b')' {
+                fields = single_type(fields, depth + 1)?.1;
+            }
+            signature.len() - fields.len() + 1
+        }
+        _ => return None,
+    };
+    Some(signature.split_at(len))
+}
+
+/// Whether `code` is a basic type, which a dict entry's key must be.
+fn is_basic(code: u8) -> bool {
+    matches!(
+        code,
+        b'y' | b'b' | b'n' | b'q' | b'i' | b'u' | b'h' | b'x' | b't' | b'd' | b's' | b'o' | b'g'
+    )
 }
 
 fn session_stream() -> Result<UnixStream, Error> {
