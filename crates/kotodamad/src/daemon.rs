@@ -663,7 +663,7 @@ impl Candidate {
 
     /// Works out its points from how well it matches, its Frecency and its
     /// Extension's `boost`, and the band they reach.
-    fn score(&mut self, lift_threshold: f64, boost: f64) {
+    fn score(&mut self, lift_threshold: f64, boost: points::Boost) {
         let habit = points::habit(self.frecency, lift_threshold);
         self.points = points::points(self.fine, habit, boost);
         self.tier = points::band(self.points);
@@ -1327,6 +1327,8 @@ pub struct Daemon<L, D, S> {
     kind_places: KindPlaces,
     /// Each Extension's app.
     apps: Apps,
+    /// By Extension, how much its Results' points count, from its app.
+    boosts: Vec<points::Boost>,
     /// The keywords two things asked for, as last told to the user.
     conflicts: Vec<Conflict>,
     problems: Problems,
@@ -1431,6 +1433,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             kinds: KindOrder::default(),
             kind_places: KindPlaces::default(),
             apps: Apps::default(),
+            boosts: Vec::new(),
             conflicts: Vec::new(),
             problems: Problems::default(),
             problems_open: HashSet::new(),

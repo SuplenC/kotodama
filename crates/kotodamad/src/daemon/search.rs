@@ -592,7 +592,13 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
     pub(super) fn add_points(&self, candidates: &mut [Candidate]) {
         let lift_threshold = self.history.settings().lift_threshold;
         for candidate in candidates {
-            candidate.score(lift_threshold, 1.0);
+            let extension = match candidate.source {
+                Source::Indexed(slot) => Some(slot.extension()),
+                Source::Live(extension, _) => Some(extension),
+                Source::Own(_) | Source::Unavailable => None,
+            };
+            let boost = extension.and_then(|extension| self.boosts.get(extension.0).copied());
+            candidate.score(lift_threshold, boost.unwrap_or_default());
         }
     }
 

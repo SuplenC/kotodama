@@ -13,13 +13,19 @@ const REAL: [Tier; 6] = [
 
 const BOOSTS: [f64; 7] = [0.01, 0.5, 1.0, 1.5, 2.0, 10.0, 1000.0];
 
+fn boost(boost: f64) -> Boost {
+    Boost::new(boost).unwrap()
+}
+
+const ONE: Boost = Boost(DEFAULT_BOOST);
+
 const FRECENCIES: [f32; 9] = [0.0, 1e-30, 0.01, 1.0, 4.99, 5.0, 35.0, 1e4, f32::MAX];
 
 #[test]
 fn with_no_habit_and_no_boost_a_result_has_the_points_of_its_tier() {
     for tier in REAL {
-        assert_eq!(points(tier, 0, 1.0), u32::from(tier.coarse()) * TIER, "{tier:?}");
-        assert_eq!(band(points(tier, 0, 1.0)), tier.coarse(), "{tier:?}");
+        assert_eq!(points(tier, 0, ONE), u32::from(tier.coarse()) * TIER, "{tier:?}");
+        assert_eq!(band(points(tier, 0, ONE)), tier.coarse(), "{tier:?}");
     }
 }
 
@@ -45,13 +51,13 @@ fn a_frecency_of_the_lift_threshold_is_worth_one_tier_and_each_further_tier_take
 #[test]
 fn a_near_miss_stays_below_every_real_match_whatever_its_habit_and_boost() {
     for frecency in FRECENCIES {
-        for boost in BOOSTS {
-            let near_miss = points(Tier::NearMiss, habit(frecency, THRESHOLD), boost);
+        for b in BOOSTS {
+            let near_miss = points(Tier::NearMiss, habit(frecency, THRESHOLD), boost(b));
             for tier in REAL {
                 for other in BOOSTS {
                     assert!(
-                        near_miss < points(tier, 0, other),
-                        "{frecency} {boost} {tier:?} {other}"
+                        near_miss < points(tier, 0, boost(other)),
+                        "{frecency} {b} {tier:?} {other}"
                     );
                 }
             }
@@ -61,12 +67,12 @@ fn a_near_miss_stays_below_every_real_match_whatever_its_habit_and_boost() {
 
 #[test]
 fn a_match_inside_a_word_or_scattered_never_reaches_an_exact_title() {
-    let exact = points(Tier::Exact, 0, 1.0);
+    let exact = points(Tier::Exact, 0, ONE);
     for tier in [Tier::Scattered, Tier::Inside] {
         for frecency in FRECENCIES {
-            for boost in BOOSTS {
-                let points = points(tier, habit(frecency, THRESHOLD), boost);
-                assert!(points < exact, "{tier:?} {frecency} {boost}");
+            for b in BOOSTS {
+                let points = points(tier, habit(frecency, THRESHOLD), boost(b));
+                assert!(points < exact, "{tier:?} {frecency} {b}");
                 assert!(band(points) < Tier::Exact.coarse());
             }
         }
@@ -75,19 +81,19 @@ fn a_match_inside_a_word_or_scattered_never_reaches_an_exact_title() {
 
 #[test]
 fn a_word_start_reaches_an_exact_title_by_habit_and_never_by_boost_alone() {
-    let exact = points(Tier::Exact, 0, 1.0);
+    let exact = points(Tier::Exact, 0, ONE);
     for tier in [Tier::WordStart, Tier::Initials] {
-        for boost in BOOSTS {
-            assert!(points(tier, habit(4.99, THRESHOLD), boost) < exact, "{tier:?} {boost}");
+        for b in BOOSTS {
+            assert!(points(tier, habit(4.99, THRESHOLD), boost(b)) < exact, "{tier:?} {b}");
         }
-        assert!(points(tier, habit(5.0, THRESHOLD), 1.0) >= exact, "{tier:?}");
-        assert_eq!(band(points(tier, habit(5.0, THRESHOLD), 1.0)), Tier::Exact.coarse());
+        assert!(points(tier, habit(5.0, THRESHOLD), ONE) >= exact, "{tier:?}");
+        assert_eq!(band(points(tier, habit(5.0, THRESHOLD), ONE)), Tier::Exact.coarse());
     }
 }
 
 #[test]
 fn habit_climbs_a_scattered_match_a_tier_at_a_time() {
-    let at = |frecency| band(points(Tier::Scattered, habit(frecency, THRESHOLD), 1.0));
+    let at = |frecency| band(points(Tier::Scattered, habit(frecency, THRESHOLD), ONE));
 
     assert_eq!(at(0.0), Tier::Scattered.coarse());
     assert_eq!(at(5.0), Tier::Inside.coarse());
@@ -97,9 +103,18 @@ fn habit_climbs_a_scattered_match_a_tier_at_a_time() {
 
 #[test]
 fn a_boost_orders_matches_of_one_tier_and_more_habit_still_wins_at_one_boost() {
-    let word_start = |frecency, boost| points(Tier::WordStart, habit(frecency, THRESHOLD), boost);
+    let word_start = |frecency, b| points(Tier::WordStart, habit(frecency, THRESHOLD), boost(b));
 
     assert!(word_start(0.0, 1.5) > word_start(0.0, 1.0));
     assert!(word_start(1.0, 0.5) < word_start(0.0, 1.0));
     assert!(word_start(2.0, 1.0) > word_start(1.0, 1.0));
+}
+
+#[test]
+fn a_boost_is_a_finite_number_above_0() {
+    for b in [0.0, -1.0, f64::NAN, f64::INFINITY] {
+        assert_eq!(Boost::new(b), None, "{b}");
+    }
+    assert_eq!(Boost::new(0.25).map(Boost::get), Some(0.25));
+    assert_eq!(Boost::default(), Boost::new(DEFAULT_BOOST).unwrap());
 }

@@ -45,7 +45,7 @@ let
       default = null;
       inherit description;
     };
-  # `word` and `in_search`, the Daemon's own keys in every
+  # `word`, `in_search` and `boost`, the Daemon's own keys in every
   # `[extensions.<name>]`. `default` and `searched` say what the Extension's
   # Manifest gives.
   app = default: searched: {
@@ -61,10 +61,15 @@ let
       `true`, or none of them, `false`, and only its app does. Unset,
       ${searched}.
     '';
+    boost = optional lib.types.numbers.positive ''
+      `boost`: how much the Extension's Results' points count. Above 1 ranks
+      them above equal matches from other Extensions, below 1 below them; it
+      never takes a Result past an exact title on its own. Unset, 1.
+    '';
   };
   # The `[extensions.<name>]` keys of `app`, as set.
   appSettings = options: {
-    inherit (options) word;
+    inherit (options) word boost;
     in_search = options.inSearch;
   };
   webSearch = app "`web`" "true";

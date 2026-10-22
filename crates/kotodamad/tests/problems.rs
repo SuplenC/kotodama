@@ -76,6 +76,15 @@ fn a_misspelt_table_or_key_is_a_problem() {
 }
 
 #[test]
+fn a_boost_that_isnt_a_number_above_0_is_a_problem() {
+    let mut h = Harness::with_config(vec![plain("apps")], config("[extensions.apps]\nboost = 0\n"));
+
+    let (_ui, greeting) = h.greeted_front_end(OUTBOX);
+
+    assert_eq!(last_problems(&greeting), Some(vec!["extensions.apps.boost".to_owned()]));
+}
+
+#[test]
 fn fixing_the_config_clears_its_problems_and_every_front_end_hears_of_it() {
     let mut h = Harness::with_config(vec![], config("[history]\npicks_to_learn = 0\n"));
     let ui = h.front_end();

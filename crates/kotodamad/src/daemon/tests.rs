@@ -61,7 +61,7 @@ fn candidate(random: &mut Random) -> Candidate {
     candidate.class = random.pick(&[Class::Rest, Class::Learned, Class::Named]);
     candidate.by_alias = random.below(2) == 0;
     candidate.frecency = random.pick(&[0.0, 0.5, 1.0, 5.0, 40.0]);
-    candidate.score(5.0, random.pick(&[0.5, 1.0, 2.0]));
+    candidate.score(5.0, points::Boost::new(random.pick(&[0.5, 1.0, 2.0])).unwrap());
     candidate.key = candidate.rank_key();
     candidate
 }

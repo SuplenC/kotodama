@@ -1563,6 +1563,110 @@ fn an_address_opens_in_the_first_row_with_its_searches_last() {
     assert!(rows[1..].iter().all(|row| row.starts_with("Example.com")), "{rows:?}");
 }
 
+// Boost, from an Extension's `[extensions.<name>]` table.
+
+/// The rows for `query` of a desktop with two Extensions, `first` and
+/// `second`, holding the apps titled `firsts` and `seconds`, under `toml`.
+fn boosted(toml: &str, firsts: &[&str], seconds: &[&str], query: &str) -> Vec<String> {
+    let mut h = Harness::with_config(vec![plain("first"), plain("second")], config(toml));
+    let (first, second) = (h.up(0), h.up(1));
+    h.add(&first, firsts.iter().map(|title| app(title)).collect());
+    h.add(&second, seconds.iter().map(|title| app(title)).collect());
+    let ui = h.front_end();
+    titles(&h.query(&ui, query)).into_iter().map(str::to_owned).collect()
+}
+
+#[test]
+fn a_boost_above_1_puts_an_extensions_results_above_equal_matches() {
+    assert_eq!(
+        boosted("", &["Terminal"], &["Terminus"], "termin"),
+        ["Terminal", "Terminus"]
+    );
+    assert_eq!(
+        boosted(
+            "[extensions.second]\nboost = 1.5\n",
+            &["Terminal"],
+            &["Terminus"],
+            "termin"
+        ),
+        ["Terminus", "Terminal"]
+    );
+}
+
+#[test]
+fn a_boost_below_1_puts_an_extensions_results_below_equal_matches() {
+    assert_eq!(
+        boosted(
+            "[extensions.first]\nboost = 0.5\n",
+            &["Terminal"],
+            &["Terminus"],
+            "termin"
+        ),
+        ["Terminus", "Terminal"]
+    );
+}
+
+#[test]
+fn no_boost_lifts_a_result_past_an_exact_title() {
+    let toml = "[extensions.second]\nboost = 1000\n";
+
+    assert_eq!(boosted(toml, &["Term"], &["Terminal"], "term"), ["Term", "Terminal"]);
+    assert_eq!(
+        boosted(toml, &["Term"], &["Determinate"], "term"),
+        ["Term", "Determinate"]
+    );
+}
+
+#[test]
+fn no_boost_takes_a_real_match_below_a_near_miss() {
+    let toml = "[extensions.first]\nboost = 0.001\n[extensions.second]\nboost = 1000\n";
+
+    assert_eq!(
+        boosted(toml, &["Streamer"], &["Steam"], "stream"),
+        ["Streamer", "Steam"]
+    );
+}
+
+#[test]
+fn a_boost_counts_for_live_query_results() {
+    let rows = |toml: &str| {
+        let notes = manifest(
+            "name = \"notes\"\ncommand = [\"x\"]\n\
+             [live_query]\ntriggers = ['.']\ndebounce_ms = 50",
+        );
+        let mut h = Harness::with_config(vec![plain("apps"), notes], config(toml));
+        let (apps, notes) = (h.up(0), h.up(1));
+        h.add(&apps, vec![app("Zebra one")]);
+        let ui = h.front_end();
+        h.query(&ui, "zebra");
+        h.advance(Duration::from_millis(50));
+        let Some(ToExtension::LiveQuery { id, .. }) = notes.drain().pop() else {
+            panic!("notes wasn't asked");
+        };
+        let note = LiveResult {
+            item: item("zebra", "Zebra two", ItemKind::Url { url: "x".into() }),
+            score: Fraction::new(1.0).unwrap(),
+            answer: false,
+        };
+        let (results, done) = (vec![note], true);
+        h.send(
+            &notes,
+            FromExtension::LiveResults {
+                live_query: id,
+                results,
+                done,
+            },
+        );
+        titles(&ui.results().unwrap())
+            .into_iter()
+            .map(str::to_owned)
+            .collect::<Vec<_>>()
+    };
+
+    assert_eq!(rows(""), ["Zebra one", "Zebra two"]);
+    assert_eq!(rows("[extensions.notes]\nboost = 2\n"), ["Zebra two", "Zebra one"]);
+}
+
 // Invariants, over a desktop's worth of apps and a range of queries.
 
 const DESKTOP: &[&str] = &[

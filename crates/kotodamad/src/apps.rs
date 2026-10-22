@@ -5,8 +5,8 @@
 //!
 //! # Owns
 //!
-//! - [`Apps`]: each Extension's app, from its Manifest and the user's `[extensions.<name>]` `word`
-//!   and `in_search`, and the app a query is in.
+//! - [`Apps`]: each Extension's app, from its Manifest and the user's `[extensions.<name>]` `word`,
+//!   `in_search` and `boost`, and the app a query is in.
 //! - [`App::entry`]: the entry Item. [`App::scope`]: what a Front end shows inside, the intro card
 //!   included.
 //!
@@ -36,6 +36,7 @@ use crate::conflict::Holder;
 use crate::daemon::ExtensionId;
 use crate::index::SIDES;
 use crate::keywords::Keywords;
+use crate::points::Boost;
 use crate::problem::Report;
 
 /// One Extension's app.
@@ -54,6 +55,8 @@ pub struct App {
     /// Whether the whole search reads each of the Extension's Segments: the
     /// Items it means for the search, then those it means for the app alone.
     pub searched: [bool; SIDES],
+    /// How much its Results' points count.
+    pub boost: Boost,
 }
 
 /// The id of an Extension's entry Item, among the Daemon's own Items: by the
@@ -213,6 +216,16 @@ impl Apps {
     }
 }
 
+/// The boost `value` sets: a number, integer or not, finite and above 0.
+fn configured_boost(value: &Value) -> Option<Boost> {
+    match value {
+        #[expect(clippy::cast_precision_loss, reason = "a boost past 2^53 is as good as 2^53")]
+        Value::Integer(boost) => Boost::new(*boost as f64),
+        Value::Float(boost) => Boost::new(*boost),
+        _ => None,
+    }
+}
+
 impl App {
     /// The app of the Extension of `manifest`, with the word it asks for,
     /// and where that word comes from.
@@ -252,6 +265,16 @@ impl App {
             None if manifest.in_search => [true, false],
             Some(false) | None => [false, false],
         };
+        let boost = match table.get("boost") {
+            Some(value) => configured_boost(value).unwrap_or_else(|| {
+                report.add(
+                    format!("extensions.{name}.boost"),
+                    format!("{value:?} isn't a number above 0; boosting by 1"),
+                );
+                Boost::default()
+            }),
+            None => Boost::default(),
+        };
         let title = manifest.title.clone().unwrap_or_else(|| name.clone());
         let about = manifest
             .about
@@ -271,6 +294,7 @@ impl App {
             },
             commands: manifest.commands.clone(),
             searched,
+            boost,
         };
         (from, app)
     }
@@ -305,6 +329,18 @@ impl Apps {
             }
         }
         searched
+    }
+
+    /// By Extension, of `extensions` Extensions, how much its Results'
+    /// points count. An Extension without an app counts them as earned.
+    pub fn boosts(&self, extensions: usize) -> Vec<Boost> {
+        let mut boosts = vec![Boost::default(); extensions];
+        for app in &self.apps {
+            if let Some(boost) = boosts.get_mut(app.extension.0) {
+                *boost = app.boost;
+            }
+        }
+        boosts
     }
 
     /// The app whose word `query` starts with, by its place here, and where

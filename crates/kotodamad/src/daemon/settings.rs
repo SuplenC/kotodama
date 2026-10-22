@@ -193,6 +193,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             .collect();
         self.apps = apps;
         self.index.set_searched(self.apps.searched(self.extensions.len()));
+        self.boosts = self.apps.boosts(self.extensions.len());
         for (id, entered) in entered {
             if let Some(session) = self.sessions.get_mut(&id) {
                 session.entered = entered;

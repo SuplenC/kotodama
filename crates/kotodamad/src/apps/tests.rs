@@ -281,3 +281,61 @@ fn the_intro_carries_the_extensions_note() {
     assert_eq!(intro.note.as_deref(), Some("Paused"));
     assert_eq!(app.scope(true, Some("Paused")).intro, None);
 }
+
+/// The boost of the one app `config` makes, with the problems it reports.
+fn boost(config: &Table) -> (Boost, Vec<String>) {
+    let manifest = Manifest::from_toml("name = \"web\"\ncommand = [\"x\"]").unwrap();
+    let mut report = Report::new();
+    let apps = Apps::new(
+        [(ExtensionId(0), &manifest)],
+        config,
+        &crate::keywords::from_config(config, &mut Report::new()),
+        &mut report,
+    );
+    let problems = report
+        .into_problems()
+        .into_iter()
+        .map(|problem| problem.about)
+        .collect();
+    (apps.boosts(1)[0], problems)
+}
+
+#[test]
+fn the_config_sets_an_extensions_boost_as_an_integer_or_a_float() {
+    assert_eq!(boost(&Table::new()), (Boost::default(), vec![]));
+    assert_eq!(
+        boost(&config("web", "boost", Value::Integer(2))).0,
+        Boost::new(2.0).unwrap()
+    );
+    assert_eq!(
+        boost(&config("web", "boost", Value::Float(0.5))).0,
+        Boost::new(0.5).unwrap()
+    );
+}
+
+#[test]
+fn a_boost_that_isnt_a_number_above_0_is_a_problem_and_boosts_by_1() {
+    for value in [
+        Value::Integer(0),
+        Value::Integer(-1),
+        Value::Float(0.0),
+        Value::Float(f64::NAN),
+        Value::Float(f64::INFINITY),
+        Value::String("2".into()),
+    ] {
+        let (boost, problems) = boost(&config("web", "boost", value.clone()));
+
+        assert_eq!(boost, Boost::default(), "{value:?}");
+        assert_eq!(problems, ["extensions.web.boost"], "{value:?}");
+    }
+}
+
+#[test]
+fn an_extension_without_an_app_counts_its_points_as_earned() {
+    let apps = apps(
+        &["name = \"web\"\ncommand = [\"x\"]"],
+        &config("web", "boost", Value::Integer(3)),
+    );
+
+    assert_eq!(apps.boosts(2), [Boost::new(3.0).unwrap(), Boost::default()]);
+}

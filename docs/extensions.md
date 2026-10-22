@@ -247,7 +247,7 @@ folder = "~/Notes"
 word = "n"
 ```
 
-The Daemon sends the table right after the handshake, and again whenever it changes, as `{"config": {"folder": "~/Notes"}}`. It leaves out the keys it reads itself: `enable`, `command`, `env`, `live_query`, `word`, `prefix` and `in_search`. Never read config files yourself. A missing table arrives as `{}`, so give every setting a default. Log a setting of the wrong shape, and say what's missing with `status`.
+The Daemon sends the table right after the handshake, and again whenever it changes, as `{"config": {"folder": "~/Notes"}}`. It leaves out the keys it reads itself: `enable`, `command`, `env`, `live_query`, `word`, `prefix`, `in_search` and `boost`. Never read config files yourself. A missing table arrives as `{}`, so give every setting a default. Log a setting of the wrong shape, and say what's missing with `status`.
 
 ## Compatibility
 

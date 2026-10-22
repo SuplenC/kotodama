@@ -15,12 +15,14 @@
 //! # Owns
 //!
 //! - [`TIER`], [`habit`], [`points`] and [`band`].
+//! - [`Boost`], an Extension's multiplier on its Results' points.
 //!
 //! # Not here
 //!
 //! - What ranks above the points (answers, fallbacks, Aliases and Learned choices) and what breaks
 //!   a tie between equal points: `daemon.rs`, `Candidate::rank_key`.
 //! - Frecency itself: `history.rs`.
+//! - Reading an Extension's boost from the config: `apps.rs`.
 
 use crate::rank::Tier;
 
@@ -31,6 +33,36 @@ pub const TIER: u32 = 1 << 12;
 /// The points of the exact band's floor: an exact title or keyword with
 /// no habit.
 const EXACT: u32 = TIER * Tier::Exact.coarse() as u32;
+
+/// An Extension's boost when its `[extensions.<name>]` sets none: its
+/// Results' points count as earned.
+pub const DEFAULT_BOOST: f64 = 1.0;
+
+/// How much an Extension's Results' points count, from its
+/// `[extensions.<name>]` table's `boost`: a number above 0, finite.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Boost(f64);
+
+// `Boost::new` takes no NaN, so equality is an equivalence.
+impl Eq for Boost {}
+
+impl Default for Boost {
+    fn default() -> Self {
+        Boost(DEFAULT_BOOST)
+    }
+}
+
+impl Boost {
+    /// `boost`, if it is finite and above 0.
+    #[must_use]
+    pub fn new(boost: f64) -> Option<Self> {
+        (boost.is_finite() && boost > 0.0).then_some(Boost(boost))
+    }
+
+    pub fn get(self) -> f64 {
+        self.0
+    }
+}
 
 /// The points a Frecency of `frecency` adds: one Tier at `lift_threshold`,
 /// two at `(1 + lift_threshold)² - 1`, and so on, so each Tier takes more
@@ -47,10 +79,10 @@ pub fn habit(frecency: f32, lift_threshold: f64) -> u32 {
 /// The points of a Result that matches at `tier` with `habit` points (see
 /// [`habit`]), from an Extension boosted by `boost`, held to the bounds the
 /// module describes.
-pub fn points(tier: Tier, habit: u32, boost: f64) -> u32 {
+pub fn points(tier: Tier, habit: u32, boost: Boost) -> u32 {
     let earned = (u32::from(tier.coarse()) * TIER).saturating_add(habit);
     // Exact at a boost of 1: every `u32` is an `f64`.
-    let boosted = (f64::from(earned) * boost) as u32;
+    let boosted = (f64::from(earned) * boost.get()) as u32;
     let (floor, ceiling) = match tier {
         Tier::NearMiss => (0, TIER - 1),
         Tier::Scattered | Tier::Inside => (TIER, EXACT - 1),

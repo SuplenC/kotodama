@@ -115,6 +115,7 @@ let
         emoji = {
           skinTone = "medium-dark";
           word = "e";
+          boost = 0.5;
         };
         folders = {
           folders = [
@@ -277,7 +278,7 @@ pkgs.runCommand "kotodama-home-manager-options-test"
         "ignore": ["^secret:"],
         "in_search": True,
     })
-    expect("emoji", extensions["emoji"], {"skin_tone": "medium-dark", "word": "e"})
+    expect("emoji", extensions["emoji"], {"skin_tone": "medium-dark", "word": "e", "boost": 0.5})
     expect("folders", extensions["folders"], {
         "folders": [
             {"path": "~/Projects", "kind": "projects", "depth": 2},
