@@ -565,20 +565,27 @@ enum Class {
     Named,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 struct Candidate {
     source: Source,
-    standing: Standing,
-    class: Class,
-    /// How well it matches, as [`Tier::coarse`] gives it, after Frecency
-    /// lifted it.
-    tier: u8,
+    /// Its place in the order, higher first, as [`Candidate::rank_key`]
+    /// works it out once every other field is settled.
+    key: u64,
     /// Its Frecency, shared with every Result of the same Identity.
     frecency: f64,
     /// The Frecency of picks of this Result itself, rather than of its
     /// Identity: of the Results of one Identity, the one picked through most
     /// goes first (see [`Daemon::lead_with_direct_picks`]).
-    direct: f64,
+    direct: f32,
+    /// nucleo's score.
+    score: u16,
+    /// The title's length in characters: a shorter title wins a tie.
+    len: u16,
+    standing: Standing,
+    class: Class,
+    /// How well it matches, as [`Tier::coarse`] gives it, after Frecency
+    /// lifted it.
+    tier: u8,
     /// How well it matches, to break a tie: initials beat a word start, and
     /// an exact title beats an exact keyword.
     fine: Tier,
@@ -588,15 +595,11 @@ struct Candidate {
     /// Where its Item kind ranks on an equal match, lowest first (see
     /// [`KindOrder`]).
     kind: u8,
-    /// nucleo's score.
-    score: u32,
-    /// The title's length in characters: a shorter title wins a tie.
-    len: u32,
 }
 
 /// Where a Candidate stands before anything else is compared: answers
 /// first, fallbacks last.
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 enum Standing {
     /// A Live query's answer, such as the calculator's result.
     Answer,
@@ -609,44 +612,100 @@ enum Standing {
 // Ranking sorts thousands of Candidates a keystroke: they stay small.
 const _: () = assert!(size_of::<Candidate>() <= 48);
 
+/// The width of each field of [`Candidate::rank_key`], highest first. They
+/// add up to the key's 64 bits.
+mod key_bits {
+    pub const STANDING: u32 = 2;
+    pub const CLASS: u32 = 2;
+    pub const TIER: u32 = 3;
+    /// The Frecency's `f32` bits past the sign, less the lowest mantissa
+    /// bits: Frecencies within 2⁻¹⁵ of each other tie here.
+    pub const FRECENCY: u32 = 23;
+    pub const FINE: u32 = 3;
+    pub const BY_ALIAS: u32 = 1;
+    pub const KIND: u32 = 8;
+    /// nucleo's score, up to 4,095: a query of over a hundred letters.
+    pub const SCORE: u32 = 12;
+    /// The title's length, up to 1,023 characters.
+    pub const LEN: u32 = 10;
+
+    const _: () = assert!(STANDING + CLASS + TIER + FRECENCY + FINE + BY_ALIAS + KIND + SCORE + LEN == 64);
+}
+
 impl Candidate {
     fn new(source: Source, tier: Tier, kind: u8, score: u32, len: u32) -> Self {
         Candidate {
             source,
+            key: 0,
+            frecency: 0.0,
+            direct: 0.0,
+            score: u16::try_from(score).unwrap_or(u16::MAX),
+            len: u16::try_from(len).unwrap_or(u16::MAX),
             standing: Standing::Match,
             class: Class::Rest,
             tier: tier.coarse(),
-            frecency: 0.0,
-            direct: 0.0,
             fine: tier,
             by_alias: false,
             kind,
-            score,
-            len,
         }
     }
 
-    /// Answers first and fallbacks last, then by class, how well it
-    /// matches, Frecency, its Item kind, and nucleo's score.
-    /// Lazy: most pairs differ in the first few keys, and a keystroke compares
-    /// thousands of pairs.
+    /// Sets its Frecency and that of its direct picks, as
+    /// [`Daemon::frecency`] gives them.
+    fn picked(&mut self, (frecency, direct): (f64, f64)) {
+        self.frecency = frecency;
+        self.direct = direct as f32;
+    }
+
+    /// Its place in the order as one number, higher first: answers first and
+    /// fallbacks last, then by class, how well it matches, Frecency, its
+    /// Item kind, nucleo's score, and the shorter title. Each key is a bit
+    /// field (`key_bits`) below the one it gives way to, so a sort compares
+    /// one integer per pair.
+    fn rank_key(&self) -> u64 {
+        let saturate = |value: u64, bits: u32| value.min((1 << bits) - 1);
+        let standing = match self.standing {
+            Standing::Answer => 2,
+            Standing::Match => 1,
+            Standing::Fallback => 0,
+        };
+        // A Frecency is never negative, so its bits order as the number does.
+        let frecency = u64::from((self.frecency as f32).to_bits() & 0x7fff_ffff) >> (31 - key_bits::FRECENCY);
+        let fields = [
+            (standing, key_bits::STANDING),
+            (self.class as u64, key_bits::CLASS),
+            (u64::from(self.tier), key_bits::TIER),
+            (frecency, key_bits::FRECENCY),
+            (self.fine as u64, key_bits::FINE),
+            (u64::from(!self.by_alias), key_bits::BY_ALIAS),
+            (u64::from(u8::MAX - self.kind), key_bits::KIND),
+            (saturate(u64::from(self.score), key_bits::SCORE), key_bits::SCORE),
+            (
+                (1 << key_bits::LEN) - 1 - saturate(u64::from(self.len), key_bits::LEN),
+                key_bits::LEN,
+            ),
+        ];
+        fields.iter().fold(0, |key, &(value, bits)| (key << bits) | value)
+    }
+
+    /// The order of two Candidates whose [`key`](Self::key) is set: the
+    /// higher key first, and on a tie the source, so the order never depends
+    /// on where they started.
     fn rank(&self, other: &Candidate) -> std::cmp::Ordering {
-        self.standing
-            .cmp(&other.standing)
-            .then_with(|| other.class.cmp(&self.class))
-            .then_with(|| other.tier.cmp(&self.tier))
-            .then_with(|| other.frecency.total_cmp(&self.frecency))
-            .then_with(|| other.fine.cmp(&self.fine))
-            .then_with(|| self.by_alias.cmp(&other.by_alias))
-            .then_with(|| self.kind.cmp(&other.kind))
-            .then_with(|| other.score.cmp(&self.score))
-            .then_with(|| self.len.cmp(&other.len))
-            .then_with(|| self.source.cmp(&other.source))
+        other.key.cmp(&self.key).then_with(|| self.source.cmp(&other.source))
+    }
+}
+
+/// Settles each Candidate's [`Candidate::key`], once everything that ranks
+/// it is known.
+fn key_candidates(candidates: &mut [Candidate]) {
+    for candidate in candidates {
+        candidate.key = candidate.rank_key();
     }
 }
 
 /// Takes the answers out of `candidates`, ranked: they take the top rows,
-/// above the rest and the rows on screen.
+/// above the rest and the rows on screen. Their keys must be set.
 fn take_answers(candidates: &mut Vec<Candidate>) -> Vec<Candidate> {
     let mut answers: Vec<Candidate> = Vec::new();
     candidates.retain(|candidate| {
@@ -1593,3 +1652,6 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
         self.next_deadline().into_iter().chain(hot).min()
     }
 }
+
+#[cfg(test)]
+mod tests;

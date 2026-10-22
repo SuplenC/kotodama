@@ -37,6 +37,7 @@ use super::Source;
 use super::Standing;
 use super::Update;
 use super::alias_id;
+use super::key_candidates;
 use super::take_answers;
 use crate::clock::When;
 use crate::history;
@@ -230,6 +231,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
         let primary = self.learn(&mut session, &mut candidates, indexed, now);
         self.add_fallbacks(&mut session, &mut candidates, fallbacks, now);
 
+        key_candidates(&mut candidates);
         let answers = take_answers(&mut candidates);
 
         let mut kept: Vec<Candidate> = Vec::new();
@@ -415,7 +417,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             let when = self.when(now);
             for fallback in &mut fallbacks {
                 if let Some((extension, item)) = self.item(session, fallback.source) {
-                    (fallback.frecency, fallback.direct) = self.frecency(extension, &item, when);
+                    fallback.picked(self.frecency(extension, &item, when));
                 }
             }
         }
@@ -571,14 +573,14 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
                     candidates[n].frecency = frecency;
                 }
                 if counts != Counts::Shared {
-                    candidates[n].direct = frecency;
+                    candidates[n].direct = frecency as f32;
                 }
             }
         }
         self.frecencies = frecencies;
         for candidate in &mut candidates[indexed..] {
             if let Some((extension, item)) = self.item(session, candidate.source) {
-                (candidate.frecency, candidate.direct) = self.frecency(extension, &item, when);
+                candidate.picked(self.frecency(extension, &item, when));
             }
         }
         for candidate in candidates.iter_mut() {
@@ -672,7 +674,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
                         session.max_score,
                         item.title.chars().count() as u32,
                     );
-                    (candidate.frecency, candidate.direct) = self.frecency(extension, &item, when);
+                    candidate.picked(self.frecency(extension, &item, when));
                     candidates.push(candidate);
                     candidates.len() - 1
                 }
