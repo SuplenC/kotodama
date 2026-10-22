@@ -270,8 +270,8 @@ in
         `half_life_days`: how long a pick takes to count half as much. Unset, 14.
       '';
       liftThreshold = optional lib.types.numbers.positive ''
-        `lift_threshold`: the Frecency that lifts a Result one tier, about a
-        week of daily use. Unset, 5.0.
+        `lift_threshold`: the Frecency worth one tier, about a week of daily
+        use; each further tier takes 1 + this times as much. Unset, 5.0.
       '';
       timeOfDay = optional (lib.types.numbers.between 0 1) ''
         `time_of_day`: how much less picks count at a time of day the Result

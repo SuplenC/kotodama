@@ -38,6 +38,7 @@ mod open_view;
 pub mod paths;
 mod payload;
 mod pick;
+mod points;
 pub mod problem;
 pub mod rank;
 mod reserved;

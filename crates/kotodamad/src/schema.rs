@@ -177,7 +177,7 @@ pub const KEYS: &[Key] = &[
     key(
         "history.lift_threshold",
         Some("5.0"),
-        "The Frecency that lifts a Result one Tier: about a week of daily use.",
+        "The Frecency worth one Tier: about a week of daily use. Each further Tier takes 1 + this times as much.",
     ),
     key(
         "history.time_of_day",

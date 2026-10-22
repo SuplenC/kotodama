@@ -97,6 +97,7 @@ use crate::narrowing::Narrowing;
 use crate::open_view::Opening;
 use crate::paths::Overrides;
 use crate::pick::Pick;
+use crate::points;
 use crate::problem;
 use crate::problem::Problems;
 use crate::rank;
@@ -571,8 +572,11 @@ struct Candidate {
     /// Its place in the order, higher first, as [`Candidate::rank_key`]
     /// works it out once every other field is settled.
     key: u64,
+    /// How well it matches and how much it is used, blended (see
+    /// [`points`]).
+    points: u32,
     /// Its Frecency, shared with every Result of the same Identity.
-    frecency: f64,
+    frecency: f32,
     /// The Frecency of picks of this Result itself, rather than of its
     /// Identity: of the Results of one Identity, the one picked through most
     /// goes first (see [`Daemon::lead_with_direct_picks`]).
@@ -583,11 +587,12 @@ struct Candidate {
     len: u16,
     standing: Standing,
     class: Class,
-    /// How well it matches, as [`Tier::coarse`] gives it, after Frecency
-    /// lifted it.
+    /// The Tier band its points reach (see [`points::band`]), as
+    /// [`Tier::coarse`] numbers them; until they are worked out, its Tier's.
     tier: u8,
-    /// How well it matches, to break a tie: initials beat a word start, and
-    /// an exact title beats an exact keyword.
+    /// How well it matches: the Tier its points start from, and on equal
+    /// points a tie-break: initials beat a word start, and an exact title
+    /// beats an exact keyword.
     fine: Tier,
     /// Named by an Alias rather than by its own title or keyword, which wins
     /// a tie.
@@ -617,10 +622,8 @@ const _: () = assert!(size_of::<Candidate>() <= 48);
 mod key_bits {
     pub const STANDING: u32 = 2;
     pub const CLASS: u32 = 2;
-    pub const TIER: u32 = 3;
-    /// The Frecency's `f32` bits past the sign, less the lowest mantissa
-    /// bits: Frecencies within 2⁻¹⁵ of each other tie here.
-    pub const FRECENCY: u32 = 23;
+    /// The points, up to 16,383 Tiers' worth.
+    pub const POINTS: u32 = 26;
     pub const FINE: u32 = 3;
     pub const BY_ALIAS: u32 = 1;
     pub const KIND: u32 = 8;
@@ -629,7 +632,7 @@ mod key_bits {
     /// The title's length, up to 1,023 characters.
     pub const LEN: u32 = 10;
 
-    const _: () = assert!(STANDING + CLASS + TIER + FRECENCY + FINE + BY_ALIAS + KIND + SCORE + LEN == 64);
+    const _: () = assert!(STANDING + CLASS + POINTS + FINE + BY_ALIAS + KIND + SCORE + LEN == 64);
 }
 
 impl Candidate {
@@ -637,6 +640,7 @@ impl Candidate {
         Candidate {
             source,
             key: 0,
+            points: 0,
             frecency: 0.0,
             direct: 0.0,
             score: u16::try_from(score).unwrap_or(u16::MAX),
@@ -653,15 +657,23 @@ impl Candidate {
     /// Sets its Frecency and that of its direct picks, as
     /// [`Daemon::frecency`] gives them.
     fn picked(&mut self, (frecency, direct): (f64, f64)) {
-        self.frecency = frecency;
+        self.frecency = frecency as f32;
         self.direct = direct as f32;
     }
 
+    /// Works out its points from how well it matches, its Frecency and its
+    /// Extension's `boost`, and the band they reach.
+    fn score(&mut self, lift_threshold: f64, boost: f64) {
+        let habit = points::habit(self.frecency, lift_threshold);
+        self.points = points::points(self.fine, habit, boost);
+        self.tier = points::band(self.points);
+    }
+
     /// Its place in the order as one number, higher first: answers first and
-    /// fallbacks last, then by class, how well it matches, Frecency, its
-    /// Item kind, nucleo's score, and the shorter title. Each key is a bit
-    /// field (`key_bits`) below the one it gives way to, so a sort compares
-    /// one integer per pair.
+    /// fallbacks last, then by class, its points, and on equal points how
+    /// well it matches, its Item kind, nucleo's score, and the shorter title.
+    /// Each key is a bit field (`key_bits`) below the one it gives way to, so
+    /// a sort compares one integer per pair.
     fn rank_key(&self) -> u64 {
         let saturate = |value: u64, bits: u32| value.min((1 << bits) - 1);
         let standing = match self.standing {
@@ -669,13 +681,10 @@ impl Candidate {
             Standing::Match => 1,
             Standing::Fallback => 0,
         };
-        // A Frecency is never negative, so its bits order as the number does.
-        let frecency = u64::from((self.frecency as f32).to_bits() & 0x7fff_ffff) >> (31 - key_bits::FRECENCY);
         let fields = [
             (standing, key_bits::STANDING),
             (self.class as u64, key_bits::CLASS),
-            (u64::from(self.tier), key_bits::TIER),
-            (frecency, key_bits::FRECENCY),
+            (saturate(u64::from(self.points), key_bits::POINTS), key_bits::POINTS),
             (self.fine as u64, key_bits::FINE),
             (u64::from(!self.by_alias), key_bits::BY_ALIAS),
             (u64::from(u8::MAX - self.kind), key_bits::KIND),

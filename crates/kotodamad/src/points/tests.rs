@@ -1,0 +1,105 @@
+use super::*;
+
+const THRESHOLD: f64 = 5.0;
+
+const REAL: [Tier; 6] = [
+    Tier::Scattered,
+    Tier::Inside,
+    Tier::WordStart,
+    Tier::Initials,
+    Tier::Keyword,
+    Tier::Exact,
+];
+
+const BOOSTS: [f64; 7] = [0.01, 0.5, 1.0, 1.5, 2.0, 10.0, 1000.0];
+
+const FRECENCIES: [f32; 9] = [0.0, 1e-30, 0.01, 1.0, 4.99, 5.0, 35.0, 1e4, f32::MAX];
+
+#[test]
+fn with_no_habit_and_no_boost_a_result_has_the_points_of_its_tier() {
+    for tier in REAL {
+        assert_eq!(points(tier, 0, 1.0), u32::from(tier.coarse()) * TIER, "{tier:?}");
+        assert_eq!(band(points(tier, 0, 1.0)), tier.coarse(), "{tier:?}");
+    }
+}
+
+#[test]
+fn any_pick_is_worth_a_point_and_more_picks_more() {
+    assert_eq!(habit(0.0, THRESHOLD), 0);
+    assert!(habit(1e-30, THRESHOLD) >= 1);
+    for pair in FRECENCIES.windows(2) {
+        assert!(habit(pair[0], THRESHOLD) <= habit(pair[1], THRESHOLD), "{pair:?}");
+    }
+}
+
+#[test]
+fn a_frecency_of_the_lift_threshold_is_worth_one_tier_and_each_further_tier_takes_more() {
+    assert!(habit(4.99, THRESHOLD) < TIER);
+    assert_eq!(habit(5.0, THRESHOLD), TIER);
+    // Two Tiers take (1 + 5)² - 1 = 35, three (1 + 5)³ - 1 = 215.
+    assert!(habit(34.9, THRESHOLD) < 2 * TIER);
+    assert!(habit(35.0, THRESHOLD) >= 2 * TIER - 1);
+    assert!(habit(215.0, THRESHOLD) >= 3 * TIER - 1);
+}
+
+#[test]
+fn a_near_miss_stays_below_every_real_match_whatever_its_habit_and_boost() {
+    for frecency in FRECENCIES {
+        for boost in BOOSTS {
+            let near_miss = points(Tier::NearMiss, habit(frecency, THRESHOLD), boost);
+            for tier in REAL {
+                for other in BOOSTS {
+                    assert!(
+                        near_miss < points(tier, 0, other),
+                        "{frecency} {boost} {tier:?} {other}"
+                    );
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn a_match_inside_a_word_or_scattered_never_reaches_an_exact_title() {
+    let exact = points(Tier::Exact, 0, 1.0);
+    for tier in [Tier::Scattered, Tier::Inside] {
+        for frecency in FRECENCIES {
+            for boost in BOOSTS {
+                let points = points(tier, habit(frecency, THRESHOLD), boost);
+                assert!(points < exact, "{tier:?} {frecency} {boost}");
+                assert!(band(points) < Tier::Exact.coarse());
+            }
+        }
+    }
+}
+
+#[test]
+fn a_word_start_reaches_an_exact_title_by_habit_and_never_by_boost_alone() {
+    let exact = points(Tier::Exact, 0, 1.0);
+    for tier in [Tier::WordStart, Tier::Initials] {
+        for boost in BOOSTS {
+            assert!(points(tier, habit(4.99, THRESHOLD), boost) < exact, "{tier:?} {boost}");
+        }
+        assert!(points(tier, habit(5.0, THRESHOLD), 1.0) >= exact, "{tier:?}");
+        assert_eq!(band(points(tier, habit(5.0, THRESHOLD), 1.0)), Tier::Exact.coarse());
+    }
+}
+
+#[test]
+fn habit_climbs_a_scattered_match_a_tier_at_a_time() {
+    let at = |frecency| band(points(Tier::Scattered, habit(frecency, THRESHOLD), 1.0));
+
+    assert_eq!(at(0.0), Tier::Scattered.coarse());
+    assert_eq!(at(5.0), Tier::Inside.coarse());
+    assert_eq!(at(36.0), Tier::WordStart.coarse());
+    assert_eq!(at(1e6), Tier::WordStart.coarse(), "never past a word start");
+}
+
+#[test]
+fn a_boost_orders_matches_of_one_tier_and_more_habit_still_wins_at_one_boost() {
+    let word_start = |frecency, boost| points(Tier::WordStart, habit(frecency, THRESHOLD), boost);
+
+    assert!(word_start(0.0, 1.5) > word_start(0.0, 1.0));
+    assert!(word_start(1.0, 0.5) < word_start(0.0, 1.0));
+    assert!(word_start(2.0, 1.0) > word_start(1.0, 1.0));
+}

@@ -723,6 +723,58 @@ fn heavy_use_lifts_a_match_inside_a_word_only_to_a_word_start() {
     assert_eq!(rows(&mut w, "fire"), ["Firefox", "Fire"]);
 }
 
+/// Habit climbs Tiers as the evidence grows: a week of daily use is worth
+/// one, and each further Tier takes six times as much.
+#[test]
+fn habit_climbs_tiers_as_picks_accumulate() {
+    let mut w = World::new(&["Terminal", "Determinate", "Tuner Remote Monitor"]);
+    assert_eq!(
+        rows(&mut w, "term"),
+        ["Terminal", "Determinate", "Tuner Remote Monitor"],
+        "a word start, a match inside a word, letters scattered"
+    );
+
+    w.daily(7, "tuner", "Tuner Remote Monitor");
+    assert_eq!(
+        rows(&mut w, "term"),
+        ["Terminal", "Tuner Remote Monitor", "Determinate"],
+        "a week of daily use: one Tier"
+    );
+
+    for _ in 0..30 {
+        w.picks(3, "tuner", "Tuner Remote Monitor");
+        w.later(DAY);
+    }
+    assert_eq!(
+        rows(&mut w, "term"),
+        ["Tuner Remote Monitor", "Terminal", "Determinate"],
+        "a month of use three times a day: two Tiers"
+    );
+}
+
+/// However much it is used, a match inside a word or scattered stops
+/// below an exact title.
+#[test]
+fn no_amount_of_use_lifts_a_scattered_match_past_an_exact_title() {
+    let mut w = World::with(
+        vec![app("Term"), app("Terminal"), app("Tuner Remote Monitor")],
+        "[history]\nlift_threshold = 0.1",
+    );
+    w.daily(30, "tuner", "Tuner Remote Monitor");
+    assert_eq!(rows(&mut w, "term"), ["Term", "Tuner Remote Monitor", "Terminal"]);
+}
+
+/// However much it is used, a near miss stays below letters scattered.
+#[test]
+fn no_amount_of_use_lifts_a_near_miss_above_letters_scattered() {
+    let mut w = World::with(
+        vec![app("Steam"), app("Sticky Remote Editor Amp Monitor")],
+        "[history]\nlift_threshold = 0.1",
+    );
+    w.daily(30, "steam", "Steam");
+    assert_eq!(rows(&mut w, "stream"), ["Sticky Remote Editor Amp Monitor", "Steam"]);
+}
+
 // Aliases.
 
 const FF: &str = "[aliases]\nff = { extension = \"apps\", item = \"firefox\" }";
