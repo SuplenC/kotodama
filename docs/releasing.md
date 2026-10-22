@@ -120,4 +120,4 @@ A new protocol major turns away the Extensions built for older ones, unless the 
 
 ## Repository setup
 
-Give `release/**` the rules main has: a pull request with `ci` green for every change, landed with a merge commit. Pushing a new branch with its trimming commit is a creation, not an update, so the rules allow it.
+The `protect release lines` ruleset gives `release/**` the rules main has: `ci` green before a pull request merges, no force-push and no deletion, with admins able to bypass. It doesn't require `ci` when a branch is created, so pushing a new line straight from its tag works, and the trimming commit on top of it needs an admin push.
