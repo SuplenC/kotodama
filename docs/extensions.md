@@ -20,6 +20,8 @@ Three complete examples show more:
 
 A Rust Extension builds on the `kotodama-extension` crate, as the Bundled extensions do. It does the handshake, reads messages on a thread, sends only the Items that changed, and logs `rejected`. It and `kotodama-protocol` are on crates.io, and their `major.minor` is the protocol version they speak: depend on `"1.0"` of both, as `kotodama extension new --lang rust` does.
 
+The crate's `dbus` module is a small D-Bus client for an Extension that calls a system service now and then, as the system Extension calls logind: `Bus::system()` or `Bus::session()`, `call` with a `Call` whose arguments `Marshal` writes, and the answer's `body()`, an `Unmarshal`. It reads every basic type (`bool`, `byte`, `i16` to `u64`, `f64`, `string` for strings and object paths, `signature`), a variant (`variant` gives the value's signature, then the value is read with the reader it names), and arrays and dict entries (`array`, `align_struct`), so `org.freedesktop.DBus.Properties.Get`'s `v` and `GetAll`'s `a{sv}` can be read; `skip` passes over a value whose type is of no interest. Each reader returns `None` on malformed bytes and never panics.
+
 ## Where it lives, and how it runs
 
 An Extension is a directory holding a `manifest.toml` and whatever it runs. The Daemon looks in `$XDG_DATA_DIRS/kotodama/extensions/*/`, which is where a package installs one, and in `~/.config/kotodama/extensions/*/`, where you put your own. An Extension in the second place replaces one of the same name in the first. The user's config can add directories (`[paths] extension_dirs`), switch an Extension off, or override its `command`, `env` and Live query in `[extensions.<name>]`; `kotodama config --schema` lists those keys.

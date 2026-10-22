@@ -18,6 +18,7 @@
   pkg-config,
   libGL,
   makeBinaryWrapper,
+  jq,
   curl,
   curlMinimal,
   runtimeShellPackage,
@@ -261,6 +262,8 @@ let
   # ones (`exts: [ exts.apps exts.emoji ]`; any package with
   # share/kotodama/extensions/<name> will do), as the outputs out, qml and
   # extensions. Its `kotodamad` finds those Extensions and no other Bundled one.
+  # An Extension that needs any of `notAtRunTime` at run time is refused, by
+  # name, whether it is Bundled or not.
   withExtensions =
     select:
     let
@@ -275,8 +278,18 @@ let
           "qml"
           "extensions"
         ];
-        nativeBuildInputs = [ makeBinaryWrapper ];
+        nativeBuildInputs = [
+          makeBinaryWrapper
+          jq
+        ];
         __structuredAttrs = true;
+        # Each chosen Extension's closure, as `closure<i>` in the attributes'
+        # JSON, with its name at index i of `chosenNames`.
+        exportReferencesGraph = lib.listToAttrs (
+          lib.imap0 (i: package: lib.nameValuePair "closure${toString i}" [ package ]) chosen
+        );
+        chosenNames = map lib.getName chosen;
+        inherit notAtRunTime;
         outputChecks = {
           out.disallowedRequisites = notAtRunTime;
           extensions.disallowedRequisites = notAtRunTime;
@@ -298,6 +311,18 @@ let
         };
       }
       ''
+        # Before anything is written. The outputs' checks would refuse such an
+        # Extension too, after the build, naming only the path it brings in.
+        for i in "''${!chosenNames[@]}"; do
+          closure=$(jq -r --arg graph "closure$i" '.[$graph][].path' "$NIX_ATTRS_JSON_FILE")
+          for path in "''${notAtRunTime[@]}"; do
+            if grep -qxF "$path" <<<"$closure"; then
+              echo "refusing the Extension ''${chosenNames[$i]}: it needs $path at run time, as no Extension may (a runpath to GCC's lib output, which holds libstdc++, instead of stdenv.cc.cc.libgcc; a shell; the build-time Qt; the full curl)" >&2
+              exit 1
+            fi
+          done
+        done
+
         mkdir -p $extensions/share/kotodama/extensions
         for package in ${lib.escapeShellArgs chosen}; do
           ln -s "$package"/share/kotodama/extensions/* $extensions/share/kotodama/extensions/
