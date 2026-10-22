@@ -336,7 +336,18 @@ impl Extension {
         let keymap = text.as_deref().map(Keymap::parse).unwrap_or_default();
         codes
             .iter()
-            .map(|&code| (code, keymap.keysym(code, layout).map(str::to_owned)))
+            .map(|&code| {
+                let name = keymap.keysym(code, layout).map(str::to_owned);
+                if name.is_none()
+                    && let Some(text) = &text
+                {
+                    log!(
+                        "the keymap Hyprland hands out ({} bytes) has no key on code:{code} in layout {layout}",
+                        text.len()
+                    );
+                }
+                (code, name)
+            })
             .collect()
     }
 

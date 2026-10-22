@@ -182,7 +182,12 @@ pkgs.testers.runNixOSTest {
         machine.succeed("grep -qP '^view\thyprland\tshortcuts$' /tmp/menu")
         machine.succeed("grep -qP '^SUPER \\+ F1\tShow the keyboard shortcuts$' /tmp/menu")
         # A bind on a keycode shows the key the keyboard's layout gives it.
-        machine.succeed("grep -qP '^SUPER \\+ 1\tGo to workspace one$' /tmp/menu")
+        try:
+            machine.succeed("grep -qP '^SUPER \\+ 1\tGo to workspace one$' /tmp/menu")
+        finally:
+            print(machine.execute("cat /tmp/menu")[1])
+            print(machine.execute(as_alice("hyprctl -i 0 devices -j"))[1])
+            print(machine.execute("journalctl --no-pager _UID=1000 | grep -i -e hyprland -e keymap")[1])
         machine.fail("grep -qP '^SUPER \\+ F9\t' /tmp/menu")
 
         # Retried if Hyprland is slow to answer; a second copy of the bind
