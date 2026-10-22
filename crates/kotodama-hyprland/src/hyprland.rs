@@ -5,7 +5,8 @@
 //! # Owns
 //!
 //! - Finding the running Hyprland instance, and waiting for one.
-//! - Requests and dispatches on `.socket.sock`.
+//! - Requests and dispatches on `.socket.sock`, and which language its dispatches are written in.
+//! - Where its Wayland socket is.
 //! - Reading `.socket2.sock` line by line.
 //!
 //! # Not here
@@ -24,6 +25,8 @@ use std::path::Path;
 use std::path::PathBuf;
 use std::time::Duration;
 use std::time::SystemTime;
+
+use serde::Deserialize;
 
 use crate::events::Change;
 
@@ -56,6 +59,37 @@ impl Error {
     fn refused(answer: &str) -> Self {
         Error::Refused {
             answer: answer.to_owned(),
+        }
+    }
+}
+
+/// The language Hyprland's config is written in, which is also the language
+/// of its dispatches. Hyprland picks it once, when it starts, from the
+/// config file's extension, so it holds for the instance's whole life.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Language {
+    /// `hyprland.conf`: a dispatch is a dispatcher and its argument, as
+    /// `focuswindow address:0x…`.
+    #[default]
+    Hyprlang,
+    /// `hyprland.lua`, from Hyprland 0.56: a dispatch is a Lua expression
+    /// Hyprland runs as `hl.dispatch(…)`, as `hl.dsp.focus({ window = … })`.
+    Lua,
+}
+
+impl Language {
+    /// The language `j/status` names in its `configProvider`. Hyprlang for
+    /// anything else, which is what a Hyprland older than 0.56 answers: it
+    /// has no `status` request, and only hyprlang.
+    pub fn from_status(answer: &str) -> Language {
+        #[derive(Deserialize)]
+        struct Status {
+            #[serde(rename = "configProvider")]
+            config_provider: String,
+        }
+        match serde_json::from_str::<Status>(answer) {
+            Ok(status) if status.config_provider == "lua" => Language::Lua,
+            _ => Language::Hyprlang,
         }
     }
 }
@@ -163,6 +197,25 @@ impl Hyprland {
         }
     }
 
+    /// The language of this instance's config and dispatches, asked once
+    /// with `j/status`; hyprlang when Hyprland doesn't answer.
+    pub fn language(&self) -> Language {
+        self.request("j/status")
+            .map(|answer| Language::from_status(&answer))
+            .unwrap_or_default()
+    }
+
+    /// The Wayland socket this instance serves, from the `hyprland.lock` it
+    /// writes in its directory: its pid, then the socket's name in
+    /// `$XDG_RUNTIME_DIR`, one per line. `None` without the file.
+    pub fn wayland_socket(&self) -> Option<PathBuf> {
+        let lock = std::fs::read_to_string(self.dir.join("hyprland.lock")).ok()?;
+        let name = lock.lines().nth(1).map(str::trim).filter(|name| !name.is_empty())?;
+        // The instance's directory is `$XDG_RUNTIME_DIR/hypr/<signature>`.
+        let runtime = self.dir.parent()?.parent()?;
+        Some(runtime.join(name))
+    }
+
     /// Connects to the event socket.
     ///
     /// # Errors
@@ -201,3 +254,6 @@ impl Events {
         }
     }
 }
+
+#[cfg(test)]
+mod tests;

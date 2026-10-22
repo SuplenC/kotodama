@@ -3,7 +3,11 @@
 //! socket, sending only the windows that changed. Its binds with a
 //! description are Items that run the bind; a `Keyboard Shortcuts` Item opens
 //! a View of every bind, grouped by modifier, read afresh each time it opens,
-//! so `kotodama open --view hyprland/shortcuts` opens on it. Outside Hyprland
+//! so `kotodama open --view hyprland/shortcuts` opens on it. A bind on a
+//! keycode is shown by its key's name under the current layout, from the
+//! keymap Hyprland hands Wayland clients, fetched only when such a bind is
+//! read and its name isn't known yet. Under Hyprland's Lua config, binds and
+//! window Actions dispatch Lua. Outside Hyprland
 //! the Extension sends nothing and waits, at no cost, for a Hyprland to start
 //! (in `$XDG_RUNTIME_DIR/hypr/`, see `Hyprland::wait`) or the Daemon to hang
 //! up; when Hyprland restarts it follows the new instance.
@@ -21,6 +25,7 @@
 #![forbid(unsafe_code)]
 
 use std::collections::BTreeMap;
+use std::collections::HashMap;
 #[cfg(target_os = "linux")]
 use std::io;
 use std::process::ExitCode;
@@ -45,6 +50,9 @@ use kotodama_hyprland::binds::RUN;
 use kotodama_hyprland::binds::SHORTCUTS;
 use kotodama_hyprland::events::Change;
 use kotodama_hyprland::hyprland::Hyprland;
+use kotodama_hyprland::hyprland::Language;
+use kotodama_hyprland::keymap;
+use kotodama_hyprland::keymap::Keymap;
 use kotodama_hyprland::windows;
 use kotodama_hyprland::windows::WORKSPACE;
 use kotodama_hyprland::windows::Windows;
@@ -85,10 +93,12 @@ fn run() -> Result<(), Error> {
     let mut extension = Extension {
         writer,
         hyprland: None,
+        language: Language::default(),
         windows: Windows::default(),
         sent_windows: SentItems::default(),
         windows_changed: false,
         binds: Vec::new(),
+        key_names: HashMap::new(),
         sent_binds: SentItems::default(),
         view_open: false,
         status: SentStatus::default(),
@@ -154,11 +164,18 @@ struct Extension {
     writer: Writer,
     /// `None` outside Hyprland, and once it exits.
     hyprland: Option<Hyprland>,
+    /// The language of the running Hyprland's dispatches, asked once when it
+    /// is found: Hyprland can't change it without restarting.
+    language: Language,
     windows: Windows,
     sent_windows: SentItems,
     /// Whether a window changed since the windows were last sent.
     windows_changed: bool,
     binds: Vec<Bind>,
+    /// The names of the keys the binds on a keycode use, by keycode, `None`
+    /// for one the keymap doesn't name. Forgotten when the config or a
+    /// layout changes, and fetched again when the binds are next read.
+    key_names: HashMap<u32, Option<String>>,
     /// The Shortcuts Item and the binds' Items.
     sent_binds: SentItems,
     /// Whether the Shortcuts View is open, so a config reload updates it.
@@ -187,7 +204,9 @@ impl Extension {
             }
             Event::Message(_) => {}
             Event::Own(Own::Up(hyprland)) => {
+                self.language = hyprland.language();
                 self.hyprland = Some(hyprland);
+                self.key_names.clear();
                 self.read_binds();
                 self.publish_binds()?;
                 if let Some(windows) = self.read("j/clients", Windows::from_clients) {
@@ -197,12 +216,17 @@ impl Extension {
                 self.status.usable(&mut self.writer)?;
             }
             Event::Own(Own::Change(Change::ConfigReloaded)) => {
+                self.key_names.clear();
                 self.read_binds();
                 self.publish_binds()?;
                 if self.view_open {
                     self.writer.send(&FromExtension::UpdateView(binds::view(&self.binds)))?;
                 }
             }
+            // Named again when the binds are next read, not on the event: a virtual
+            // keyboard, as the Daemon types with, sends this too, and while
+            // it was last used its keymap is the one Hyprland hands out.
+            Event::Own(Own::Change(Change::LayoutChanged)) => self.key_names.clear(),
             Event::Own(Own::Change(change)) => {
                 self.windows_changed |= self.windows.apply(&change);
             }
@@ -211,6 +235,7 @@ impl Extension {
                 self.hyprland = None;
                 self.windows = Windows::default();
                 self.binds = Vec::new();
+                self.key_names.clear();
                 self.publish_binds()?;
                 self.windows_changed = true;
                 self.status.unusable(&mut self.writer, NOT_RUNNING)?;
@@ -225,7 +250,8 @@ impl Extension {
         match &item.kind {
             ItemKind::Window { address } => {
                 let workspace = arguments.get(WORKSPACE).map(String::as_str);
-                let dispatch = windows::dispatch(action, address, workspace).map_err(|err| err.to_string())?;
+                let dispatch =
+                    windows::dispatch(action, address, workspace, self.language).map_err(|err| err.to_string())?;
                 hyprland.dispatch(&dispatch).map_err(|err| Chain(&err).to_string())?;
                 Ok(Outcome::Close)
             }
@@ -234,9 +260,8 @@ impl Extension {
                 if bind.mouse {
                     return Err("A mouse bind only runs with the mouse".into());
                 }
-                hyprland
-                    .dispatch(&bind.dispatch())
-                    .map_err(|err| Chain(&err).to_string())?;
+                let dispatch = bind.dispatch().ok_or("Hyprland gives this shortcut nothing to run")?;
+                hyprland.dispatch(&dispatch).map_err(|err| Chain(&err).to_string())?;
                 Ok(Outcome::Close)
             }
             _ if item.id == SHORTCUTS && action == OPEN => {
@@ -268,11 +293,68 @@ impl Extension {
             .ok()
     }
 
-    /// Reads the binds again; keeps the last ones if they can't be read.
+    /// Reads the binds again, and names the keys of those on a keycode;
+    /// keeps the last ones if they can't be read.
     fn read_binds(&mut self) {
-        if let Some(binds) = self.read("j/binds", binds::parse) {
-            self.binds = binds;
+        let Some(mut binds) = self.read("j/binds", binds::parse) else {
+            return;
+        };
+        if binds.iter().any(Bind::lacks_keycode)
+            && let Some(hyprland) = &self.hyprland
+        {
+            match hyprland.request("/binds") {
+                Ok(listing) => binds::keycodes_from_listing(&mut binds, &listing),
+                Err(err) => log!("binds: {err}"),
+            }
         }
+        let codes: Vec<u32> = binds
+            .iter()
+            .filter(|bind| bind.on_keycode())
+            .map(|bind| bind.keycode)
+            .collect();
+        if codes.iter().any(|code| !self.key_names.contains_key(code)) {
+            self.key_names = self.name_keycodes(&codes);
+        }
+        binds::name_keys(&mut binds, |code| self.key_names.get(&code).cloned().flatten());
+        self.binds = binds;
+    }
+
+    /// The names of the keys `codes` under the main keyboard's current
+    /// layout, from the keymap Hyprland hands Wayland clients; each `None`
+    /// without a keymap.
+    fn name_keycodes(&self, codes: &[u32]) -> HashMap<u32, Option<String>> {
+        let layout = self
+            .hyprland
+            .as_ref()
+            .and_then(|hyprland| hyprland.request("j/devices").ok())
+            .and_then(|devices| keymap::active_layout(&devices))
+            .unwrap_or(0);
+        let text = self
+            .keymap()
+            .map_err(|err| log!("naming the keys of the binds on a keycode: {err}"))
+            .ok();
+        let keymap = text.as_deref().map(Keymap::parse).unwrap_or_default();
+        codes
+            .iter()
+            .map(|&code| (code, keymap.keysym(code, layout).map(str::to_owned)))
+            .collect()
+    }
+
+    /// The keymap Hyprland hands Wayland clients.
+    #[cfg(target_os = "linux")]
+    fn keymap(&self) -> Result<String, String> {
+        let socket = self
+            .hyprland
+            .as_ref()
+            .and_then(Hyprland::wayland_socket)
+            .ok_or("Hyprland names no Wayland socket")?;
+        kotodama_hyprland::keyboard::keymap(&socket).map_err(|err| Chain(&err).to_string())
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    #[expect(clippy::unused_self, reason = "the Linux one reads the running Hyprland's socket")]
+    fn keymap(&self) -> Result<String, String> {
+        Err("the keymap is read on Linux only".to_owned())
     }
 
     /// Sends the Shortcuts Item and the binds' Items that changed: all gone

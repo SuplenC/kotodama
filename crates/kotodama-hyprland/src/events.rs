@@ -11,7 +11,7 @@
 //! - Reading the lines from the socket: [`crate::hyprland::Events`].
 //! - Applying a change to the windows: [`crate::windows::Windows::apply`].
 
-/// An event that changes a window Item, or the binds.
+/// An event that changes a window Item, or the binds and their keys.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Change {
     /// A window was mapped. `address` is as `j/clients` writes it, `0x…`.
@@ -34,6 +34,9 @@ pub enum Change {
     },
     /// The config was read again, so the binds may have changed.
     ConfigReloaded,
+    /// A keyboard's layout changed, or a keyboard got a keymap, so a key
+    /// may have another name.
+    LayoutChanged,
 }
 
 impl Change {
@@ -75,6 +78,7 @@ impl Change {
                 }
             }
             "configreloaded" => Change::ConfigReloaded,
+            "activelayout" => Change::LayoutChanged,
             _ => return None,
         })
     }

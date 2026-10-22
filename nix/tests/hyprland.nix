@@ -79,6 +79,7 @@ pkgs.testers.runNixOSTest {
           disable_splash_rendering = true
         }
         bindd = SUPER, F1, Show the keyboard shortcuts, exec, kotodama open --view hyprland/shortcuts
+        bindd = SUPER, code:10, Go to workspace one, workspace, 1
       '';
     };
   };
@@ -180,6 +181,8 @@ pkgs.testers.runNixOSTest {
         machine.wait_until_succeeds("grep -qP '^open\thyprland/shortcuts$' /tmp/menu")
         machine.succeed("grep -qP '^view\thyprland\tshortcuts$' /tmp/menu")
         machine.succeed("grep -qP '^SUPER \\+ F1\tShow the keyboard shortcuts$' /tmp/menu")
+        # A bind on a keycode shows the key the keyboard's layout gives it.
+        machine.succeed("grep -qP '^SUPER \\+ 1\tGo to workspace one$' /tmp/menu")
         machine.fail("grep -qP '^SUPER \\+ F9\t' /tmp/menu")
 
         # Retried if Hyprland is slow to answer; a second copy of the bind

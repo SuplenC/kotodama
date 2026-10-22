@@ -217,6 +217,8 @@ Some need extras: the shell example Extension for the Views checks (link `exampl
 - [ ] `SUPER+F1` → `kotodama open --view hyprland/shortcuts` opens the View in the first frame.
 - [ ] A bind in a submap.
 - [ ] "Move to Workspace" with a named workspace.
+- [ ] Under a Lua config (`hyprland.lua`, Hyprland 0.56 and later): Focus, Close, Move to Workspace and Toggle Floating act on the window, and a bind runs from the menu.
+- [ ] A bind on a keycode (`code:10`) shows its key under the current layout (`1` on us); switch the layout and open the Shortcuts View again: it shows that layout's key.
 - [ ] The feel of Views and the Action panel.
 
 ### System
