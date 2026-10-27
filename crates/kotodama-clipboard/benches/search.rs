@@ -15,6 +15,7 @@ use std::sync::mpsc;
 use std::sync::mpsc::Receiver;
 use std::time::Duration;
 use std::time::Instant;
+use std::time::SystemTime;
 
 use criterion::Criterion;
 use criterion::criterion_group;
@@ -121,6 +122,11 @@ fn items(dir: &Path) -> Vec<Item> {
         seed ^= seed << 5;
         seed as usize
     };
+    // Stamped from now, not a fixed date: the extension drops entries past
+    // their maximum age when it starts, so a fixed date expires the whole
+    // history a week later and the bench finds nothing to search.
+    let now = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_secs();
+    let first = now - ENTRIES as u64;
     let mut history = History::open(dir);
     for n in 0..ENTRIES {
         let words = 2 + next() % 60;
@@ -138,7 +144,7 @@ fn items(dir: &Path) -> Vec<Item> {
         history
             .record(
                 Copied::read("text/plain;charset=utf-8", text.into_bytes()).unwrap(),
-                1_792_368_000 + n as u64,
+                first + n as u64,
                 &Limits::default(),
             )
             .unwrap();
