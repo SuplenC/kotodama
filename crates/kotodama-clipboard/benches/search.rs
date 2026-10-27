@@ -122,9 +122,9 @@ fn items(dir: &Path) -> Vec<Item> {
         seed ^= seed << 5;
         seed as usize
     };
-    // Stamped from now, not a fixed date: the extension drops entries past
-    // their maximum age when it starts, so a fixed date expires the whole
-    // history a week later and the bench finds nothing to search.
+    // Stamped from the current time, not a fixed date: the extension drops
+    // entries past their maximum age when it starts, so a fixed date expires
+    // the whole history a week later and the bench finds nothing to search.
     let now = SystemTime::now()
         .duration_since(SystemTime::UNIX_EPOCH)
         .unwrap()
