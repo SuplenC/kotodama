@@ -7,6 +7,12 @@
 //! replaced by a rename, is watched again once it is back. Only the directories asked for
 //! are watched: each [`Watcher::watch`] call replaces the last.
 //!
+//! Only what changes a directory counts: opening, reading or closing a file or directory
+//! doesn't (writing to one does), so an idle watcher sleeps however often others read what it
+//! watches, and acting on a change may read it without being woken again. `matters` never sees
+//! an `Access` event. A write through a shared memory mapping goes unseen: the kernel reports
+//! none for it, only the close after it, which counts as an access.
+//!
 //! A watch follows the symlinks on the way to its directory once, when it is
 //! made. A NixOS or home-manager switch doesn't change the directories a
 //! profile holds: it replaces the profile's symlink (`/run/current-system`,
@@ -41,8 +47,10 @@ use std::thread;
 use std::time::Duration;
 
 pub use notify;
+use notify::Config;
 pub use notify::Event;
 pub use notify::EventKind;
+use notify::EventKindMask;
 use notify::RecommendedWatcher;
 pub use notify::RecursiveMode;
 use notify::Watcher as _;
@@ -242,7 +250,7 @@ impl Watcher {
     /// appearing, starts a wait; once nothing more happened for `settle`,
     /// the directories asked for are watched again and `settled` runs, on a
     /// thread of the watcher's own called `name`. `matters` runs for every
-    /// change, on `notify`'s thread, so it should be quick.
+    /// change, never a read, on `notify`'s thread, so it should be quick.
     ///
     /// # Errors
     ///
@@ -301,10 +309,17 @@ impl Watcher {
     ) -> notify::Result<Self> {
         let watched = Arc::new(Mutex::new(Watched::default()));
         let handler_watched = Arc::clone(&watched);
-        let notify = notify::recommended_watcher(move |event: notify::Result<Event>| {
+        let handler = move |event: notify::Result<Event>| {
             let Ok(event) = event else {
                 return;
             };
+            // HAZARD: a read is never a change. Acting on one feeds back on itself: `settled`
+            // reads what changed, the read is an event, and the watcher wakes for ever. The
+            // kernel's watch leaves reads out where it can; a platform that reports them anyway
+            // has them dropped here.
+            if event.kind.is_access() {
+                return;
+            }
             let mut watched = lock(&handler_watched);
             let matters = watched.appeared(&event) || matters(&event, &watched);
             // A directory watched going, or a link to one replaced, is acted
@@ -314,7 +329,8 @@ impl Watcher {
             if matters || gone {
                 touched();
             }
-        })?;
+        };
+        let notify = RecommendedWatcher::new(handler, Config::default().with_event_kinds(EventKindMask::CORE))?;
         Ok(Watcher(Arc::new(Inner {
             notify: Mutex::new(notify),
             mode,
