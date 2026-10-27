@@ -315,7 +315,7 @@ impl From<Kept> for Picks {
             weekends: kept.weekends,
         };
         if unknown(&picks.weekdays) && unknown(&picks.weekends) {
-            // Picks kept before the kinds of day were count in full on
+            // Picks kept before the kinds of day were learned count in full on
             // either, as picks made at the same rate every day of the week
             // do: five parts in seven on weekdays, two on weekends. Scaled
             // by 5 and 2 rather than divided by 7, so the rates are equal
