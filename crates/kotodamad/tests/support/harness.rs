@@ -18,6 +18,7 @@ use std::time::Instant;
 use kotodama_protocol::*;
 use kotodamad::clock::Clock;
 use kotodamad::clock::DAY_SECS;
+use kotodamad::clock::When;
 use kotodamad::daemon::Daemon;
 use kotodamad::daemon::Desktop;
 use kotodamad::daemon::Ended;
@@ -229,6 +230,15 @@ impl Harness {
         let time_of_day = (START + self.elapsed().as_secs()) % DAY_SECS;
         let wait = (hour * 3600 + DAY_SECS - time_of_day) % DAY_SECS;
         self.advance(Duration::from_secs(if wait == 0 { DAY_SECS } else { wait }));
+    }
+
+    /// Waits for the next `hour` o'clock on the day of the week `day`, 0 for
+    /// Monday to 6 for Sunday, in UTC.
+    pub fn advance_to_on(&mut self, day: u8, hour: u64) {
+        self.advance_to(hour);
+        while When::utc(START + self.elapsed().as_secs()).day_of_week != day {
+            self.advance(Duration::from_secs(DAY_SECS));
+        }
     }
 
     /// How long the Daemon has run.

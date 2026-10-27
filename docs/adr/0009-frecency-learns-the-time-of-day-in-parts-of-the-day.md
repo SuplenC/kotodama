@@ -1,6 +1,6 @@
 # 9. Frecency learns the time of day in parts of the day, and never counts more than the picks
 
-Status: accepted (2026-10-19)
+Status: accepted (2026-10-19); amended by ADR 0033 (Frecency learns weekdays from weekends, beside the time of day)
 
 Something used every morning should rank higher in the morning, and the Empty query should show what is used at this time of day. Keeping every pick's time would grow the History without bound. Instead, each Result keeps how its picks fall across eight three-hour parts of the day, next to its decayed number of picks: eight small integers, each part's share of the picks out of 10,000. They decay with the picks, so they need no time of their own, and they are fine enough that one more pick still moves them at hundreds of picks a day. A pick counts towards the two parts whose middles it falls between, by how near it is to each. A time of day reads the parts the same way, so a habit at 11:50 still counts at 12:10. The time of day is local, read from the system's clock and time zone at each pick and query, so time spent suspended and daylight saving time both count.
 

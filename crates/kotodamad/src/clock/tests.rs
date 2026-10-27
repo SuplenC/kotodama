@@ -11,6 +11,33 @@ fn the_time_of_day_is_local() {
     assert_eq!(clock.when(Duration::from_secs(60)).time_of_day, 23 * 3600 + 60);
 }
 
+/// A Monday, 2026-10-19, at `hour` o'clock UTC.
+fn monday(hour: u64) -> u64 {
+    1_792_368_000 + hour * 3600
+}
+
+#[test]
+fn the_day_of_the_week_is_local() {
+    assert_eq!(When::utc(monday(12)).day_of_week, 0);
+    let clock = Clock::new(Some(monday(23)), |_| 2 * 3600);
+    assert_eq!(clock.when(Duration::ZERO).day_of_week, 1, "Tuesday already");
+    let clock = Clock::new(Some(monday(1)), |_| -2 * 3600);
+    assert_eq!(clock.when(Duration::ZERO).day_of_week, 6, "still Sunday");
+}
+
+#[test]
+fn a_moment_moved_by_some_seconds_keeps_its_time_zone() {
+    let clock = Clock::new(Some(monday(1)), |_| 2 * 3600);
+    let three = clock.when(Duration::ZERO);
+    let earlier = three.plus(-4 * 3600);
+    assert_eq!(earlier.at, monday(1) - 4 * 3600);
+    assert_eq!(earlier.time_of_day, 23 * 3600);
+    assert_eq!(earlier.day_of_week, 6);
+    let later = three.plus(7 * DAY_SECS as i64 - 3 * 3600);
+    assert_eq!(later.time_of_day, 0);
+    assert_eq!(later.day_of_week, 0);
+}
+
 #[test]
 fn the_system_clock_is_read_each_time() {
     let clock = Clock::system();

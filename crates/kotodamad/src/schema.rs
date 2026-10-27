@@ -192,6 +192,11 @@ pub const KEYS: &[Key] = &[
         "How much less a pick counts at a time of day it is seldom made: 0 to 1.",
     ),
     key(
+        "history.day_of_week",
+        Some("0.3"),
+        "How much less a pick counts on a weekday or a weekend it is seldom made on: 0 to 1.",
+    ),
+    key(
         "history.usage_log",
         Some("false"),
         "Whether queries and picks go in the Usage log, to tune ranking from real use.",

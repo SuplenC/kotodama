@@ -101,11 +101,7 @@ impl Setup {
         let start = START - 30 * DAY_SECS;
         for n in 0..2000u64 {
             let at = start + n * 30 * DAY_SECS / 2000;
-            let when = When {
-                at,
-                time_of_day: (at % DAY_SECS) as u32,
-            };
-            history.touch("apps", &format!("item-{}", n * 5), when);
+            history.touch("apps", &format!("item-{}", n * 5), When::utc(at));
         }
         let mut setup = Self::with(history, corpus::items());
         setup.plan();

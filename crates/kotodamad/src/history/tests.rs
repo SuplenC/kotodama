@@ -2,12 +2,28 @@ use super::*;
 
 const HOUR: u32 = 3600;
 
-/// `hour` seconds into day `day`, in UTC.
+/// `hour` seconds into day `day`, in UTC. Day 0 is a Monday.
 fn when(day: u64, hour: u32) -> When {
-    When {
-        at: 1_792_368_000 + day * DAY_SECS + u64::from(hour),
-        time_of_day: hour,
-    }
+    When::utc(1_792_368_000 + day * DAY_SECS + u64::from(hour))
+}
+
+/// `hour` seconds into the day of the week `day` (0 for Monday) of week
+/// `week`, in UTC.
+fn on(week: u64, day: u64, hour: u32) -> When {
+    when(week * 7 + day, hour)
+}
+
+const MONDAY: u64 = 0;
+const WEDNESDAY: u64 = 2;
+const FRIDAY: u64 = 4;
+const SATURDAY: u64 = 5;
+const SUNDAY: u64 = 6;
+
+#[test]
+fn the_days_of_the_week_fall_where_the_helpers_say() {
+    assert_eq!(when(0, 0).day_of_week, 0, "a Monday");
+    assert_eq!(on(0, SUNDAY, 0).day_of_week, 6);
+    assert_eq!(on(3, SATURDAY, 0).day_of_week, 5);
 }
 
 #[test]
@@ -116,20 +132,19 @@ fn decayed_together_picks_count_as_each_on_its_own() {
     // Also before some of the picks: a clock set back.
     for at in [when(30, 3 * HOUR), when(60, 9 * HOUR), when(400, 17 * HOUR)] {
         frecent.habits(at, &mut habits);
-        frecent.frecency(at, settings.time_of_day, &mut frecency);
+        frecent.frecency(at, &settings, &mut frecency);
         for (n, picks) in picks.iter().enumerate() {
             let alone = picks.habit(at, settings.half_life_secs);
             let close = |a: f64, b: f64| (a - b).abs() <= 1e-12 * b.abs().max(1.0);
             assert!(close(habits[n].overall, alone.overall), "{n}");
             assert!(close(habits[n].near_now, alone.near_now), "{n}");
             assert!(close(frecency[n], picks.frecency(at, &settings)), "{n}");
-            assert_eq!(frecent.picks(n), *picks);
         }
     }
 }
 
 #[test]
-fn a_result_takes_about_a_hundred_bytes_however_often_it_is_picked() {
+fn a_result_takes_under_two_hundred_bytes_however_often_it_is_picked() {
     let mut history = History::default();
     for day in 0..100 {
         for hour in 0..24 {
@@ -139,7 +154,7 @@ fn a_result_takes_about_a_hundred_bytes_however_often_it_is_picked() {
     let json = serde_json::to_string(&history).unwrap();
     let entry = json.find("\"firefox\"").map(|at| &json[at..]).unwrap();
     let entry = &entry[..=entry.find('}').unwrap()];
-    assert!(entry.len() <= 110, "{entry}");
+    assert!(entry.len() <= 170, "{entry}");
 }
 
 #[test]
@@ -151,15 +166,143 @@ fn picks_kept_before_times_of_day_were_count_in_full_at_any_time() {
 }
 
 #[test]
+fn picks_kept_before_days_of_the_week_were_count_in_full_on_either_kind_of_day() {
+    let history: History = serde_json::from_str(
+        r#"{"picks":{"apps":{"firefox":{"score":5.0,"at":1792368000,"parts":[0,0,0,5000,5000,0,0,0]}}}}"#,
+    )
+    .unwrap();
+    assert_eq!(counts(&history, "firefox", on(0, MONDAY, 9 * HOUR)), 1.0);
+    assert_eq!(counts(&history, "firefox", on(0, SATURDAY, 9 * HOUR)), 1.0);
+    assert_eq!(
+        counts(&history, "firefox", on(0, SATURDAY, 21 * HOUR)),
+        0.5,
+        "the time of day still counts"
+    );
+
+    let json = serde_json::to_string(&history).unwrap();
+    let reloaded: History = serde_json::from_str(&json).unwrap();
+    assert_eq!(reloaded.picks("apps", "firefox"), history.picks("apps", "firefox"));
+}
+
+#[test]
+fn picks_count_in_full_on_the_kind_of_day_they_are_made_and_less_on_the_other() {
+    let mut history = History::default();
+    for week in 0..3 {
+        for day in MONDAY..=FRIDAY {
+            history.touch("apps", "mail", on(week, day, 9 * HOUR));
+        }
+        for day in [SATURDAY, SUNDAY] {
+            history.touch("apps", "games", on(week, day, 9 * HOUR));
+        }
+    }
+    let less = 1.0 - history.settings().day_of_week;
+    assert!(less < 1.0, "the default counts the day of the week");
+    assert_eq!(counts(&history, "mail", on(3, WEDNESDAY, 9 * HOUR)), 1.0);
+    assert_eq!(counts(&history, "mail", on(3, SATURDAY, 9 * HOUR)), less);
+    assert_eq!(counts(&history, "games", on(3, SATURDAY, 9 * HOUR)), 1.0);
+    assert_eq!(counts(&history, "games", on(3, WEDNESDAY, 9 * HOUR)), less);
+}
+
+#[test]
+fn a_result_used_daily_counts_in_full_on_both_kinds_of_day() {
+    let mut history = History::default();
+    for week in 0..3 {
+        for day in MONDAY..=SUNDAY {
+            history.touch("apps", "browser", on(week, day, 9 * HOUR));
+        }
+    }
+    assert_eq!(counts(&history, "browser", on(3, WEDNESDAY, 9 * HOUR)), 1.0);
+    assert_eq!(counts(&history, "browser", on(3, SATURDAY, 9 * HOUR)), 1.0);
+}
+
+#[test]
+fn picks_fade_from_weekdays_into_weekends_across_midnight() {
+    let mut history = History::default();
+    for week in 0..3 {
+        history.touch("apps", "early", on(week, FRIDAY, 21 * HOUR));
+        history.touch("apps", "late", on(week, FRIDAY, 23 * HOUR));
+        history.touch("apps", "night", on(week, SATURDAY, HOUR));
+    }
+    let less = 1.0 - history.settings().day_of_week;
+    let close = |a: f64, b: f64| (a - b).abs() <= 1e-9;
+    let early = counts(&history, "early", on(3, SATURDAY, 21 * HOUR));
+    assert!(close(early, less), "a weekday pick: {early}");
+    let late = counts(&history, "late", on(3, SATURDAY, 23 * HOUR));
+    assert!(late > less + 0.01 && late < 0.99, "partly a weekend pick: {late}");
+    assert_eq!(
+        counts(&history, "late", on(3, WEDNESDAY, 23 * HOUR)),
+        1.0,
+        "mostly a weekday pick"
+    );
+    let night = counts(&history, "night", on(3, WEDNESDAY, HOUR));
+    assert!(night > less + 0.01 && night < 0.99, "partly a weekday pick: {night}");
+    assert_eq!(
+        counts(&history, "night", on(3, SATURDAY, 2 * HOUR)),
+        1.0,
+        "mostly a weekend pick"
+    );
+}
+
+#[test]
+fn the_empty_query_counts_picks_near_now_on_this_kind_of_day() {
+    let mut history = History::default();
+    for week in 0..3 {
+        for day in MONDAY..=FRIDAY {
+            history.touch("apps", "mail", on(week, day, 9 * HOUR));
+        }
+    }
+    let half_life = history.settings().half_life_secs;
+    let picks = history.picks("apps", "mail").unwrap();
+    let weekday = picks.habit(on(3, WEDNESDAY, 9 * HOUR), half_life);
+    let weekend = picks.habit(on(3, SATURDAY, 9 * HOUR), half_life);
+    assert_eq!(weekday.near_now, weekday.overall);
+    assert_eq!(weekend.near_now, 0.0);
+    assert!(weekend.overall > 0.0);
+}
+
+#[test]
+fn undoing_a_pick_on_either_kind_of_day_takes_off_that_pick_alone() {
+    let mut history = History::default();
+    for week in 0..3 {
+        history.touch("apps", "mail", on(week, MONDAY, 9 * HOUR));
+        history.touch("apps", "mail", on(week, SATURDAY, 9 * HOUR));
+    }
+    let mut second_only = history.clone();
+    let mut withdrawn = history;
+    let first_weekday = withdrawn.touch("apps", "mail", on(3, MONDAY, 9 * HOUR));
+    withdrawn.touch("apps", "mail", on(3, MONDAY, 10 * HOUR));
+    let first_weekend = withdrawn.touch("apps", "mail", on(3, SATURDAY, 9 * HOUR));
+    withdrawn.touch("apps", "mail", on(3, SATURDAY, 10 * HOUR));
+    withdrawn.undo(first_weekday);
+    withdrawn.undo(first_weekend);
+    second_only.touch("apps", "mail", on(3, MONDAY, 10 * HOUR));
+    second_only.touch("apps", "mail", on(3, SATURDAY, 10 * HOUR));
+
+    let close = |a: f64, b: f64| (a - b).abs() <= 1e-3 * b.abs().max(1.0);
+    for at in [
+        on(4, MONDAY, 9 * HOUR),
+        on(4, SATURDAY, 9 * HOUR),
+        on(4, FRIDAY, 23 * HOUR),
+    ] {
+        let (got, want) = (
+            withdrawn.frecency("apps", "mail", at),
+            second_only.frecency("apps", "mail", at),
+        );
+        assert!(close(got, want), "at {at:?}: {got} for {want}");
+    }
+}
+
+#[test]
 fn picks_count_in_full_at_the_time_of_day_they_are_made_and_less_away_from_it() {
     let mut history = History::default();
     for day in 0..5 {
         history.touch("apps", "mail", when(day, 7 * HOUR));
     }
-    assert_eq!(counts(&history, "mail", when(5, 7 * HOUR)), 1.0);
-    let near = counts(&history, "mail", when(5, 9 * HOUR));
+    // Read on the Monday after, a weekday like the picks' days.
+    assert_eq!(counts(&history, "mail", when(7, 7 * HOUR)), 1.0);
+    let near = counts(&history, "mail", when(7, 9 * HOUR));
     assert!(near > 0.8, "two hours later: {near}");
-    assert_eq!(counts(&history, "mail", when(5, 19 * HOUR)), 0.5, "away");
+    assert_eq!(counts(&history, "mail", when(7, 19 * HOUR)), 0.5, "away");
 }
 
 #[test]
@@ -169,8 +312,9 @@ fn habits_four_hours_apart_each_count_most_at_their_own_time() {
         history.touch("apps", "mail", when(day, 8 * HOUR));
         history.touch("apps", "news", when(day, 12 * HOUR));
     }
-    assert!(counts(&history, "news", when(5, 8 * HOUR)) < 0.7);
-    assert!(counts(&history, "mail", when(5, 12 * HOUR)) < 0.7);
+    // Read on the Monday after, a weekday like the picks' days.
+    assert!(counts(&history, "news", when(7, 8 * HOUR)) < 0.7);
+    assert!(counts(&history, "mail", when(7, 12 * HOUR)) < 0.7);
 }
 
 #[test]

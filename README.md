@@ -224,6 +224,7 @@ picks_to_take_over = 2  # picks of another Result, since the choice was last pic
 half_life_days = 14     # how long a pick takes to count half as much; above 0
 lift_threshold = 5.0    # the Frecency worth one tier, about a week of daily use; each further tier takes 1 + this times as much; above 0
 time_of_day = 0.5       # how much less picks count at a time of day the Result is never picked; 0 to 1
+day_of_week = 0.3       # how much less picks count on a weekday or a weekend the Result is never picked on; 0 to 1
 usage_log = false       # log queries and picks, to tune ranking from real use
 undo_seconds = 60       # how long Forget and Clear history can be undone; 0 to 86400
 max_results = 2000      # the most Results kept; past it the least used go

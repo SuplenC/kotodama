@@ -3,6 +3,7 @@ use kotodama_protocol::Item;
 use kotodama_protocol::ItemKind;
 
 use super::*;
+use crate::clock::DAY_SECS;
 use crate::daemon::Source;
 use crate::history::Frecent;
 use crate::history::History;
@@ -144,6 +145,7 @@ fn items_named_by_a_keyword_or_an_alias_are_read_with_their_version_once() {
 const EIGHT: When = When {
     at: 10 * DAY_SECS,
     time_of_day: 8 * 3600,
+    day_of_week: 6,
 };
 
 /// A plan at eight o'clock, of `rows` picked at eight `picks` times

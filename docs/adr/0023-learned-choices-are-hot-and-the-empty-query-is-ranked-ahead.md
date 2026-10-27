@@ -1,6 +1,6 @@
 # 23. Learned choices are hot, and the Empty query is ranked ahead of each part of the day
 
-Status: accepted (2026-10-21). Amends ADR 0017.
+Status: accepted (2026-10-21). Amends ADR 0017; amended by ADR 0033 (the day of the week it left for later).
 
 ADR 0017 made only the time-of-day habit hot. A Learned choice stayed cold unless it had been shown lately, so the query that taught it read its row off the Shelf: a `pread` and a decode on the keystroke path. The Empty query ranked its most used Results on the Daemon's thread each time the menu opened, or when a Shown found the part of the day changed (ADR 0009, #118). On the 10k apps corpus with 2,000 Items picked, that cost about 400,000 instructions per open.
 
