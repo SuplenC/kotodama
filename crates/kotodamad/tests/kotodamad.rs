@@ -377,6 +377,78 @@ fn a_symlinked_config_file_pointed_elsewhere_is_followed_there() {
     assert_eq!(last_config_is(&dir, 3), Some(()), "{:?}", received(&dir));
 }
 
+/// Each thread of process `pid` with how often it has woken: its voluntary context switches.
+#[cfg(target_os = "linux")]
+fn wakeups_by_thread(pid: u32) -> BTreeMap<String, u64> {
+    let mut wakeups = BTreeMap::new();
+    for task in fs::read_dir(format!("/proc/{pid}/task")).unwrap().flatten() {
+        let status = fs::read_to_string(task.path().join("status")).unwrap_or_default();
+        let count = status
+            .lines()
+            .find_map(|line| line.strip_prefix("voluntary_ctxt_switches:"))
+            .and_then(|count| count.trim().parse::<u64>().ok());
+        if let Some(count) = count {
+            wakeups.insert(task.file_name().to_string_lossy().into_owned(), count);
+        }
+    }
+    wakeups
+}
+
+/// How often the threads of process `pid` woke since `before`: a thread started since counts
+/// whole, one that ended counts for nothing.
+#[cfg(target_os = "linux")]
+fn woke_since(pid: u32, before: &BTreeMap<String, u64>) -> u64 {
+    wakeups_by_thread(pid)
+        .iter()
+        .map(|(thread, now)| now.saturating_sub(before.get(thread).copied().unwrap_or(0)))
+        .sum()
+}
+
+/// Longer than any settle of the Daemon's start, the hot Items' one second included.
+#[cfg(target_os = "linux")]
+const IDLE_FOR: Duration = Duration::from_millis(1500);
+
+#[cfg(target_os = "linux")]
+#[test]
+fn an_idle_daemon_sleeps_while_its_config_and_extensions_are_read() {
+    // Regression: #240.
+    let root = Daemon::home();
+    install(&root, "bookmarks", "", &[]);
+    // As KubaOS lays the config out: the user's file linked in from a directory of its own.
+    let elsewhere = root.path().join("config/kubaos/kotodama");
+    fs::create_dir_all(&elsewhere).unwrap();
+    let target = elsewhere.join("user.toml");
+    fs::write(&target, "[extensions.bookmarks]\nv = 1\n").unwrap();
+    symlink(&target, root.path().join("config/kotodama/user.toml")).unwrap();
+    let daemon = Daemon::start(root);
+    let dir = daemon.extension_dir("bookmarks");
+    wait_for("the first config", || last_config_is(&dir, 1));
+    let pid = daemon.child.id();
+    let start = Instant::now();
+    loop {
+        let before = wakeups_by_thread(pid);
+        thread::sleep(IDLE_FOR);
+        if woke_since(pid, &before) == 0 {
+            break;
+        }
+        assert!(start.elapsed() < TIMEOUT, "the Daemon never went idle after its start");
+    }
+    let before = wakeups_by_thread(pid);
+
+    // Others reading what the Daemon watches, as a shell or an editor does.
+    for _ in 0..50 {
+        let _ = fs::read(&target).unwrap();
+        let _ = fs::read_dir(daemon.root.path().join("config/kotodama"))
+            .unwrap()
+            .count();
+        let _ = fs::read(dir.join("manifest.toml")).unwrap();
+        thread::sleep(Duration::from_millis(40));
+    }
+
+    let woke = woke_since(pid, &before);
+    assert!(woke <= 2, "the idle Daemon woke {woke} times in 2 s");
+}
+
 #[test]
 fn an_extension_that_never_says_hello_is_killed_restarted_and_dies_with_the_daemon() {
     let root = Daemon::home();
