@@ -24,7 +24,11 @@ wayland = ["dep:wayland-client", "dep:wayland-protocols", "dep:wayland-protocols
 # The protocol version this crate speaks, raised with it.
 kotodama-protocol = { path = "../kotodama-protocol", version = "1.0" }
 log = "0.4.34"
-notify = { version = "8", optional = true }
+# 9 for `Config::with_event_kinds`, which keeps reads out of the kernel's watch: a
+# watched directory others read from (`$HOME`, `/usr/share`, the Nix store) would
+# wake the watcher's thread on every read otherwise.
+# Pinned exactly, as a later release candidate may still change the API.
+notify = { version = "=9.0.0-rc.6", optional = true }
 thiserror = "2.0.21"
 
 [target.'cfg(target_os = "linux")'.dependencies]

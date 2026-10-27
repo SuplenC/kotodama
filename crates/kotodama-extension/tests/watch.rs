@@ -2,11 +2,14 @@
 
 #![cfg(feature = "watch")]
 
+use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
 use std::path::PathBuf;
+use std::process::Command;
 use std::sync::mpsc;
 use std::sync::mpsc::Receiver;
+use std::thread;
 use std::time::Duration;
 
 use kotodama_extension::watch::RecursiveMode;
@@ -279,4 +282,114 @@ fn only_a_watched_link_replaced_counts_in_its_directory() {
     assert!(quiet(&changes));
     relink(&generation, &system);
     assert!(noticed(&changes));
+}
+
+#[test]
+fn reading_what_changed_once_it_settles_is_not_another_change() {
+    // Regression: #240.
+    let root = TempDir::new().unwrap();
+    let dir = root.path().join("config");
+    fs::create_dir(&dir).unwrap();
+    let file = dir.join("user.toml");
+    fs::write(&file, "v = 1").unwrap();
+    let (settled, changes) = mpsc::channel();
+    let watcher = Watcher::start(
+        "watch",
+        RecursiveMode::NonRecursive,
+        SETTLE,
+        {
+            let file = file.clone();
+            move |event, _| event.paths.contains(&file)
+        },
+        {
+            let file = file.clone();
+            move |_| {
+                let _ = fs::read_to_string(&file);
+                let _ = settled.send(());
+            }
+        },
+    )
+    .unwrap();
+    watcher.watch(vec![dir.clone()]);
+
+    fs::write(&file, "v = 2").unwrap();
+
+    assert!(noticed(&changes));
+    assert!(quiet(&changes));
+}
+
+/// Each thread of this process with how often it has woken: its voluntary context switches.
+#[cfg(target_os = "linux")]
+fn wakeups_by_thread() -> HashMap<String, u64> {
+    let mut wakeups = HashMap::new();
+    for task in fs::read_dir("/proc/self/task").unwrap().flatten() {
+        let status = fs::read_to_string(task.path().join("status")).unwrap_or_default();
+        let count = status
+            .lines()
+            .find_map(|line| line.strip_prefix("voluntary_ctxt_switches:"))
+            .and_then(|count| count.trim().parse::<u64>().ok());
+        if let Some(count) = count {
+            wakeups.insert(task.file_name().to_string_lossy().into_owned(), count);
+        }
+    }
+    wakeups
+}
+
+/// Set in the process the wakeup test runs itself in.
+#[cfg(target_os = "linux")]
+const ALONE: &str = "KOTODAMA_WATCH_TEST_ALONE";
+
+#[cfg(target_os = "linux")]
+#[test]
+fn reads_in_a_watched_directory_never_wake_the_watcher() {
+    const NAME: &str = "reads_in_a_watched_directory_never_wake_the_watcher";
+    // Regression: #240.
+    if std::env::var_os(ALONE).is_none() {
+        // In a process of its own: under `cargo test` the other tests' watchers start, wake and
+        // end beside it, and their threads can't be told from its own.
+        let run = Command::new(std::env::current_exe().unwrap())
+            .args([NAME, "--exact", "--test-threads=1", "--nocapture"])
+            .env(ALONE, "1")
+            .output()
+            .unwrap();
+        let out = String::from_utf8_lossy(&run.stdout);
+        assert!(
+            run.status.success() && out.contains("1 passed"),
+            "{out}{}",
+            String::from_utf8_lossy(&run.stderr)
+        );
+        return;
+    }
+    let root = TempDir::new().unwrap();
+    let dir = root.path().join("share");
+    fs::create_dir(&dir).unwrap();
+    // Two files read in turn, as the kernel merges a run of identical events.
+    let (one, two) = (dir.join("one"), dir.join("two"));
+    fs::write(&one, "x").unwrap();
+    fs::write(&two, "x").unwrap();
+    let threads = wakeups_by_thread();
+    let (_watcher, changes) = watch(vec![dir.clone()], RecursiveMode::NonRecursive, |_| true);
+    thread::sleep(SETTLE);
+    // The threads the watcher started.
+    let before: HashMap<String, u64> = wakeups_by_thread()
+        .into_iter()
+        .filter(|(thread, _)| !threads.contains_key(thread))
+        .collect();
+    assert!(!before.is_empty(), "the watcher started no thread");
+
+    // Spaced, so each read would wake the watcher on its own rather than in a batch.
+    for _ in 0..50 {
+        let _ = fs::read(&one).unwrap();
+        let _ = fs::read(&two).unwrap();
+        let _ = fs::read_dir(&dir).unwrap().count();
+        thread::sleep(Duration::from_millis(2));
+    }
+
+    assert!(quiet(&changes));
+    let after = wakeups_by_thread();
+    let woke: u64 = before
+        .iter()
+        .map(|(thread, count)| after.get(thread).map_or(0, |now| now.saturating_sub(*count)))
+        .sum();
+    assert!(woke <= 2, "the watcher woke {woke} times for reads");
 }
