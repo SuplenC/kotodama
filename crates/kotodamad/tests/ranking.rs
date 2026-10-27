@@ -13,6 +13,7 @@ use std::time::Duration;
 use harness::*;
 use kotodama_protocol::*;
 use kotodamad::daemon::Event;
+use kotodamad::history::History;
 use kotodamad::rank::Haystack;
 use kotodamad::rank::Matched;
 use kotodamad::rank::Query;
@@ -34,7 +35,11 @@ impl World {
     }
 
     fn with(items: Vec<Item>, toml: &str) -> Self {
-        let mut h = Harness::with_config(vec![plain("apps")], config(toml));
+        Self::with_history(items, toml, History::default())
+    }
+
+    fn with_history(items: Vec<Item>, toml: &str, history: History) -> Self {
+        let mut h = Harness::with_history(vec![plain("apps")], config(toml), history);
         let apps = h.up(0);
         h.add(&apps, items);
         let ui = h.front_end();
@@ -96,6 +101,12 @@ impl World {
     /// Waits for the next `hour` o'clock.
     fn at(&mut self, hour: u64) {
         self.h.advance_to(hour);
+    }
+
+    /// Waits for the next `hour` o'clock on the day of the week `day`, 0 for
+    /// Monday to 6 for Sunday.
+    fn on(&mut self, day: u8, hour: u64) {
+        self.h.advance_to_on(day, hour);
     }
 
     /// Replaces the config, as when the user edits it.
@@ -643,6 +654,59 @@ fn a_morning_habit_ranks_higher_in_the_morning() {
     assert_eq!(w.first("tool"), "Beta Tool", "in the evening");
     w.at(14);
     assert_eq!(w.first("tool"), "Beta Tool", "at neither, the more recent");
+}
+
+const MONDAY: u8 = 0;
+const TUESDAY: u8 = 1;
+const THURSDAY: u8 = 3;
+const SATURDAY: u8 = 5;
+const SUNDAY: u8 = 6;
+
+/// Ten weeks of a tool used two weekday mornings a week, and another used
+/// both weekend mornings, the weekday tool picked last.
+fn weekly_habits(w: &mut World) {
+    for _ in 0..10 {
+        w.on(SATURDAY, 9);
+        w.pick("play", "Play Tool");
+        w.on(SUNDAY, 9);
+        w.pick("play", "Play Tool");
+        w.on(TUESDAY, 9);
+        w.pick("work", "Work Tool");
+        w.on(THURSDAY, 9);
+        w.pick("work", "Work Tool");
+    }
+}
+
+/// R6: on a Saturday morning, the tool used every weekend morning comes
+/// first, though the one used on weekday mornings was picked more recently.
+#[test]
+fn a_weekday_habit_ranks_higher_on_a_weekday() {
+    let mut w = World::new(&["Work Tool", "Play Tool"]);
+    weekly_habits(&mut w);
+    w.on(SATURDAY, 9);
+    assert_eq!(w.first("tool"), "Play Tool", "on a Saturday");
+    w.on(TUESDAY, 9);
+    assert_eq!(w.first("tool"), "Work Tool", "on a Tuesday");
+}
+
+/// R6: on a Monday morning the Empty query shows what was used over the
+/// weekend when nothing else was.
+#[test]
+fn on_a_weekday_the_empty_query_shows_what_is_used_on_weekdays_first() {
+    let mut w = World::new(&["Work Tool", "Play Tool", "Mail"]);
+    weekly_habits(&mut w);
+    w.on(SATURDAY, 9);
+    assert_eq!(rows(&mut w, ""), ["Play Tool", "Work Tool", "apps"]);
+    w.on(MONDAY, 9);
+    assert_eq!(rows(&mut w, ""), ["Work Tool", "Play Tool", "apps"]);
+
+    let mut w = World::new(&["Work Tool", "Play Tool", "Mail"]);
+    for _ in 0..10 {
+        w.on(SATURDAY, 9);
+        w.pick("play", "Play Tool");
+    }
+    w.on(MONDAY, 9);
+    assert_eq!(rows(&mut w, ""), ["Play Tool", "apps"], "nothing else is used");
 }
 
 /// R7
@@ -1230,6 +1294,51 @@ fn how_much_the_time_of_day_counts_is_a_setting() {
     }
     w.at(8);
     assert_eq!(w.first("tool"), "Beta Tool", "the more recent");
+}
+
+/// H4
+#[test]
+fn how_much_the_day_of_the_week_counts_is_a_setting() {
+    let mut w = World::new(&["Work Tool", "Play Tool"]);
+    weekly_habits(&mut w);
+    w.on(SATURDAY, 9);
+    assert_eq!(w.first("tool"), "Play Tool");
+
+    w.reconfigure("[history]\nday_of_week = 0");
+    assert_eq!(w.first("tool"), "Work Tool", "the more recent");
+}
+
+/// H4: a History kept before the day of the week was counts in full on
+/// either kind of day.
+#[test]
+fn a_history_with_no_weekday_shares_ranks_as_before() {
+    let mut w = World::new(&["Work Tool", "Play Tool"]);
+    weekly_habits(&mut w);
+    let mut kept = serde_json::to_value(w.h.saved.0.borrow().as_ref().expect("the History was saved")).unwrap();
+    for (_, picks) in kept["picks"]["apps"].as_object_mut().unwrap() {
+        let picks = picks.as_object_mut().unwrap();
+        // A kind of day with no share is left out of the file.
+        let shares = |kind: &str| -> Vec<u64> {
+            picks.get(kind).map_or(vec![0; 8], |shares| {
+                shares.as_array().unwrap().iter().map(|n| n.as_u64().unwrap()).collect()
+            })
+        };
+        let parts: Vec<u64> = shares("weekdays")
+            .iter()
+            .zip(shares("weekends"))
+            .map(|(a, b)| a + b)
+            .collect();
+        picks.remove("weekdays");
+        picks.remove("weekends");
+        picks.insert("parts".into(), parts.into());
+    }
+    let old = serde_json::from_value(kept).expect("an old History decodes");
+    let elapsed = w.h.elapsed();
+    let mut w = World::with_history(vec![app("Work Tool"), app("Play Tool")], "", old);
+    w.later(elapsed);
+
+    w.on(SATURDAY, 9);
+    assert_eq!(w.first("tool"), "Work Tool", "the more recent, on a Saturday too");
 }
 
 /// H4

@@ -293,11 +293,7 @@ fn no_more_items_are_hot_than_there_is_room_for() {
 /// `hour`:`minute` on the day `days_before` the day the Harness starts on,
 /// in UTC.
 fn on(days_before: u64, hour: u64, minute: u64) -> When {
-    let time_of_day = hour * 3600 + minute * 60;
-    When {
-        at: START - START % DAY_SECS - days_before * DAY_SECS + time_of_day,
-        time_of_day: time_of_day as u32,
-    }
+    When::utc(START - START % DAY_SECS - days_before * DAY_SECS + hour * 3600 + minute * 60)
 }
 
 /// A Daemon running `apps`, with `history`, `config`, and a Front end,

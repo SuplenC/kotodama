@@ -50,6 +50,7 @@ let
         halfLifeDays = 7.5;
         liftThreshold = 3;
         timeOfDay = 0.25;
+        dayOfWeek = 0.1;
         usageLog = true;
         undoSeconds = 30;
         maxResults = 500;
@@ -232,6 +233,7 @@ pkgs.runCommand "kotodama-home-manager-options-test"
         "half_life_days": 7.5,
         "lift_threshold": 3,
         "time_of_day": 0.25,
+        "day_of_week": 0.1,
         "usage_log": True,
         "undo_seconds": 30,
         "max_results": 500,

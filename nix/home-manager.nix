@@ -87,6 +87,7 @@ let
       half_life_days = cfg.history.halfLifeDays;
       lift_threshold = cfg.history.liftThreshold;
       time_of_day = cfg.history.timeOfDay;
+      day_of_week = cfg.history.dayOfWeek;
       usage_log = cfg.history.usageLog;
       undo_seconds = cfg.history.undoSeconds;
       max_results = cfg.history.maxResults;
@@ -281,6 +282,10 @@ in
       timeOfDay = optional (lib.types.numbers.between 0 1) ''
         `time_of_day`: how much less picks count at a time of day the Result
         is never picked, from 0 to 1. Unset, 0.5.
+      '';
+      dayOfWeek = optional (lib.types.numbers.between 0 1) ''
+        `day_of_week`: how much less picks count on a weekday or a weekend the
+        Result is never picked on, from 0 to 1. Unset, 0.3.
       '';
       usageLog = optional lib.types.bool ''
         `usage_log`: log queries and picks to

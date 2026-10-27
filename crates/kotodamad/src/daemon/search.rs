@@ -568,7 +568,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
         let settings = *self.history.settings();
         self.cache_frecent();
         let mut frecencies = std::mem::take(&mut self.frecencies);
-        self.frecent.picks.frecency(when, settings.time_of_day, &mut frecencies);
+        self.frecent.picks.frecency(when, &settings, &mut frecencies);
         for (&(slot, counts), &frecency) in self.frecent.slots.iter().zip(&frecencies) {
             if let Ok(n) = candidates[..indexed].binary_search_by_key(&Source::Indexed(slot), |c| c.source) {
                 if counts != Counts::Direct {

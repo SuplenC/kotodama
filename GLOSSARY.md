@@ -113,7 +113,7 @@ What the Daemon keeps of the user's picks, per Result and per Identity, kept on 
 _Avoid_: History file, frecency store, usage data
 
 **Frecency**:
-The score that combines how often and how recently the user picked a Result, and how usual this time of day is for picking it.
+The score that combines how often and how recently the user picked a Result, and how usual this time of day and this kind of day, a weekday or a weekend, are for picking it.
 _Avoid_: Popularity, history score
 
 **Learned choice**:

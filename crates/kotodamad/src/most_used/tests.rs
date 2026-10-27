@@ -6,10 +6,7 @@ const FRESH_SECS: u64 = 5 * 60;
 
 /// `hour` seconds into a day, in UTC.
 fn at(hour: u32) -> When {
-    When {
-        at: 1_792_368_000 + u64::from(hour),
-        time_of_day: hour,
-    }
+    When::utc(1_792_368_000 + u64::from(hour))
 }
 
 fn slot(row: u32) -> Slot {
@@ -34,10 +31,7 @@ fn rows_ranked_ahead_stand_for_their_part_of_the_day_alone() {
     let now = ahead.at((1, 2, 3), at(10 * HOUR + 60), FRESH_SECS);
     let next = ahead.at((1, 2, 3), at(12 * HOUR + 60), FRESH_SECS);
     let later = ahead.at((1, 2, 3), at(15 * HOUR), FRESH_SECS);
-    let next_day = When {
-        at: at(10 * HOUR).at + DAY_SECS,
-        ..at(10 * HOUR)
-    };
+    let next_day = at(10 * HOUR).plus(DAY_SECS as i64);
     let next_day = ahead.at((1, 2, 3), next_day, FRESH_SECS);
 
     assert_eq!(now, Some(&[Source::Indexed(slot(1))][..]));

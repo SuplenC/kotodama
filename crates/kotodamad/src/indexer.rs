@@ -32,7 +32,6 @@ use std::sync::mpsc::Receiver;
 use std::sync::mpsc::Sender;
 use std::thread;
 
-use crate::clock::DAY_SECS;
 use crate::clock::When;
 use crate::daemon::Event;
 use crate::daemon::ExtensionId;
@@ -168,11 +167,7 @@ impl Plan {
         let picked = &*self.usage.picked;
         let mut near = vec![0.0f64; picked.slots.len()];
         for by in [-HOT_GRACE_SECS, 0, HOT_LEAD_SECS] {
-            let when = When {
-                at: self.when.at.saturating_add_signed(by),
-                time_of_day: (i64::from(self.when.time_of_day) + by).rem_euclid(DAY_SECS as i64) as u32,
-            };
-            picked.picks.habits(when, habits);
+            picked.picks.habits(self.when.plus(by), habits);
             for (near, habit) in near.iter_mut().zip(habits.iter()) {
                 *near = near.max(habit.near_now);
             }

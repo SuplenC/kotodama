@@ -1,5 +1,6 @@
 //! The wall clock the History's times come from: seconds since the Unix epoch,
-//! and the time of day where the user is, which Frecency learns by.
+//! and the time of day and day of the week where the user is, which Frecency
+//! learns by.
 //!
 //! # Owns
 //!
@@ -8,7 +9,8 @@
 //!
 //! # Not here
 //!
-//! - What the History does with the time of day: `history.rs`, `part_of_day`.
+//! - What the History does with the time of day and the day of the week: `history.rs`,
+//!   `part_of_day`, `weekend`.
 
 use std::cell::Cell;
 use std::time::Duration;
@@ -82,13 +84,16 @@ impl Clock {
             offset = (self.utc_offset)(at);
             self.zone.set((minute, offset));
         }
-        let local = at as i64 + offset;
-        When {
-            at,
-            time_of_day: local.rem_euclid(DAY_SECS as i64) as u32,
-        }
+        When::local(at, offset)
     }
 }
+
+/// Days in a week.
+const WEEK_DAYS: i64 = 7;
+
+/// The day of the week the Unix epoch fell on, a Thursday, counted from
+/// Monday as 0.
+const EPOCH_DAY: i64 = 3;
 
 /// A moment, as the History counts it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -97,6 +102,41 @@ pub struct When {
     pub at: u64,
     /// Seconds since local midnight.
     pub time_of_day: u32,
+    /// The local day of the week: 0 on Monday to 6 on Sunday.
+    pub day_of_week: u8,
+}
+
+impl When {
+    /// The moment `at` seconds after the Unix epoch, where local time is
+    /// `utc_offset` seconds ahead of UTC.
+    #[must_use]
+    pub fn local(at: u64, utc_offset: i64) -> When {
+        let local = at as i64 + utc_offset;
+        let days = local.div_euclid(DAY_SECS as i64);
+        When {
+            at,
+            time_of_day: local.rem_euclid(DAY_SECS as i64) as u32,
+            day_of_week: (days + EPOCH_DAY).rem_euclid(WEEK_DAYS) as u8,
+        }
+    }
+
+    /// The moment `at` seconds after the Unix epoch, in UTC.
+    #[must_use]
+    pub fn utc(at: u64) -> When {
+        When::local(at, 0)
+    }
+
+    /// `secs` seconds later, or earlier below 0, in the same time zone.
+    #[must_use]
+    pub fn plus(self, secs: i64) -> When {
+        let local = i64::from(self.time_of_day) + secs;
+        let days = local.div_euclid(DAY_SECS as i64);
+        When {
+            at: self.at.saturating_add_signed(secs),
+            time_of_day: local.rem_euclid(DAY_SECS as i64) as u32,
+            day_of_week: (i64::from(self.day_of_week) + days).rem_euclid(WEEK_DAYS) as u8,
+        }
+    }
 }
 
 /// The local time's offset from UTC at `at`, in the current time zone.
