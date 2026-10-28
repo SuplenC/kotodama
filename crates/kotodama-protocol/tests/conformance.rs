@@ -38,6 +38,7 @@ fn items() -> Vec<Item> {
             keywords: vec!["browser".into(), "web".into()],
             hidden: false,
             app_only: false,
+            weak_keywords: Vec::new(),
             actions: vec![
                 action("open"),
                 Action {
@@ -57,6 +58,7 @@ fn items() -> Vec<Item> {
             keywords: vec![],
             hidden: false,
             app_only: false,
+            weak_keywords: Vec::new(),
             actions: vec![Action {
                 arguments: vec![
                     Argument {
@@ -86,6 +88,7 @@ fn items() -> Vec<Item> {
             keywords: vec![],
             hidden: false,
             app_only: false,
+            weak_keywords: Vec::new(),
             actions: vec![action("open")],
         },
     ]

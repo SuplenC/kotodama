@@ -166,6 +166,7 @@ impl Settings {
             keywords,
             hidden: false,
             app_only: false,
+            weak_keywords: Vec::new(),
             actions,
         }
     }

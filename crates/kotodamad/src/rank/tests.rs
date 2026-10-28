@@ -114,6 +114,12 @@ fn neither_case_nor_accents_matter() {
 /// How well `query` matches an Item titled `Untitled` with `keyword` and
 /// `keywords`.
 fn keyword_tier(keyword: Option<&str>, keywords: &[&str], query: &str) -> Option<Tier> {
+    weak_tier(keyword, keywords, &[], query)
+}
+
+/// How well `query` matches an Item titled `Untitled` with `keyword`,
+/// `keywords` and `weak_keywords`.
+fn weak_tier(keyword: Option<&str>, keywords: &[&str], weak_keywords: &[&str], query: &str) -> Option<Tier> {
     let item = Item {
         id: "untitled".into(),
         kind: ItemKind::Url { url: "x".into() },
@@ -126,6 +132,7 @@ fn keyword_tier(keyword: Option<&str>, keywords: &[&str], query: &str) -> Option
         hidden: false,
         app_only: false,
         actions: vec![],
+        weak_keywords: weak_keywords.iter().map(|&word| word.to_owned()).collect(),
     };
     let mut tiers = Tiers::default();
     tiers.texts(Haystack::new(&item).texts(), &Query::new(query), Matched::ALL)
@@ -143,4 +150,36 @@ fn only_the_items_own_keyword_matches_as_exactly_as_a_title() {
         Some(Tier::WordStart)
     );
     assert_eq!(keyword_tier(Some(""), &["chrome"], "chrome"), Some(Tier::WordStart));
+}
+
+#[test]
+fn a_weak_keyword_matches_as_the_query_inside_a_word_at_best() {
+    let id = ["chrome-abcdef-Default"];
+    assert_eq!(
+        weak_tier(None, &[], &id, "chrome-abcdef-default"),
+        Some(Tier::WeakKeyword)
+    );
+    assert_eq!(weak_tier(None, &[], &id, "chrome"), Some(Tier::WeakKeyword));
+    assert_eq!(weak_tier(None, &[], &id, "abcdef"), Some(Tier::WeakKeyword));
+    assert_eq!(weak_tier(None, &[], &id, "crmdflt"), Some(Tier::Scattered));
+    assert_eq!(
+        weak_tier(None, &[], &id, "c"),
+        None,
+        "one letter matches only at a word start"
+    );
+    assert_eq!(weak_tier(None, &[], &["x"], "x"), None);
+    assert_eq!(weak_tier(None, &[], &["one", "two"], "two"), Some(Tier::WeakKeyword));
+}
+
+#[test]
+fn a_weak_keyword_leaves_the_other_keywords_and_the_title_as_they_match() {
+    let id = ["chrome-abcdef-Default"];
+    assert_eq!(weak_tier(Some("go"), &[], &id, "go"), Some(Tier::Keyword));
+    assert_eq!(weak_tier(None, &["chrome"], &id, "chrome"), Some(Tier::WordStart));
+    assert_eq!(
+        weak_tier(Some("go"), &["browser"], &id, "browser"),
+        Some(Tier::WordStart)
+    );
+    assert_eq!(weak_tier(None, &["web"], &id, "eb"), Some(Tier::Inside));
+    assert_eq!(weak_tier(None, &[], &id, "untitled"), Some(Tier::Exact));
 }

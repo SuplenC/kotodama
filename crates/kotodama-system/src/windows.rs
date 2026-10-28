@@ -151,6 +151,7 @@ fn item(number: u64, window: &Window) -> Item {
         keywords: vec![window.app_id.clone()],
         hidden: false,
         app_only: false,
+        weak_keywords: Vec::new(),
         actions: vec![
             Action::new(FOCUS, "Focus Window"),
             Action::new(CLOSE, "Close Window"),

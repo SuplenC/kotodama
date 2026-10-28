@@ -146,6 +146,7 @@ pub fn item(count: usize) -> Item {
         keywords: vec!["problems".into(), "check".into()],
         hidden: false,
         app_only: false,
+        weak_keywords: Vec::new(),
         actions: vec![Action::new(SHOW, "Show")],
     }
 }

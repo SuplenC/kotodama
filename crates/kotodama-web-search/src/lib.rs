@@ -252,6 +252,7 @@ fn item(id: String, title: String, url: String) -> Item {
         actions: vec![Action::new(OPEN, "Open")],
         hidden: false,
         app_only: false,
+        weak_keywords: Vec::new(),
     }
 }
 

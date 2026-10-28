@@ -137,6 +137,7 @@ impl Power {
             keywords: self.keywords().iter().map(|&keyword| keyword.to_owned()).collect(),
             hidden: false,
             app_only: false,
+            weak_keywords: Vec::new(),
             actions: vec![self.action()],
         }
     }

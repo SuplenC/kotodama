@@ -38,6 +38,10 @@ pub enum Tier {
     NearMiss,
     /// The query's letters in order, with gaps.
     Scattered,
+    /// The query inside one of the Item's weak keywords, and nowhere better.
+    /// Counts as inside a word, behind one on a tie, and habit never lifts it
+    /// to a word start, so a title that starts with the query stays above it.
+    WeakKeyword,
     /// The query inside a word, or a word of a subtitle.
     Inside,
     /// A word starts with the query.
@@ -62,7 +66,7 @@ impl Tier {
         match self {
             Tier::NearMiss => 0,
             Tier::Scattered => 1,
-            Tier::Inside => 2,
+            Tier::WeakKeyword | Tier::Inside => 2,
             Tier::WordStart | Tier::Initials => 3,
             Tier::Keyword | Tier::Exact => 4,
         }
@@ -295,6 +299,10 @@ pub fn fold_text(text: &str) -> String {
 /// starts a word like a space does.
 pub const SEPARATOR: char = '\u{1f}';
 
+/// What puts an Item's weak keywords after its other keywords in
+/// [`Haystack`], so they are searched with them but ranked apart.
+const WEAK: char = '\u{1e}';
+
 /// One folded text as it is searched, wherever it is kept: its characters,
 /// as nucleo holds them, and where its words start.
 #[derive(Clone, Copy, Debug)]
@@ -321,9 +329,13 @@ impl Text<'_> {
 #[derive(Clone, Copy, Debug)]
 pub struct Texts<'a> {
     pub title: Text<'a>,
-    /// The keyword and keywords, joined by [`SEPARATOR`]; empty if there are
-    /// none.
+    /// The keyword and keywords, joined by [`SEPARATOR`], then the weak
+    /// keywords after [`WEAK`], joined the same way; empty if there are none.
+    /// Its word starts are only the keywords'.
     pub words: Text<'a>,
+    /// Where in `words` the weak keywords' [`WEAK`] is, or its length if it
+    /// has none.
+    pub weak_at: u32,
     /// Whether `words` starts with the Item's own keyword.
     pub keyword: bool,
     /// Empty if there is none. Searched so seldom that where its words start
@@ -339,6 +351,23 @@ pub struct Texts<'a> {
     pub letters: Letters,
 }
 
+impl<'a> Texts<'a> {
+    /// The keyword and keywords of `words`, without the weak keywords.
+    pub(crate) fn keywords(&self) -> Text<'a> {
+        Text {
+            chars: self.words.chars.slice(..self.weak_at as usize),
+            starts: self.words.starts,
+        }
+    }
+
+    /// The weak keywords of `words`, joined by [`SEPARATOR`]; empty if there
+    /// are none.
+    pub(crate) fn weak(&self) -> Utf32Str<'a> {
+        let chars = self.words.chars;
+        chars.slice((self.weak_at as usize + 1).min(chars.len())..)
+    }
+}
+
 /// An Item's texts folded as [`fold`] does, with all that [`Texts`] holds:
 /// what the Index copies into its arena, and [`Haystack`] keeps on its own.
 #[derive(Debug)]
@@ -348,12 +377,14 @@ pub struct Folded {
     pub subtitle: Utf32String,
     pub title_starts: Vec<u32>,
     pub words_starts: Vec<u32>,
+    /// Where in `words` its weak keywords begin, at [`WEAK`], if it has any.
+    pub weak_at: Option<u32>,
     /// Whether `words` starts with the Item's own keyword.
     pub keyword: bool,
     pub initials: Letters,
     pub subtitle_initials: Letters,
     pub letters: Letters,
-    /// Every letter of the title, keywords and subtitle.
+    /// Every letter of the title, keywords, weak keywords and subtitle.
     pub every_letter: Letters,
 }
 
@@ -367,20 +398,42 @@ impl Folded {
             words.push_str(word);
         }
         let title = fold_text(&item.title);
-        let words = fold_text(&words);
+        let mut words = fold_text(&words);
         let subtitle = fold_text(item.subtitle.as_deref().unwrap_or(""));
         let mut title_starts = Vec::new();
         let mut words_starts = Vec::new();
         let initials = starts_and_initials(&title, Some(&item.title), &mut title_starts)
             | starts_and_initials(&words, None, &mut words_starts);
+        let letters = Letters::in_str(&title) | Letters::in_str(&words);
+        // The weak keywords go after the others, with no word starts: they
+        // match only inside a word.
+        let mut weak_at = None;
+        for (n, weak) in item.weak_keywords.iter().enumerate() {
+            if n == 0 {
+                weak_at = Some(words.len());
+                words.push(WEAK);
+            } else {
+                words.push(SEPARATOR);
+            }
+            words.push_str(&fold_text(weak));
+        }
         // Where the subtitle's words start isn't kept.
         let subtitle_initials = if subtitle.is_ascii() {
             ascii_starts(subtitle.as_bytes(), None, |_| {})
         } else {
             self::initials(&subtitle, None)
         };
-        let letters = Letters::in_str(&title) | Letters::in_str(&words);
-        let every_letter = letters | Letters::in_str(&subtitle);
+        let weak_letters = weak_at.map_or(Letters::NONE, |at| Letters::in_str(&words[at..]));
+        let every_letter = letters | weak_letters | Letters::in_str(&subtitle);
+        // Where the weak keywords begin, as nucleo holds the text: a
+        // character a grapheme, and `WEAK` one of its own.
+        let weak_at = weak_at.map(|at| {
+            if words.is_ascii() {
+                at as u32
+            } else {
+                Utf32String::from(&words[..at]).len() as u32
+            }
+        });
         let (title, words, subtitle) = (
             Utf32String::from(title),
             Utf32String::from(words),
@@ -392,6 +445,7 @@ impl Folded {
             subtitle,
             title_starts,
             words_starts,
+            weak_at,
             // An empty keyword adds no part to `words`, which would leave the
             // first of the other keywords in its place.
             keyword: item.keyword.as_deref().is_some_and(|keyword| !keyword.is_empty()),
@@ -414,6 +468,8 @@ pub struct Haystack {
     starts: Vec<u32>,
     /// How many of `starts` are the title's.
     title_starts: usize,
+    /// As [`Texts::weak_at`].
+    weak_at: u32,
     /// Whether `words` starts with the Item's own keyword.
     keyword: bool,
     initials: Letters,
@@ -662,6 +718,7 @@ impl Haystack {
             subtitle,
             mut title_starts,
             words_starts,
+            weak_at,
             keyword,
             initials,
             subtitle_initials,
@@ -670,12 +727,14 @@ impl Haystack {
         } = Folded::new(item);
         let len = title_starts.len();
         title_starts.extend(words_starts);
+        let weak_at = weak_at.unwrap_or(words.len() as u32);
         Haystack {
             title,
             words,
             subtitle,
             starts: title_starts,
             title_starts: len,
+            weak_at,
             keyword,
             initials,
             subtitle_initials,
@@ -695,6 +754,7 @@ impl Haystack {
                 chars: self.words.slice(..),
                 starts: words,
             },
+            weak_at: self.weak_at,
             keyword: self.keyword,
             subtitle: self.subtitle.slice(..),
             initials: self.initials,
@@ -896,7 +956,9 @@ impl Tiers {
 
     /// How well an Item matches: the best of its title and its keywords, where
     /// its own keyword exactly is [`Tier::Keyword`] and another keyword
-    /// exactly [`Tier::WordStart`], or failing those, its subtitle.
+    /// exactly [`Tier::WordStart`], then of its weak keywords, where the
+    /// query inside one is [`Tier::WeakKeyword`] at best, or failing those,
+    /// its subtitle.
     /// A subtitle counts only for a query of at least [`SUBTITLE_LETTERS`]
     /// letters, only at word starts, and then only as [`Tier::Inside`]. Only
     /// the texts in `matched` are looked at. `None` if nothing matches well
@@ -907,12 +969,16 @@ impl Tiers {
             best = Self::text(texts.title, query);
         }
         if matched.words && best < Some(Tier::Exact) && !texts.words.is_empty() {
-            let words = Self::text(texts.words, query).map(|tier| match tier {
-                Tier::Exact if texts.keyword && is_exact(first_part(texts.words.chars), &query.whole) => Tier::Keyword,
+            let keywords = texts.keywords();
+            let words = Self::text(keywords, query).map(|tier| match tier {
+                Tier::Exact if texts.keyword && is_exact(first_part(keywords.chars), &query.whole) => Tier::Keyword,
                 Tier::Exact => Tier::WordStart,
                 tier => tier,
             });
             best = best.max(words);
+            if best < Some(Tier::WeakKeyword) {
+                best = best.max(weak(texts.weak(), query));
+            }
         }
         if best.is_none() && matched.subtitle && query.searches_subtitles() && !texts.subtitle.is_empty() {
             let mut starts = std::mem::take(&mut self.starts);
@@ -945,7 +1011,8 @@ impl Tiers {
         if !query.may_nearly_match(texts.letters, texts.initials) {
             return false;
         }
-        self.nearly(texts.title, query) || (!texts.words.is_empty() && self.nearly(texts.words, query))
+        let keywords = texts.keywords();
+        self.nearly(texts.title, query) || (!keywords.is_empty() && self.nearly(keywords, query))
     }
 
     /// Whether each word of the query matches one folded text, or a word of
@@ -1077,6 +1144,23 @@ fn past_symbols<C: Char>(chars: &[C]) -> &[C] {
 fn word_tier(text: Text, word: &[char], whole: bool) -> Option<Tier> {
     debug_assert!(!word.is_empty());
     with_chars!(text.chars, |chars| { word_in(chars, text.starts, word, whole) })
+}
+
+/// How well a query matches an Item's weak keywords, folded and joined:
+/// [`Tier::WeakKeyword`] if each word is inside them, as if none of their
+/// words started anywhere, so a word of one letter never matches.
+fn weak(chars: Utf32Str, query: &Query) -> Option<Tier> {
+    if chars.is_empty() {
+        return None;
+    }
+    let last = query.words.len().checked_sub(1)?;
+    let mut worst = Tier::WeakKeyword;
+    for (n, word) in query.words.iter().enumerate() {
+        let whole = n == last && query.last_is_whole;
+        let tier = with_chars!(chars, |chars| word_in(chars, &[], word, whole))?;
+        worst = worst.min(tier.min(Tier::WeakKeyword));
+    }
+    Some(worst)
 }
 
 fn word_in<C: Char>(chars: &[C], starts: &[u32], word: &[char], whole: bool) -> Option<Tier> {

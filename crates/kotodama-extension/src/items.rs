@@ -86,9 +86,20 @@ fn fingerprint(item: &Item) -> u64 {
         hidden,
         actions,
         app_only,
+        weak_keywords,
     } = item;
     (
-        id, kind, identity, title, subtitle, icon, keyword, keywords, hidden, app_only,
+        id,
+        kind,
+        identity,
+        title,
+        subtitle,
+        icon,
+        keyword,
+        keywords,
+        hidden,
+        app_only,
+        weak_keywords,
     )
         .hash(&mut hasher);
     for Action {

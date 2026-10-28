@@ -37,9 +37,10 @@ impl Random {
     }
 }
 
-const TIERS: [Tier; 7] = [
+const TIERS: [Tier; 8] = [
     Tier::NearMiss,
     Tier::Scattered,
+    Tier::WeakKeyword,
     Tier::Inside,
     Tier::WordStart,
     Tier::Initials,

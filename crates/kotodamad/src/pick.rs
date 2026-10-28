@@ -43,6 +43,7 @@ pub fn view(id: String, title: &str, offering: Vec<Item>) -> View {
             keyword: None,
             hidden: false,
             app_only: false,
+            weak_keywords: Vec::new(),
             actions: vec![Action::new(PICK, title)],
             ..item
         })

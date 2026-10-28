@@ -91,6 +91,7 @@ fn the_action_panel_lists_the_items_own_actions_then_contributed_ones_under_thei
             keywords: Vec::new(),
             hidden: false,
             app_only: false,
+            weak_keywords: Vec::new(),
             identity: None,
             actions: vec![Action::new("open", "Open"), Action::new("term", "Open in terminal")],
         },
@@ -142,6 +143,7 @@ fn an_unavailable_row_keeps_its_alias_badge_and_runs_nothing() {
             keywords: Vec::new(),
             hidden: false,
             app_only: false,
+            weak_keywords: Vec::new(),
             identity: None,
             actions: vec![Action::new("open", "Open")],
         },
@@ -173,6 +175,7 @@ fn a_contributed_shortcut_an_items_own_action_binds_is_left_to_the_own_one() {
         keywords: Vec::new(),
         hidden: false,
         app_only: false,
+        weak_keywords: Vec::new(),
         identity: None,
         actions: vec![open],
     };
@@ -524,6 +527,7 @@ fn a_listed_row_is_made_again_only_when_its_item_changed() {
         keywords: Vec::new(),
         hidden: false,
         app_only: false,
+        weak_keywords: Vec::new(),
         identity: None,
         actions: vec![Action::new("open", "Open")],
     };

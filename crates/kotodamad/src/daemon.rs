@@ -1035,6 +1035,7 @@ fn clear_history() -> Item {
         keywords: Vec::new(),
         hidden: false,
         app_only: false,
+        weak_keywords: Vec::new(),
         actions: vec![Action {
             id: "run".into(),
             title: "Clear".into(),
@@ -1058,6 +1059,7 @@ fn undo_item(title: &str) -> Item {
         keywords: Vec::new(),
         hidden: false,
         app_only: false,
+        weak_keywords: Vec::new(),
         actions: vec![action_titled("run", "Undo".into())],
     }
 }
@@ -1075,6 +1077,7 @@ fn named_only(id: &str) -> Item {
         keywords: Vec::new(),
         hidden: false,
         app_only: false,
+        weak_keywords: Vec::new(),
         actions: Vec::new(),
     }
 }

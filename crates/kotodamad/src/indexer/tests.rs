@@ -24,6 +24,7 @@ fn item(id: &str) -> Item {
         keywords: vec![],
         hidden: false,
         app_only: false,
+        weak_keywords: Vec::new(),
         actions: vec![Action {
             id: "open".into(),
             title: "Open".into(),
