@@ -48,7 +48,8 @@ pub enum Tier {
     /// The Item's own keyword, the one typed before its Arguments, is the
     /// query. Ranks as exact, behind an exact title on a tie. One of its
     /// other keywords being the query is only a [`Tier::WordStart`], so an
-    /// Item that lists an app's name among them ranks below the app.
+    /// Item that lists an app's name among them ties with the app rather
+    /// than passing it.
     Keyword,
     /// The whole title is the query, past any symbols that lead it, as
     /// `fire` is of `🔥 Fire`.
@@ -391,7 +392,9 @@ impl Folded {
             subtitle,
             title_starts,
             words_starts,
-            keyword: item.keyword.is_some(),
+            // An empty keyword adds no part to `words`, which would leave the
+            // first of the other keywords in its place.
+            keyword: item.keyword.as_deref().is_some_and(|keyword| !keyword.is_empty()),
             initials,
             subtitle_initials,
             letters,

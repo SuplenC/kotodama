@@ -142,4 +142,5 @@ fn only_the_items_own_keyword_matches_as_exactly_as_a_title() {
         keyword_tier(None, &["google", "chrome"], "chrome"),
         Some(Tier::WordStart)
     );
+    assert_eq!(keyword_tier(Some(""), &["chrome"], "chrome"), Some(Tier::WordStart));
 }
