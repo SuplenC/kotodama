@@ -184,6 +184,40 @@ fn keywords_generic_names_and_ids_make_an_app_findable() {
     assert_eq!(files.keywords, ["katalog", "File Manager", "org.gnome.Nautilus"]);
 }
 
+/// Whether `query` is in the Item's title or one of its keywords, ignoring case.
+fn matches(item: &Item, query: &str) -> bool {
+    std::iter::once(&item.title)
+        .chain(&item.keywords)
+        .any(|text| text.to_lowercase().contains(query))
+}
+
+#[test]
+fn a_browser_web_app_is_not_found_by_the_browsers_name() {
+    let dir = data_dirs();
+    install(
+        dir.path(),
+        "home",
+        "chrome-abcdef-Default.desktop",
+        &app("Google Chat", "chat"),
+    );
+    install(
+        dir.path(),
+        "home",
+        "brave-ghijkl-Profile_2.desktop",
+        &app("WhatsApp Web", "whatsapp"),
+    );
+    let apps = Apps::configured(dir, Table::new());
+
+    let items = apps.added();
+    let chat = find(&items, "chrome-abcdef-Default");
+    assert!(!matches(chat, "chrome"), "{chat:?}");
+    assert!(!matches(chat, "default"), "{chat:?}");
+    assert!(matches(chat, "chat"), "{chat:?}");
+    let whatsapp = find(&items, "brave-ghijkl-Profile_2");
+    assert!(!matches(whatsapp, "brave"), "{whatsapp:?}");
+    assert!(matches(whatsapp, "whatsapp"), "{whatsapp:?}");
+}
+
 #[test]
 fn an_app_without_a_generic_name_shows_its_comment() {
     let dir = data_dirs();

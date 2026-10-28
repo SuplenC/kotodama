@@ -141,8 +141,9 @@ impl Settings {
         if renamed.is_some() {
             keywords.push(app.name.clone());
         }
-        if !app.id.eq_ignore_ascii_case(&title) {
-            keywords.push(app.id.clone());
+        let id = searchable_id(&app.id);
+        if !id.eq_ignore_ascii_case(&title) {
+            keywords.push(id.to_owned());
         }
         let mut actions = Vec::with_capacity(1 + app.actions.len());
         actions.push(Action::new(OPEN, "Open"));
@@ -170,6 +171,25 @@ impl Settings {
         }
     }
 }
+
+/// The part of `id` worth finding the app by. A browser's web app, such as
+/// `chrome-<app id>-Default`, loses the browser and profile around its app id,
+/// so typing the browser's name doesn't list every web app next to it.
+fn searchable_id(id: &str) -> &str {
+    let Some(rest) = WEB_APP_BROWSERS
+        .iter()
+        .find_map(|browser| id.strip_prefix(browser)?.strip_prefix('-'))
+    else {
+        return id;
+    };
+    match rest.rsplit_once('-') {
+        Some((app, profile)) if profile == "Default" || profile.starts_with("Profile_") => app,
+        _ => id,
+    }
+}
+
+/// The browsers whose web apps' desktop ids are `<browser>-<app id>-<profile>`.
+const WEB_APP_BROWSERS: [&str; 4] = ["chrome", "chromium", "brave", "msedge"];
 
 /// `value` as a number of seconds, from 0 to [`MAX_WITHDRAW_WITHIN`].
 fn seconds(value: &Value) -> Option<Duration> {
