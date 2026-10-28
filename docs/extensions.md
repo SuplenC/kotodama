@@ -136,7 +136,7 @@ Items are what the search finds as you type. The Daemon indexes them and ranks t
 
   Other Extensions offer Contributed actions by kind, so a file is better as a `file` than as a kind of your own. Any other kind is named `<name>.<kind>`, as in `notes.note`.
 - `title`, and optionally `subtitle` and `icon`.
-- `keywords`: more words to find the Item by. `keyword`: a word typed before the Item's Arguments, as `timer` in `timer 5`.
+- `keywords`: more words to find the Item by. One of them typed whole ranks as a word of the title would, not as the whole title: an Item that lists an app's name among them ranks below the app until the user picks it more. `keyword`: a word typed before the Item's Arguments, as `timer` in `timer 5`.
 - `actions`: at least one. The first is the primary Action, which Enter runs.
 - `identity`: names the thing itself when other Extensions may offer it too, as in `app:firefox.desktop`, `file:/etc/hosts` or `url:https://example.org`. Items with the same identity share their History, so picking one raises the others. Leave it out for anything only your Extension offers.
 - `hidden: true` keeps an Item out of the search. Only `kotodama open --view <extension>/<id>` reaches it, which runs its primary Action, usually one that pushes a View. This is how an Extension with only Live queries makes a View reachable from a keybind.
