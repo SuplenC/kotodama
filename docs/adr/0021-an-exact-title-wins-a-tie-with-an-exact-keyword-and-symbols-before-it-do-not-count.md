@@ -1,6 +1,6 @@
 # 21. An exact title wins a tie with an exact keyword, and symbols before a title don't count
 
-Status: accepted (2026-10-20)
+Status: accepted (2026-10-20); amended by ADR 0034 (only an Item's own keyword matches as exact; its search words match as a word start)
 
 Typing `fire` put 🔥 fifth, behind 🧑‍🚒 Firefighter and 🧨 Firecracker. The emoji Extension titles each emoji with the character first, `🔥 Fire`, so the title was never exactly the query, while CLDR gives the firefighter and the firecracker the keyword `fire`, an exact match (ADR 0006). Users expect the thing named as they typed to come first, ahead of things that only list the word among their keywords.
 

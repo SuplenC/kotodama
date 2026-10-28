@@ -158,9 +158,10 @@ fn initials_count_like_a_word_start_and_win_a_tie_with_one() {
     assert_eq!(rows(&mut w, "ff"), ["File Finder", "Firefox"]);
 }
 
-/// M4
+/// M4: an exact keyword counts as a word start, and the shorter title wins
+/// the tie.
 #[test]
-fn an_exact_keyword_beats_a_title_that_starts_with_the_query() {
+fn an_exact_keyword_ties_with_a_title_that_starts_with_the_query() {
     let mut w = World::with(
         vec![
             app("Browser History Viewer"),
@@ -169,6 +170,15 @@ fn an_exact_keyword_beats_a_title_that_starts_with_the_query() {
         "",
     );
     assert_eq!(rows(&mut w, "browser"), ["Firefox", "Browser History Viewer"]);
+
+    let mut w = World::with(
+        vec![
+            with_keywords(app("Mozilla Firefox"), &["browser", "web"]),
+            app("Browser Tabs"),
+        ],
+        "",
+    );
+    assert_eq!(rows(&mut w, "browser"), ["Browser Tabs", "Mozilla Firefox"]);
 }
 
 /// M5
@@ -327,6 +337,39 @@ fn the_kind_order_does_not_decide_between_results_of_one_thing() {
 fn an_exact_title_beats_an_exact_keyword() {
     let mut w = World::with(vec![with_keywords(app("Ash"), &["fire"]), app("Fire")], "");
     assert_eq!(rows(&mut w, "fire"), ["Fire", "Ash"]);
+}
+
+/// An Extension's Item about an app, as "Remove Google Chrome" is about Google Chrome.
+fn about(title: &str, keywords: &[&str]) -> Item {
+    let mut about = item(
+        &title.to_lowercase().replace(' ', "-"),
+        title,
+        ItemKind::Namespaced(NamespacedKind::new("apps.package").expect("a valid kind")),
+    );
+    about.actions = vec![Action::new("remove", "Remove").confirm()];
+    with_keywords(about, keywords)
+}
+
+// Regression: #245.
+#[test]
+fn an_installed_app_beats_an_item_about_it_that_lists_its_name_as_a_keyword() {
+    let mut w = World::with(
+        vec![
+            about("Remove Google Chrome", &["chrome"]),
+            about("Install Google Chrome", &["chrome", "google"]),
+            app("Google Chrome"),
+        ],
+        "",
+    );
+    assert_eq!(w.first("chrome"), "Google Chrome");
+}
+
+#[test]
+fn an_items_own_keyword_still_ranks_as_an_exact_match() {
+    let mut remove = about("Remove Google Chrome", &[]);
+    remove.keyword = Some("chrome".into());
+    let mut w = World::with(vec![app("Google Chrome"), remove], "");
+    assert_eq!(rows(&mut w, "chrome"), ["Remove Google Chrome", "Google Chrome"]);
 }
 
 /// The rows for `query` of a desktop with `apps` and the emoji Extension's

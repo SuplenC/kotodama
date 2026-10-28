@@ -1,3 +1,5 @@
+use kotodama_protocol::ItemKind;
+
 use super::*;
 
 #[test]
@@ -107,4 +109,38 @@ fn neither_case_nor_accents_matter() {
     assert_eq!(tier("Żółw Notes", "zolw"), Some(Tier::WordStart));
     assert_eq!(tier("Zolw Notes", "żółw"), Some(Tier::WordStart));
     assert_eq!(fold_text("ŻÓŁW"), "zolw");
+}
+
+/// How well `query` matches an Item titled `Untitled` with `keyword` and
+/// `keywords`.
+fn keyword_tier(keyword: Option<&str>, keywords: &[&str], query: &str) -> Option<Tier> {
+    let item = Item {
+        id: "untitled".into(),
+        kind: ItemKind::Url { url: "x".into() },
+        title: "Untitled".into(),
+        subtitle: None,
+        icon: None,
+        keyword: keyword.map(str::to_owned),
+        identity: None,
+        keywords: keywords.iter().map(|&word| word.to_owned()).collect(),
+        hidden: false,
+        app_only: false,
+        actions: vec![],
+    };
+    let mut tiers = Tiers::default();
+    tiers.texts(Haystack::new(&item).texts(), &Query::new(query), Matched::ALL)
+}
+
+#[test]
+fn only_the_items_own_keyword_matches_as_exactly_as_a_title() {
+    assert_eq!(keyword_tier(Some("go"), &["golang"], "go"), Some(Tier::Keyword));
+    assert_eq!(keyword_tier(Some("g"), &[], "g"), Some(Tier::Keyword));
+    assert_eq!(keyword_tier(Some("go"), &["golang"], "golang"), Some(Tier::WordStart));
+    assert_eq!(keyword_tier(None, &["chrome"], "chrome"), Some(Tier::WordStart));
+    assert_eq!(keyword_tier(None, &["c"], "c"), Some(Tier::WordStart));
+    assert_eq!(
+        keyword_tier(None, &["google", "chrome"], "chrome"),
+        Some(Tier::WordStart)
+    );
+    assert_eq!(keyword_tier(Some(""), &["chrome"], "chrome"), Some(Tier::WordStart));
 }

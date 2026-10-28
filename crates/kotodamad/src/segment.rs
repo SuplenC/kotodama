@@ -86,6 +86,8 @@ struct Keys {
     letters: Letters,
     /// The Item's kind, as an index into [`Segment::kinds`].
     kind: u16,
+    /// Whether `words` starts with the Item's own keyword.
+    keyword: bool,
     /// Whether the row holds an Item: a search reads it here, beside the
     /// rest, rather than in the Segment's `held`.
     filled: bool,
@@ -310,6 +312,7 @@ impl Segment {
             starts,
             title_starts: folded.title_starts.len() as u32,
             words_starts: folded.words_starts.len() as u32,
+            keyword: folded.keyword,
             subtitle_initials: folded.subtitle_initials,
             letters: folded.letters,
             kind,
@@ -565,6 +568,7 @@ impl Segment {
                 chars: self.text(keys.words),
                 starts: &self.starts[words..words + keys.words_starts as usize],
             },
+            keyword: keys.keyword,
             subtitle: self.text(keys.subtitle),
             initials: self.initials[row as usize],
             subtitle_initials: keys.subtitle_initials,

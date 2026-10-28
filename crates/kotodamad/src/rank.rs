@@ -45,8 +45,11 @@ pub enum Tier {
     /// The query is the first letters of consecutive words, as `vsc` is of
     /// Visual Studio Code. Ranks as a word start, ahead of one on a tie.
     Initials,
-    /// One of the Item's keywords is the query. Ranks as exact, behind an
-    /// exact title on a tie.
+    /// The Item's own keyword, the one typed before its Arguments, is the
+    /// query. Ranks as exact, behind an exact title on a tie. One of its
+    /// other keywords being the query is only a [`Tier::WordStart`], so an
+    /// Item that lists an app's name among them ties with the app rather
+    /// than passing it.
     Keyword,
     /// The whole title is the query, past any symbols that lead it, as
     /// `fire` is of `🔥 Fire`.
@@ -321,6 +324,8 @@ pub struct Texts<'a> {
     /// The keyword and keywords, joined by [`SEPARATOR`]; empty if there are
     /// none.
     pub words: Text<'a>,
+    /// Whether `words` starts with the Item's own keyword.
+    pub keyword: bool,
     /// Empty if there is none. Searched so seldom that where its words start
     /// isn't kept.
     pub subtitle: Utf32Str<'a>,
@@ -343,6 +348,8 @@ pub struct Folded {
     pub subtitle: Utf32String,
     pub title_starts: Vec<u32>,
     pub words_starts: Vec<u32>,
+    /// Whether `words` starts with the Item's own keyword.
+    pub keyword: bool,
     pub initials: Letters,
     pub subtitle_initials: Letters,
     pub letters: Letters,
@@ -385,6 +392,9 @@ impl Folded {
             subtitle,
             title_starts,
             words_starts,
+            // An empty keyword adds no part to `words`, which would leave the
+            // first of the other keywords in its place.
+            keyword: item.keyword.as_deref().is_some_and(|keyword| !keyword.is_empty()),
             initials,
             subtitle_initials,
             letters,
@@ -404,6 +414,8 @@ pub struct Haystack {
     starts: Vec<u32>,
     /// How many of `starts` are the title's.
     title_starts: usize,
+    /// Whether `words` starts with the Item's own keyword.
+    keyword: bool,
     initials: Letters,
     subtitle_initials: Letters,
     letters: Letters,
@@ -650,6 +662,7 @@ impl Haystack {
             subtitle,
             mut title_starts,
             words_starts,
+            keyword,
             initials,
             subtitle_initials,
             letters,
@@ -663,6 +676,7 @@ impl Haystack {
             subtitle,
             starts: title_starts,
             title_starts: len,
+            keyword,
             initials,
             subtitle_initials,
             letters,
@@ -681,6 +695,7 @@ impl Haystack {
                 chars: self.words.slice(..),
                 starts: words,
             },
+            keyword: self.keyword,
             subtitle: self.subtitle.slice(..),
             initials: self.initials,
             subtitle_initials: self.subtitle_initials,
@@ -880,7 +895,8 @@ impl Tiers {
     }
 
     /// How well an Item matches: the best of its title and its keywords, where
-    /// an exact keyword is [`Tier::Keyword`], or failing those, its subtitle.
+    /// its own keyword exactly is [`Tier::Keyword`] and another keyword
+    /// exactly [`Tier::WordStart`], or failing those, its subtitle.
     /// A subtitle counts only for a query of at least [`SUBTITLE_LETTERS`]
     /// letters, only at word starts, and then only as [`Tier::Inside`]. Only
     /// the texts in `matched` are looked at. `None` if nothing matches well
@@ -891,8 +907,12 @@ impl Tiers {
             best = Self::text(texts.title, query);
         }
         if matched.words && best < Some(Tier::Exact) && !texts.words.is_empty() {
-            let words = Self::text(texts.words, query);
-            best = best.max(words.map(|tier| tier.min(Tier::Keyword)));
+            let words = Self::text(texts.words, query).map(|tier| match tier {
+                Tier::Exact if texts.keyword && is_exact(first_part(texts.words.chars), &query.whole) => Tier::Keyword,
+                Tier::Exact => Tier::WordStart,
+                tier => tier,
+            });
+            best = best.max(words);
         }
         if best.is_none() && matched.subtitle && query.searches_subtitles() && !texts.subtitle.is_empty() {
             let mut starts = std::mem::take(&mut self.starts);
@@ -1029,6 +1049,13 @@ fn is_exact(chars: Utf32Str, whole: &[char]) -> bool {
             .split(|c| c.char() == SEPARATOR)
             .any(|part| is(part) || is(past_symbols(part)))
     })
+}
+
+/// A folded text up to its first [`SEPARATOR`]: of an Item's keywords, the
+/// first.
+fn first_part(chars: Utf32Str<'_>) -> Utf32Str<'_> {
+    let end = with_chars!(chars, |chars| chars.iter().position(|c| c.char() == SEPARATOR));
+    chars.slice(..end.unwrap_or(chars.len()))
 }
 
 /// What follows the symbols that lead a folded text and the space after

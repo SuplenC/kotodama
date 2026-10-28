@@ -1,6 +1,6 @@
 # 32. Results rank by points that blend Tier and habit, within bounds
 
-Status: accepted (2026-10-22); supersedes the order of ADR 0006 and ADR 0011
+Status: accepted (2026-10-22); supersedes the order of ADR 0006 and ADR 0011; amended by ADR 0034 (an Item's search words count 3, as a word start)
 
 ADR 0006 ranked Results by Tier, then Frecency, and let usage lift a Result one Tier at most. ADR 0011 put the Item kind after Frecency. Together they fixed a chain of comparisons: standing, class, Tier after the lift, Frecency, fine Tier, Alias, kind, nucleo's score, length. Habit could move a Result one Tier and no further, however often it was picked, and there was nothing for a per-Extension boost to multiply. ADR 0006 rejected a blend because no weights kept both "an exact title wins" and "habit wins". The ranking cases are tests now (`crates/kotodamad/tests/ranking.rs`), so those promises become bounds on the weights, each with a test of its own, rather than following from the shape of the comparison.
 
