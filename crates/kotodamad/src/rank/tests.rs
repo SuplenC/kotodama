@@ -121,21 +121,31 @@ fn keyword_tier(keyword: Option<&str>, keywords: &[&str], query: &str) -> Option
 /// `keywords` and `weak_keywords`.
 fn weak_tier(keyword: Option<&str>, keywords: &[&str], weak_keywords: &[&str], query: &str) -> Option<Tier> {
     let item = Item {
+        keyword: keyword.map(str::to_owned),
+        keywords: keywords.iter().map(|&word| word.to_owned()).collect(),
+        weak_keywords: weak_keywords.iter().map(|&word| word.to_owned()).collect(),
+        ..untitled()
+    };
+    let mut tiers = Tiers::default();
+    tiers.texts(Haystack::new(&item).texts(), &Query::new(query), Matched::ALL)
+}
+
+/// An Item titled `Untitled` with nothing else to find it by.
+fn untitled() -> Item {
+    Item {
         id: "untitled".into(),
         kind: ItemKind::Url { url: "x".into() },
         title: "Untitled".into(),
         subtitle: None,
         icon: None,
-        keyword: keyword.map(str::to_owned),
+        keyword: None,
         identity: None,
-        keywords: keywords.iter().map(|&word| word.to_owned()).collect(),
+        keywords: vec![],
         hidden: false,
         app_only: false,
         actions: vec![],
-        weak_keywords: weak_keywords.iter().map(|&word| word.to_owned()).collect(),
-    };
-    let mut tiers = Tiers::default();
-    tiers.texts(Haystack::new(&item).texts(), &Query::new(query), Matched::ALL)
+        weak_keywords: vec![],
+    }
 }
 
 #[test]
@@ -161,7 +171,11 @@ fn a_weak_keyword_matches_as_the_query_inside_a_word_at_best() {
     );
     assert_eq!(weak_tier(None, &[], &id, "chrome"), Some(Tier::WeakKeyword));
     assert_eq!(weak_tier(None, &[], &id, "abcdef"), Some(Tier::WeakKeyword));
-    assert_eq!(weak_tier(None, &[], &id, "crmdflt"), Some(Tier::Scattered));
+    assert_eq!(
+        weak_tier(None, &[], &id, "crmdflt"),
+        None,
+        "letters scattered across an id find nothing"
+    );
     assert_eq!(
         weak_tier(None, &[], &id, "c"),
         None,
@@ -169,6 +183,41 @@ fn a_weak_keyword_matches_as_the_query_inside_a_word_at_best() {
     );
     assert_eq!(weak_tier(None, &[], &["x"], "x"), None);
     assert_eq!(weak_tier(None, &[], &["one", "two"], "two"), Some(Tier::WeakKeyword));
+    assert_eq!(weak_tier(None, &[], &[""], "untitled"), Some(Tier::Exact));
+}
+
+#[test]
+fn a_query_may_match_a_keyword_with_one_word_and_a_weak_keyword_with_another() {
+    let nautilus = ["org.gnome.Nautilus"];
+    assert_eq!(
+        weak_tier(None, &["File Manager"], &nautilus, "file nautilus"),
+        Some(Tier::WeakKeyword)
+    );
+    assert_eq!(
+        weak_tier(None, &["File Manager"], &nautilus, "file nautilus gedit"),
+        None
+    );
+}
+
+#[test]
+fn keywords_keep_their_word_starts_where_nucleo_holds_them_beside_weak_keywords_that_arent_ascii() {
+    let item = Item {
+        keywords: vec!["one\r\ntwo".into()],
+        weak_keywords: vec!["żółw".into()],
+        ..untitled()
+    };
+    let folded = Folded::new(&item);
+    let chars: Vec<char> = folded.words.slice(..).chars().collect();
+
+    assert_eq!(chars[folded.weak_at.unwrap() as usize], WEAK);
+    assert_eq!(
+        folded
+            .words_starts
+            .iter()
+            .map(|&at| chars[at as usize])
+            .collect::<String>(),
+        "ot"
+    );
 }
 
 #[test]

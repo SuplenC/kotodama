@@ -634,6 +634,8 @@ mod key_bits {
 
     const _: () = assert!(STANDING + CLASS + POINTS + FINE + BY_ALIAS + KIND + SCORE + LEN == 64);
     const _: () = assert!(crate::points::MAX == (1 << POINTS) - 1);
+    // Every Tier fits the fine tie-break: `Exact` is the last.
+    const _: () = assert!((crate::rank::Tier::Exact as u32) < 1 << FINE);
 }
 
 impl Candidate {

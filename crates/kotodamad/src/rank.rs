@@ -407,9 +407,10 @@ impl Folded {
         let letters = Letters::in_str(&title) | Letters::in_str(&words);
         // The weak keywords go after the others, with no word starts: they
         // match only inside a word.
+        let keywords_ascii = words.is_ascii();
         let mut weak_at = None;
-        for (n, weak) in item.weak_keywords.iter().enumerate() {
-            if n == 0 {
+        for weak in item.weak_keywords.iter().filter(|weak| !weak.is_empty()) {
+            if weak_at.is_none() {
                 weak_at = Some(words.len());
                 words.push(WEAK);
             } else {
@@ -425,20 +426,31 @@ impl Folded {
         };
         let weak_letters = weak_at.map_or(Letters::NONE, |at| Letters::in_str(&words[at..]));
         let every_letter = letters | weak_letters | Letters::in_str(&subtitle);
-        // Where the weak keywords begin, as nucleo holds the text: a
-        // character a grapheme, and `WEAK` one of its own.
-        let weak_at = weak_at.map(|at| {
-            if words.is_ascii() {
-                at as u32
-            } else {
-                Utf32String::from(&words[..at]).len() as u32
-            }
-        });
+        let words_ascii = words.is_ascii();
         let (title, words, subtitle) = (
             Utf32String::from(title),
             Utf32String::from(words),
             Utf32String::from(subtitle),
         );
+        // Where the weak keywords begin, as nucleo holds the text: a
+        // character a grapheme, and `WEAK` one of its own.
+        let weak_at = weak_at.map(|at| {
+            if words_ascii {
+                at as u32
+            } else {
+                words.slice(..).chars().position(|c| c == WEAK).unwrap_or(at) as u32
+            }
+        });
+        // Weak keywords that aren't ASCII make nucleo hold the keywords a
+        // grapheme a character too, where `\r\n` is one: their word starts
+        // are found again in the text as nucleo holds it.
+        if let Some(at) = weak_at
+            && keywords_ascii
+            && !words_ascii
+        {
+            words_starts.clear();
+            word_starts(words.slice(..at as usize), None, &mut words_starts);
+        }
         Folded {
             title,
             words,
@@ -773,7 +785,7 @@ impl Haystack {
         self.initials
     }
 
-    /// Every letter of the title, keywords and subtitle.
+    /// Every letter of the title, keywords, weak keywords and subtitle.
     pub fn every_letter(&self) -> Letters {
         self.every_letter
     }
@@ -977,7 +989,7 @@ impl Tiers {
             });
             best = best.max(words);
             if best < Some(Tier::WeakKeyword) {
-                best = best.max(weak(texts.weak(), query));
+                best = best.max(weak(keywords, texts.weak(), query));
             }
         }
         if best.is_none() && matched.subtitle && query.searches_subtitles() && !texts.subtitle.is_empty() {
@@ -1146,10 +1158,14 @@ fn word_tier(text: Text, word: &[char], whole: bool) -> Option<Tier> {
     with_chars!(text.chars, |chars| { word_in(chars, text.starts, word, whole) })
 }
 
-/// How well a query matches an Item's weak keywords, folded and joined:
-/// [`Tier::WeakKeyword`] if each word is inside them, as if none of their
-/// words started anywhere, so a word of one letter never matches.
-fn weak(chars: Utf32Str, query: &Query) -> Option<Tier> {
+/// How well a query matches an Item's weak keywords, folded and joined,
+/// with its other keywords: [`Tier::WeakKeyword`] at best, when each word of
+/// the query is inside a weak keyword or matches a keyword. A weak keyword
+/// counts as if none of its words started anywhere, so a word of one letter
+/// never matches it, and only the query's letters together do: letters
+/// scattered across an id would find most Items, and habit would lift them
+/// past a word start.
+fn weak(keywords: Text, chars: Utf32Str, query: &Query) -> Option<Tier> {
     if chars.is_empty() {
         return None;
     }
@@ -1157,8 +1173,15 @@ fn weak(chars: Utf32Str, query: &Query) -> Option<Tier> {
     let mut worst = Tier::WeakKeyword;
     for (n, word) in query.words.iter().enumerate() {
         let whole = n == last && query.last_is_whole;
-        let tier = with_chars!(chars, |chars| word_in(chars, &[], word, whole))?;
-        worst = worst.min(tier.min(Tier::WeakKeyword));
+        let inside = with_chars!(chars, |chars| word_in(chars, &[], word, whole))
+            .filter(|&tier| tier >= Tier::Inside)
+            .map(|_| Tier::WeakKeyword);
+        let elsewhere = if keywords.is_empty() {
+            None
+        } else {
+            word_tier(keywords, word, whole)
+        };
+        worst = worst.min(inside.max(elsewhere)?);
     }
     Some(worst)
 }

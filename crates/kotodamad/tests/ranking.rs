@@ -384,13 +384,22 @@ fn web_app(title: &str, desktop_id: &str) -> Item {
 #[test]
 fn an_app_found_by_its_desktop_id_alone_never_passes_an_app_whose_title_matches() {
     let mut w = World::with(
-        vec![app("Google Chrome"), web_app("Google Chat", "chrome-abcdef-Default")],
+        vec![
+            app("Google Chrome"),
+            app("Visual Studio Code"),
+            web_app("Google Chat", "chrome-abcdef-Default"),
+        ],
         "",
     );
     w.daily(100, "google chat", "Google Chat");
 
     assert_eq!(rows(&mut w, "chrome"), ["Google Chrome", "Google Chat"]);
     assert_eq!(w.first("chat"), "Google Chat");
+    assert_eq!(
+        w.first("code"),
+        "Visual Studio Code",
+        "`code` is only scattered in the id"
+    );
 }
 
 /// The rows for `query` of a desktop with `apps` and the emoji Extension's
