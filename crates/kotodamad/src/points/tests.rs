@@ -2,8 +2,9 @@ use super::*;
 
 const THRESHOLD: f64 = 5.0;
 
-const REAL: [Tier; 6] = [
+const REAL: [Tier; 7] = [
     Tier::Scattered,
+    Tier::WeakKeyword,
     Tier::Inside,
     Tier::WordStart,
     Tier::Initials,
@@ -68,13 +69,25 @@ fn a_near_miss_stays_below_every_real_match_whatever_its_habit_and_boost() {
 #[test]
 fn a_match_inside_a_word_or_scattered_never_reaches_an_exact_title() {
     let exact = points(Tier::Exact, 0, ONE);
-    for tier in [Tier::Scattered, Tier::Inside] {
+    for tier in [Tier::Scattered, Tier::WeakKeyword, Tier::Inside] {
         for frecency in FRECENCIES {
             for b in BOOSTS {
                 let points = points(tier, habit(frecency, THRESHOLD), boost(b));
                 assert!(points < exact, "{tier:?} {frecency} {b}");
                 assert!(band(points) < Tier::Exact.coarse());
             }
+        }
+    }
+}
+
+#[test]
+fn a_match_inside_a_weak_keyword_never_reaches_a_word_start() {
+    let word_start = points(Tier::WordStart, 0, ONE);
+    for frecency in FRECENCIES {
+        for b in BOOSTS {
+            let points = points(Tier::WeakKeyword, habit(frecency, THRESHOLD), boost(b));
+            assert!(points < word_start, "{frecency} {b}");
+            assert!(band(points) <= Tier::Inside.coarse());
         }
     }
 }
@@ -132,7 +145,7 @@ fn rising(tier: Tier, b: f64, frecencies: &[f32]) -> bool {
 #[test]
 fn heavy_use_past_a_bands_ceiling_still_orders_by_frecency() {
     let heavy = [50.0, 500.0, 5e3, 1e5, 1e7];
-    for tier in [Tier::Scattered, Tier::Inside, Tier::WordStart] {
+    for tier in [Tier::Scattered, Tier::WeakKeyword, Tier::Inside, Tier::WordStart] {
         for b in [0.5, 1.0, 2.0] {
             assert!(rising(tier, b, &heavy), "{tier:?} {b}");
         }

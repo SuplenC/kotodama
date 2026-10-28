@@ -181,7 +181,26 @@ fn keywords_generic_names_and_ids_make_an_app_findable() {
     let files = find(&items, "org.gnome.Nautilus");
     // The Extension runs in Polish.
     assert_eq!(files.title, "Pliki");
-    assert_eq!(files.keywords, ["katalog", "File Manager", "org.gnome.Nautilus"]);
+    assert_eq!(files.keywords, ["katalog", "File Manager"]);
+    assert_eq!(files.weak_keywords, ["org.gnome.Nautilus"]);
+}
+
+// Regression: #246.
+#[test]
+fn a_desktop_id_is_a_weak_keyword_so_a_web_app_does_not_rank_as_its_browser() {
+    let dir = data_dirs();
+    install(
+        dir.path(),
+        "home",
+        "chrome-abcdef-Default.desktop",
+        &app("Google Chat", "chrome"),
+    );
+    let apps = Apps::configured(dir, Table::new());
+
+    let items = apps.added();
+    let chat = find(&items, "chrome-abcdef-Default");
+    assert!(chat.keywords.is_empty(), "{:?}", chat.keywords);
+    assert_eq!(chat.weak_keywords, ["chrome-abcdef-Default"]);
 }
 
 #[test]

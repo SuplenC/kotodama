@@ -60,6 +60,13 @@ pub struct Item {
     /// `add_items`, and when the user puts the whole Extension in the search
     /// or behind its app.
     pub app_only: bool,
+    /// Words the Item is still found by, but which never rank it above a
+    /// title: one matches only as the query inside a word, and a Result
+    /// found by them alone stays below every title that starts with the
+    /// query, however often it is picked. For a name a user seldom types
+    /// but may look for, such as an app's desktop id, whose first word may
+    /// be another app's name.
+    pub weak_keywords: Vec<String>,
 }
 
 /// An Item's id and kind, without anything shown on screen. This is how the
@@ -450,6 +457,7 @@ struct ItemWire<'a> {
     actions: &'a [Action],
     hidden: bool,
     app_only: bool,
+    weak_keywords: &'a [String],
 }
 
 /// An Item as it arrives, before its kind's field and its Actions are checked.
@@ -481,6 +489,8 @@ pub(crate) struct ItemOwned {
     hidden: bool,
     #[serde(default)]
     app_only: bool,
+    #[serde(default)]
+    weak_keywords: Vec<String>,
 }
 
 impl Serialize for Item {
@@ -502,6 +512,7 @@ impl Serialize for Item {
             actions: &self.actions,
             hidden: self.hidden,
             app_only: self.app_only,
+            weak_keywords: &self.weak_keywords,
         }
         .serialize(serializer)
     }
@@ -543,6 +554,7 @@ impl ItemOwned {
             actions: self.actions,
             hidden: self.hidden,
             app_only: self.app_only,
+            weak_keywords: self.weak_keywords,
         })
     }
 }

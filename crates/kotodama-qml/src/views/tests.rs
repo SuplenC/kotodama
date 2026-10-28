@@ -86,6 +86,7 @@ fn item(id: &str, kind: ItemKind) -> Item {
         keywords: Vec::new(),
         hidden: false,
         app_only: false,
+        weak_keywords: Vec::new(),
         actions: Vec::new(),
     }
 }

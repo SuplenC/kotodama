@@ -31,6 +31,7 @@ fn batch() -> FromExtension {
             keywords: vec!["example".into(), "utility".into(), format!("app{n}")],
             hidden: false,
             app_only: false,
+            weak_keywords: Vec::new(),
             actions: vec![
                 Action {
                     id: "open".into(),

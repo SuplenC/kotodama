@@ -201,7 +201,10 @@ Indexes Items. An Item whose id was sent before replaces the old one, which is h
           }
         ],
         "hidden": true,
-        "app_only": true
+        "app_only": true,
+        "weak_keywords": [
+          "org.mozilla.firefox"
+        ]
       }
     ]
   }
@@ -264,7 +267,10 @@ Results for Live query `live_query`, in as many batches as you like; `done` says
             }
           ],
           "hidden": true,
-          "app_only": true
+          "app_only": true,
+          "weak_keywords": [
+            "org.mozilla.firefox"
+          ]
         },
         "score": 0.75,
         "answer": true
@@ -558,7 +564,10 @@ An application, by its desktop file id.
     }
   ],
   "hidden": true,
-  "app_only": true
+  "app_only": true,
+  "weak_keywords": [
+    "org.mozilla.firefox"
+  ]
 }
 ```
 
@@ -598,7 +607,10 @@ A file, by its absolute path.
     }
   ],
   "hidden": true,
-  "app_only": true
+  "app_only": true,
+  "weak_keywords": [
+    "org.mozilla.firefox"
+  ]
 }
 ```
 
@@ -638,7 +650,10 @@ A folder, by its absolute path.
     }
   ],
   "hidden": true,
-  "app_only": true
+  "app_only": true,
+  "weak_keywords": [
+    "org.mozilla.firefox"
+  ]
 }
 ```
 
@@ -678,7 +693,10 @@ A project's folder, by its absolute path.
     }
   ],
   "hidden": true,
-  "app_only": true
+  "app_only": true,
+  "weak_keywords": [
+    "org.mozilla.firefox"
+  ]
 }
 ```
 
@@ -718,7 +736,10 @@ An open window, by the compositor's address for it.
     }
   ],
   "hidden": true,
-  "app_only": true
+  "app_only": true,
+  "weak_keywords": [
+    "org.mozilla.firefox"
+  ]
 }
 ```
 
@@ -758,7 +779,10 @@ A web address.
     }
   ],
   "hidden": true,
-  "app_only": true
+  "app_only": true,
+  "weak_keywords": [
+    "org.mozilla.firefox"
+  ]
 }
 ```
 
@@ -798,7 +822,10 @@ Any other kind belongs to one Extension and is named `<extension>.<kind>`, witho
     }
   ],
   "hidden": true,
-  "app_only": true
+  "app_only": true,
+  "weak_keywords": [
+    "org.mozilla.firefox"
+  ]
 }
 ```
 
@@ -845,7 +872,10 @@ Items to pick from, whose Actions run like a Result's. Typing filters them in th
           }
         ],
         "hidden": true,
-        "app_only": true
+        "app_only": true,
+        "weak_keywords": [
+          "org.mozilla.firefox"
+        ]
       }
     ],
     "filters_itself": true
@@ -1239,7 +1269,10 @@ The whole ranked list for the query, best first, and the app it is in.
             }
           ],
           "hidden": true,
-          "app_only": true
+          "app_only": true,
+          "weak_keywords": [
+            "org.mozilla.firefox"
+          ]
         },
         "contributed": [
           {

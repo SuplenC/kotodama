@@ -134,16 +134,21 @@ impl Settings {
     fn item(&self, app: &App) -> Item {
         let renamed = self.names.get(&app.id);
         let title = renamed.unwrap_or(&app.name).clone();
-        // Found by its generic name, by its own name when renamed, and by its
-        // desktop id, besides its keywords.
+        // Found by its generic name and by its own name when renamed, besides
+        // its keywords.
         let mut keywords = app.keywords.clone();
         keywords.extend(app.generic_name.iter().cloned());
         if renamed.is_some() {
             keywords.push(app.name.clone());
         }
-        if !app.id.eq_ignore_ascii_case(&title) {
-            keywords.push(app.id.clone());
-        }
+        // Found by its desktop id too, but never ranked by it as by a name:
+        // a web app's id starts with its browser's, as in
+        // `chrome-<app id>-Default`, and would tie with the browser.
+        let weak_keywords = if app.id.eq_ignore_ascii_case(&title) {
+            Vec::new()
+        } else {
+            vec![app.id.clone()]
+        };
         let mut actions = Vec::with_capacity(1 + app.actions.len());
         actions.push(Action::new(OPEN, "Open"));
         actions.extend(
@@ -166,6 +171,7 @@ impl Settings {
             keywords,
             hidden: false,
             app_only: false,
+            weak_keywords,
             actions,
         }
     }

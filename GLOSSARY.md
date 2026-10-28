@@ -52,6 +52,10 @@ _Avoid_: Cached item, preloaded item
 An Item an Extension sends ahead of time that the search never shows; only `kotodama open --view` reaches it, to run its primary Action, which usually pushes a View.
 _Avoid_: Private item, internal item
 
+**Weak keyword**:
+A word an Item is found by that never ranks it as a title would: the query matches it only inside a word, and an Item found by its Weak keywords alone stays below every title that starts with the query, however often it is picked. The Apps Extension's desktop ids are Weak keywords.
+_Avoid_: Hidden keyword, secondary keyword, id keyword
+
 **App**:
 The search over one Extension's Items alone, which every Extension has. The search shows its entry Item, found by the App's title and its Word; Tab or Enter on it enters the App, where an intro card from the Manifest shows until something is typed; Esc with nothing typed goes back to the whole search. Each Item is in the search, or in its App only. Unlike a Hidden item, an App only Item is still searched, in its App; unlike a View, the search in an App is the search, with Results. A program installed on the desktop is an application, never an App: its Item kind is `app`, and the `apps` Extension's App is the Applications App.
 _Avoid_: Prefix, scope, mode, namespace, trigger; app for a desktop application
@@ -129,7 +133,7 @@ The Results the user lists in the config for the Empty query to show after the m
 _Avoid_: Pinned menu, favorites, default list
 
 **Tier**:
-How well a Result matches a query: exact, initials or word start, inside a word, letters scattered, or a Near miss. Each is worth a step of Points.
+How well a Result matches a query: exact, initials or word start, inside a word (or inside a Weak keyword, which habit never lifts to a word start), letters scattered, or a Near miss. Each is worth a step of Points.
 _Avoid_: Match quality, bucket
 
 **Points**:

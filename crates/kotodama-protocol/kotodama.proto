@@ -221,6 +221,7 @@ message Item {
   repeated Action actions = 13;
   bool hidden = 14;
   bool app_only = 15;
+  repeated string weak_keywords = 16;
 }
 
 message ItemRef {

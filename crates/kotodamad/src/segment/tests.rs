@@ -17,6 +17,7 @@ fn item(id: &str, title: &str, actions: &[&str]) -> Item {
         keywords: vec![],
         hidden: false,
         app_only: false,
+        weak_keywords: Vec::new(),
         actions: actions
             .iter()
             .map(|&id| Action {
@@ -70,6 +71,31 @@ fn an_earlier_version_reads_its_own_items_after_a_later_one_replaced_them() {
     segment.edit(Edit::Add(vec![item("a", "Second", &["open"])]));
     assert_eq!(read(&earlier, "a").unwrap().title, "First");
     assert_eq!(read(&segment, "a").unwrap().title, "Second");
+}
+
+#[test]
+fn weak_keywords_stay_apart_from_the_keywords_after_the_arenas_are_compacted() {
+    let mut segment = Segment::default();
+    let mut first = item("first", "Some Notes", &["open"]);
+    first.keywords = vec!["notes".into(), "text editor".into()];
+    let mut chat = item("chat", "Google Chat", &["open"]);
+    chat.keywords = vec!["messages".into()];
+    chat.weak_keywords = vec!["chrome-abcdef-Default".into()];
+    segment.edit(Edit::Add(vec![first, chat]));
+    let row = segment.find("chat").unwrap();
+    let before = segment.keys[row as usize].starts;
+
+    segment.edit(Edit::Remove(vec!["first".into()]));
+    for round in 0..50 {
+        let filler = (0..20).map(|n| item(&format!("filler-{n}"), &format!("Filler {round}"), &["open"]));
+        segment.edit(Edit::Add(filler.collect()));
+    }
+
+    assert!(segment.keys[row as usize].starts < before, "the arenas were compacted");
+    let texts = segment.texts(row).unwrap();
+    assert_eq!(texts.keywords().chars.to_string(), "messages");
+    assert_eq!(texts.weak().to_string(), "chrome-abcdef-default");
+    assert_eq!(texts.keywords().starts, [0]);
 }
 
 #[test]

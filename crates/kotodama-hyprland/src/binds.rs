@@ -226,6 +226,7 @@ fn bind_item(id: String, title: String, subtitle: String, keywords: Vec<String>)
         keywords,
         hidden: false,
         app_only: true,
+        weak_keywords: Vec::new(),
         actions: vec![Action::new(RUN, "Run")],
     }
 }
@@ -244,6 +245,7 @@ pub fn shortcuts_item() -> Item {
         keywords: ["keybinds", "hotkeys", "hyprland"].map(str::to_owned).to_vec(),
         hidden: false,
         app_only: true,
+        weak_keywords: Vec::new(),
         actions: vec![Action::new(OPEN, "Show Keyboard Shortcuts")],
     }
 }

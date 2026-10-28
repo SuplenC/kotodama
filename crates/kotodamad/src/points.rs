@@ -13,6 +13,7 @@
 //! - Only an exact match, or a word start (or initials) whose habit is worth a Tier, reaches the
 //!   exact band. A match inside a word or scattered never passes an exact title on habit or boost;
 //!   nor does a word start on boost alone.
+//! - A match inside a weak keyword never reaches a word start, on habit or boost.
 //!
 //! # Owns
 //!
@@ -35,6 +36,10 @@ pub const TIER: u32 = 1 << 12;
 /// The points of the exact band's floor: an exact title or keyword with
 /// no habit.
 const EXACT: u32 = TIER * Tier::Exact.coarse() as u32;
+
+/// The points of the word start band's floor: a title that starts with the
+/// query, with no habit.
+const WORD_START: u32 = TIER * Tier::WordStart.coarse() as u32;
 
 /// An Extension's boost when its `[extensions.<name>]` sets none: its
 /// Results' points count as earned.
@@ -87,6 +92,7 @@ pub fn points(tier: Tier, habit: u32, boost: Boost) -> u32 {
     let boosted = f64::from(earned) * boost.get();
     let (floor, ceiling, room) = match tier {
         Tier::NearMiss => (0, TIER - 1, ROOM),
+        Tier::WeakKeyword => (TIER, WORD_START - 1, ROOM),
         Tier::Scattered | Tier::Inside => (TIER, EXACT - 1, ROOM),
         Tier::WordStart | Tier::Initials if habit < TIER => (TIER, EXACT - 1, ROOM),
         Tier::WordStart | Tier::Initials | Tier::Keyword | Tier::Exact => (TIER, MAX, TOP_ROOM),

@@ -105,6 +105,7 @@ fn item(random: &mut Random) -> Item {
                 confirm: false,
             })
             .collect(),
+        weak_keywords: (0..random.below(3)).map(|_| words(random, 2)).collect(),
     }
 }
 

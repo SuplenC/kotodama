@@ -77,9 +77,12 @@ struct Keys {
     words: Span,
     subtitle: Span,
     /// Where the title's word starts are in the arena of them, followed by
-    /// the keywords'.
+    /// the keywords', then, with [`WEAK_AT`] set in `words_starts`, where
+    /// in `words` the weak keywords begin.
     starts: u32,
     title_starts: u32,
+    /// How many of the keywords' word starts there are, with [`WEAK_AT`] set
+    /// when the Item has weak keywords.
     words_starts: u32,
     subtitle_initials: Letters,
     /// Every letter of the title and keywords.
@@ -91,6 +94,27 @@ struct Keys {
     /// Whether the row holds an Item: a search reads it here, beside the
     /// rest, rather than in the Segment's `held`.
     filled: bool,
+}
+
+// A row's keys are what a search reads of every row its letters let
+// through: they stay one cache line or less, with no padding left. Weak
+// keywords, which most Items lack, cost a row nothing here.
+const _: () = assert!(size_of::<Keys>() == 56);
+
+/// Set in [`Keys::words_starts`] when the Item has weak keywords. A count
+/// of word starts never reaches it: a text is shorter than [`WIDE`].
+const WEAK_AT: u32 = 1 << 31;
+
+impl Keys {
+    /// How many of the keywords' word starts there are.
+    fn words_starts(&self) -> u32 {
+        self.words_starts & !WEAK_AT
+    }
+
+    /// How many entries of the arena of word starts the row takes.
+    fn starts_len(&self) -> u32 {
+        self.title_starts + self.words_starts() + u32::from(self.words_starts & WEAK_AT != 0)
+    }
 }
 
 /// A filled row, as ranking reads it: its keys, looked up once, and its
@@ -298,6 +322,11 @@ impl Segment {
         let starts = self.starts.len() as u32;
         self.starts.extend(&folded.title_starts);
         self.starts.extend(&folded.words_starts);
+        let mut words_starts = folded.words_starts.len() as u32;
+        if let Some(weak_at) = folded.weak_at {
+            self.starts.push(weak_at);
+            words_starts |= WEAK_AT;
+        }
         let kind = item.kind.name();
         let kind = if let Some(n) = self.kinds.iter().position(|known| known == kind) {
             n
@@ -311,7 +340,7 @@ impl Segment {
             subtitle: self.push_text(&folded.subtitle),
             starts,
             title_starts: folded.title_starts.len() as u32,
-            words_starts: folded.words_starts.len() as u32,
+            words_starts,
             keyword: folded.keyword,
             subtitle_initials: folded.subtitle_initials,
             letters: folded.letters,
@@ -407,7 +436,7 @@ impl Segment {
             .iter()
             .map(|span| text_bytes(*span))
             .sum::<usize>()
-            + (keys.title_starts + keys.words_starts) as usize * size_of::<u32>();
+            + keys.starts_len() as usize * size_of::<u32>();
     }
 
     /// Puts the payloads of the Items just added on the Shelf. Should the
@@ -506,7 +535,7 @@ impl Segment {
                 continue;
             }
             let keys = self.keys[at];
-            let starts = keys.starts as usize..(keys.starts + keys.title_starts + keys.words_starts) as usize;
+            let starts = keys.starts as usize..(keys.starts + keys.starts_len()) as usize;
             let moved = Keys {
                 title: self.copy_text(&ascii, &wide, keys.title),
                 words: self.copy_text(&ascii, &wide, keys.words),
@@ -559,6 +588,12 @@ impl Segment {
     fn keys_texts(&self, row: Row, keys: &Keys) -> Texts<'_> {
         let starts = keys.starts as usize;
         let words = starts + keys.title_starts as usize;
+        let end = words + keys.words_starts() as usize;
+        let weak_at = if keys.words_starts & WEAK_AT == 0 {
+            keys.words.len() as u32
+        } else {
+            self.starts[end]
+        };
         Texts {
             title: Text {
                 chars: self.text(keys.title),
@@ -566,8 +601,9 @@ impl Segment {
             },
             words: Text {
                 chars: self.text(keys.words),
-                starts: &self.starts[words..words + keys.words_starts as usize],
+                starts: &self.starts[words..end],
             },
+            weak_at,
             keyword: keys.keyword,
             subtitle: self.text(keys.subtitle),
             initials: self.initials[row as usize],

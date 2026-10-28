@@ -372,6 +372,36 @@ fn an_items_own_keyword_still_ranks_as_an_exact_match() {
     assert_eq!(rows(&mut w, "chrome"), ["Remove Google Chrome", "Google Chrome"]);
 }
 
+/// An app whose desktop id, as a Chrome web app's is, names the browser it
+/// runs in.
+fn web_app(title: &str, desktop_id: &str) -> Item {
+    let mut web_app = app(title);
+    web_app.weak_keywords = vec![desktop_id.into()];
+    web_app
+}
+
+// Regression: #246.
+#[test]
+fn an_app_found_by_its_desktop_id_alone_never_passes_an_app_whose_title_matches() {
+    let mut w = World::with(
+        vec![
+            app("Google Chrome"),
+            app("Visual Studio Code"),
+            web_app("Google Chat", "chrome-abcdef-Default"),
+        ],
+        "",
+    );
+    w.daily(100, "google chat", "Google Chat");
+
+    assert_eq!(rows(&mut w, "chrome"), ["Google Chrome", "Google Chat"]);
+    assert_eq!(w.first("chat"), "Google Chat");
+    assert_eq!(
+        w.first("code"),
+        "Visual Studio Code",
+        "`code` is only scattered in the id"
+    );
+}
+
 /// The rows for `query` of a desktop with `apps` and the emoji Extension's
 /// real Items.
 fn with_emoji(apps: &[&str], query: &str) -> Vec<String> {

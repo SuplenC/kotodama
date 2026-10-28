@@ -545,6 +545,7 @@ fn item(kind: ItemKind) -> Item {
         actions: vec![action()],
         hidden: true,
         app_only: true,
+        weak_keywords: vec!["org.mozilla.firefox".into()],
     }
 }
 
