@@ -174,16 +174,18 @@ impl Settings {
 
 /// The part of `id` worth finding the app by. A browser's web app, such as
 /// `chrome-<app id>-Default`, loses the browser and profile around its app id,
-/// so typing the browser's name doesn't list every web app next to it.
+/// so typing the browser's name doesn't list every web app next to it. A
+/// Flatpak browser puts its own id and `.flextop.` in front.
 fn searchable_id(id: &str) -> &str {
+    let web_app = id.rsplit_once(".flextop.").map_or(id, |(_, web_app)| web_app);
     let Some(rest) = WEB_APP_BROWSERS
         .iter()
-        .find_map(|browser| id.strip_prefix(browser)?.strip_prefix('-'))
+        .find_map(|browser| web_app.strip_prefix(browser)?.strip_prefix('-'))
     else {
         return id;
     };
     match rest.rsplit_once('-') {
-        Some((app, profile)) if profile == "Default" || profile.starts_with("Profile_") => app,
+        Some((app, profile)) if !app.is_empty() && (profile == "Default" || profile.starts_with("Profile_")) => app,
         _ => id,
     }
 }

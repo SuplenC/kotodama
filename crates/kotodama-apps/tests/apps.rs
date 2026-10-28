@@ -206,6 +206,12 @@ fn a_browser_web_app_is_not_found_by_the_browsers_name() {
         "brave-ghijkl-Profile_2.desktop",
         &app("WhatsApp Web", "whatsapp"),
     );
+    install(
+        dir.path(),
+        "home",
+        "com.google.Chrome.flextop.chrome-mnopqr-Default.desktop",
+        &app("Google Meet", "meet"),
+    );
     let apps = Apps::configured(dir, Table::new());
 
     let items = apps.added();
@@ -216,6 +222,9 @@ fn a_browser_web_app_is_not_found_by_the_browsers_name() {
     let whatsapp = find(&items, "brave-ghijkl-Profile_2");
     assert!(!matches(whatsapp, "brave"), "{whatsapp:?}");
     assert!(matches(whatsapp, "whatsapp"), "{whatsapp:?}");
+    let meet = find(&items, "com.google.Chrome.flextop.chrome-mnopqr-Default");
+    assert!(!matches(meet, "chrome"), "{meet:?}");
+    assert!(matches(meet, "meet"), "{meet:?}");
 }
 
 #[test]
