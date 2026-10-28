@@ -7,7 +7,7 @@ ADR 0021 ranked an exact keyword as exact, behind an exact title on a tie, and A
 ## What it does
 
 - **One of `keywords` equal to the query is a word start**, as if it were a word of the title. It counts 3 in ADR 0032's points, not 4, and ties with a word start, not ahead of it. On a tie the kind (ADR 0011) then puts an app before an Extension's Item about it, as ADR 0027 does for an app's entry Item.
-- **The Item's own `keyword` equal to the query stays exact**, behind an exact title on a tie (ADR 0021). It is a word the Extension gives the Item to be named by, as an Alias, a Quicklink or an app's word is (ADR 0028), none of which change.
+- **The Item's own `keyword` equal to the query stays exact.** It is a word the Extension gives the Item to be named by, as an Alias, a Quicklink or an app's word is (ADR 0028), none of which change. The keyword table already ranks an Indexed item named by its keyword as an exact match when the query starts with it; the match on the Item's texts covers what the table doesn't reach: the Daemon's own Items, Live query results, and a keyword typed without its accents.
 - **Habit still lifts either** as ADR 0032 says: an Item about an app that the user picks more than the app passes it.
 
 ## Considered options
@@ -18,5 +18,5 @@ ADR 0021 ranked an exact keyword as exact, behind an exact title on a tie, and A
 
 ## Consequences
 
-- An Item found only by one of its search words no longer beats a title that starts with the query: they tie, and the kind, nucleo's score and the shorter title decide.
+- An Item found only by one of its search words no longer beats a title that starts with the query: they tie, and the kind, nucleo's score and the shorter title decide. A title whose initials are the query wins that tie, as it does over a word start (ADR 0021): `vsc` ranks Visual Studio Code above an Item whose search words hold `vsc`.
 - The Index keeps one more flag per row, whether its keywords text starts with the Item's own keyword. It sits in padding, so a row costs no more memory, and a search reads it only for an exact match on the keywords.
