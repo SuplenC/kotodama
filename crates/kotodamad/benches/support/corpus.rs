@@ -44,6 +44,7 @@ pub fn items() -> Vec<Item> {
                 hidden: false,
                 app_only: false,
                 weak_keywords: Vec::new(),
+                yields: false,
                 actions: vec![Action::new("open", "Open")],
                 title,
             }
@@ -87,6 +88,7 @@ pub fn long_titles(n: usize, chars: usize, seed: u32) -> Vec<Item> {
                 hidden: false,
                 app_only: false,
                 weak_keywords: Vec::new(),
+                yields: false,
                 actions: vec![Action::new("paste", "Paste")],
                 title,
             }

@@ -138,6 +138,7 @@ impl Quicklink {
             hidden: false,
             app_only: false,
             weak_keywords: Vec::new(),
+            yields: false,
             actions: vec![Action::new("open", "Open").arguments(if self.takes_query() {
                 // The keyword alone opens it with an empty Argument.
                 vec![Argument::new("query").optional()]

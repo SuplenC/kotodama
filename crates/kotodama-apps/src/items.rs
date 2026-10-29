@@ -172,6 +172,7 @@ impl Settings {
             hidden: false,
             app_only: false,
             weak_keywords,
+            yields: false,
             actions,
         }
     }

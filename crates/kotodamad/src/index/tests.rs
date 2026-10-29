@@ -85,10 +85,12 @@ fn item(random: &mut Random) -> Item {
             path: format!("/src/{id}").into(),
         },
     };
+    let identity = (random.below(4) == 0).then(|| format!("thing:{}", random.below(5)));
+    let yields = identity.is_some() && random.below(3) == 0;
     Item {
         id,
         kind,
-        identity: (random.below(4) == 0).then(|| format!("thing:{}", random.below(5))),
+        identity,
         title: words(random, 3),
         subtitle: (random.below(2) == 0).then(|| words(random, 4)),
         icon: None,
@@ -108,6 +110,7 @@ fn item(random: &mut Random) -> Item {
             })
             .collect(),
         weak_keywords: (0..random.below(3)).map(|_| words(random, 2)).collect(),
+        yields,
     }
 }
 
@@ -180,6 +183,27 @@ fn segment_of(extension: usize, app_only: bool) -> usize {
     extension * SIDES + usize::from(app_only)
 }
 
+/// The Items the Index shows of `items`: all but the placeholders an Item
+/// of their Identity that doesn't yield is among them for.
+fn showing(items: &BTreeMap<(usize, String), Item>) -> BTreeMap<(usize, String), Item> {
+    let claimed: BTreeSet<&str> = items
+        .values()
+        .filter(|item| !item.yields)
+        .filter_map(|item| item.identity.as_deref())
+        .collect();
+    items
+        .iter()
+        .filter(|(_, item)| {
+            !item.yields
+                || item
+                    .identity
+                    .as_deref()
+                    .is_none_or(|identity| !claimed.contains(identity))
+        })
+        .map(|(key, item)| (key.clone(), item.clone()))
+        .collect()
+}
+
 /// Matched the naive way: each Item in reach folded afresh, whole.
 fn naive(
     items: &BTreeMap<(usize, String), Item>,
@@ -245,7 +269,7 @@ fn a_search_of_the_index_finds_what_a_naive_search_of_every_item_finds() {
             };
             assert_eq!(
                 search(&index, reach, &text, &mut matcher, &mut tiers),
-                naive(&items, reach, &text, &mut matcher, &mut tiers),
+                naive(&showing(&items), reach, &text, &mut matcher, &mut tiers),
                 "seed {seed}, {reach:?}, query {text:?}"
             );
         }
@@ -255,6 +279,7 @@ fn a_search_of_the_index_finds_what_a_naive_search_of_every_item_finds() {
                 (0..segment.every_letter().len() as Row).filter_map(move |row| Some((n, segment.id(row)?.to_owned())))
             })
             .collect();
+        let items = showing(&items);
         assert_eq!(indexed, items.keys().cloned().collect(), "seed {seed}");
         for ((n, id), item) in &items {
             let slot = index.find(ExtensionId(n / SIDES), id).unwrap();
@@ -263,4 +288,68 @@ fn a_search_of_the_index_finds_what_a_naive_search_of_every_item_finds() {
             assert_eq!(index.identity(slot), item.identity.as_deref());
         }
     }
+}
+
+/// An Item of Identity `thing:a`, which yields with `yields`.
+fn of_a(id: &str, yields: bool) -> Item {
+    Item {
+        id: id.into(),
+        kind: ItemKind::Url {
+            url: format!("https://example.org/{id}"),
+        },
+        identity: Some("thing:a".into()),
+        title: "Thing".into(),
+        subtitle: None,
+        icon: None,
+        keyword: None,
+        keywords: Vec::new(),
+        hidden: false,
+        app_only: false,
+        actions: vec![Action::new("open", "Open"), Action::new("copy", "Copy")],
+        weak_keywords: Vec::new(),
+        yields,
+    }
+}
+
+#[test]
+fn what_the_real_item_and_its_placeholder_sent_again_change_nothing_a_search_reads() {
+    let mut index = Index::new(2);
+    index.edit(ExtensionId(0), Edit::Add(vec![of_a("placeholder", true)]));
+    assert!(index.edit(ExtensionId(1), Edit::Add(vec![of_a("real", false)])));
+    assert_eq!(index.find(ExtensionId(0), "placeholder"), None);
+    let keys = index.keys_version();
+
+    let mut real = of_a("real", false);
+    real.actions.reverse();
+    assert!(!index.edit(ExtensionId(1), Edit::Add(vec![real])));
+    assert!(!index.edit(ExtensionId(0), Edit::Add(vec![of_a("placeholder", true)])));
+
+    assert_eq!(index.keys_version(), keys);
+    assert_eq!(index.find(ExtensionId(0), "placeholder"), None);
+}
+
+#[test]
+fn a_placeholder_standing_aside_is_moved_between_its_segments_and_removed() {
+    let mut index = Index::new(2);
+    index.edit(ExtensionId(1), Edit::Add(vec![of_a("real", false)]));
+    index.edit(ExtensionId(0), Edit::Add(vec![of_a("placeholder", true)]));
+    let in_app = Item {
+        app_only: true,
+        ..of_a("placeholder", true)
+    };
+
+    index.edit(ExtensionId(0), Edit::Add(vec![in_app]));
+    index.edit(ExtensionId(1), Edit::Remove(vec!["real".into()]));
+    let slot = index.find(ExtensionId(0), "placeholder").expect("it came back");
+    assert_eq!(slot.segment as usize, segment_of(0, true));
+    assert_eq!(index.identified("thing:a").count(), 1);
+
+    index.edit(ExtensionId(1), Edit::Add(vec![of_a("real", false)]));
+    index.edit(ExtensionId(0), Edit::Remove(vec!["placeholder".into()]));
+    index.edit(ExtensionId(1), Edit::Remove(vec!["real".into()]));
+    assert_eq!(
+        index.find(ExtensionId(0), "placeholder"),
+        None,
+        "it was removed while aside"
+    );
 }

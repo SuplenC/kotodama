@@ -550,6 +550,7 @@ fn item(kind: ItemKind) -> Item {
         hidden: true,
         app_only: true,
         weak_keywords: vec!["org.mozilla.firefox".into()],
+        yields: true,
     }
 }
 

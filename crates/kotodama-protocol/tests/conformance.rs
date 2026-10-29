@@ -39,6 +39,7 @@ fn items() -> Vec<Item> {
             hidden: false,
             app_only: false,
             weak_keywords: Vec::new(),
+            yields: false,
             actions: vec![
                 action("open"),
                 Action {
@@ -63,6 +64,7 @@ fn items() -> Vec<Item> {
             hidden: false,
             app_only: false,
             weak_keywords: Vec::new(),
+            yields: false,
             actions: vec![Action {
                 arguments: vec![
                     Argument::new("version").placeholder("1.23"),
@@ -87,6 +89,7 @@ fn items() -> Vec<Item> {
             hidden: false,
             app_only: false,
             weak_keywords: Vec::new(),
+            yields: false,
             actions: vec![action("open")],
         },
     ]

@@ -144,6 +144,26 @@ fn an_item_may_name_the_thing_it_stands_for() {
 }
 
 #[test]
+fn an_item_that_yields_needs_an_identity_to_yield_to() {
+    let item = decode(
+        r#"{"id": "x", "kind": "url", "url": "https://example.org", "identity": "url:https://example.org",
+            "yields": true, "title": "X", "actions": [{"id": "open", "title": "Open"}]}"#,
+    )
+    .unwrap();
+    assert!(item.yields);
+
+    let item = decode(&item_json(r#""kind": "url", "url": "https://example.org""#)).unwrap();
+    assert!(!item.yields, "an Item doesn't yield unless it says so");
+
+    let err = decode(
+        r#"{"id": "x", "kind": "url", "url": "https://example.org", "yields": true,
+            "title": "X", "actions": [{"id": "open", "title": "Open"}]}"#,
+    )
+    .unwrap_err();
+    assert!(err.contains("identity"), "{err}");
+}
+
+#[test]
 fn an_item_reference_carries_the_kind_fields_but_not_the_title() {
     let reference: ItemRef = WireFormat::Json
         .decode(br#"{"id": "kotodama", "kind": "project", "path": "/src/kotodama"}"#)

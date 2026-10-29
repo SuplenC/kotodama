@@ -147,6 +147,7 @@ pub fn item(count: usize) -> Item {
         hidden: false,
         app_only: false,
         weak_keywords: Vec::new(),
+        yields: false,
         actions: vec![Action::new(SHOW, "Show")],
     }
 }

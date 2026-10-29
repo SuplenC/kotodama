@@ -67,6 +67,12 @@ pub struct Item {
     /// but may look for, such as an app's desktop id, whose first word may
     /// be another app's name.
     pub weak_keywords: Vec<String>,
+    /// A placeholder for the thing its Identity names, such as an app not
+    /// installed yet whose primary Action installs it: kept out of every
+    /// search, Actions and all, while an Item with the same Identity that
+    /// doesn't yield is indexed, from any Extension. Needs an Identity.
+    /// Ignored outside `add_items`.
+    pub yields: bool,
 }
 
 /// An Item's id and kind, without anything shown on screen. This is how the
@@ -634,6 +640,8 @@ pub(crate) enum ItemError {
     NoActions(String),
     #[error("Item `{0}` has an empty identity; leave it out instead")]
     EmptyIdentity(String),
+    #[error("Item `{0}` yields with no identity; it yields to an Item with its identity")]
+    YieldsWithoutIdentity(String),
 }
 
 impl ItemError {
@@ -689,6 +697,7 @@ struct ItemWire<'a> {
     hidden: bool,
     app_only: bool,
     weak_keywords: &'a [String],
+    yields: bool,
 }
 
 /// An Item as it arrives, before its kind's field and its Actions are checked.
@@ -722,6 +731,8 @@ pub(crate) struct ItemOwned {
     app_only: bool,
     #[serde(default)]
     weak_keywords: Vec<String>,
+    #[serde(default)]
+    yields: bool,
 }
 
 impl Serialize for Item {
@@ -744,6 +755,7 @@ impl Serialize for Item {
             hidden: self.hidden,
             app_only: self.app_only,
             weak_keywords: &self.weak_keywords,
+            yields: self.yields,
         }
         .serialize(serializer)
     }
@@ -773,6 +785,9 @@ impl ItemOwned {
         if self.identity.as_deref() == Some("") {
             return Err(ItemError::EmptyIdentity(self.id));
         }
+        if self.yields && self.identity.is_none() {
+            return Err(ItemError::YieldsWithoutIdentity(self.id));
+        }
         Ok(Item {
             id: self.id,
             kind,
@@ -786,6 +801,7 @@ impl ItemOwned {
             hidden: self.hidden,
             app_only: self.app_only,
             weak_keywords: self.weak_keywords,
+            yields: self.yields,
         })
     }
 }

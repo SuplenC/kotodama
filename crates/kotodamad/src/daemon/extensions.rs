@@ -231,6 +231,11 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
         if let Some(indexer) = &mut self.indexer {
             self.stale[id.0] = indexer.clear(id);
             indexer.free(cleared);
+        } else if self.index.settle() {
+            // The placeholders its Items stood in for come back. On the
+            // indexing thread they come back in a version of their own.
+            self.repin_index();
+            self.mark_late();
         }
         self.live_queries.retain(|_, (_, ext)| *ext != id);
         // Its running jobs will never finish.

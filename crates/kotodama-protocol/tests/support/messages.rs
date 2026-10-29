@@ -42,6 +42,7 @@ pub fn item(n: usize) -> Item {
         hidden: false,
         app_only: false,
         weak_keywords: Vec::new(),
+        yields: false,
     }
 }
 

@@ -97,5 +97,6 @@ fn item(id: &str, kind: &str, title: &str, action: Action) -> Item {
         hidden: false,
         app_only: false,
         weak_keywords: Vec::new(),
+        yields: false,
     }
 }

@@ -156,6 +156,7 @@ pub fn history_item() -> Item {
         hidden: false,
         app_only: false,
         weak_keywords: Vec::new(),
+        yields: false,
         actions: vec![
             Action::new(OPEN, "Show Clipboard History"),
             // Nothing brings the history back.
@@ -203,6 +204,7 @@ pub fn pause_item(pause: Pause, now: u64) -> Item {
         hidden: false,
         app_only: false,
         weak_keywords: Vec::new(),
+        yields: false,
         actions,
     }
 }
@@ -247,6 +249,7 @@ pub fn clip_item(history: &History, entry: &Entry) -> Item {
         hidden: false,
         app_only: false,
         weak_keywords: Vec::new(),
+        yields: false,
         actions: vec![
             Action::new(PASTE, "Paste"),
             Action::new(COPY, "Copy to Clipboard"),

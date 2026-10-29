@@ -20,6 +20,7 @@ fn note(actions: Vec<Action>) -> Item {
         hidden: false,
         app_only: false,
         weak_keywords: Vec::new(),
+        yields: false,
         actions,
     }
 }

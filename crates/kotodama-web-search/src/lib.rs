@@ -253,6 +253,7 @@ fn item(id: String, title: String, url: String) -> Item {
         hidden: false,
         app_only: false,
         weak_keywords: Vec::new(),
+        yields: false,
     }
 }
 
