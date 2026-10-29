@@ -396,16 +396,16 @@ impl Index {
         std::mem::replace(&mut self.segments[at], segment)
     }
 
-    /// Removes every Item of one Extension. Returns whether there were any.
-    pub fn clear(&mut self, extension: ExtensionId) -> bool {
-        let mut cleared = false;
+    /// Removes every Item of one Extension. Returns the Segments that held
+    /// them, none if there were none.
+    pub fn clear(&mut self, extension: ExtensionId) -> Vec<Arc<Segment>> {
+        let mut cleared = Vec::new();
         for at in Self::segments_of(extension) {
             if self.segments[at].is_empty() {
                 continue;
             }
             let empty = self.segments[at].emptied();
-            self.replace(at, Arc::new(empty));
-            cleared = true;
+            cleared.push(self.replace(at, Arc::new(empty)));
         }
         cleared
     }

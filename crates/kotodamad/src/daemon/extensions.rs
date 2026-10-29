@@ -223,12 +223,14 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
                 self.last_seen.insert((name.clone(), alias.item.clone()), item);
             }
         }
-        if self.index.clear(id) {
+        let cleared = self.index.clear(id);
+        if !cleared.is_empty() {
             self.repin_index();
             self.mark_late();
         }
         if let Some(indexer) = &mut self.indexer {
             self.stale[id.0] = indexer.clear(id);
+            indexer.free(cleared);
         }
         self.live_queries.retain(|_, (_, ext)| *ext != id);
         // Its running jobs will never finish.

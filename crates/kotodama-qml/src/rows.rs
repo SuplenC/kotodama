@@ -207,6 +207,13 @@ impl Row {
             .then(|| format!("{}? ↵ Confirm · Esc Cancel", entry.action.title))
     }
 
+    /// Where the Action panel lists the Action `id` that `group` offers, or
+    /// the Item's own with no `group`.
+    pub fn place_of(&self, group: Option<&str>, id: &str) -> Option<usize> {
+        self.actions()
+            .position(|entry| entry.group == group && entry.action.id == id)
+    }
+
     /// What runs the `n`th entry of the Action panel. Nothing runs on an
     /// unavailable row.
     pub fn action(&self, n: usize) -> Option<ActionRef> {

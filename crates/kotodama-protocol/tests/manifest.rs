@@ -111,6 +111,28 @@ fn a_targeted_contributed_action_names_no_kind_and_carries_its_verbs_and_role() 
 }
 
 #[test]
+fn contributed_actions_by_kind_may_share_an_id_across_kinds() {
+    let manifest = parse(
+        r#"
+        name = "notes"
+        command = ["notes"]
+
+        [[contributed_actions]]
+        kind = "file"
+        id = "add"
+        title = "Add to notes"
+
+        [[contributed_actions]]
+        kind = "folder"
+        id = "add"
+        title = "Add to notes"
+        "#,
+    );
+
+    assert_eq!(manifest.unwrap().contributed_actions.len(), 2);
+}
+
+#[test]
 fn an_extension_that_only_indexes_items_needs_only_a_name_and_a_command() {
     let manifest = parse(
         r#"
@@ -234,6 +256,19 @@ fn invalid_manifests_are_rejected_with_the_reason() {
             title = "A"
             role = "scary""#,
             "`scary` isn't an Action role",
+        ),
+        (
+            r#"name = "x"
+            command = ["x"]
+            [[contributed_actions]]
+            kind = "app"
+            id = "remove"
+            title = "Remove"
+            [[contributed_actions]]
+            targeted = true
+            id = "remove"
+            title = "Remove""#,
+            "targeted Contributed action `remove` shares its id",
         ),
     ];
     for (toml, reason) in cases {

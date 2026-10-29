@@ -168,6 +168,19 @@ fn the_action_panel_lists_every_destructive_action_last_but_the_primary() {
 }
 
 #[test]
+fn an_action_the_panel_listed_is_found_where_the_row_has_it_since() {
+    let mut wifi = row("Wi-Fi", &[]);
+    wifi.own = vec![Action::new("off", "Turn off"), Action::new("on", "Turn on")];
+    wifi.contributed = Arc::new([offered("pinner", "on", "Pin")]);
+
+    wifi.own.reverse();
+
+    assert_eq!(wifi.place_of(None, "off"), Some(1));
+    assert_eq!(wifi.place_of(Some("pinner"), "on"), Some(2));
+    assert_eq!(wifi.place_of(None, "toggle"), None);
+}
+
+#[test]
 fn an_unavailable_row_keeps_its_alias_badge_and_runs_nothing() {
     let shown = ShownResult {
         extension: "apps".into(),

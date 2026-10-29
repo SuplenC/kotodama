@@ -216,13 +216,14 @@ pub fn view(views: &Views) -> Map {
     out
 }
 
-/// A Result's Action panel: `{title, group, shortcut, role, keywords}` for
-/// each Action, in order. `group` is the Extension offering a Contributed
-/// action, empty for the Item's own; `role` is `normal`, `destructive` or
-/// `form`; `keywords` are the verbs the Action is known by.
+/// A Result's Action panel: `{id, title, group, shortcut, role, keywords}`
+/// for each Action, in order. `group` is the Extension offering a
+/// Contributed action, empty for the Item's own; `role` is `normal`,
+/// `destructive` or `form`; `keywords` are the verbs the Action is known by.
 pub fn actions(row: &Row) -> List {
     list(row.actions().map(|entry| {
         map([
+            ("id", text(&entry.action.id)),
             ("title", text(&entry.action.title)),
             ("group", text(entry.group.unwrap_or_default())),
             ("shortcut", text(entry.shortcut.unwrap_or_default())),

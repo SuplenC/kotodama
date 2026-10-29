@@ -127,9 +127,9 @@ pub mod qobject {
         #[cxx_name = "cancelConfirm"]
         fn cancel_confirm(self: Pin<&mut KotodamaSearch>) -> bool;
 
-        /// The Action panel of the Result in `row`: the Item's own Actions,
-        /// then Contributed actions grouped by Extension. See
-        /// `variant::actions`.
+        /// The Action panel of the Result in `row`: the primary Action, the
+        /// Item's other Actions, then Contributed actions grouped by
+        /// Extension, then the destructive ones. See `variant::actions`.
         #[qinvokable]
         fn actions(self: &KotodamaSearch, row: i32) -> QList_QVariant;
 
@@ -143,6 +143,14 @@ pub mod qobject {
         #[qinvokable]
         #[cxx_name = "runAction"]
         fn run_action(self: Pin<&mut KotodamaSearch>, row: i32, n: i32) -> bool;
+
+        /// Runs the Action the open Action panel lists by `group` and `id`,
+        /// as `actions` gave them, wherever the Result in `row`'s panel has
+        /// it since: the Result may have been sent again with its Actions in
+        /// another order. False, and nothing runs, if it is gone.
+        #[qinvokable]
+        #[cxx_name = "runListed"]
+        fn run_listed(self: Pin<&mut KotodamaSearch>, row: i32, group: &QString, id: &QString) -> bool;
 
         /// Runs the Action of the Result in `row` bound to `key` (a `Qt::Key`)
         /// with `modifiers` held, as a key event gives them. False if none is.

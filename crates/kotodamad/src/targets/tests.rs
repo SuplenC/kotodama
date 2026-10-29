@@ -54,8 +54,7 @@ fn naming_identities_again_replaces_those_named_before_and_returns_both() {
         .unwrap();
 
     changed.sort_unstable();
-    changed.dedup();
-    assert_eq!(changed, ["app:gimp".into(), "app:mpv".into(), "app:vlc".into()]);
+    assert_eq!(changed, [Arc::from("app:gimp"), Arc::from("app:mpv")]);
     assert_eq!(on(&targets, "app:gimp"), []);
     assert_eq!(on(&targets, "app:mpv"), [(PACKAGES, "Remove")]);
 
@@ -69,7 +68,7 @@ fn an_action_not_declared_targeted_names_nothing() {
 
     assert_eq!(
         targets.target(FLATPAK, "update", names(&["app:gimp"])),
-        Err(NotTargeted("update".into()))
+        Err(NotTargeted::action("update"))
     );
     assert!(targets.is_empty());
 }

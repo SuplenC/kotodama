@@ -277,3 +277,25 @@ fn an_item_resent_with_its_actions_reordered_shows_its_new_primary_in_the_open_m
     let row = after.iter().find(|row| row.item.id == "wi-fi").unwrap();
     assert_eq!(row.item.actions[0].id, "on");
 }
+
+#[test]
+fn typing_on_after_an_items_actions_changed_finds_what_it_did_and_a_new_title_is_searched() {
+    let mut h = Harness::new(vec![plain("apps")]);
+    let apps = h.up(0);
+    let mut wifi = app("Wi-Fi");
+    wifi.actions = vec![Action::new("off", "Turn off"), Action::new("on", "Turn on")];
+    h.add(&apps, vec![wifi.clone(), app("Wiki")]);
+    let ui = h.front_end();
+    h.query(&ui, "wi");
+
+    wifi.actions.reverse();
+    h.add(&apps, vec![wifi.clone()]);
+    let narrowed = h.query(&ui, "wi-");
+
+    assert_eq!(titles(&narrowed), ["Wi-Fi"]);
+    assert_eq!(narrowed[0].item.actions[0].id, "on");
+
+    wifi.title = "Wireless".into();
+    h.add(&apps, vec![wifi]);
+    assert_eq!(titles(&h.query(&ui, "wir")), ["Wireless"]);
+}

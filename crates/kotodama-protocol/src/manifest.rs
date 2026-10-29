@@ -203,6 +203,8 @@ enum ManifestError {
     OfferedOnNothing(String),
     #[error("Contributed action `{0}` has both `kind` and `targeted = true`; it is offered by one or the other")]
     OfferedTwice(String),
+    #[error("targeted Contributed action `{0}` shares its id with another Contributed action; give each its own")]
+    TargetedTwice(String),
 }
 
 #[derive(Deserialize)]
@@ -234,6 +236,20 @@ struct ManifestToml {
     in_search: bool,
 }
 
+/// The id of a targeted Contributed action that another Contributed action
+/// shares, if there is one. An Action runs by its id, and a targeted one has
+/// no kind to tell it apart from another with the same id; Actions by kind
+/// may share one across kinds.
+fn targeted_twice(contributed: &[ContributedAction]) -> Option<&str> {
+    contributed.iter().enumerate().find_map(|(n, offered)| {
+        let shared = contributed
+            .iter()
+            .enumerate()
+            .any(|(m, other)| m != n && other.action.id == offered.action.id);
+        (offered.to == ContributedTo::Identities && shared).then_some(offered.action.id.as_str())
+    })
+}
+
 /// An Extension's Items are in the search unless its Manifest says
 /// otherwise.
 fn in_search_by_default() -> bool {
@@ -253,6 +269,9 @@ impl TryFrom<ManifestToml> for Manifest {
             && !is_valid_word(word)
         {
             return Err(ManifestError::NotOneWord(word.clone()));
+        }
+        if let Some(id) = targeted_twice(&toml.contributed_actions) {
+            return Err(ManifestError::TargetedTwice(id.to_owned()));
         }
         Ok(Manifest {
             name: toml.name,

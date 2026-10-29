@@ -298,9 +298,10 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
     }
 
     /// Other running Extensions' Actions for an Item of `kind` whose Identity
-    /// is `identity`: those offered on the kind and those targeted at the
-    /// Identity, in Extension order. When a shortcut clashes, the owner's
-    /// binding in `own` wins, then the earlier Extension's.
+    /// is `identity`, in Extension order, and within one Extension those
+    /// offered on the kind before those targeted at the Identity. When a
+    /// shortcut clashes, the owner's binding in `own` wins, then the earlier
+    /// Extension's.
     pub(super) fn contributed_for(
         &self,
         owner: ExtensionId,
