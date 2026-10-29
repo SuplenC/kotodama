@@ -12,6 +12,7 @@ use super::absolute;
 use super::absolute_fields;
 use super::absolute_paths;
 use super::form;
+use super::submitted;
 
 const HOME: &str = "/home/kuba";
 
@@ -33,6 +34,43 @@ fn a_relative_path_is_taken_from_the_home_directory() {
 
     assert_eq!(absolute("Downloads/work.conf", home), "/home/kuba/Downloads/work.conf");
     assert_eq!(absolute("./work.conf", home), "/home/kuba/./work.conf");
+}
+
+#[test]
+fn only_a_tilde_alone_or_before_a_slash_is_the_home_directory() {
+    assert_eq!(absolute("~bob/x", Path::new(HOME)), "/home/kuba/~bob/x");
+}
+
+#[test]
+fn a_file_uri_is_its_decoded_path() {
+    let home = Path::new(HOME);
+
+    assert_eq!(
+        absolute("file:///home/kuba/My%20VPN/work.conf", home),
+        "/home/kuba/My VPN/work.conf"
+    );
+    assert_eq!(absolute("file://localhost/etc/x%2", home), "/etc/x%2");
+}
+
+#[test]
+fn whitespace_around_a_path_goes() {
+    let home = Path::new(HOME);
+
+    assert_eq!(absolute("  ~/work.conf \n", home), "/home/kuba/work.conf");
+    assert_eq!(absolute("   ", home), "");
+}
+
+#[test]
+fn a_blank_form_value_is_left_out() {
+    let values = Table::from([
+        ("config".into(), Value::String("  ".into())),
+        ("name".into(), Value::String("vpn".into())),
+    ]);
+
+    assert_eq!(
+        submitted(values),
+        BTreeMap::from([("name".to_owned(), "vpn".to_owned())])
+    );
 }
 
 #[test]

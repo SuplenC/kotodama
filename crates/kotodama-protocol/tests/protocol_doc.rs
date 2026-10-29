@@ -183,10 +183,13 @@ fn describe_extension_message(label: &str) -> Option<&'static str> {
         }
         "ToExtension::run_action" => {
             "Runs one of the Extension's Actions on an Item: its own, or another Extension's for a Contributed \
-             action, of which `item` is all it sees. `arguments` holds the Arguments by name. Answer with \
-             `action_done` and the same `invocation`."
+             action, of which `item` is all it sees. `arguments` holds the Arguments by name; one of kind `file` or \
+             `folder` is an absolute path. Answer with `action_done` and the same `invocation`."
         }
-        "ToExtension::submit_form" => "The user submitted a form View the Extension pushed: the values by field id.",
+        "ToExtension::submit_form" => {
+            "The user submitted a form View the Extension pushed: the values by field id, a `file` field's as an \
+             absolute path."
+        }
         "ToExtension::view_popped" => {
             "The user left one of the Extension's Views, as with Esc. Closing the menu never sends it, so it may \
              mean \"cancel\"."

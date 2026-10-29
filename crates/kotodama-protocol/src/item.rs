@@ -456,7 +456,8 @@ impl Argument {
 /// What an [`Argument`] asks for, and so how a form asks for it.
 ///
 /// On the wire it is a string, `text`, `file` or `folder`, so that in
-/// protobuf an Argument without one, or with an empty one, is text.
+/// protobuf an Argument without one, or with an empty one, is text. Any
+/// other name refuses the message that carries it.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(into = "&'static str", try_from = "String")]
 pub enum ArgumentKind {

@@ -817,6 +817,47 @@ fn an_extension_asks_for_a_file_in_a_form() {
     );
 }
 
+/// An Argument as protobuf code generated from `kotodama.proto` may write
+/// it: without `kind`, or with it empty.
+#[derive(Serialize)]
+struct Generated {
+    name: &'static str,
+    placeholder: Option<&'static str>,
+    optional: bool,
+    kind: &'static str,
+}
+
+#[derive(Serialize)]
+struct Bare {
+    name: &'static str,
+}
+
+#[test]
+fn a_protobuf_argument_without_a_kind_is_text() {
+    let without = WireFormat::Protobuf.encode(&Bare { name: "path" }).unwrap();
+    let empty = WireFormat::Protobuf
+        .encode(&Generated {
+            name: "path",
+            placeholder: None,
+            optional: false,
+            kind: "",
+        })
+        .unwrap();
+
+    for bytes in [without, empty] {
+        let argument: Argument = WireFormat::Protobuf.decode(&bytes).unwrap();
+        assert_eq!(argument, Argument::new("path"));
+    }
+}
+
+#[test]
+fn an_argument_of_a_kind_that_isnt_one_is_refused() {
+    let refused = WireFormat::Json.decode::<Argument>(br#"{"name": "when", "kind": "date"}"#);
+
+    let message = std::error::Error::source(&refused.unwrap_err()).unwrap().to_string();
+    assert!(message.contains("`date` isn't an Argument kind"), "{message}");
+}
+
 #[test]
 fn image_bytes_travel_as_base64_in_json() {
     let message = FromExtension::ActionDone {

@@ -92,12 +92,12 @@ pub fn form(id: String, title: &str, wanted: &[Argument], given: &BTreeMap<Strin
     }
 }
 
-/// The Arguments a submitted form holds: its text fields that aren't empty.
+/// The Arguments a submitted form holds: its text fields that aren't blank.
 pub fn submitted(values: Table) -> BTreeMap<String, String> {
     values
         .into_iter()
         .filter_map(|(name, value)| match value {
-            Value::String(value) if !value.is_empty() => Some((name, value)),
+            Value::String(value) if !value.trim().is_empty() => Some((name, value)),
             _ => None,
         })
         .collect()
@@ -130,9 +130,16 @@ pub fn absolute_fields(fields: &[FormField], values: &mut Table, home: &Path) {
 /// `path` as an absolute path: `~` and `~/…` expand to `home`, and a
 /// relative path is taken from `home`, the directory a person's paths start
 /// from in a file manager and a new terminal; the Daemon's own working
-/// directory is wherever systemd started it. An empty path stays empty: it
-/// was left out.
+/// directory is wherever systemd started it. Only `~` alone and `~/` expand,
+/// so `~bob/x` is a relative path too. A `file://` URI, as a file picker or a
+/// drop gives, is its path. Whitespace around the path goes, and an empty
+/// path stays empty: it was left out.
 pub fn absolute(path: &str, home: &Path) -> String {
+    let path = path.trim();
+    if let Some(uri) = path.strip_prefix("file://") {
+        // A local file's URI has an empty host: `file:///home/…`.
+        return percent_decoded(uri.trim_start_matches("localhost"));
+    }
     if path.is_empty() || path.starts_with('/') {
         return path.to_owned();
     }
@@ -147,6 +154,29 @@ pub fn absolute(path: &str, home: &Path) -> String {
         home.join(rest)
     };
     joined.to_string_lossy().into_owned()
+}
+
+/// A URI's path with its `%XX` escapes decoded; a `%` not followed by two
+/// hex digits stays as it is.
+fn percent_decoded(uri: &str) -> String {
+    let bytes = uri.as_bytes();
+    let mut decoded = Vec::with_capacity(bytes.len());
+    let mut at = 0;
+    while at < bytes.len() {
+        let escaped = (bytes[at] == b'%')
+            .then(|| bytes.get(at + 1..at + 3))
+            .flatten()
+            .and_then(|hex| std::str::from_utf8(hex).ok())
+            .and_then(|hex| u8::from_str_radix(hex, 16).ok());
+        if let Some(byte) = escaped {
+            decoded.push(byte);
+            at += 3;
+        } else {
+            decoded.push(bytes[at]);
+            at += 1;
+        }
+    }
+    String::from_utf8_lossy(&decoded).into_owned()
 }
 
 #[cfg(test)]

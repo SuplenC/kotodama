@@ -53,7 +53,7 @@ The query changed or the menu closed: results for Live query `id` are no longer 
 
 ### `run_action`
 
-Runs one of the Extension's Actions on an Item: its own, or another Extension's for a Contributed action, of which `item` is all it sees. `arguments` holds the Arguments by name. Answer with `action_done` and the same `invocation`.
+Runs one of the Extension's Actions on an Item: its own, or another Extension's for a Contributed action, of which `item` is all it sees. `arguments` holds the Arguments by name; one of kind `file` or `folder` is an absolute path. Answer with `action_done` and the same `invocation`.
 
 ```json
 {
@@ -77,7 +77,7 @@ Runs one of the Extension's Actions on an Item: its own, or another Extension's 
 
 ### `submit_form`
 
-The user submitted a form View the Extension pushed: the values by field id.
+The user submitted a form View the Extension pushed: the values by field id, a `file` field's as an absolute path.
 
 ```json
 {
