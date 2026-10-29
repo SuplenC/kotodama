@@ -12,6 +12,7 @@ fn row(title: &str, highlights: &[u32]) -> Row {
         },
         own: Vec::new(),
         contributed: Arc::new([]),
+        chosen: None,
         title: title.into(),
         subtitle: String::new(),
         icon: String::new(),
@@ -103,6 +104,7 @@ fn the_action_panel_lists_the_items_own_actions_then_contributed_ones_under_thei
         highlights: Vec::new(),
         alias: None,
         unavailable: None,
+        primary: None,
     };
     let row = Row::from(shown);
     let panel: Vec<_> = row
@@ -204,6 +206,7 @@ fn an_unavailable_row_keeps_its_alias_badge_and_runs_nothing() {
         highlights: Vec::new(),
         alias: Some("ff".into()),
         unavailable: Some("apps isn't running".into()),
+        primary: None,
     };
 
     let row = Row::from(shown);
@@ -211,6 +214,111 @@ fn an_unavailable_row_keeps_its_alias_badge_and_runs_nothing() {
     assert_eq!(row.alias.as_deref(), Some("ff"));
     assert_eq!(row.unavailable.as_deref(), Some("apps isn't running"));
     assert_eq!(row.action(0), None);
+}
+
+/// Google Chrome as `remove chrome` finds it, with the Action the query
+/// chose, `extension`'s `id`. The Item's types are named in full: the
+/// filter bench compiles this helper, and the imports only tests use must
+/// stay unused there.
+fn chosen(extension: &str, id: &str) -> Row {
+    let item = kotodama_protocol::Item {
+        id: "google-chrome".into(),
+        kind: kotodama_protocol::ItemKind::App {
+            desktop_id: "google-chrome.desktop".into(),
+        },
+        title: "Google Chrome".into(),
+        subtitle: None,
+        icon: None,
+        keyword: None,
+        keywords: Vec::new(),
+        hidden: false,
+        app_only: false,
+        weak_keywords: Vec::new(),
+        identity: None,
+        actions: vec![
+            Action::new("open", "Open"),
+            Action::new("incognito", "New Incognito Window"),
+            Action::new("reset", "Reset profile").role(ActionRole::Destructive),
+        ],
+    };
+    Row::from(ShownResult {
+        extension: "apps".into(),
+        item,
+        contributed: vec![
+            OfferedAction {
+                extension: "packages".into(),
+                action: Action::new("remove", "Remove").role(ActionRole::Destructive),
+            },
+            offered("pinner", "pin", "Pin"),
+        ],
+        highlights: Vec::new(),
+        alias: None,
+        unavailable: None,
+        primary: Some(ActionRef {
+            extension: extension.into(),
+            id: id.into(),
+        }),
+    })
+}
+
+fn panel(row: &Row) -> Vec<String> {
+    row.actions()
+        .enumerate()
+        .map(|(n, entry)| {
+            let runs = row.action(n).unwrap();
+            assert_eq!(runs.id, entry.action.id, "the panel runs what it lists");
+            format!("{}/{}", runs.extension, runs.id)
+        })
+        .collect()
+}
+
+#[test]
+fn a_contributed_action_the_query_chose_comes_first_and_enter_runs_it() {
+    let chrome = chosen("packages", "remove");
+
+    assert_eq!(
+        panel(&chrome),
+        [
+            "packages/remove",
+            "apps/open",
+            "apps/incognito",
+            "pinner/pin",
+            "apps/reset"
+        ]
+    );
+    assert!(chrome.primary_chosen());
+    assert_eq!(chrome.primary_title(), "Remove");
+    assert_eq!(chrome.primary_role(), Some(ActionRole::Destructive));
+    assert_eq!(chrome.hints(), "↵ Remove · ⌃K Actions");
+}
+
+#[test]
+fn an_own_action_the_query_chose_comes_first_and_the_usual_one_follows() {
+    let chrome = chosen("apps", "incognito");
+
+    assert_eq!(
+        panel(&chrome),
+        [
+            "apps/incognito",
+            "apps/open",
+            "pinner/pin",
+            "apps/reset",
+            "packages/remove"
+        ]
+    );
+    assert!(chrome.primary_chosen());
+    assert_eq!(chrome.primary_title(), "New Incognito Window");
+}
+
+#[test]
+fn the_usual_first_action_or_one_the_row_lacks_is_no_choice() {
+    for (extension, id) in [("apps", "open"), ("packages", "purge")] {
+        let chrome = chosen(extension, id);
+
+        assert!(!chrome.primary_chosen(), "{extension}/{id}");
+        assert_eq!(chrome.primary_title(), "Open");
+        assert_eq!(panel(&chrome)[0], "apps/open");
+    }
 }
 
 #[test]
