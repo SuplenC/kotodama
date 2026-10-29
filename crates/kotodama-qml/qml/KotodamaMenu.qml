@@ -20,6 +20,8 @@ PanelWindow {
     property color selection: "#313244"
     property color border: "#45475a"
     property color error: "#f38ba8"
+    // The bar beside a form's description.
+    property color note: "#fab387"
     property string fontFamily: "sans-serif"
     property int fontSize: 15
     property real radius: 12
@@ -87,6 +89,65 @@ PanelWindow {
 
     function escaped(text) {
         return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    }
+
+    // `title` as StyledText, the characters at `highlights` (positions in
+    // characters, not UTF-16 units) in the accent colour.
+    function matched(title, highlights) {
+        const chars = Array.from(title);
+        let out = "";
+        for (let n = 0; n < chars.length; ++n) {
+            const char = menu.escaped(chars[n]);
+            out += highlights.includes(n) ? "<font color=\"" + menu.accent + "\">" + char + "</font>" : char;
+        }
+        return out;
+    }
+
+    // An ISO 8601 date, with or without a time of day, as a form shows it:
+    // `Fri 30 Oct 2026 · 09:30`. Empty when `text` isn't one.
+    function shownDate(text) {
+        const parts = /^(\d{4})-(\d{2})-(\d{2})(?:T(\d{2}):(\d{2})(?::\d{2})?)?$/.exec(text.trim());
+        if (!parts || Number(parts[4] ?? 0) > 23 || Number(parts[5] ?? 0) > 59)
+            return "";
+        // `new Date(year, …)` reads a year under 100 as 19xx, so the year
+        // is set on its own.
+        const date = new Date(2000, Number(parts[2]) - 1, Number(parts[3]));
+        date.setFullYear(Number(parts[1]));
+        if (date.getMonth() !== Number(parts[2]) - 1 || date.getDate() !== Number(parts[3]))
+            return "";
+        const days = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+        const day = days[date.getDay()] + " " + date.getDate() + " " + menu.months[date.getMonth()] + " " + date.getFullYear();
+        return parts[4] === undefined ? day : day + " · " + parts[4] + ":" + parts[5];
+    }
+    readonly property var months: ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+
+    // How long ago `modified`, in seconds since the Unix epoch, was: "2 h
+    // ago", "yesterday", or the date once it is a week old. Empty when the
+    // file system can't tell (-1).
+    function ago(modified) {
+        if (modified < 0)
+            return "";
+        const seconds = Date.now() / 1000 - modified;
+        if (seconds < 60)
+            return "just now";
+        if (seconds < 3600)
+            return Math.floor(seconds / 60) + " min ago";
+        if (seconds < 86400)
+            return Math.floor(seconds / 3600) + " h ago";
+        if (seconds < 2 * 86400)
+            return "yesterday";
+        if (seconds < 7 * 86400)
+            return Math.floor(seconds / 86400) + " days ago";
+        const date = new Date(modified * 1000);
+        const day = date.getDate() + " " + menu.months[date.getMonth()];
+        return date.getFullYear() === new Date().getFullYear() ? day : day + " " + date.getFullYear();
+    }
+
+    // A path offered to a file field, written `~/…` under the home directory
+    // as the user would type it.
+    function homeRelative(path) {
+        const home = Quickshell.env("HOME");
+        return home && path.startsWith(home + "/") ? "~" + path.slice(home.length) : path;
     }
 
     // Which part of the Action panel its `n`th entry is in: the Item's own
@@ -208,12 +269,16 @@ PanelWindow {
             return true;
         }
         if (menu.kind === "form") {
+            // Shift+Tab is Backtab from a keyboard whose keymap has
+            // ISO_Left_Tab, and Tab with Shift held from one without, such as
+            // a virtual keyboard.
+            const back = event.key === Qt.Key_Backtab || (event.key === Qt.Key_Tab && (event.modifiers & Qt.ShiftModifier));
             if (enter) {
                 menu.failure = "";
                 search.submit();
-            } else if (event.key === Qt.Key_Tab || event.key === Qt.Key_Down) {
+            } else if ((event.key === Qt.Key_Tab && !back) || event.key === Qt.Key_Down) {
                 form.move(1);
-            } else if (event.key === Qt.Key_Backtab || event.key === Qt.Key_Up) {
+            } else if (back || event.key === Qt.Key_Up) {
                 form.move(-1);
             } else {
                 return false;
@@ -307,6 +372,7 @@ PanelWindow {
         }
         onDepthChanged: {
             menu.actions = [];
+            scroller.contentY = 0;
             list.currentIndex = 0;
             list.positionViewAtBeginning();
         }
@@ -753,171 +819,602 @@ PanelWindow {
                 }
             }
 
-            // A form, a detail or a progress View.
-            Column {
-                id: content
+            // A form, a detail or a progress View, scrolled to keep the field
+            // with the keys in sight when it is taller than the menu.
+            Flickable {
+                id: scroller
                 width: parent.width
+                height: parent.height
                 visible: !list.visible
-                topPadding: 4
-                bottomPadding: 12
-                spacing: 8
+                contentWidth: width
+                contentHeight: content.height
+                // A form that grows shorter, as when a file field's list
+                // closes, stays scrolled no further than its end.
+                onContentHeightChanged: contentY = Math.max(0, Math.min(contentY, contentHeight - height))
+                onHeightChanged: contentY = Math.max(0, Math.min(contentY, contentHeight - height))
+                boundsBehavior: Flickable.StopAtBounds
+                interactive: contentHeight > height
 
-                // The form: Tab and Shift+Tab move between fields, Space ticks a
-                // checkbox, Left and Right choose an option, Enter submits.
-                FocusScope {
-                    id: form
+                // Scrolls as little as shows all of `item`.
+                function reveal(item) {
+                    if (!item)
+                        return;
+                    const at = item.mapToItem(content, 0, 0).y;
+                    if (at < contentY)
+                        contentY = at;
+                    else if (at + item.height > contentY + height)
+                        contentY = Math.min(at, at + item.height - height);
+                }
+
+                Column {
+                    id: content
                     width: parent.width
-                    visible: menu.kind === "form"
-                    height: visible ? formFields.implicitHeight : 0
-                    property int current: 0
+                    topPadding: 4
+                    bottomPadding: 12
+                    spacing: 8
 
-                    // A description takes no keys, so moving passes over it.
-                    function move(by) {
-                        for (let step = 1; step <= fields.count; ++step) {
-                            const next = fields.itemAt(((current + by * step) % fields.count + fields.count) % fields.count);
-                            if (next.modelData.kind !== "description") {
-                                next.take();
-                                return;
+                    // The form: Tab and Shift+Tab, or Down and Up, move between
+                    // fields, passing over descriptions; Enter submits. Space
+                    // ticks a checkbox or the chip at the cursor, Left and Right
+                    // choose an option, step a number or move between chips,
+                    // and Shift+Enter starts a line in a text area. Up and Down
+                    // choose a path a file field offers, and Tab or Enter takes it.
+                    FocusScope {
+                        id: form
+                        width: parent.width
+                        visible: menu.kind === "form"
+                        height: visible ? formFields.implicitHeight : 0
+                        property int current: 0
+                        // The kind of the field with the keys, for the hint under
+                        // the form.
+                        readonly property string currentKind: fields.count > current && fields.itemAt(current) ? fields.itemAt(current).modelData.kind : ""
+
+                        onCurrentChanged: Qt.callLater(() => scroller.reveal(fields.itemAt(form.current)))
+
+                        // A description takes no keys, so moving passes over it.
+                        function move(by) {
+                            for (let step = 1; step <= fields.count; ++step) {
+                                const next = fields.itemAt(((current + by * step) % fields.count + fields.count) % fields.count);
+                                if (next.modelData.kind !== "description") {
+                                    next.take();
+                                    return;
+                                }
                             }
                         }
-                    }
 
-                    Column {
-                        id: formFields
-                        width: parent.width
-                        spacing: 8
+                        Column {
+                            id: formFields
+                            width: parent.width
+                            spacing: 8
 
-                        Repeater {
-                            id: fields
-                            model: menu.kind === "form" ? search.view.fields : []
+                            Repeater {
+                                id: fields
+                                model: menu.kind === "form" ? search.view.fields : []
 
-                            Item {
-                                id: formField
-                                required property int index
-                                required property var modelData
-                                width: formFields.width
-                                // The menu doesn't draw a description yet, so it leaves it out.
-                                visible: modelData.kind !== "description"
-                                height: visible ? menu.rowHeight : 0
-                                readonly property bool current: typed.activeFocus || toggle.activeFocus || choice.activeFocus
-                                // The menu has no picker and draws no text area, number, date or
-                                // multi-select of its own yet: each is typed into as a text field is.
-                                readonly property bool typedIn: !["checkbox", "select", "description"].includes(modelData.kind)
+                                Item {
+                                    id: formField
+                                    required property int index
+                                    required property var modelData
+                                    readonly property string kind: modelData.kind
+                                    readonly property bool path: kind === "file" || kind === "folder"
+                                    readonly property string error: search.fieldErrors[index] ?? ""
+                                    readonly property bool current: typed.activeFocus || textArea.activeFocus || toggle.activeFocus || choice.activeFocus || chips.activeFocus
+                                    readonly property bool typedIn: ["text", "file", "folder", "number", "date"].includes(kind)
+                                    // The paths offered for what is typed, under the box
+                                    // while it has the keys, until one is taken or Esc.
+                                    readonly property bool completing: path && typed.activeFocus && !paths.dismissed && search.completingField === index && search.completions.length > 0
+                                    width: formFields.width
+                                    height: kind === "description" ? note.height : fieldColumn.height
 
-                                function take() {
-                                    const kind = modelData.kind;
-                                    if (kind === "description") {
-                                        form.current = index;
-                                        form.move(1);
-                                        return;
+                                    onCurrentChanged: {
+                                        if (current)
+                                            form.current = index;
                                     }
-                                    (kind === "checkbox" ? toggle : kind === "select" ? choice : typed).forceActiveFocus();
-                                }
+                                    onHeightChanged: {
+                                        if (current)
+                                            Qt.callLater(() => scroller.reveal(formField));
+                                    }
 
-                                onCurrentChanged: {
-                                    if (current)
-                                        form.current = index;
-                                }
-
-                                Text {
-                                    id: label
-                                    x: 18
-                                    width: parent.width / 3 - 18
-                                    anchors.verticalCenter: parent.verticalCenter
-                                    elide: Text.ElideRight
-                                    text: formField.modelData.label
-                                    color: formField.current ? menu.foreground : menu.dimmed
-                                    font.family: menu.fontFamily
-                                    font.pixelSize: menu.fontSize
-                                }
-
-                                Rectangle {
-                                    anchors.left: label.right
-                                    anchors.right: parent.right
-                                    anchors.rightMargin: 18
-                                    anchors.verticalCenter: parent.verticalCenter
-                                    height: menu.rowHeight - 12
-                                    radius: menu.radius / 2
-                                    color: "transparent"
-                                    border.width: 1
-                                    border.color: formField.current ? menu.accent : menu.border
-
-                                    TextInput {
-                                        id: typed
-                                        anchors.fill: parent
-                                        anchors.leftMargin: 10
-                                        anchors.rightMargin: 10
-                                        visible: formField.typedIn
-                                        verticalAlignment: TextInput.AlignVCenter
-                                        clip: true
-                                        color: menu.foreground
-                                        selectionColor: menu.selection
-                                        font.family: menu.fontFamily
-                                        font.pixelSize: menu.fontSize
-                                        echoMode: formField.modelData.secret ? TextInput.Password : TextInput.Normal
-                                        // Its options are toggled, never typed: it shows the chosen ones.
-                                        readOnly: formField.modelData.kind === "multiselect"
-                                        Component.onCompleted: {
-                                            if (formField.typedIn)
-                                                text = formField.modelData.value;
+                                    function take() {
+                                        if (kind === "description") {
+                                            form.current = index;
+                                            form.move(1);
+                                            return;
                                         }
-                                        onTextChanged: search.setText(formField.index, text)
-                                        Keys.onPressed: event => event.accepted = menu.key(event)
+                                        const takes = {
+                                            checkbox: toggle,
+                                            select: choice,
+                                            textarea: textArea,
+                                            multiselect: chips
+                                        };
+                                        (takes[kind] ?? typed).forceActiveFocus();
+                                    }
+
+                                    // Steps a number field by its step, or 1, within
+                                    // its bounds, on the step's grid from `min`.
+                                    function step(by) {
+                                        const field = modelData;
+                                        const size = typeof field.step === "number" && field.step > 0 ? field.step : 1;
+                                        const from = typeof field.min === "number" ? field.min : 0;
+                                        const now = parseFloat(typed.text);
+                                        let next = isNaN(now) ? from : from + Math.round((now + by * size - from) / size) * size;
+                                        if (typeof field.min === "number")
+                                            next = Math.max(field.min, next);
+                                        if (typeof field.max === "number")
+                                            next = Math.min(field.max, next);
+                                        const decimals = n => {
+                                            const written = n.toString().split("e-");
+                                            return (written[0].split(".")[1] ?? "").length + Number(written[1] ?? 0);
+                                        };
+                                        const places = Math.min(15, Math.max(decimals(size), decimals(from)));
+                                        typed.text = String(Number(next.toFixed(places)));
+                                    }
+
+                                    // Fills in the `n`th path offered. A folder in a file
+                                    // field, or taken with Tab, goes on completing.
+                                    function fill(n, byTab) {
+                                        const offered = search.completions[n];
+                                        const slash = typed.text.lastIndexOf("/");
+                                        // What was typed of the folder stays as it was, such
+                                        // as `~/`; with nothing typed, the path is whole.
+                                        let filled = slash >= 0 ? typed.text.slice(0, slash + 1) + offered.title : menu.homeRelative(offered.path);
+                                        if (offered.folder && (byTab || kind === "file")) {
+                                            typed.text = filled + "/";
+                                        } else {
+                                            paths.taking = true;
+                                            typed.text = filled;
+                                            paths.taking = false;
+                                            paths.dismissed = true;
+                                        }
+                                        typed.cursorPosition = typed.text.length;
+                                    }
+
+                                    // A description: text to read, with a bar beside it.
+                                    Item {
+                                        id: note
+                                        x: 18
+                                        width: parent.width - 36
+                                        visible: formField.kind === "description"
+                                        height: visible ? noteText.implicitHeight + 8 : 0
+
+                                        Rectangle {
+                                            y: 4
+                                            width: 2
+                                            height: noteText.implicitHeight
+                                            color: menu.note
+                                        }
 
                                         Text {
-                                            anchors.fill: parent
-                                            verticalAlignment: Text.AlignVCenter
-                                            visible: typed.text === ""
-                                            text: formField.modelData.placeholder
+                                            id: noteText
+                                            x: 12
+                                            y: 4
+                                            width: parent.width - 12
+                                            wrapMode: Text.Wrap
+                                            textFormat: Text.PlainText
+                                            text: formField.modelData.text
                                             color: menu.dimmed
-                                            font: typed.font
+                                            font.family: menu.fontFamily
+                                            font.pixelSize: menu.fontSize - 1
                                         }
                                     }
 
-                                    Text {
-                                        id: toggle
-                                        anchors.fill: parent
-                                        anchors.leftMargin: 10
-                                        visible: formField.modelData.kind === "checkbox"
-                                        verticalAlignment: Text.AlignVCenter
-                                        property bool checked: formField.modelData.value === true
-                                        text: checked ? "[x]" : "[ ]"
-                                        color: menu.foreground
-                                        font.family: menu.fontFamily
-                                        font.pixelSize: menu.fontSize
-                                        Keys.onPressed: event => {
-                                            if (menu.key(event)) {
-                                                event.accepted = true;
-                                            } else if (event.key === Qt.Key_Space) {
-                                                checked = !checked;
-                                                search.setChecked(formField.index, checked);
-                                                event.accepted = true;
+                                    Column {
+                                        id: fieldColumn
+                                        width: parent.width
+                                        visible: formField.kind !== "description"
+                                        topPadding: 6
+                                        bottomPadding: 6
+                                        spacing: 4
+
+                                        Item {
+                                            width: parent.width
+                                            height: frame.height
+
+                                            // The label, centred on the box's first line, with
+                                            // a red star when the field must be filled in.
+                                            Text {
+                                                id: label
+                                                x: 18
+                                                y: (menu.rowHeight - 12 - height) / 2
+                                                width: parent.width / 3 - 18
+                                                elide: Text.ElideRight
+                                                textFormat: Text.StyledText
+                                                text: menu.escaped(formField.modelData.label) + (formField.modelData.optional ? "" : " <font color=\"" + menu.error + "\">*</font>")
+                                                color: formField.current ? menu.foreground : menu.dimmed
+                                                font.family: menu.fontFamily
+                                                font.pixelSize: menu.fontSize
+                                            }
+
+                                            Rectangle {
+                                                id: frame
+                                                anchors.left: label.right
+                                                width: formField.kind === "number" ? 80 : parent.width - label.x - label.width - 18
+                                                // A text area shows about three lines.
+                                                height: formField.kind === "textarea" ? Math.ceil(metrics.lineSpacing * 3) + 16 : menu.rowHeight - 12
+                                                radius: menu.radius / 2
+                                                color: "transparent"
+                                                border.width: 1
+                                                border.color: formField.error !== "" ? menu.error : formField.current ? menu.accent : menu.border
+
+                                                TextInput {
+                                                    id: typed
+                                                    anchors.fill: parent
+                                                    anchors.leftMargin: 10
+                                                    anchors.rightMargin: 10
+                                                    visible: formField.typedIn
+                                                    verticalAlignment: TextInput.AlignVCenter
+                                                    horizontalAlignment: formField.kind === "number" ? TextInput.AlignRight : TextInput.AlignLeft
+                                                    clip: true
+                                                    // A date reads as words while it doesn't have
+                                                    // the keys; it is typed as ISO 8601.
+                                                    readonly property string dateShown: formField.kind === "date" && !activeFocus ? menu.shownDate(text) : ""
+                                                    color: dateShown !== "" ? "transparent" : menu.foreground
+                                                    selectionColor: menu.selection
+                                                    font.family: menu.fontFamily
+                                                    font.pixelSize: menu.fontSize
+                                                    echoMode: formField.modelData.secret ? TextInput.Password : TextInput.Normal
+                                                    Component.onCompleted: {
+                                                        if (formField.typedIn)
+                                                            text = formField.modelData.value ?? "";
+                                                    }
+                                                    onTextChanged: {
+                                                        search.setText(formField.index, text);
+                                                        paths.current = -1;
+                                                        if (formField.path && activeFocus && !paths.taking) {
+                                                            paths.dismissed = false;
+                                                            search.complete(formField.index, text);
+                                                        }
+                                                    }
+                                                    // With nothing typed, a file field offers the
+                                                    // newest files it takes.
+                                                    onActiveFocusChanged: {
+                                                        if (activeFocus && formField.path) {
+                                                            paths.current = -1;
+                                                            search.complete(formField.index, text);
+                                                        }
+                                                    }
+                                                    Keys.onPressed: event => {
+                                                        const enter = event.key === Qt.Key_Return || event.key === Qt.Key_Enter;
+                                                        const plain = (event.modifiers & (Qt.ControlModifier | Qt.ShiftModifier | Qt.AltModifier | Qt.MetaModifier)) === 0;
+                                                        if (formField.completing) {
+                                                            if (event.key === Qt.Key_Down) {
+                                                                paths.current = Math.min(paths.count - 1, paths.current + 1);
+                                                                event.accepted = true;
+                                                                return;
+                                                            }
+                                                            if (event.key === Qt.Key_Up && paths.current >= 0) {
+                                                                paths.current -= 1;
+                                                                event.accepted = true;
+                                                                return;
+                                                            }
+                                                            const tab = event.key === Qt.Key_Tab && !(event.modifiers & Qt.ShiftModifier);
+                                                            if ((tab || enter) && paths.current >= 0) {
+                                                                formField.fill(paths.current, event.key === Qt.Key_Tab);
+                                                                event.accepted = true;
+                                                                return;
+                                                            }
+                                                            // Esc closes the list before it does
+                                                            // anything else.
+                                                            if (event.key === Qt.Key_Escape) {
+                                                                paths.dismissed = true;
+                                                                event.accepted = true;
+                                                                return;
+                                                            }
+                                                        }
+                                                        if (formField.kind === "number" && plain && (event.key === Qt.Key_Left || event.key === Qt.Key_Right)) {
+                                                            formField.step(event.key === Qt.Key_Right ? 1 : -1);
+                                                            event.accepted = true;
+                                                            return;
+                                                        }
+                                                        event.accepted = menu.key(event);
+                                                    }
+
+                                                    Text {
+                                                        anchors.fill: parent
+                                                        verticalAlignment: Text.AlignVCenter
+                                                        horizontalAlignment: typed.horizontalAlignment
+                                                        visible: typed.text === "" || typed.dateShown !== ""
+                                                        text: typed.dateShown !== "" ? typed.dateShown : formField.kind === "date" ? (formField.modelData.time ? "YYYY-MM-DDTHH:MM" : "YYYY-MM-DD") : formField.modelData.placeholder
+                                                        color: typed.dateShown !== "" ? menu.foreground : menu.dimmed
+                                                        elide: Text.ElideRight
+                                                        font: typed.font
+                                                    }
+                                                }
+
+                                                // A text area: Enter submits the form, as in
+                                                // every field, and Shift+Enter starts a line.
+                                                Flickable {
+                                                    id: textAreaView
+                                                    anchors.fill: parent
+                                                    anchors.margins: 8
+                                                    anchors.leftMargin: 10
+                                                    anchors.rightMargin: 10
+                                                    visible: formField.kind === "textarea"
+                                                    clip: true
+                                                    contentWidth: width
+                                                    contentHeight: textArea.contentHeight
+                                                    boundsBehavior: Flickable.StopAtBounds
+                                                    interactive: false
+
+                                                    function keepInSight(cursor) {
+                                                        if (contentY >= cursor.y)
+                                                            contentY = cursor.y;
+                                                        else if (contentY + height <= cursor.y + cursor.height)
+                                                            contentY = cursor.y + cursor.height - height;
+                                                    }
+
+                                                    TextEdit {
+                                                        id: textArea
+                                                        width: textAreaView.width
+                                                        wrapMode: TextEdit.Wrap
+                                                        textFormat: TextEdit.PlainText
+                                                        color: menu.foreground
+                                                        selectionColor: menu.selection
+                                                        font.family: menu.fontFamily
+                                                        font.pixelSize: menu.fontSize
+                                                        Component.onCompleted: {
+                                                            if (formField.kind === "textarea")
+                                                                text = formField.modelData.value ?? "";
+                                                        }
+                                                        onTextChanged: {
+                                                            if (formField.kind === "textarea")
+                                                                search.setText(formField.index, text);
+                                                        }
+                                                        onCursorRectangleChanged: textAreaView.keepInSight(cursorRectangle)
+                                                        Keys.onPressed: event => {
+                                                            const enter = event.key === Qt.Key_Return || event.key === Qt.Key_Enter;
+                                                            if (enter && (event.modifiers & Qt.ShiftModifier)) {
+                                                                textArea.remove(textArea.selectionStart, textArea.selectionEnd);
+                                                                textArea.insert(textArea.cursorPosition, "\n");
+                                                                event.accepted = true;
+                                                                return;
+                                                            }
+                                                            // Up and Down move between lines, and
+                                                            // past the first or last to the next field.
+                                                            const top = textArea.cursorRectangle.y < metrics.lineSpacing / 2;
+                                                            const bottom = textArea.cursorRectangle.y + textArea.cursorRectangle.height > textArea.contentHeight - metrics.lineSpacing / 2;
+                                                            if ((event.key === Qt.Key_Up && !top) || (event.key === Qt.Key_Down && !bottom)) {
+                                                                event.accepted = false;
+                                                                return;
+                                                            }
+                                                            event.accepted = menu.key(event);
+                                                        }
+
+                                                        Text {
+                                                            visible: textArea.text === ""
+                                                            text: formField.modelData.placeholder
+                                                            color: menu.dimmed
+                                                            font: textArea.font
+                                                        }
+                                                    }
+                                                }
+
+                                                Text {
+                                                    id: toggle
+                                                    anchors.fill: parent
+                                                    anchors.leftMargin: 10
+                                                    visible: formField.kind === "checkbox"
+                                                    verticalAlignment: Text.AlignVCenter
+                                                    property bool checked: formField.modelData.value === true
+                                                    text: checked ? "[x]" : "[ ]"
+                                                    color: menu.foreground
+                                                    font.family: menu.fontFamily
+                                                    font.pixelSize: menu.fontSize
+                                                    Keys.onPressed: event => {
+                                                        if (menu.key(event)) {
+                                                            event.accepted = true;
+                                                        } else if (event.key === Qt.Key_Space) {
+                                                            checked = !checked;
+                                                            search.setChecked(formField.index, checked);
+                                                            event.accepted = true;
+                                                        }
+                                                    }
+                                                }
+
+                                                Text {
+                                                    id: choice
+                                                    anchors.fill: parent
+                                                    anchors.leftMargin: 10
+                                                    anchors.rightMargin: 10
+                                                    visible: formField.kind === "select"
+                                                    verticalAlignment: Text.AlignVCenter
+                                                    elide: Text.ElideRight
+                                                    readonly property var options: formField.modelData.options
+                                                    property int chosen: Math.max(0, options.findIndex(option => option.value === formField.modelData.value))
+                                                    text: options.length > 0 ? "‹ " + options[chosen].label + " ›" : ""
+                                                    color: menu.foreground
+                                                    font.family: menu.fontFamily
+                                                    font.pixelSize: menu.fontSize
+                                                    Keys.onPressed: event => {
+                                                        const by = event.key === Qt.Key_Right ? 1 : event.key === Qt.Key_Left ? -1 : 0;
+                                                        if (menu.key(event)) {
+                                                            event.accepted = true;
+                                                        } else if (by !== 0 && options.length > 0) {
+                                                            chosen = (chosen + by + options.length) % options.length;
+                                                            search.setText(formField.index, options[chosen].value);
+                                                            event.accepted = true;
+                                                        }
+                                                    }
+                                                }
+
+                                                // A multi-select: a chip per option. Left and
+                                                // Right move the cursor, Space ticks or unticks.
+                                                Item {
+                                                    id: chips
+                                                    anchors.fill: parent
+                                                    anchors.leftMargin: 5
+                                                    anchors.rightMargin: 5
+                                                    visible: formField.kind === "multiselect"
+                                                    clip: true
+                                                    property int at: 0
+                                                    // The field keeps its own ticks: toggling
+                                                    // doesn't send the View again.
+                                                    property var ticked: formField.kind === "multiselect" && formField.modelData.value ? Array.from(formField.modelData.value) : []
+                                                    readonly property var options: formField.modelData.options
+                                                    Keys.onPressed: event => {
+                                                        const by = event.key === Qt.Key_Right ? 1 : event.key === Qt.Key_Left ? -1 : 0;
+                                                        if (menu.key(event)) {
+                                                            event.accepted = true;
+                                                        } else if (by !== 0 && options.length > 0) {
+                                                            at = Math.max(0, Math.min(options.length - 1, at + by));
+                                                            event.accepted = true;
+                                                        } else if (event.key === Qt.Key_Space && options.length > 0) {
+                                                            const value = options[at].value;
+                                                            if (search.toggleOption(formField.index, value))
+                                                                ticked = ticked.includes(value) ? ticked.filter(other => other !== value) : ticked.concat([value]);
+                                                            event.accepted = true;
+                                                        }
+                                                    }
+
+                                                    Row {
+                                                        anchors.verticalCenter: parent.verticalCenter
+                                                        spacing: 6
+
+                                                        Repeater {
+                                                            model: chips.visible ? chips.options : []
+
+                                                            Rectangle {
+                                                                id: optionChip
+                                                                required property int index
+                                                                required property var modelData
+                                                                readonly property bool on: chips.ticked.includes(modelData.value)
+                                                                readonly property bool here: chips.activeFocus && chips.at === index
+                                                                width: optionChipText.implicitWidth + 20
+                                                                height: frame.height - 10
+                                                                radius: height / 2
+                                                                color: on ? menu.selection : "transparent"
+                                                                border.width: here ? 2 : 1
+                                                                border.color: on ? menu.accent : here ? menu.dimmed : menu.border
+
+                                                                Text {
+                                                                    id: optionChipText
+                                                                    anchors.centerIn: parent
+                                                                    textFormat: Text.PlainText
+                                                                    text: (optionChip.on ? "✓ " : "") + optionChip.modelData.label
+                                                                    color: optionChip.on || optionChip.here ? menu.foreground : menu.dimmed
+                                                                    font.family: menu.fontFamily
+                                                                    font.pixelSize: menu.fontSize - 2
+                                                                }
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                            }
+
+                                            Text {
+                                                anchors.left: frame.right
+                                                anchors.leftMargin: 10
+                                                anchors.verticalCenter: frame.verticalCenter
+                                                visible: formField.kind === "number"
+                                                text: "←/→ or type"
+                                                color: menu.dimmed
+                                                font.family: menu.fontFamily
+                                                font.pixelSize: menu.fontSize - 3
                                             }
                                         }
-                                    }
 
-                                    Text {
-                                        id: choice
-                                        anchors.fill: parent
-                                        anchors.leftMargin: 10
-                                        anchors.rightMargin: 10
-                                        visible: formField.modelData.kind === "select"
-                                        verticalAlignment: Text.AlignVCenter
-                                        elide: Text.ElideRight
-                                        readonly property var options: formField.modelData.options
-                                        property int chosen: Math.max(0, options.findIndex(option => option.value === formField.modelData.value))
-                                        text: options.length > 0 ? "‹ " + options[chosen].label + " ›" : ""
-                                        color: menu.foreground
-                                        font.family: menu.fontFamily
-                                        font.pixelSize: menu.fontSize
-                                        Keys.onPressed: event => {
-                                            const by = event.key === Qt.Key_Right ? 1 : event.key === Qt.Key_Left ? -1 : 0;
-                                            if (menu.key(event)) {
-                                                event.accepted = true;
-                                            } else if (by !== 0 && options.length > 0) {
-                                                chosen = (chosen + by + options.length) % options.length;
-                                                search.setText(formField.index, options[chosen].value);
-                                                event.accepted = true;
+                                        // What the Daemon found wrong when the form was
+                                        // last submitted.
+                                        Text {
+                                            x: frame.x
+                                            width: frame.parent.width - frame.x - 18
+                                            visible: formField.error !== ""
+                                            wrapMode: Text.Wrap
+                                            textFormat: Text.PlainText
+                                            text: formField.error
+                                            color: menu.error
+                                            font.family: menu.fontFamily
+                                            font.pixelSize: menu.fontSize - 3
+                                        }
+
+                                        // The paths that complete what is typed: a file or
+                                        // folder, the name with the letters that matched,
+                                        // and when it changed.
+                                        Rectangle {
+                                            x: frame.x
+                                            width: frame.parent.width - frame.x - 18
+                                            visible: formField.completing
+                                            height: visible ? paths.height + 8 : 0
+                                            radius: menu.radius / 2
+                                            color: "transparent"
+                                            border.width: 1
+                                            border.color: menu.border
+
+                                            ListView {
+                                                id: paths
+                                                y: 4
+                                                width: parent.width
+                                                height: Math.min(count, 5) * menu.rowHeight * 0.75
+                                                clip: true
+                                                boundsBehavior: Flickable.StopAtBounds
+                                                model: formField.path && search.completingField === formField.index ? search.completions : []
+                                                // A row chosen in the last answer may be past the
+                                                // end of the next. The same answer can come twice,
+                                                // so a row still in the list stays chosen.
+                                                onModelChanged: {
+                                                    if (current >= (model.length ?? 0))
+                                                        current = -1;
+                                                }
+                                                currentIndex: current
+                                                highlightMoveDuration: 0
+                                                // The row Tab or Enter takes, or -1 for none: then
+                                                // they move on or submit, as elsewhere.
+                                                property int current: -1
+                                                // The list stays closed after a path is taken, or
+                                                // Esc, until something is typed.
+                                                property bool dismissed: false
+                                                // While a file is filled in: the text changes,
+                                                // and no paths are asked for it.
+                                                property bool taking: false
+
+                                                delegate: Item {
+                                                    id: offered
+                                                    required property int index
+                                                    required property var modelData
+                                                    width: paths.width
+                                                    height: menu.rowHeight * 0.75
+
+                                                    Rectangle {
+                                                        anchors.fill: parent
+                                                        anchors.leftMargin: 4
+                                                        anchors.rightMargin: 4
+                                                        radius: menu.radius / 2
+                                                        color: offered.index === paths.current ? menu.selection : "transparent"
+                                                    }
+
+                                                    PathIcon {
+                                                        id: pathIcon
+                                                        x: 12
+                                                        anchors.verticalCenter: parent.verticalCenter
+                                                        folder: offered.modelData.folder
+                                                        color: offered.modelData.folder ? menu.accent : menu.dimmed
+                                                    }
+
+                                                    Text {
+                                                        anchors.left: pathIcon.right
+                                                        anchors.leftMargin: 10
+                                                        anchors.right: when.left
+                                                        anchors.rightMargin: 10
+                                                        anchors.verticalCenter: parent.verticalCenter
+                                                        elide: Text.ElideRight
+                                                        textFormat: Text.StyledText
+                                                        text: menu.matched(offered.modelData.title, offered.modelData.highlights)
+                                                        color: menu.foreground
+                                                        font.family: menu.fontFamily
+                                                        font.pixelSize: menu.fontSize - 1
+                                                    }
+
+                                                    Text {
+                                                        id: when
+                                                        anchors.right: parent.right
+                                                        anchors.rightMargin: 12
+                                                        anchors.verticalCenter: parent.verticalCenter
+                                                        text: offered.modelData.folder ? "folder" : menu.ago(offered.modelData.modified)
+                                                        color: menu.dimmed
+                                                        font.family: menu.fontFamily
+                                                        font.pixelSize: menu.fontSize - 3
+                                                    }
+                                                }
                                             }
                                         }
                                     }
@@ -925,77 +1422,75 @@ PanelWindow {
                             }
                         }
                     }
-                }
-
-                Text {
-                    id: submitHint
-                    x: 18
-                    visible: menu.kind === "form"
-                    // Until each field draws its own error, the first wrong field's shows here.
-                    readonly property int wrong: search.fieldErrors.findIndex(error => error !== "")
-                    text: wrong < 0 ? "Enter: " + (search.view.submit ?? "") : search.view.fields[wrong].label + ": " + search.fieldErrors[wrong]
-                    color: wrong < 0 ? menu.dimmed : menu.error
-                    font.family: menu.fontFamily
-                    font.pixelSize: menu.fontSize - 3
-                }
-
-                // A detail View: Markdown and the metadata beside it.
-                Text {
-                    x: 18
-                    width: parent.width - 36
-                    visible: menu.kind === "detail"
-                    wrapMode: Text.Wrap
-                    textFormat: Text.MarkdownText
-                    text: search.view.markdown ?? ""
-                    color: menu.foreground
-                    font.family: menu.fontFamily
-                    font.pixelSize: menu.fontSize
-                }
-
-                Repeater {
-                    model: menu.kind === "detail" ? search.view.metadata : []
 
                     Text {
-                        required property var modelData
+                        id: submitHint
                         x: 18
-                        width: content.width - 36
-                        elide: Text.ElideRight
-                        text: modelData.label + ": " + modelData.value
+                        visible: menu.kind === "form"
+                        text: "Enter: " + (search.view.submit ?? "") + (form.currentKind === "textarea" ? " · Shift+Enter: new line" : "")
                         color: menu.dimmed
                         font.family: menu.fontFamily
                         font.pixelSize: menu.fontSize - 3
                     }
-                }
 
-                // A progress View: the job it follows.
-                Column {
-                    x: 18
-                    width: parent.width - 36
-                    visible: menu.kind === "progress"
-                    spacing: 8
-                    readonly property var job: search.view.job ?? ({})
-
-                    ProgressBar {
-                        width: parent.width
-                        progress: parent.job.progress ?? -1
-                        failed: parent.job.state === "failed"
-                        color: menu.selection
-                        fill: menu.accent
-                        unknown: menu.border
-                        error: menu.error
+                    // A detail View: Markdown and the metadata beside it.
+                    Text {
+                        x: 18
+                        width: parent.width - 36
+                        visible: menu.kind === "detail"
+                        wrapMode: Text.Wrap
+                        textFormat: Text.MarkdownText
+                        text: search.view.markdown ?? ""
+                        color: menu.foreground
+                        font.family: menu.fontFamily
+                        font.pixelSize: menu.fontSize
                     }
 
-                    Text {
-                        width: parent.width
-                        elide: Text.ElideRight
-                        text: {
-                            const job = parent.job;
-                            const state = job.state === "succeeded" ? "Done" : job.state === "failed" ? "Failed" : job.progress >= 0 ? Math.round(job.progress * 100) + "%" : "Running";
-                            return job.message ? state + " · " + job.message : state;
+                    Repeater {
+                        model: menu.kind === "detail" ? search.view.metadata : []
+
+                        Text {
+                            required property var modelData
+                            x: 18
+                            width: content.width - 36
+                            elide: Text.ElideRight
+                            text: modelData.label + ": " + modelData.value
+                            color: menu.dimmed
+                            font.family: menu.fontFamily
+                            font.pixelSize: menu.fontSize - 3
                         }
-                        color: parent.job.state === "failed" ? menu.error : menu.dimmed
-                        font.family: menu.fontFamily
-                        font.pixelSize: menu.fontSize - 3
+                    }
+
+                    // A progress View: the job it follows.
+                    Column {
+                        x: 18
+                        width: parent.width - 36
+                        visible: menu.kind === "progress"
+                        spacing: 8
+                        readonly property var job: search.view.job ?? ({})
+
+                        ProgressBar {
+                            width: parent.width
+                            progress: parent.job.progress ?? -1
+                            failed: parent.job.state === "failed"
+                            color: menu.selection
+                            fill: menu.accent
+                            unknown: menu.border
+                            error: menu.error
+                        }
+
+                        Text {
+                            width: parent.width
+                            elide: Text.ElideRight
+                            text: {
+                                const job = parent.job;
+                                const state = job.state === "succeeded" ? "Done" : job.state === "failed" ? "Failed" : job.progress >= 0 ? Math.round(job.progress * 100) + "%" : "Running";
+                                return job.message ? state + " · " + job.message : state;
+                            }
+                            color: parent.job.state === "failed" ? menu.error : menu.dimmed
+                            font.family: menu.fontFamily
+                            font.pixelSize: menu.fontSize - 3
+                        }
                     }
                 }
             }
@@ -1214,6 +1709,66 @@ PanelWindow {
                             }
                         }
                     }
+                }
+            }
+        }
+    }
+
+    // The line height of the menu's text, for a text area's three lines.
+    FontMetrics {
+        id: metrics
+        font.family: menu.fontFamily
+        font.pixelSize: menu.fontSize
+    }
+
+    // A folder or a file, drawn so it looks the same with any icon theme or
+    // none.
+    component PathIcon: Item {
+        id: pathIcon
+        property bool folder: false
+        // Inline components can't see the menu, so the color is passed in.
+        property color color
+        width: 16
+        height: 14
+
+        Rectangle {
+            visible: pathIcon.folder
+            width: 7
+            height: 4
+            radius: 1
+            color: pathIcon.color
+        }
+
+        Rectangle {
+            visible: pathIcon.folder
+            y: 2
+            width: 16
+            height: 12
+            radius: 2
+            color: pathIcon.color
+        }
+
+        Rectangle {
+            visible: !pathIcon.folder
+            x: 2
+            y: -1
+            width: 12
+            height: 16
+            radius: 2
+            color: "transparent"
+            border.width: 1.5
+            border.color: pathIcon.color
+
+            Repeater {
+                model: 3
+
+                Rectangle {
+                    required property int index
+                    x: 3
+                    y: 4 + index * 3
+                    width: index === 2 ? 4 : 6
+                    height: 1
+                    color: pathIcon.color
                 }
             }
         }
