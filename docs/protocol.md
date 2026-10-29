@@ -142,7 +142,11 @@ Every Action on offer, without any Item, for an Extension whose Manifest has `ac
               ]
             }
           ],
-          "confirm": true
+          "confirm": true,
+          "keywords": [
+            "launch"
+          ],
+          "role": "destructive"
         }
       }
     ]
@@ -205,7 +209,11 @@ Indexes Items. An Item whose id was sent before replaces the old one, which is h
                 ]
               }
             ],
-            "confirm": true
+            "confirm": true,
+            "keywords": [
+              "launch"
+            ],
+            "role": "destructive"
           }
         ],
         "hidden": true,
@@ -275,7 +283,11 @@ Results for Live query `live_query`, in as many batches as you like; `done` says
                   ]
                 }
               ],
-              "confirm": true
+              "confirm": true,
+              "keywords": [
+                "launch"
+              ],
+              "role": "destructive"
             }
           ],
           "hidden": true,
@@ -420,6 +432,22 @@ Whether the Extension can do anything now, sent whenever that changes. The searc
   "status": {
     "usable": true,
     "note": "Paused for an hour"
+  }
+}
+```
+
+### `target_action`
+
+Offers the Contributed action `action`, declared with `targeted = true` in the Manifest, on every other Extension's Result whose Identity is in `identities`. Each one replaces the set sent before for that Action, so send the whole set whenever it changes; an empty one withdraws it. Send it again after every start.
+
+```json
+{
+  "target_action": {
+    "action": "remove",
+    "identities": [
+      "app:firefox.desktop",
+      "app:gimp.desktop"
+    ]
   }
 }
 ```
@@ -576,7 +604,11 @@ An application, by its desktop file id.
           ]
         }
       ],
-      "confirm": true
+      "confirm": true,
+      "keywords": [
+        "launch"
+      ],
+      "role": "destructive"
     }
   ],
   "hidden": true,
@@ -623,7 +655,11 @@ A file, by its absolute path.
           ]
         }
       ],
-      "confirm": true
+      "confirm": true,
+      "keywords": [
+        "launch"
+      ],
+      "role": "destructive"
     }
   ],
   "hidden": true,
@@ -670,7 +706,11 @@ A folder, by its absolute path.
           ]
         }
       ],
-      "confirm": true
+      "confirm": true,
+      "keywords": [
+        "launch"
+      ],
+      "role": "destructive"
     }
   ],
   "hidden": true,
@@ -717,7 +757,11 @@ A project's folder, by its absolute path.
           ]
         }
       ],
-      "confirm": true
+      "confirm": true,
+      "keywords": [
+        "launch"
+      ],
+      "role": "destructive"
     }
   ],
   "hidden": true,
@@ -764,7 +808,11 @@ An open window, by the compositor's address for it.
           ]
         }
       ],
-      "confirm": true
+      "confirm": true,
+      "keywords": [
+        "launch"
+      ],
+      "role": "destructive"
     }
   ],
   "hidden": true,
@@ -811,7 +859,11 @@ A web address.
           ]
         }
       ],
-      "confirm": true
+      "confirm": true,
+      "keywords": [
+        "launch"
+      ],
+      "role": "destructive"
     }
   ],
   "hidden": true,
@@ -858,7 +910,11 @@ Any other kind belongs to one Extension and is named `<extension>.<kind>`, witho
           ]
         }
       ],
-      "confirm": true
+      "confirm": true,
+      "keywords": [
+        "launch"
+      ],
+      "role": "destructive"
     }
   ],
   "hidden": true,
@@ -912,7 +968,11 @@ Items to pick from, whose Actions run like a Result's. Typing filters them in th
                 ]
               }
             ],
-            "confirm": true
+            "confirm": true,
+            "keywords": [
+              "launch"
+            ],
+            "role": "destructive"
           }
         ],
         "hidden": true,
@@ -1345,7 +1405,11 @@ The whole ranked list for the query, best first, and the app it is in.
                   ]
                 }
               ],
-              "confirm": true
+              "confirm": true,
+              "keywords": [
+                "launch"
+              ],
+              "role": "destructive"
             }
           ],
           "hidden": true,
@@ -1372,7 +1436,11 @@ The whole ranked list for the query, best first, and the app it is in.
                   ]
                 }
               ],
-              "confirm": true
+              "confirm": true,
+              "keywords": [
+                "launch"
+              ],
+              "role": "destructive"
             }
           }
         ],
@@ -1479,7 +1547,11 @@ Push an Extension's View, with the Contributed actions on its Items.
                 ]
               }
             ],
-            "confirm": true
+            "confirm": true,
+            "keywords": [
+              "launch"
+            ],
+            "role": "destructive"
           }
         }
       ]
@@ -1524,7 +1596,11 @@ Replace the open View with the same id.
                 ]
               }
             ],
-            "confirm": true
+            "confirm": true,
+            "keywords": [
+              "launch"
+            ],
+            "role": "destructive"
           }
         }
       ]
@@ -1570,7 +1646,11 @@ Pop one View and push another in one step.
                 ]
               }
             ],
-            "confirm": true
+            "confirm": true,
+            "keywords": [
+              "launch"
+            ],
+            "role": "destructive"
           }
         }
       ]

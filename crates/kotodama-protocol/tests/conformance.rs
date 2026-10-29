@@ -45,6 +45,10 @@ fn items() -> Vec<Item> {
                     shortcut: Some("ctrl+n".into()),
                     ..action("new-window")
                 },
+                action("remove")
+                    .keywords(["remove", "uninstall"])
+                    .role(ActionRole::Destructive)
+                    .confirm(),
             ],
         },
         Item {
@@ -355,6 +359,14 @@ fn job_and_status_messages() -> Vec<FromExtension> {
             usable: true,
             note: None,
         },
+        FromExtension::TargetAction {
+            action: "remove".into(),
+            identities: vec!["app:firefox.desktop".into()],
+        },
+        FromExtension::TargetAction {
+            action: "remove".into(),
+            identities: vec![],
+        },
     ]
 }
 
@@ -390,9 +402,10 @@ fn from_extension_variant(message: &FromExtension) -> usize {
         FromExtension::RequestActionCatalog => 9,
         FromExtension::WithdrawPick { .. } => 10,
         FromExtension::Status { .. } => 11,
+        FromExtension::TargetAction { .. } => 12,
     }
 }
-const FROM_EXTENSION_VARIANTS: usize = 12;
+const FROM_EXTENSION_VARIANTS: usize = 13;
 
 fn to_front_end_messages() -> Vec<ToFrontEnd> {
     [results_messages(), menu_and_view_messages()].concat()
@@ -890,6 +903,68 @@ fn an_argument_of_a_kind_that_isnt_one_is_refused() {
 
     let message = std::error::Error::source(&refused.unwrap_err()).unwrap().to_string();
     assert!(message.contains("`date` isn't an Argument kind"), "{message}");
+}
+
+#[test]
+fn an_action_without_a_role_or_keywords_is_normal_and_known_by_its_title_alone() {
+    let action: Action = WireFormat::Json.decode(br#"{"id": "open", "title": "Open"}"#).unwrap();
+
+    assert_eq!(action.role, ActionRole::Normal);
+    assert!(action.keywords.is_empty());
+}
+
+#[test]
+fn an_actions_role_is_its_name_on_the_wire() {
+    let action: Action = WireFormat::Json
+        .decode(br#"{"id": "rm", "title": "Remove", "keywords": ["remove", "uninstall"], "role": "destructive"}"#)
+        .unwrap();
+
+    assert_eq!(
+        action,
+        Action::new("rm", "Remove")
+            .keywords(["remove", "uninstall"])
+            .role(ActionRole::Destructive)
+    );
+    assert_eq!(json(&Action::new("f", "F").role(ActionRole::Form))["role"], "form");
+}
+
+/// An Action as protobuf code generated from `kotodama.proto` may write
+/// it: with its role empty.
+#[derive(Serialize)]
+struct GeneratedAction {
+    id: &'static str,
+    title: &'static str,
+    shortcut: Option<&'static str>,
+    arguments: Vec<Bare>,
+    confirm: bool,
+    keywords: Vec<&'static str>,
+    role: &'static str,
+}
+
+#[test]
+fn a_protobuf_action_with_an_empty_role_is_normal() {
+    let bytes = WireFormat::Protobuf
+        .encode(&GeneratedAction {
+            id: "open",
+            title: "Open",
+            shortcut: None,
+            arguments: Vec::new(),
+            confirm: false,
+            keywords: Vec::new(),
+            role: "",
+        })
+        .unwrap();
+
+    let action: Action = WireFormat::Protobuf.decode(&bytes).unwrap();
+    assert_eq!(action, Action::new("open", "Open"));
+}
+
+#[test]
+fn an_action_role_that_isnt_one_is_refused() {
+    let refused = WireFormat::Json.decode::<Action>(br#"{"id": "a", "title": "A", "role": "scary"}"#);
+
+    let message = std::error::Error::source(&refused.unwrap_err()).unwrap().to_string();
+    assert!(message.contains("`scary` isn't an Action role"), "{message}");
 }
 
 #[test]

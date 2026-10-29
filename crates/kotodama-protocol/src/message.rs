@@ -148,6 +148,14 @@ pub enum FromExtension {
         #[serde(default)]
         note: Option<String>,
     },
+    /// Offers the Contributed action `action`, which the Manifest declares
+    /// with `targeted = true`, on every Result whose Identity is among
+    /// `identities`, whichever other Extension's it is, and on no other.
+    /// Each one replaces the set sent before for that Action, so an
+    /// Extension sends the whole set whenever it changes; an empty one
+    /// withdraws the Action from every Result. The sets last while the
+    /// Extension runs.
+    TargetAction { action: String, identities: Vec<String> },
 }
 
 /// One Live query result.

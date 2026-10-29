@@ -198,7 +198,7 @@ fn the_shell_examples_hidden_bookmarks_item_lists_them_in_a_view_it_leaves_the_d
 fn the_shell_example_contributes_an_action_for_projects() {
     let contributed = manifest().contributed_actions;
     assert_eq!(contributed.len(), 1);
-    assert_eq!(contributed[0].kind.as_str(), "project");
+    assert_eq!(contributed[0].to.kind().map(KindName::as_str), Some("project"));
 
     let mut extension = Extension::start();
     extension.send(&bookmarks(&[]));

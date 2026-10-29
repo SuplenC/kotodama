@@ -1,5 +1,7 @@
 use kotodama_protocol::Action;
+use kotodama_protocol::ActionRole;
 use kotodama_protocol::Argument;
+use kotodama_protocol::ContributedTo;
 use kotodama_protocol::Example;
 use kotodama_protocol::KindName;
 use kotodama_protocol::Manifest;
@@ -54,7 +56,7 @@ fn a_manifest_declares_everything_an_extension_contributes() {
 
     assert_eq!(manifest.contributed_actions.len(), 2);
     let pin = &manifest.contributed_actions[0];
-    assert_eq!(pin.kind, KindName::new("project").unwrap());
+    assert_eq!(pin.to, ContributedTo::Kind(KindName::new("project").unwrap()));
     assert_eq!(
         pin.action,
         Action {
@@ -68,10 +70,44 @@ fn a_manifest_declares_everything_an_extension_contributes() {
                     .placeholder("~/Downloads/work.conf"),
             ],
             confirm: false,
+            keywords: Vec::new(),
+            role: ActionRole::Normal,
         }
     );
-    assert_eq!(manifest.contributed_actions[1].kind.as_str(), "folder");
+    assert_eq!(
+        manifest.contributed_actions[1].to,
+        ContributedTo::Kind(KindName::new("folder").unwrap())
+    );
     assert!(manifest.contributed_actions[1].action.confirm);
+}
+
+#[test]
+fn a_targeted_contributed_action_names_no_kind_and_carries_its_verbs_and_role() {
+    let manifest = parse(
+        r#"
+        name = "packages"
+        command = ["packages"]
+
+        [[contributed_actions]]
+        targeted = true
+        id = "remove"
+        title = "Remove"
+        keywords = ["remove", "uninstall", "delete"]
+        role = "destructive"
+        confirm = true
+        "#,
+    )
+    .unwrap();
+
+    let remove = &manifest.contributed_actions[0];
+    assert_eq!(remove.to, ContributedTo::Identities);
+    assert_eq!(
+        remove.action,
+        Action::new("remove", "Remove")
+            .keywords(["remove", "uninstall", "delete"])
+            .role(ActionRole::Destructive)
+            .confirm()
+    );
 }
 
 #[test]
@@ -170,6 +206,34 @@ fn invalid_manifests_are_rejected_with_the_reason() {
             id = "a"
             titel = "A""#,
             "unknown field `titel`",
+        ),
+        (
+            r#"name = "x"
+            command = ["x"]
+            [[contributed_actions]]
+            id = "a"
+            title = "A""#,
+            "needs `kind`, or `targeted = true`",
+        ),
+        (
+            r#"name = "x"
+            command = ["x"]
+            [[contributed_actions]]
+            kind = "app"
+            targeted = true
+            id = "a"
+            title = "A""#,
+            "has both `kind` and `targeted = true`",
+        ),
+        (
+            r#"name = "x"
+            command = ["x"]
+            [[contributed_actions]]
+            kind = "app"
+            id = "a"
+            title = "A"
+            role = "scary""#,
+            "`scary` isn't an Action role",
         ),
     ];
     for (toml, reason) in cases {

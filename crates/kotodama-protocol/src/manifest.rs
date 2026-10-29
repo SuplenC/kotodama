@@ -2,8 +2,8 @@
 //!
 //! # Owns
 //!
-//! - [`Manifest`], its [`LiveQueries`] and [`ContributedAction`]s, and the rules a Manifest must
-//!   keep to parse.
+//! - [`Manifest`], its [`LiveQueries`] and [`ContributedAction`]s (by kind or targeted), and the
+//!   rules a Manifest must keep to parse.
 //!
 //! # Not here
 //!
@@ -13,6 +13,7 @@
 use serde::Deserialize;
 
 use crate::Action;
+use crate::ActionRole;
 use crate::Argument;
 use crate::Error;
 use crate::Example;
@@ -56,7 +57,8 @@ pub struct Manifest {
     pub command: Vec<String>,
     /// Present if the Extension answers Live queries.
     pub live_query: Option<LiveQueries>,
-    /// Actions this Extension offers on other Extensions' Items, by Item kind.
+    /// Actions this Extension offers on other Extensions' Items, by Item kind
+    /// or by Identity.
     pub contributed_actions: Vec<ContributedAction>,
     /// Whether the Extension may read the Action catalog.
     pub action_catalog: bool,
@@ -143,13 +145,46 @@ pub struct LiveQueries {
     pub fallback: bool,
 }
 
-/// An Action offered on every Item of one kind, whichever Extension owns it.
+/// An Action offered on other Extensions' Items: every Item of one kind, or
+/// the Results whose Identity the Extension names.
+///
+/// ```toml
+/// [[contributed_actions]]
+/// targeted = true
+/// id = "remove"
+/// title = "Remove"
+/// keywords = ["remove", "uninstall", "delete"]
+/// role = "destructive"
+/// confirm = true
+/// ```
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
-#[serde(from = "ContributedActionToml")]
+#[serde(try_from = "ContributedActionToml")]
 pub struct ContributedAction {
-    /// The kind of Item it is offered on.
-    pub kind: KindName,
+    /// The Items it is offered on.
+    pub to: ContributedTo,
     pub action: Action,
+}
+
+/// Which Items a [`ContributedAction`] is offered on.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ContributedTo {
+    /// Every Item of this kind, from `kind` in the Manifest.
+    Kind(KindName),
+    /// Every Result whose Identity the Extension names, while it runs, in
+    /// [`FromExtension::TargetAction`](crate::FromExtension::TargetAction),
+    /// from `targeted = true` in the Manifest.
+    Identities,
+}
+
+impl ContributedTo {
+    /// The kind it is offered on; `None` for a targeted Action.
+    #[must_use]
+    pub fn kind(&self) -> Option<&KindName> {
+        match self {
+            ContributedTo::Kind(kind) => Some(kind),
+            ContributedTo::Identities => None,
+        }
+    }
 }
 
 /// Why a Manifest's TOML breaks its rules. Serde reads it into the parser's
@@ -164,6 +199,10 @@ enum ManifestError {
     NotOneWord(String),
     #[error("`live_query` needs at least one prefix or trigger, or `fallback`")]
     RoutesNothing,
+    #[error("Contributed action `{0}` needs `kind`, or `targeted = true` for the Identities the Extension names")]
+    OfferedOnNothing(String),
+    #[error("Contributed action `{0}` has both `kind` and `targeted = true`; it is offered by one or the other")]
+    OfferedTwice(String),
 }
 
 #[derive(Deserialize)]
@@ -263,7 +302,10 @@ impl TryFrom<LiveQueriesToml> for LiveQueries {
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct ContributedActionToml {
-    kind: KindName,
+    #[serde(default)]
+    kind: Option<KindName>,
+    #[serde(default)]
+    targeted: bool,
     id: String,
     title: String,
     #[serde(default)]
@@ -272,19 +314,32 @@ struct ContributedActionToml {
     arguments: Vec<Argument>,
     #[serde(default)]
     confirm: bool,
+    #[serde(default)]
+    keywords: Vec<String>,
+    #[serde(default)]
+    role: ActionRole,
 }
 
-impl From<ContributedActionToml> for ContributedAction {
-    fn from(toml: ContributedActionToml) -> Self {
-        ContributedAction {
-            kind: toml.kind,
+impl TryFrom<ContributedActionToml> for ContributedAction {
+    type Error = ManifestError;
+    fn try_from(toml: ContributedActionToml) -> Result<Self, ManifestError> {
+        let to = match (toml.kind, toml.targeted) {
+            (Some(kind), false) => ContributedTo::Kind(kind),
+            (None, true) => ContributedTo::Identities,
+            (None, false) => return Err(ManifestError::OfferedOnNothing(toml.id)),
+            (Some(_), true) => return Err(ManifestError::OfferedTwice(toml.id)),
+        };
+        Ok(ContributedAction {
+            to,
             action: Action {
                 id: toml.id,
                 title: toml.title,
                 shortcut: toml.shortcut,
                 arguments: toml.arguments,
                 confirm: toml.confirm,
+                keywords: toml.keywords,
+                role: toml.role,
             },
-        }
+        })
     }
 }
