@@ -164,6 +164,25 @@ mod linux {
     }
 
     #[test]
+    fn a_program_in_a_scope_has_no_launch_prefix_of_the_extensions() {
+        let (ours, peer) = manager(Duration::ZERO, "done");
+        let mut command = Command::new("sh");
+        command
+            .args([
+                "-c",
+                "echo \"${KOTODAMA_LAUNCH_PREFIX-unset} ${KOTODAMA_LAUNCH_SCOPED-unset}\"",
+            ])
+            .env("KOTODAMA_LAUNCH_PREFIX", "systemd-run --user --scope")
+            .env("KOTODAMA_LAUNCH_SCOPED", "1")
+            .stdout(Stdio::piped());
+
+        let child = spawn_scoped(&mut command, None, bus(ours), |_| {}).unwrap().child;
+        let output = child.wait_with_output().unwrap();
+        peer.join().unwrap();
+        assert_eq!(String::from_utf8_lossy(&output.stdout).trim(), "unset unset");
+    }
+
+    #[test]
     fn a_program_that_cant_start_fails_without_waiting_forever() {
         let (ours, _peer) = manager(Duration::ZERO, "done");
         let started = spawn_scoped(&mut Command::new("/nonexistent/program"), None, bus(ours), |_| {});

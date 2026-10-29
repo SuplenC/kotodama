@@ -58,8 +58,9 @@ impl Apps {
                 .env_remove("LC_ALL")
                 .env_remove("LC_MESSAGES")
                 // Started directly, not in a scope of the user's systemd. A
-                // test run from an app Kotodama started inherits its
-                // KOTODAMA_LAUNCH_SCOPED, which would hide a test's prefix.
+                // test run from a shell an older Kotodama started still
+                // inherits its KOTODAMA_LAUNCH_SCOPED, which would hide a
+                // test's prefix.
                 .env("KOTODAMA_LAUNCH_PREFIX", "")
                 .env_remove("KOTODAMA_LAUNCH_SCOPED")
                 .envs(env.iter().copied()),
@@ -625,6 +626,49 @@ fn a_prefix_that_only_makes_a_scope_is_passed_over() {
     }
     assert!(ran.exists(), "the app ran");
     assert!(!out.exists(), "the app ran through the prefix");
+}
+
+/// What the app `name`, started with `env` added to the Extension's
+/// environment, finds of the launch prefix: the variables are for
+/// Extensions, so the app should find neither.
+fn launch_variables_seen_by(name: &str, env: &[(&str, &str)]) -> String {
+    let dir = data_dirs();
+    let out = dir.path().join("seen");
+    let seen = script(
+        dir.path(),
+        name,
+        &format!(
+            "echo \"${{KOTODAMA_LAUNCH_PREFIX-unset}} ${{KOTODAMA_LAUNCH_SCOPED-unset}}\" > {0}.tmp\nmv {0}.tmp {0}",
+            out.display()
+        ),
+    );
+    install(dir.path(), "system", "app.desktop", &app("App", &seen));
+    let mut apps = Apps::start_with(dir, env);
+    apps.send(ToExtension::Config(Table::new()));
+    apps.added();
+
+    assert_eq!(apps.run("app", "open"), Outcome::Close);
+    wait_for(&out)
+}
+
+#[test]
+fn an_app_started_without_a_scope_inherits_no_launch_prefix() {
+    let seen = launch_variables_seen_by(
+        "unscoped-app",
+        &[
+            ("KOTODAMA_LAUNCH_PREFIX", "/nonexistent/systemd-run --scope"),
+            ("KOTODAMA_LAUNCH_SCOPED", "1"),
+            // No user manager, so the app starts without a scope.
+            ("XDG_RUNTIME_DIR", "/nonexistent"),
+        ],
+    );
+    assert_eq!(seen, "unset unset\n");
+}
+
+#[test]
+fn an_app_started_through_the_users_prefix_inherits_no_launch_prefix() {
+    let seen = launch_variables_seen_by("prefixed-app", &[("KOTODAMA_LAUNCH_PREFIX", "env")]);
+    assert_eq!(seen, "unset unset\n");
 }
 
 /// Writes a shell script named `name` in `dir`, running `body`, and returns

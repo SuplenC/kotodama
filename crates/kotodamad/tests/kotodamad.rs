@@ -86,8 +86,9 @@ fn with_home<'a>(command: &'a mut Command, root: &Path) -> &'a mut Command {
         .env("XDG_STATE_HOME", root.join("state"))
         .env("HOME", root)
         .env_remove("WAYLAND_DISPLAY")
-        // A test run from an app Kotodama started inherits its prefix, and its
-        // KOTODAMA_LAUNCH_SCOPED would hide the prefix a test sets.
+        // A test run from a shell an older Kotodama started still inherits
+        // its prefix, and its KOTODAMA_LAUNCH_SCOPED would hide the prefix a
+        // test sets.
         .env_remove(LAUNCH_PREFIX)
         .env_remove(LAUNCH_SCOPED)
 }
@@ -791,6 +792,83 @@ fn a_quicklinks_command_starts_through_the_launch_prefix() {
     wait_for("the wrapped command", || {
         (fs::read_to_string(&out).ok()? == "--scope\necho\nhi\n").then_some(())
     });
+}
+
+/// The launch prefix is for Extensions: a program the Daemon starts for the
+/// user, and all it starts in turn, must not take it for its own.
+#[test]
+fn a_quicklinks_command_inherits_no_launch_prefix() {
+    let root = Daemon::home();
+    let out = root.path().join("seen");
+    let seen = root.path().join("see");
+    fs::write(
+        &seen,
+        format!(
+            "#!/bin/sh\necho \"${{KOTODAMA_LAUNCH_PREFIX-unset}} ${{KOTODAMA_LAUNCH_SCOPED-unset}}\" > {0}.tmp\nmv {0}.tmp {0}\n",
+            out.display()
+        ),
+    )
+    .unwrap();
+    Command::new("chmod")
+        .args(["+x", seen.to_str().unwrap()])
+        .status()
+        .unwrap();
+    fs::write(
+        root.path().join("config/kotodama/links.toml"),
+        format!(
+            "[quicklinks.see]\ntitle = \"See\"\ncommand = [\"{}\"]\n",
+            seen.display()
+        ),
+    )
+    .unwrap();
+    let mut command = Command::new(env!("CARGO_BIN_EXE_kotodamad"));
+    with_home(&mut command, root.path()).env(LAUNCH_PREFIX, "env");
+    let daemon = Daemon {
+        child: command.spawn().unwrap(),
+        root,
+    };
+    let mut ui = daemon.connect();
+    wait_for("the Quicklink", || {
+        ui.titles("see")
+            .first()
+            .is_some_and(|title| title.starts_with("See"))
+            .then_some(())
+    });
+    ui.run("kotodama", "quicklink:see", "open");
+
+    wait_for("the command", || {
+        (fs::read_to_string(&out).ok()? == "unset unset\n").then_some(())
+    });
+}
+
+/// With no prefix of its own and a user manager to make scopes, the Daemon
+/// hands its Extensions the prefix that makes one.
+#[cfg(target_os = "linux")]
+#[test]
+fn an_extension_gets_the_scope_prefix_when_there_is_a_user_manager() {
+    let root = Daemon::home();
+    fs::create_dir(root.path().join("runtime/systemd")).unwrap();
+    let _manager = std::os::unix::net::UnixListener::bind(root.path().join("runtime/systemd/private")).unwrap();
+    install(&root, "bookmarks", "", &[item("fir", "Fir")]);
+    let mut command = Command::new(env!("CARGO_BIN_EXE_kotodamad"));
+    // A prefix the user set in the shell running the tests would replace the
+    // scope prefix.
+    with_home(&mut command, root.path()).env_remove(LAUNCH_PREFIX);
+    let daemon = Daemon {
+        child: command.spawn().unwrap(),
+        root,
+    };
+    let mut ui = daemon.connect();
+    ui.wait_for_titles("fir", &["Fir"]);
+
+    let pid = fs::read_to_string(daemon.extension_dir("bookmarks").join("pid")).unwrap();
+    let environ = fs::read(format!("/proc/{}/environ", pid.trim())).unwrap();
+    let vars: Vec<String> = environ
+        .split(|&byte| byte == 0)
+        .map(|var| String::from_utf8_lossy(var).into_owned())
+        .collect();
+    assert!(vars.contains(&format!("{LAUNCH_PREFIX}={SCOPE_PREFIX}")), "{vars:?}");
+    assert!(vars.contains(&format!("{LAUNCH_SCOPED}=1")), "{vars:?}");
 }
 
 /// systemd holds the socket while the Daemon is stopped, so a `kotodama toggle`

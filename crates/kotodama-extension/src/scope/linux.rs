@@ -27,6 +27,8 @@ use kotodama_protocol::launch_prefix;
 
 use super::Launched;
 use super::app_name;
+use super::for_the_user;
+use super::spawn_unscoped;
 use super::unit_name;
 use crate::dbus::Bus;
 use crate::dbus::Call;
@@ -40,8 +42,9 @@ const SCOPE_STACK: usize = 64 * 1024;
 /// call is answered.
 const JOB_WAIT: Duration = Duration::from_secs(2);
 
-/// Spawns `command` in a scope of its own, unless a launch prefix is set
-/// or there is no systemd user manager to make one. The scope is named
+/// Spawns `command` for the user (`for_the_user`) in a scope of its own,
+/// unless a launch prefix is set or there is no systemd user manager to
+/// make one. The scope is named
 /// for `app_id`, the desktop id of the app the command starts without
 /// `.desktop`, if known, else for the command's program. A program that
 /// can't get its scope still starts, and `unscoped` hears why, possibly
@@ -61,25 +64,27 @@ pub fn spawn(
     unscoped: impl FnOnce(Error) + Send + 'static,
 ) -> io::Result<Launched> {
     if launch_prefix().is_some() {
-        return command.spawn().map(Launched::unscoped);
+        return spawn_unscoped(command);
     }
     match Bus::user_manager() {
         Ok(manager) => spawn_scoped(command, app_id, manager, unscoped),
-        Err(err) if err.is_absent() => command.spawn().map(Launched::unscoped),
+        Err(err) if err.is_absent() => spawn_unscoped(command),
         Err(err) => {
             unscoped(err);
-            command.spawn().map(Launched::unscoped)
+            spawn_unscoped(command)
         }
     }
 }
 
-/// Spawns `command` in a scope `manager` makes, named as [`spawn`] says.
+/// Spawns `command` in a scope `manager` makes, named as [`spawn`] says,
+/// for the user as [`spawn_unscoped`] does.
 pub(super) fn spawn_scoped(
     command: &mut Command,
     app_id: Option<&str>,
     manager: Bus,
     unscoped: impl FnOnce(Error) + Send + 'static,
 ) -> io::Result<Launched> {
+    for_the_user(command);
     let app = app_name(command, app_id);
     let description = description(command);
     let (mut pid_reader, pid_writer) = io::pipe()?;
