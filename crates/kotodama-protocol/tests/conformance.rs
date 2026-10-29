@@ -61,16 +61,10 @@ fn items() -> Vec<Item> {
             weak_keywords: Vec::new(),
             actions: vec![Action {
                 arguments: vec![
-                    Argument {
-                        name: "version".into(),
-                        placeholder: Some("1.23".into()),
-                        optional: false,
-                    },
-                    Argument {
-                        name: "note".into(),
-                        placeholder: None,
-                        optional: true,
-                    },
+                    Argument::new("version").placeholder("1.23"),
+                    Argument::new("note").optional(),
+                    Argument::new("config").file(["mod", "application/json"]).optional(),
+                    Argument::new("into").folder().optional(),
                 ],
                 ..action("install")
             }],
@@ -153,11 +147,7 @@ fn to_extension_messages() -> Vec<ToExtension> {
                 extension: "kubaos".into(),
                 kind: KindName::new("project").unwrap(),
                 action: Action {
-                    arguments: vec![Argument {
-                        name: "version".into(),
-                        placeholder: None,
-                        optional: false,
-                    }],
+                    arguments: vec![Argument::new("version")],
                     ..action("pin-version")
                 },
             }],
@@ -291,6 +281,26 @@ fn view_messages() -> Vec<FromExtension> {
                             },
                         ],
                         default: Some("stable".into()),
+                    },
+                },
+                FormField {
+                    id: "config".into(),
+                    label: "Config".into(),
+                    input: FormInput::File {
+                        accept: vec!["conf".into()],
+                        folder: false,
+                        default: Some("~/Downloads/work.conf".into()),
+                        placeholder: Some("A WireGuard config".into()),
+                    },
+                },
+                FormField {
+                    id: "into".into(),
+                    label: "Into".into(),
+                    input: FormInput::File {
+                        accept: Vec::new(),
+                        folder: true,
+                        default: None,
+                        placeholder: None,
                     },
                 },
             ],
@@ -765,6 +775,46 @@ fn an_extension_may_leave_out_optional_fields() {
     };
     assert!(!results[0].answer);
     assert!(!done);
+}
+
+#[test]
+fn an_extension_asks_for_a_file_with_an_argument_of_kind_file() {
+    let action: Action = WireFormat::Json
+        .decode(
+            br#"{"id": "import", "title": "Import", "arguments": [
+                {"name": "path", "kind": "file", "accept": ["conf"], "placeholder": "~/Downloads/work.conf"},
+                {"name": "into", "kind": "folder"},
+                {"name": "label"}]}"#,
+        )
+        .unwrap();
+
+    assert_eq!(
+        action.arguments,
+        vec![
+            Argument::new("path")
+                .file(["conf"])
+                .placeholder("~/Downloads/work.conf"),
+            Argument::new("into").folder(),
+            Argument::new("label"),
+        ]
+    );
+}
+
+#[test]
+fn an_extension_asks_for_a_file_in_a_form() {
+    let field: FormField = WireFormat::Json
+        .decode(br#"{"id": "path", "label": "Config", "input": {"file": {"accept": ["conf"]}}}"#)
+        .unwrap();
+
+    assert_eq!(
+        field.input,
+        FormInput::File {
+            accept: vec!["conf".into()],
+            folder: false,
+            default: None,
+            placeholder: None,
+        }
+    );
 }
 
 #[test]

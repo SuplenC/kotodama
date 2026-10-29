@@ -143,12 +143,8 @@ impl Quicklink {
                 title: "Open".into(),
                 shortcut: None,
                 arguments: if self.takes_query() {
-                    vec![Argument {
-                        name: "query".into(),
-                        placeholder: None,
-                        // The keyword alone opens it with an empty Argument.
-                        optional: true,
-                    }]
+                    // The keyword alone opens it with an empty Argument.
+                    vec![Argument::new("query").optional()]
                 } else {
                     Vec::new()
                 },

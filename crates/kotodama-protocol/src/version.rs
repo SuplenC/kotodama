@@ -151,7 +151,9 @@ impl Since for ViewContent {
 impl Since for FormInput {
     fn since(&self) -> u32 {
         match self {
-            FormInput::Text { .. } | FormInput::Checkbox { .. } | FormInput::Select { .. } => 0,
+            FormInput::Text { .. } | FormInput::Checkbox { .. } | FormInput::Select { .. } | FormInput::File { .. } => {
+                0
+            }
         }
     }
 }

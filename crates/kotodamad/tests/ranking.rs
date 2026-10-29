@@ -555,11 +555,7 @@ fn a_trailing_space_asks_for_a_whole_word() {
 fn an_items_keyword_puts_it_first_with_the_rest_as_its_argument() {
     let mut go = app("Go: use a version");
     go.keyword = Some("go".into());
-    go.actions[0].arguments = vec![Argument {
-        name: "version".into(),
-        placeholder: None,
-        optional: false,
-    }];
+    go.actions[0].arguments = vec![Argument::new("version")];
     let mut w = World::with(vec![app("Gnome Online"), go], "");
     assert_eq!(w.first("go 1.23"), "Go: use a version");
 }

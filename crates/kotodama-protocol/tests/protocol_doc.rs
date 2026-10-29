@@ -118,6 +118,10 @@ fn describe(label: &str) -> Option<&'static str> {
         "FormInput::text" => "A line of text; `secret` hides what is typed. Submitted as a string.",
         "FormInput::checkbox" => "A checkbox. Submitted as a boolean.",
         "FormInput::select" => "One of a list of options. Submitted as the option's `value`.",
+        "FormInput::file" => {
+            "A path to a file, or with `folder` to a folder; `accept` lists the extensions or MIME types a file may \
+             have. Submitted as a string, the path made absolute by the Daemon."
+        }
         "JobState::running" => "Still going.",
         "JobState::succeeded" => "Done.",
         "JobState::failed" => "Gave up; the `message` says why.",

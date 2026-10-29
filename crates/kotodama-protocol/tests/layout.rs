@@ -527,6 +527,8 @@ fn action() -> Action {
             name: "version".into(),
             placeholder: Some("1.23".into()),
             optional: true,
+            kind: ArgumentKind::File,
+            accept: vec!["conf".into()],
         }],
         confirm: true,
     }
@@ -899,6 +901,12 @@ fn form_inputs() -> Vec<FormInput> {
                 label: "A".into(),
             }],
             default: Some("a".into()),
+        },
+        FormInput::File {
+            accept: vec!["conf".into()],
+            folder: true,
+            default: Some("~/work.conf".into()),
+            placeholder: Some("A config".into()),
         },
     ]
 }

@@ -8,11 +8,7 @@ use super::*;
 use crate::DEFAULT_MODEL;
 
 fn catalog() -> Vec<CatalogEntry> {
-    let name = Argument {
-        name: "name".into(),
-        placeholder: Some("hello".into()),
-        optional: false,
-    };
+    let name = Argument::new("name").placeholder("hello");
     vec![
         CatalogEntry {
             extension: "apps".into(),

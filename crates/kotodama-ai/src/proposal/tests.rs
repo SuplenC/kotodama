@@ -5,11 +5,7 @@ use serde_json::json;
 use super::*;
 
 fn catalog() -> Vec<CatalogEntry> {
-    let name = Argument {
-        name: "name".into(),
-        placeholder: None,
-        optional: false,
-    };
+    let name = Argument::new("name");
     vec![
         CatalogEntry {
             extension: "apps".into(),

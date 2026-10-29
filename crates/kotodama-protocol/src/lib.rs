@@ -73,6 +73,8 @@ pub use front_end::socket_path;
 pub use handshake::Hello;
 pub use item::Action;
 pub use item::Argument;
+pub use item::ArgumentKind;
+pub use item::ArgumentKindError;
 pub use item::Item;
 pub use item::ItemKind;
 pub use item::ItemRef;

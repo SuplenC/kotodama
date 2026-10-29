@@ -54,11 +54,7 @@ fn an_argument_changing_sends_the_item_again() {
     let mut sent = SentItems::default();
     let mut asks = item("a", "A");
     sent.update([asks.clone()]);
-    asks.actions[0].arguments.push(Argument {
-        name: "Query".into(),
-        placeholder: None,
-        optional: false,
-    });
+    asks.actions[0].arguments.push(Argument::new("Query"));
     let (_, added) = sent.update([asks]);
     assert_eq!(ids(&added), ["a"]);
 }

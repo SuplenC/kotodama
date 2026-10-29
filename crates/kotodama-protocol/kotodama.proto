@@ -29,6 +29,8 @@ message Argument {
   string name = 1;
   optional string placeholder = 2;
   bool optional = 3;
+  string kind = 4;
+  repeated string accept = 5;
 }
 
 message CatalogEntry {
@@ -68,10 +70,18 @@ message FormInput {
     FormInput.Text text = 1;
     FormInput.Checkbox checkbox = 2;
     FormInput.Select select = 3;
+    FormInput.File file = 4;
   }
 
   message Checkbox {
     bool default = 1;
+  }
+
+  message File {
+    repeated string accept = 1;
+    bool folder = 2;
+    optional string default = 3;
+    optional string placeholder = 4;
   }
 
   message Select {

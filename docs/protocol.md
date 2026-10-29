@@ -135,7 +135,11 @@ Every Action on offer, without any Item, for an Extension whose Manifest has `ac
             {
               "name": "version",
               "placeholder": "1.23",
-              "optional": true
+              "optional": true,
+              "kind": "file",
+              "accept": [
+                "conf"
+              ]
             }
           ],
           "confirm": true
@@ -194,7 +198,11 @@ Indexes Items. An Item whose id was sent before replaces the old one, which is h
               {
                 "name": "version",
                 "placeholder": "1.23",
-                "optional": true
+                "optional": true,
+                "kind": "file",
+                "accept": [
+                  "conf"
+                ]
               }
             ],
             "confirm": true
@@ -260,7 +268,11 @@ Results for Live query `live_query`, in as many batches as you like; `done` says
                 {
                   "name": "version",
                   "placeholder": "1.23",
-                  "optional": true
+                  "optional": true,
+                  "kind": "file",
+                  "accept": [
+                    "conf"
+                  ]
                 }
               ],
               "confirm": true
@@ -557,7 +569,11 @@ An application, by its desktop file id.
         {
           "name": "version",
           "placeholder": "1.23",
-          "optional": true
+          "optional": true,
+          "kind": "file",
+          "accept": [
+            "conf"
+          ]
         }
       ],
       "confirm": true
@@ -600,7 +616,11 @@ A file, by its absolute path.
         {
           "name": "version",
           "placeholder": "1.23",
-          "optional": true
+          "optional": true,
+          "kind": "file",
+          "accept": [
+            "conf"
+          ]
         }
       ],
       "confirm": true
@@ -643,7 +663,11 @@ A folder, by its absolute path.
         {
           "name": "version",
           "placeholder": "1.23",
-          "optional": true
+          "optional": true,
+          "kind": "file",
+          "accept": [
+            "conf"
+          ]
         }
       ],
       "confirm": true
@@ -686,7 +710,11 @@ A project's folder, by its absolute path.
         {
           "name": "version",
           "placeholder": "1.23",
-          "optional": true
+          "optional": true,
+          "kind": "file",
+          "accept": [
+            "conf"
+          ]
         }
       ],
       "confirm": true
@@ -729,7 +757,11 @@ An open window, by the compositor's address for it.
         {
           "name": "version",
           "placeholder": "1.23",
-          "optional": true
+          "optional": true,
+          "kind": "file",
+          "accept": [
+            "conf"
+          ]
         }
       ],
       "confirm": true
@@ -772,7 +804,11 @@ A web address.
         {
           "name": "version",
           "placeholder": "1.23",
-          "optional": true
+          "optional": true,
+          "kind": "file",
+          "accept": [
+            "conf"
+          ]
         }
       ],
       "confirm": true
@@ -815,7 +851,11 @@ Any other kind belongs to one Extension and is named `<extension>.<kind>`, witho
         {
           "name": "version",
           "placeholder": "1.23",
-          "optional": true
+          "optional": true,
+          "kind": "file",
+          "accept": [
+            "conf"
+          ]
         }
       ],
       "confirm": true
@@ -865,7 +905,11 @@ Items to pick from, whose Actions run like a Result's. Typing filters them in th
               {
                 "name": "version",
                 "placeholder": "1.23",
-                "optional": true
+                "optional": true,
+                "kind": "file",
+                "accept": [
+                  "conf"
+                ]
               }
             ],
             "confirm": true
@@ -980,6 +1024,23 @@ One of a list of options. Submitted as the option's `value`.
       }
     ],
     "default": "a"
+  }
+}
+```
+
+### `file`
+
+A path to a file, or with `folder` to a folder; `accept` lists the extensions or MIME types a file may have. Submitted as a string, the path made absolute by the Daemon.
+
+```json
+{
+  "file": {
+    "accept": [
+      "conf"
+    ],
+    "folder": true,
+    "default": "~/work.conf",
+    "placeholder": "A config"
   }
 }
 ```
@@ -1262,7 +1323,11 @@ The whole ranked list for the query, best first, and the app it is in.
                 {
                   "name": "version",
                   "placeholder": "1.23",
-                  "optional": true
+                  "optional": true,
+                  "kind": "file",
+                  "accept": [
+                    "conf"
+                  ]
                 }
               ],
               "confirm": true
@@ -1285,7 +1350,11 @@ The whole ranked list for the query, best first, and the app it is in.
                 {
                   "name": "version",
                   "placeholder": "1.23",
-                  "optional": true
+                  "optional": true,
+                  "kind": "file",
+                  "accept": [
+                    "conf"
+                  ]
                 }
               ],
               "confirm": true
@@ -1388,7 +1457,11 @@ Push an Extension's View, with the Contributed actions on its Items.
               {
                 "name": "version",
                 "placeholder": "1.23",
-                "optional": true
+                "optional": true,
+                "kind": "file",
+                "accept": [
+                  "conf"
+                ]
               }
             ],
             "confirm": true
@@ -1429,7 +1502,11 @@ Replace the open View with the same id.
               {
                 "name": "version",
                 "placeholder": "1.23",
-                "optional": true
+                "optional": true,
+                "kind": "file",
+                "accept": [
+                  "conf"
+                ]
               }
             ],
             "confirm": true
@@ -1471,7 +1548,11 @@ Pop one View and push another in one step.
               {
                 "name": "version",
                 "placeholder": "1.23",
-                "optional": true
+                "optional": true,
+                "kind": "file",
+                "accept": [
+                  "conf"
+                ]
               }
             ],
             "confirm": true

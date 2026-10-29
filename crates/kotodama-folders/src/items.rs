@@ -83,11 +83,7 @@ pub fn script(script: &Script, home: Option<&Path>) -> Item {
     // thing.
     let identity = format!("file:{}", script.path.to_string_lossy());
     let arguments = if script.header.prompt {
-        vec![Argument {
-            name: ARGUMENTS.to_owned(),
-            placeholder: None,
-            optional: false,
-        }]
+        vec![Argument::new(ARGUMENTS)]
     } else {
         Vec::new()
     };
