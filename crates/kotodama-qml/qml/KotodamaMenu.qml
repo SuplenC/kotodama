@@ -42,8 +42,8 @@ PanelWindow {
     // at the search.
     readonly property string kind: search.view.kind ?? ""
     // The Action panel of the selected row while Ctrl+K shows it: each entry
-    // `{id, title, group, shortcut, role}`, as `KotodamaSearch.actions` gives
-    // them.
+    // `{id, title, group, shortcut, role, keywords}`, as
+    // `KotodamaSearch.actions` gives them.
     property var actions: []
     readonly property bool actionsOpen: actions.length > 0
     // The keys the selected row takes, built for that row alone. Reading the
@@ -91,10 +91,14 @@ PanelWindow {
 
     // Which part of the Action panel its `n`th entry is in: the Item's own
     // Actions (0), the Contributed ones (1) or the destructive ones (2). The
-    // entry Enter runs leads the first, whatever it is.
+    // entry Enter runs comes first, whatever it is: it leads the Item's own,
+    // or stands alone (-1) when another Extension offers it, so its heading
+    // doesn't seem to cover the Item's own Actions under it.
     function panelSection(n) {
         const entry = menu.actions[n];
-        return n === 0 ? 0 : entry.role === "destructive" ? 2 : entry.group !== "" ? 1 : 0;
+        if (n === 0)
+            return entry.group === "" ? 0 : -1;
+        return entry.role === "destructive" ? 2 : entry.group !== "" ? 1 : 0;
     }
 
     function show(query) {
@@ -690,7 +694,7 @@ PanelWindow {
                     Rectangle {
                         id: badge
                         anchors.right: verb.left
-                        anchors.rightMargin: verb.visible ? 6 : 0
+                        anchors.rightMargin: verb.visible && badge.visible ? 6 : 0
                         anchors.verticalCenter: parent.verticalCenter
                         visible: row.alias !== ""
                         width: visible ? badgeText.implicitWidth + 12 : 0

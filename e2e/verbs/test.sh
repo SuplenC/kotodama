@@ -50,6 +50,14 @@ spawn "$target/debug/kotodamad"
 QML_IMPORT_PATH=$imports spawn quickshell --path ../menu/shell.qml
 wait_for_log quickshell.log "connected: true"
 
+# A search run before the target arrives isn't run again when it does, so
+# the test waits for the package manager to have its config, which it
+# answers with the target at once.
+for _ in $(seq 50); do
+    grep -qF '{"config":' "$extensions/packages/received" 2>/dev/null && break
+    sleep 0.2
+done
+
 kotodama="$target/debug/kotodama"
 mark=$(log_lines quickshell.log)
 "$kotodama" open
