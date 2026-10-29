@@ -57,8 +57,11 @@ impl Apps {
                 .env("LANG", "pl_PL.UTF-8")
                 .env_remove("LC_ALL")
                 .env_remove("LC_MESSAGES")
-                // Started directly, not in a scope of the user's systemd.
+                // Started directly, not in a scope of the user's systemd. A
+                // test run from an app Kotodama started inherits its
+                // KOTODAMA_LAUNCH_SCOPED, which would hide a test's prefix.
                 .env("KOTODAMA_LAUNCH_PREFIX", "")
+                .env_remove("KOTODAMA_LAUNCH_SCOPED")
                 .envs(env.iter().copied()),
             WAIT,
         );

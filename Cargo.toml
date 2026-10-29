@@ -54,3 +54,12 @@ unwrap_used = "warn"
 [profile.release]
 lto = "fat"
 codegen-units = 1
+
+# Tests and dev builds keep line tables, enough for a panic's backtrace to name
+# the file and line, and the dependencies keep none: full debuginfo was most of
+# what target/ held and what the linker read. Nothing here runs a debugger.
+[profile.dev]
+debug = "line-tables-only"
+
+[profile.dev.package."*"]
+debug = false

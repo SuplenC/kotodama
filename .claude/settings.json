@@ -1,0 +1,28 @@
+{
+  "hooks": {
+    "WorktreeCreate": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PROJECT_DIR}/.claude/hooks/worktree",
+            "args": ["create"],
+            "timeout": 600
+          }
+        ]
+      }
+    ],
+    "WorktreeRemove": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PROJECT_DIR}/.claude/hooks/worktree",
+            "args": ["remove"],
+            "timeout": 600
+          }
+        ]
+      }
+    ]
+  }
+}

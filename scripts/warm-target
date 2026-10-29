@@ -1,0 +1,153 @@
+#!/usr/bin/env bash
+# scripts/warm-target: start a git worktree's cargo build from the main checkout's
+# target/, so its first `cargo nextest` rebuilds only what differs from main.
+# See CODEMAP.md, "Warm worktree builds".
+#
+#   scripts/warm-target [WORKTREE]   warm WORKTREE (default: the worktree holding
+#                                    the current directory)
+#
+# It reflink-copies the main checkout's target/ into the worktree (free on
+# btrfs until a file changes), then gives every tracked file whose content is
+# the main checkout's the main checkout's mtime: cargo's fingerprints are
+# relative to the workspace and survive the move, but it judges a path
+# dependency's sources by mtime, and a fresh checkout's are all newer than the
+# copied build. A file that differs keeps its new mtime and is rebuilt, and
+# so is every unit that read the main checkout by its absolute path.
+#
+# It never writes to the main checkout, and it never fails a worktree: where it
+# can't copy (no reflinks on this filesystem, a cargo build holding main's
+# target/ past WARM_TARGET_LOCK_WAIT seconds, default 300), or where the
+# worktree has a target/ already, it changes nothing and cargo builds cold.
+# Only a WORKTREE outside git is an error.
+set -euo pipefail
+
+LOCK_WAIT="${WARM_TARGET_LOCK_WAIT:-300}"
+
+die() { printf 'warm-target: %s\n' "$*" >&2; exit 1; }
+say() { printf 'warm-target: %s\n' "$*"; }
+
+usage() {
+  sed -n '2,/^set -euo/{/^set -euo/d;s/^# \{0,1\}//;p}' "$0"
+}
+
+case "${1:-}" in
+  -h | --help) usage; exit 0 ;;
+  -*) usage >&2; exit 2 ;;
+esac
+(($# <= 1)) || { usage >&2; exit 2; }
+
+wt="$(git -C "${1:-.}" rev-parse --show-toplevel 2>/dev/null)" || die "${1:-.} isn't in a git checkout"
+common="$(git -C "$wt" rev-parse --path-format=absolute --git-common-dir)"
+main="${common%/.git}"
+
+if [[ $main == "$common" ]]; then
+  say "$wt has no main checkout to warm from (its git directory is $common); cargo builds cold"
+  exit 0
+fi
+if [[ -n ${CARGO_TARGET_DIR:-} ]]; then
+  say "CARGO_TARGET_DIR is $CARGO_TARGET_DIR, which every checkout shares: nothing to copy"
+  exit 0
+fi
+if [[ $wt == "$main" ]]; then
+  say "$wt is the main checkout, whose target/ is the one the worktrees copy"
+  exit 0
+fi
+if [[ -e $wt/target ]]; then
+  say "$wt/target is there already; leaving it"
+  exit 0
+fi
+if [[ ! -d $main/target ]]; then
+  say "$main has no target/ yet; cargo builds cold"
+  exit 0
+fi
+
+# Holds every cargo lock in main's target/ (each profile's, and each target
+# triple's) for the copy: a build writing there meanwhile would leave a
+# half-written artifact beside the fingerprint cargo trusts. Exclusive, as
+# cargo's own, so it never overlaps a build; parallel warms take turns of about
+# ten seconds. The files are opened read-only, so main's target/ is never written.
+lock_main_target() {
+  local f fd
+  for f in "$main"/target/{*,*/*}/.cargo{-lock,-build-lock,-artifact-lock}; do
+    [[ -f $f ]] || continue
+    exec {fd}<"$f"
+    flock -x -w "$LOCK_WAIT" "$fd" || return 1
+  done
+}
+
+# Copies main's target/ into the worktree as reflinks, under main's locks and
+# through a temporary name, so a failed or killed copy leaves no target/ that
+# cargo would take for a build. Exits non-zero, having said why, when it can't.
+copy_main_target() (
+  local tmp="$wt/.target.warm-$$" err
+  if ! lock_main_target; then
+    say "a cargo build held $main/target for ${LOCK_WAIT}s; cargo builds cold"
+    exit 1
+  fi
+  trap 'rm -rf "$tmp"' EXIT
+  if ! err="$(cp -a --reflink=always "$main/target" "$tmp" 2>&1)"; then
+    say "couldn't reflink $main/target (${err##*$'\n'}); cargo builds cold"
+    exit 1
+  fi
+  if ! mv -T "$tmp" "$wt/target" 2>/dev/null; then
+    say "$wt/target appeared during the copy; leaving it"
+    exit 1
+  fi
+  trap - EXIT
+)
+
+# Prints, NUL-separated, the fingerprint folder of every copied unit whose
+# build read the main checkout by its absolute path. Cargo keeps those paths
+# absolute, so the copy would judge the unit by main's files and run it
+# against them:
+# - a file included from outside its package (`include_str!("../../config/…")`),
+#   which cargo's own dep-info, .fingerprint/<unit>/dep-*, names absolute;
+# - CARGO_MANIFEST_DIR, or a CARGO_BIN_EXE_* that runs main's binary, baked in
+#   by `env!`, which only rustc's dep-info, deps/<crate>-<hash>.d, names, as an
+#   env-dep of the unit .fingerprint/*-<hash>. OUT_DIR is cargo's to move.
+units_reading_main() {
+  local f hash d
+  find "$wt/target" -path '*/.fingerprint/*/dep-*' -type f -exec grep -laZF -- "$main/" {} + |
+    while IFS= read -r -d '' f; do printf '%s\0' "${f%/*}"; done
+  find "$wt/target" -path '*/deps/*.d' -type f -exec awk -v main="$main" '
+    /^# env-dep:/ {
+      name = substr($0, 11); value = name
+      sub(/=.*/, "", name); sub(/^[^=]*=/, "", value)
+      if (name != "OUT_DIR" && (value == main || index(value, main "/") == 1)) { print FILENAME; nextfile }
+    }' {} + |
+    while IFS= read -r f; do
+      hash="${f##*-}"
+      for d in "${f%/deps/*}"/.fingerprint/*-"${hash%.d}"; do
+        [[ -d $d ]] && printf '%s\0' "$d"
+      done
+    done
+}
+
+# Deletes those units' fingerprints, so cargo rebuilds them with the
+# worktree's paths. Prints the count.
+forget_units_reading_main() {
+  local -A units=()
+  local d
+  while IFS= read -r -d '' d; do units[$d]=1; done < <(units_reading_main)
+  ((${#units[@]} == 0)) || rm -rf "${!units[@]}"
+  printf '%s\n' "${#units[@]}"
+}
+
+# Gives each tracked file that is byte for byte the main checkout's the main
+# checkout's mtime, so cargo judges it as it would in main. Prints the count.
+mirror_mtimes() {
+  local f n=0
+  while IFS= read -r -d '' f; do
+    [[ -f $wt/$f && ! -L $wt/$f && -f $main/$f && ! -L $main/$f ]] || continue
+    cmp -s "$wt/$f" "$main/$f" || continue
+    touch -r "$main/$f" "$wt/$f"
+    n=$((n + 1))
+  done < <(git -C "$wt" ls-files -z)
+  printf '%s\n' "$n"
+}
+
+start=$SECONDS
+copy_main_target || exit 0
+forgotten="$(forget_units_reading_main)"
+same="$(mirror_mtimes)"
+say "$wt/target is $main/target's, reflinked; $same files match main's and $forgotten units read main's own files, so cargo rebuilds those units and what differs ($((SECONDS - start))s)"

@@ -3,3 +3,5 @@
 /result*
 # cxx-qt-build writes it for qmlls, with paths from the machine that built it.
 /crates/kotodama-qml/.qmlls.ini
+# Agent worktrees; .claude/settings.json and .claude/hooks/ are tracked.
+/.claude/worktrees/
