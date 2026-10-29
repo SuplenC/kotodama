@@ -259,7 +259,8 @@ pub struct Segment {
 /// An Item that yields to any Item of its Identity that doesn't.
 #[derive(Clone, Debug)]
 struct Placeholder {
-    item: Item,
+    /// Shared, so a copy of the Segment made to change it copies none.
+    item: Arc<Item>,
     /// Whether it is out of the Segment's rows, for an Item of its Identity
     /// that doesn't yield is indexed.
     aside: bool,
@@ -347,6 +348,12 @@ impl Segment {
                 }
             }
         }
+        self.tidy();
+    }
+
+    /// Drops the garbage of the arenas and the Shelf once it is half of
+    /// them.
+    fn tidy(&mut self) {
         self.compact();
         if self.shelf_garbage * 2 >= self.end.max(SMALL_SHELF) {
             let fresh = Shelf::new(self.dir.as_deref());
@@ -377,7 +384,13 @@ impl Segment {
         if !aside {
             self.add(&item, shelved);
         }
-        self.placeholders.insert(item.id.clone(), Placeholder { item, aside });
+        self.placeholders.insert(
+            item.id.clone(),
+            Placeholder {
+                item: Arc::new(item),
+                aside,
+            },
+        );
     }
 
     /// Each Item that yields: its id, its Identity, and whether it stands
@@ -419,7 +432,7 @@ impl Segment {
             self.placeholders.insert(id.clone(), placeholder);
         }
         self.shelve(&shelved);
-        self.compact();
+        self.tidy();
     }
 
     fn add(&mut self, item: &Item, shelved: &mut Shelved) {
