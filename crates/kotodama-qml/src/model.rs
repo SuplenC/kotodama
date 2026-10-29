@@ -22,6 +22,7 @@ use cxx_qt_lib::QHashPair_i32_QByteArray;
 use cxx_qt_lib::QModelIndex;
 use cxx_qt_lib::QString;
 use cxx_qt_lib::QVariant;
+use kotodama_protocol::ActionRole;
 
 use crate::bridge::qobject::KotodamaSearch;
 use crate::bridge::qobject::QVector_i32;
@@ -41,6 +42,9 @@ const EXTENSION: i32 = 0x104;
 const ALIAS: i32 = 0x105;
 /// Why the Result can't run, or empty when it can.
 const UNAVAILABLE: i32 = 0x106;
+/// The role of the Action Enter runs (`normal`, `destructive` or `form`),
+/// or empty when nothing runs.
+const PRIMARY_ROLE: i32 = 0x107;
 
 impl KotodamaSearch {
     pub(crate) fn data(&self, index: &QModelIndex, role: i32) -> QVariant {
@@ -55,6 +59,7 @@ impl KotodamaSearch {
             EXTENSION => QString::from(&row.result.extension),
             ALIAS => QString::from(row.alias.as_deref().unwrap_or_default()),
             UNAVAILABLE => QString::from(row.unavailable.as_deref().unwrap_or_default()),
+            PRIMARY_ROLE => QString::from(row.primary_role().map(ActionRole::as_str).unwrap_or_default()),
             _ => return QVariant::default(),
         };
         QVariant::from(&text)
@@ -74,6 +79,7 @@ impl KotodamaSearch {
             (EXTENSION, "extension"),
             (ALIAS, "alias"),
             (UNAVAILABLE, "unavailable"),
+            (PRIMARY_ROLE, "primaryRole"),
         ] {
             roles.insert(role, QByteArray::from(name));
         }

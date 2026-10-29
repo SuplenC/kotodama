@@ -216,15 +216,26 @@ pub fn view(views: &Views) -> Map {
     out
 }
 
-/// A Result's Action panel: `{title, group, shortcut}` for each Action, in
-/// order. `group` is the Extension offering a Contributed action, empty for
-/// the Item's own.
+/// A Result's Action panel: `{title, group, shortcut, role, keywords}` for
+/// each Action, in order. `group` is the Extension offering a Contributed
+/// action, empty for the Item's own; `role` is `normal`, `destructive` or
+/// `form`; `keywords` are the verbs the Action is known by.
 pub fn actions(row: &Row) -> List {
     list(row.actions().map(|entry| {
         map([
             ("title", text(&entry.action.title)),
             ("group", text(entry.group.unwrap_or_default())),
             ("shortcut", text(entry.shortcut.unwrap_or_default())),
+            ("role", text(entry.action.role.as_str())),
+            ("keywords", QVariant::from(&strings(&entry.action.keywords))),
         ])
     }))
+}
+
+fn strings(words: &[String]) -> List {
+    let mut list = List::default();
+    for word in words {
+        list.append(text(word));
+    }
+    list
 }
