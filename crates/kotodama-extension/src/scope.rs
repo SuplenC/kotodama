@@ -107,7 +107,8 @@ pub fn is_empty(cgroup: &Path) -> bool {
     }
 }
 
-/// Spawns `command`, without the launch prefix. Without systemd there is no scope to start it in.
+/// Spawns `command` for the user (`for_the_user`). Without systemd there
+/// is no scope to start it in.
 ///
 /// # Errors
 ///

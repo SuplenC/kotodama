@@ -42,9 +42,9 @@ const SCOPE_STACK: usize = 64 * 1024;
 /// call is answered.
 const JOB_WAIT: Duration = Duration::from_secs(2);
 
-/// Spawns `command`, without the launch prefix, which is for Extensions
-/// alone, in a scope of its own, unless a launch prefix is set
-/// or there is no systemd user manager to make one. The scope is named
+/// Spawns `command` for the user (`for_the_user`) in a scope of its own,
+/// unless a launch prefix is set or there is no systemd user manager to
+/// make one. The scope is named
 /// for `app_id`, the desktop id of the app the command starts without
 /// `.desktop`, if known, else for the command's program. A program that
 /// can't get its scope still starts, and `unscoped` hears why, possibly
