@@ -1,0 +1,110 @@
+#!/usr/bin/env bash
+# .claude/hooks/worktree: Claude Code's WorktreeCreate and WorktreeRemove hooks
+# (.claude/settings.json), so every agent worktree starts from a warm build.
+#
+#   worktree create   read {"name", "cwd"} on stdin, make the worktree, warm
+#                     its target/ (scripts/warm-target) and print its path
+#   worktree remove   read {"worktree_path"} on stdin, remove that worktree of
+#                     .claude/worktrees/ and the branch create made for it
+#
+# A WorktreeCreate hook replaces Claude Code's own `git worktree add`, so create
+# makes the worktree as Claude Code does by default: <main checkout>/.claude/worktrees/<name>,
+# on a new branch worktree-<name> with no upstream, from origin/HEAD (its
+# branch fetched when the last fetch is a day old, for five seconds at most,
+# never asking for a password), or from HEAD when origin/HEAD isn't known. The
+# `worktree.baseRef` setting isn't read. A name whose worktree exists is
+# reopened as it is. Claude Code reads the last line of stdout as the path, so
+# everything else goes to stderr. A warm that fails leaves the worktree cold;
+# it never fails the creation.
+# https://code.claude.com/docs/en/hooks#worktreecreate
+set -euo pipefail
+
+NAME_RE='^[A-Za-z0-9][A-Za-z0-9._-]*$'
+
+die() { printf 'worktree hook: %s\n' "$*" >&2; exit 1; }
+
+field() { jq -r --arg k "$1" '.[$k] // empty' <<<"$input"; }
+
+main_checkout() {
+  local common
+  common="$(git -C "$1" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" || return 1
+  [[ $common == */.git ]] || die "$1's git directory, $common, isn't a checkout's .git"
+  printf '%s\n' "${common%/.git}"
+}
+
+# The commit Claude Code's default worktree starts from: the remote's default
+# branch, kept within a day of the remote, else the local HEAD.
+base_commit() {
+  local main="$1" default
+  if ! default="$(git -C "$main" symbolic-ref --quiet --short refs/remotes/origin/HEAD)"; then
+    echo HEAD
+    return
+  fi
+  if [[ -z $(find "$main/.git/FETCH_HEAD" -mmin -1440 2>/dev/null) ]]; then
+    GIT_TERMINAL_PROMPT=0 GIT_SSH_COMMAND="${GIT_SSH_COMMAND:-ssh} -o BatchMode=yes" \
+      timeout 5 git -C "$main" fetch --quiet origin "${default#origin/}" >&2 ||
+      echo "worktree hook: no fetch from origin; starting from the last one" >&2
+  fi
+  echo origin/HEAD
+}
+
+create() {
+  local name cwd main dir branch warm
+  name="$(field name)"
+  cwd="$(field cwd)"
+  [[ $name =~ $NAME_RE ]] || die "the worktree name is letters, digits, '.', '_' and '-', not '$name'"
+  main="$(main_checkout "${cwd:-${CLAUDE_PROJECT_DIR:-.}}")" || die "${cwd:-${CLAUDE_PROJECT_DIR:-.}} isn't in a git checkout"
+  dir="$main/.claude/worktrees/$name"
+  branch="worktree-$name"
+
+  if [[ -d $dir ]]; then
+    [[ $(git -C "$dir" rev-parse --show-toplevel 2>/dev/null) == "$dir" ]] || die "$dir is there and isn't a worktree"
+  else
+    # A worktree deleted by hand stays registered, and git refuses to add it again.
+    git -C "$main" worktree prune >&2
+    if git -C "$main" rev-parse --verify --quiet "refs/heads/$branch" >/dev/null; then
+      git -C "$main" worktree add "$dir" "$branch" >&2
+    else
+      git -C "$main" worktree add --no-track -b "$branch" "$dir" "$(base_commit "$main")" >&2
+    fi
+  fi
+
+  warm="${BASH_SOURCE[0]%/*}/../../scripts/warm-target"
+  "$warm" "$dir" >&2 || echo "worktree hook: scripts/warm-target failed; $dir builds cold" >&2
+  printf '%s\n' "$dir"
+}
+
+remove() {
+  local path main name
+  path="$(field worktree_path)"
+  [[ -n $path ]] || die "no worktree_path on stdin"
+  main="$(main_checkout "$path")" || main="$(main_checkout "${CLAUDE_PROJECT_DIR:-.}")" ||
+    die "neither $path nor ${CLAUDE_PROJECT_DIR:-.} is in a git checkout"
+  name="${path##*/}"
+  [[ $path == "$main/.claude/worktrees/$name" && $name =~ $NAME_RE ]] ||
+    die "$path isn't a worktree of $main/.claude/worktrees/"
+
+  if [[ -d $path ]]; then
+    # Twice forced: Claude Code may still hold its lock on the worktree.
+    git -C "$main" worktree remove --force --force "$path" >&2
+  else
+    git -C "$main" worktree prune >&2
+  fi
+  # The branch goes only when its commits are already on main's HEAD or the remote's default branch:
+  # one an agent committed to and never pushed stays, so removing a worktree never loses work.
+  if git -C "$main" rev-parse --verify --quiet "refs/heads/worktree-$name" >/dev/null; then
+    if git -C "$main" merge-base --is-ancestor "worktree-$name" HEAD ||
+      git -C "$main" merge-base --is-ancestor "worktree-$name" origin/HEAD 2>/dev/null; then
+      git -C "$main" branch -D "worktree-$name" >&2
+    else
+      echo "worktree hook: worktree-$name has commits main hasn't; kept" >&2
+    fi
+  fi
+}
+
+input="$(cat)"
+case "${1:-}" in
+  create) create ;;
+  remove) remove ;;
+  *) echo "usage: .claude/hooks/worktree create|remove, with the hook's JSON on stdin" >&2; exit 2 ;;
+esac
