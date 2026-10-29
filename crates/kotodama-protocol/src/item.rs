@@ -387,7 +387,116 @@ pub struct Argument {
     /// The Action runs without it.
     #[serde(default)]
     pub optional: bool,
+    /// Whether it is text, or the path to a file or a folder. A path reaches
+    /// the Action absolute: the Daemon expands a leading `~` and puts the
+    /// home directory before a relative one.
+    #[serde(default)]
+    pub kind: ArgumentKind,
+    /// For a file, the ones it takes, by extension (`conf`, without the dot)
+    /// or by MIME type (`application/pdf`); empty takes any file.
+    #[serde(default)]
+    pub accept: Vec<String>,
 }
+
+impl Argument {
+    /// A required text Argument named `name`, with no placeholder; the
+    /// setters below change that.
+    ///
+    /// ```
+    /// use kotodama_protocol::Argument;
+    /// use kotodama_protocol::ArgumentKind;
+    ///
+    /// let config = Argument::new("path").file(["conf"]).placeholder("~/Downloads/work.conf");
+    /// assert_eq!(config.kind, ArgumentKind::File);
+    /// assert_eq!(config.accept, ["conf"]);
+    /// ```
+    #[must_use]
+    pub fn new(name: impl Into<String>) -> Self {
+        Argument {
+            name: name.into(),
+            placeholder: None,
+            optional: false,
+            kind: ArgumentKind::Text,
+            accept: Vec::new(),
+        }
+    }
+
+    /// Shows `placeholder` greyed out until something is typed.
+    #[must_use]
+    pub fn placeholder(mut self, placeholder: impl Into<String>) -> Self {
+        self.placeholder = Some(placeholder.into());
+        self
+    }
+
+    /// Lets the Action run without it.
+    #[must_use]
+    pub fn optional(mut self) -> Self {
+        self.optional = true;
+        self
+    }
+
+    /// Asks for the path to a file of one of the kinds in `accept`, by
+    /// extension or MIME type; none takes any file.
+    #[must_use]
+    pub fn file<S: Into<String>>(mut self, accept: impl IntoIterator<Item = S>) -> Self {
+        self.kind = ArgumentKind::File;
+        self.accept = accept.into_iter().map(Into::into).collect();
+        self
+    }
+
+    /// Asks for the path to a folder.
+    #[must_use]
+    pub fn folder(mut self) -> Self {
+        self.kind = ArgumentKind::Folder;
+        self.accept = Vec::new();
+        self
+    }
+}
+
+/// What an [`Argument`] asks for, and so how a form asks for it.
+///
+/// On the wire it is a string, `text`, `file` or `folder`, so that in
+/// protobuf an Argument without one, or with an empty one, is text. Any
+/// other name refuses the message that carries it.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(into = "&'static str", try_from = "String")]
+pub enum ArgumentKind {
+    /// Any text: a text field.
+    #[default]
+    Text,
+    /// The path to a file: a file field.
+    File,
+    /// The path to a folder: a file field that asks for a folder.
+    Folder,
+}
+
+impl From<ArgumentKind> for &'static str {
+    fn from(kind: ArgumentKind) -> Self {
+        match kind {
+            ArgumentKind::Text => "text",
+            ArgumentKind::File => "file",
+            ArgumentKind::Folder => "folder",
+        }
+    }
+}
+
+impl TryFrom<String> for ArgumentKind {
+    type Error = ArgumentKindError;
+
+    fn try_from(name: String) -> Result<Self, Self::Error> {
+        match name.as_str() {
+            "" | "text" => Ok(ArgumentKind::Text),
+            "file" => Ok(ArgumentKind::File),
+            "folder" => Ok(ArgumentKind::Folder),
+            _ => Err(ArgumentKindError(name)),
+        }
+    }
+}
+
+/// An Argument's `kind` that is none of `text`, `file` and `folder`.
+#[derive(Debug, thiserror::Error)]
+#[error("`{0}` isn't an Argument kind: it is `text`, `file` or `folder`")]
+pub struct ArgumentKindError(String);
 
 /// Why an Item or an [`ItemRef`] that arrived isn't valid. Serde reads it into
 /// the Wire format's decode error.

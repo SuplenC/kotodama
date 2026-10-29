@@ -27,7 +27,10 @@ fn a_manifest_declares_everything_an_extension_contributes() {
         id = "pin-version"
         title = "Pin a version here"
         shortcut = "ctrl+p"
-        arguments = [{ name = "version", placeholder = "1.23" }]
+        arguments = [
+            { name = "version", placeholder = "1.23" },
+            { name = "path", kind = "file", accept = ["conf"], placeholder = "~/Downloads/work.conf" },
+        ]
 
         [[contributed_actions]]
         kind = "folder"
@@ -58,11 +61,12 @@ fn a_manifest_declares_everything_an_extension_contributes() {
             id: "pin-version".into(),
             title: "Pin a version here".into(),
             shortcut: Some("ctrl+p".into()),
-            arguments: vec![Argument {
-                name: "version".into(),
-                placeholder: Some("1.23".into()),
-                optional: false
-            }],
+            arguments: vec![
+                Argument::new("version").placeholder("1.23"),
+                Argument::new("path")
+                    .file(["conf"])
+                    .placeholder("~/Downloads/work.conf"),
+            ],
             confirm: false,
         }
     );

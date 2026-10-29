@@ -29,8 +29,10 @@ use std::cell::Cell;
 use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::collections::HashSet;
+use std::env;
 use std::fmt;
 use std::path::Path;
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::mpsc::Sender;
 use std::sync::mpsc::SyncSender;
@@ -1364,6 +1366,9 @@ pub struct Daemon<L, D, S> {
     scored: Vec<Slot>,
     tiers: Tiers,
     highlights: Vec<u32>,
+    /// Where a file Argument's relative path is taken from, and what `~`
+    /// stands for: `$HOME`. `None` leaves such paths as they were typed.
+    home: Option<PathBuf>,
 }
 
 /// The Extensions and the Front ends by count: the rest is the Index, the
@@ -1453,6 +1458,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             scored: Vec::new(),
             tiers: Tiers::default(),
             highlights: Vec::new(),
+            home: env::var_os("HOME").map(PathBuf::from),
         };
         daemon.set_config(config, now);
         daemon
@@ -1525,6 +1531,12 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
     /// Shelves.
     pub fn shelf_reads(&self) -> u64 {
         self.index.shelf_reads()
+    }
+
+    /// Replaces the home directory file Arguments are taken from, which starts
+    /// as `$HOME`.
+    pub fn set_home(&mut self, home: PathBuf) {
+        self.home = Some(home);
     }
 
     /// Replaces the wall clock, which starts as the system's.

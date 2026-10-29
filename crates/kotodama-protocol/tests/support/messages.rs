@@ -55,11 +55,8 @@ pub fn results() -> ToFrontEnd {
                 contributed: vec![
                     OfferedAction {
                         extension: "folders".into(),
-                        action: Action::new("pin", "Pin to the menu").arguments(vec![Argument {
-                            name: "where".into(),
-                            placeholder: Some("top".into()),
-                            optional: true,
-                        }]),
+                        action: Action::new("pin", "Pin to the menu")
+                            .arguments(vec![Argument::new("where").placeholder("top").optional()]),
                     },
                     OfferedAction {
                         extension: "kotodama".into(),

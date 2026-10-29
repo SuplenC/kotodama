@@ -67,7 +67,7 @@ pub struct FormField {
 }
 
 /// A form field's control, and so the type of its submitted value: a string for
-/// text and a select, a boolean for a checkbox.
+/// text, a select and a file, a boolean for a checkbox.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum FormInput {
@@ -92,6 +92,24 @@ pub enum FormInput {
         /// The `value` of the option selected at first.
         #[serde(default)]
         default: Option<String>,
+    },
+    /// A path to a file or a folder, which a Front end may offer to pick.
+    /// The value submitted reaches the Extension as an absolute path: the
+    /// Daemon expands a leading `~` and puts the home directory before a
+    /// relative one.
+    File {
+        /// The files it takes, by extension (`conf`, without the dot) or by
+        /// MIME type (`application/pdf`); empty takes any file.
+        #[serde(default)]
+        accept: Vec<String>,
+        /// Asks for a folder rather than a file; `accept` is then ignored.
+        #[serde(default)]
+        folder: bool,
+        /// The path filled in at first.
+        #[serde(default)]
+        default: Option<String>,
+        #[serde(default)]
+        placeholder: Option<String>,
     },
 }
 

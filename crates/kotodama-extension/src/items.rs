@@ -115,9 +115,11 @@ fn fingerprint(item: &Item) -> u64 {
             name,
             placeholder,
             optional,
+            kind,
+            accept,
         } in arguments
         {
-            (name, placeholder, optional).hash(&mut hasher);
+            (name, placeholder, optional, kind, accept).hash(&mut hasher);
         }
     }
     hasher.finish()

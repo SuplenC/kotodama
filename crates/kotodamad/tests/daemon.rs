@@ -935,13 +935,9 @@ fn suite() -> Item {
         "Go Suite",
         ItemKind::Namespaced(NamespacedKind::new("suites.suite").expect("a valid kind")),
     );
-    suite.actions.push(
-        Action::new("new-go-project", "New Go project").arguments(vec![Argument {
-            name: "name".into(),
-            placeholder: None,
-            optional: false,
-        }]),
-    );
+    suite
+        .actions
+        .push(Action::new("new-go-project", "New Go project").arguments(vec![Argument::new("name")]));
     suite
 }
 

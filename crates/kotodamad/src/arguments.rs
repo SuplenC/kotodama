@@ -5,6 +5,8 @@
 //!
 //! - [`fill`]: the Arguments an Action takes, filled from what follows its keyword.
 //! - [`missing`], [`form`] and [`submitted`]: the form that asks for the rest, and its answers.
+//! - [`absolute`]: a file or folder Argument, or a form's file field, as the absolute path it
+//!   reaches the Extension as.
 //!
 //! # Not here
 //!
@@ -12,8 +14,10 @@
 //! - Running the Action: `daemon/picks.rs`.
 
 use std::collections::BTreeMap;
+use std::path::Path;
 
 use kotodama_protocol::Argument;
+use kotodama_protocol::ArgumentKind;
 use kotodama_protocol::FormField;
 use kotodama_protocol::FormInput;
 use kotodama_protocol::Table;
@@ -60,14 +64,27 @@ pub fn form(id: String, title: &str, wanted: &[Argument], given: &BTreeMap<Strin
         content: ViewContent::Form {
             fields: wanted
                 .iter()
-                .map(|argument| FormField {
-                    id: argument.name.clone(),
-                    label: argument.name.clone(),
-                    input: FormInput::Text {
-                        placeholder: argument.placeholder.clone(),
-                        default: given.get(&argument.name).cloned(),
-                        secret: false,
-                    },
+                .map(|argument| {
+                    let placeholder = argument.placeholder.clone();
+                    let default = given.get(&argument.name).cloned();
+                    let input = match argument.kind {
+                        ArgumentKind::Text => FormInput::Text {
+                            placeholder,
+                            default,
+                            secret: false,
+                        },
+                        ArgumentKind::File | ArgumentKind::Folder => FormInput::File {
+                            accept: argument.accept.clone(),
+                            folder: argument.kind == ArgumentKind::Folder,
+                            default,
+                            placeholder,
+                        },
+                    };
+                    FormField {
+                        id: argument.name.clone(),
+                        label: argument.name.clone(),
+                        input,
+                    }
                 })
                 .collect(),
             submit: title.to_owned(),
@@ -75,13 +92,92 @@ pub fn form(id: String, title: &str, wanted: &[Argument], given: &BTreeMap<Strin
     }
 }
 
-/// The Arguments a submitted form holds: its text fields that aren't empty.
+/// The Arguments a submitted form holds: its text fields that aren't blank.
 pub fn submitted(values: Table) -> BTreeMap<String, String> {
     values
         .into_iter()
         .filter_map(|(name, value)| match value {
-            Value::String(value) if !value.is_empty() => Some((name, value)),
+            Value::String(value) if !value.trim().is_empty() => Some((name, value)),
             _ => None,
         })
         .collect()
 }
+
+/// Makes the file and folder Arguments among `given` absolute paths, as
+/// [`absolute`] does, however they were filled in: typed after the
+/// keyword, in a form, or by the Front end.
+pub fn absolute_paths(wanted: &[Argument], given: &mut BTreeMap<String, String>, home: &Path) {
+    for argument in wanted.iter().filter(|argument| argument.kind != ArgumentKind::Text) {
+        if let Some(path) = given.get_mut(&argument.name) {
+            *path = absolute(path, home);
+        }
+    }
+}
+
+/// Makes the values of a form's file fields in `values` absolute paths, as
+/// [`absolute`] does.
+pub fn absolute_fields(fields: &[FormField], values: &mut Table, home: &Path) {
+    for field in fields
+        .iter()
+        .filter(|field| matches!(field.input, FormInput::File { .. }))
+    {
+        if let Some(Value::String(path)) = values.get_mut(&field.id) {
+            *path = absolute(path, home);
+        }
+    }
+}
+
+/// `path` as an absolute path: `~` and `~/…` expand to `home`, and a
+/// relative path is taken from `home`, the directory a person's paths start
+/// from in a file manager and a new terminal; the Daemon's own working
+/// directory is wherever systemd started it. Only `~` alone and `~/` expand,
+/// so `~bob/x` is a relative path too. A `file://` URI, as a file picker or a
+/// drop gives, is its path. Whitespace around the path goes, and an empty
+/// path stays empty: it was left out.
+pub fn absolute(path: &str, home: &Path) -> String {
+    let path = path.trim();
+    if let Some(uri) = path.strip_prefix("file://") {
+        // A local file's URI has an empty host: `file:///home/…`.
+        return percent_decoded(uri.trim_start_matches("localhost"));
+    }
+    if path.is_empty() || path.starts_with('/') {
+        return path.to_owned();
+    }
+    let rest = match path.strip_prefix('~') {
+        Some("") => "",
+        Some(rest) if rest.starts_with('/') => rest.trim_start_matches('/'),
+        _ => path,
+    };
+    let joined = if rest.is_empty() {
+        home.to_path_buf()
+    } else {
+        home.join(rest)
+    };
+    joined.to_string_lossy().into_owned()
+}
+
+/// A URI's path with its `%XX` escapes decoded; a `%` not followed by two
+/// hex digits stays as it is.
+fn percent_decoded(uri: &str) -> String {
+    let bytes = uri.as_bytes();
+    let mut decoded = Vec::with_capacity(bytes.len());
+    let mut at = 0;
+    while at < bytes.len() {
+        let escaped = (bytes[at] == b'%')
+            .then(|| bytes.get(at + 1..at + 3))
+            .flatten()
+            .and_then(|hex| std::str::from_utf8(hex).ok())
+            .and_then(|hex| u8::from_str_radix(hex, 16).ok());
+        if let Some(byte) = escaped {
+            decoded.push(byte);
+            at += 3;
+        } else {
+            decoded.push(bytes[at]);
+            at += 1;
+        }
+    }
+    String::from_utf8_lossy(&decoded).into_owned()
+}
+
+#[cfg(test)]
+mod tests;

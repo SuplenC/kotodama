@@ -224,6 +224,40 @@ fn a_submitted_form_sends_what_was_typed_and_the_defaults_of_the_rest() {
 }
 
 #[test]
+fn a_file_field_starts_with_its_default_and_takes_a_typed_path() {
+    let mut views = Views::default();
+    let file = |default: Option<&str>, folder| FormInput::File {
+        accept: vec!["conf".into()],
+        folder,
+        default: default.map(Into::into),
+        placeholder: None,
+    };
+    views.push(
+        "wireguard".into(),
+        form(vec![
+            field("config", file(Some("~/Downloads/work.conf"), false)),
+            field("into", file(None, true)),
+        ]),
+        none(),
+    );
+
+    assert!(views.set_value(1, Value::String("~/vpn".into())));
+    assert!(!views.set_value(1, Value::Bool(true)));
+
+    assert_eq!(
+        views.submit(),
+        Some(FromFrontEnd::SubmitForm {
+            extension: "wireguard".into(),
+            view: "form".into(),
+            values: Table::from([
+                ("config".into(), Value::String("~/Downloads/work.conf".into())),
+                ("into".into(), Value::String("~/vpn".into())),
+            ]),
+        })
+    );
+}
+
+#[test]
 fn a_value_that_does_not_suit_its_field_is_refused() {
     let mut views = Views::default();
     views.push(

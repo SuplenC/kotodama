@@ -93,8 +93,9 @@ pub fn jobs(views: &Views) -> List {
 /// `detail` or `progress`; the other keys depend on it:
 ///
 /// - a list has `filter`, what is typed to filter it;
-/// - a form has `fields`, each `{label, kind, placeholder, secret, options, value}` with `kind`
-///   `text`, `checkbox` or `select`, and `submit`;
+/// - a form has `fields`, each `{label, kind, placeholder, secret, options, accept, value}` with
+///   `kind` `text`, `checkbox`, `select`, `file` or `folder` (a path, `accept` listing the file
+///   extensions or MIME types a `file` takes, none for any), and `submit`;
 /// - a detail has `markdown` and `metadata`, each `{label, value}`;
 /// - a progress View has `job`, as [`jobs`] lists them.
 pub fn view(views: &Views) -> Map {
@@ -121,6 +122,7 @@ pub fn view(views: &Views) -> Map {
                     Value::String(value) => text(value),
                     _ => QVariant::default(),
                 };
+                let mut accepted = List::default();
                 let (kind, placeholder, secret, options) = match &field.input {
                     FormInput::Text {
                         placeholder, secret, ..
@@ -136,6 +138,18 @@ pub fn view(views: &Views) -> Map {
                                 .map(|option| map([("value", text(&option.value)), ("label", text(&option.label))])),
                         ),
                     ),
+                    FormInput::File {
+                        accept,
+                        folder,
+                        placeholder,
+                        ..
+                    } => {
+                        for kind in accept {
+                            accepted.append(text(kind));
+                        }
+                        let kind = if *folder { "folder" } else { "file" };
+                        (kind, placeholder.as_deref(), false, List::default())
+                    }
                 };
                 map([
                     ("id", text(&field.id)),
@@ -144,6 +158,7 @@ pub fn view(views: &Views) -> Map {
                     ("placeholder", text(placeholder.unwrap_or_default())),
                     ("secret", QVariant::from(&secret)),
                     ("options", QVariant::from(&options)),
+                    ("accept", QVariant::from(&accepted)),
                     ("value", value),
                 ])
             });

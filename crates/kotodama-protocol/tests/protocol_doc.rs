@@ -118,6 +118,10 @@ fn describe(label: &str) -> Option<&'static str> {
         "FormInput::text" => "A line of text; `secret` hides what is typed. Submitted as a string.",
         "FormInput::checkbox" => "A checkbox. Submitted as a boolean.",
         "FormInput::select" => "One of a list of options. Submitted as the option's `value`.",
+        "FormInput::file" => {
+            "A path to a file, or with `folder` to a folder; `accept` lists the extensions or MIME types a file may \
+             have. Submitted as a string, the path made absolute by the Daemon."
+        }
         "JobState::running" => "Still going.",
         "JobState::succeeded" => "Done.",
         "JobState::failed" => "Gave up; the `message` says why.",
@@ -179,10 +183,13 @@ fn describe_extension_message(label: &str) -> Option<&'static str> {
         }
         "ToExtension::run_action" => {
             "Runs one of the Extension's Actions on an Item: its own, or another Extension's for a Contributed \
-             action, of which `item` is all it sees. `arguments` holds the Arguments by name. Answer with \
-             `action_done` and the same `invocation`."
+             action, of which `item` is all it sees. `arguments` holds the Arguments by name; one of kind `file` or \
+             `folder` is an absolute path. Answer with `action_done` and the same `invocation`."
         }
-        "ToExtension::submit_form" => "The user submitted a form View the Extension pushed: the values by field id.",
+        "ToExtension::submit_form" => {
+            "The user submitted a form View the Extension pushed: the values by field id, a `file` field's as an \
+             absolute path."
+        }
         "ToExtension::view_popped" => {
             "The user left one of the Extension's Views, as with Esc. Closing the menu never sends it, so it may \
              mean \"cancel\"."

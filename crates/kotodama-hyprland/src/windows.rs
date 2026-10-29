@@ -193,11 +193,8 @@ fn item(address: &str, window: &Window) -> Item {
         actions: vec![
             Action::new(FOCUS, "Focus Window"),
             Action::new(CLOSE, "Close Window"),
-            Action::new(MOVE, "Move to Workspace").arguments(vec![Argument {
-                name: WORKSPACE.to_owned(),
-                placeholder: Some("1, 2 or a name".to_owned()),
-                optional: false,
-            }]),
+            Action::new(MOVE, "Move to Workspace")
+                .arguments(vec![Argument::new(WORKSPACE).placeholder("1, 2 or a name")]),
             Action::new(FLOAT, "Toggle Floating"),
         ],
     }

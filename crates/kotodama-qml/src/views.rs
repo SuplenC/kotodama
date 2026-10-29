@@ -83,7 +83,9 @@ impl Open {
             ViewContent::Form { fields, .. } => fields
                 .iter()
                 .map(|field| match &field.input {
-                    FormInput::Text { default, .. } => Value::String(default.clone().unwrap_or_default()),
+                    FormInput::Text { default, .. } | FormInput::File { default, .. } => {
+                        Value::String(default.clone().unwrap_or_default())
+                    }
                     FormInput::Checkbox { default } => Value::Bool(*default),
                     FormInput::Select { options, default } => Value::String(
                         default
@@ -361,7 +363,8 @@ impl Views {
             return false;
         };
         let fits = match (input, &value) {
-            (FormInput::Text { .. }, Value::String(_)) | (FormInput::Checkbox { .. }, Value::Bool(_)) => true,
+            (FormInput::Text { .. } | FormInput::File { .. }, Value::String(_))
+            | (FormInput::Checkbox { .. }, Value::Bool(_)) => true,
             (FormInput::Select { options, .. }, Value::String(chosen)) => {
                 options.iter().any(|option| option.value == *chosen)
             }
