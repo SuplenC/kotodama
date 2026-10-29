@@ -718,6 +718,8 @@ PanelWindow {
                                 width: formFields.width
                                 height: menu.rowHeight
                                 readonly property bool current: typed.activeFocus || toggle.activeFocus || choice.activeFocus
+                                // The menu has no picker: a file or folder field is typed into as a text field is.
+                                readonly property bool typedIn: modelData.kind === "text" || modelData.kind === "file" || modelData.kind === "folder"
 
                                 function take() {
                                     const kind = modelData.kind;
@@ -757,7 +759,7 @@ PanelWindow {
                                         anchors.fill: parent
                                         anchors.leftMargin: 10
                                         anchors.rightMargin: 10
-                                        visible: formField.modelData.kind === "text"
+                                        visible: formField.typedIn
                                         verticalAlignment: TextInput.AlignVCenter
                                         clip: true
                                         color: menu.foreground
@@ -766,7 +768,7 @@ PanelWindow {
                                         font.pixelSize: menu.fontSize
                                         echoMode: formField.modelData.secret ? TextInput.Password : TextInput.Normal
                                         Component.onCompleted: {
-                                            if (formField.modelData.kind === "text")
+                                            if (formField.typedIn)
                                                 text = formField.modelData.value;
                                         }
                                         onTextChanged: search.setText(formField.index, text)
