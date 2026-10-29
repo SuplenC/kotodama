@@ -92,7 +92,7 @@ pub fn split(edit: Edit, segments: [&Segment; SIDES]) -> [Vec<Edit>; SIDES] {
                 }
                 added[other]
                     .iter()
-                    .filter(|item| segments[side].find(&item.id).is_some())
+                    .filter(|item| segments[side].holds(&item.id))
                     .map(|item| item.id.clone())
                     .collect()
             });
@@ -107,7 +107,7 @@ pub fn split(edit: Edit, segments: [&Segment; SIDES]) -> [Vec<Edit>; SIDES] {
         }
         Edit::Remove(ids) => {
             for (side, segment) in segments.into_iter().enumerate() {
-                let held: Vec<String> = ids.iter().filter(|id| segment.find(id).is_some()).cloned().collect();
+                let held: Vec<String> = ids.iter().filter(|id| segment.holds(id)).cloned().collect();
                 if !held.is_empty() {
                     split[side].push(Edit::Remove(held));
                 }
@@ -115,6 +115,46 @@ pub fn split(edit: Edit, segments: [&Segment; SIDES]) -> [Vec<Edit>; SIDES] {
         }
     }
     split
+}
+
+/// What each Segment's placeholders must do: by Segment, those to stand
+/// aside, `true`, as an Item of their Identity that doesn't yield is in
+/// some Segment, and those to come back, `false`, as none is any more.
+/// Empty, at the cost of one test per Segment, while no Segment has one.
+fn steps(segments: &[Arc<Segment>]) -> Vec<(usize, Vec<(String, bool)>)> {
+    let mut steps = Vec::new();
+    for (at, segment) in segments.iter().enumerate() {
+        let moved: Vec<(String, bool)> = segment
+            .placeholders()
+            .filter_map(|(id, identity, aside)| {
+                let claimed = identity.is_some_and(|identity| segments.iter().any(|other| other.claims(identity)));
+                (claimed != aside).then(|| (id.to_owned(), claimed))
+            })
+            .collect();
+        if !moved.is_empty() {
+            steps.push((at, moved));
+        }
+    }
+    steps
+}
+
+/// Stands aside each placeholder an Item of its Identity that doesn't
+/// yield is in `segments` for, and brings back each one none is for any
+/// more. A Segment it changes starts a new version first when `begins`
+/// says so for it: not one already changed in the version being made.
+/// Returns the Segments it changed.
+pub fn settle(segments: &mut [Arc<Segment>], mut begins: impl FnMut(usize) -> bool) -> Vec<usize> {
+    let steps = steps(segments);
+    let mut changed = Vec::with_capacity(steps.len());
+    for (at, steps) in steps {
+        let segment = Arc::make_mut(&mut segments[at]);
+        if begins(at) {
+            segment.next_version();
+        }
+        segment.step(&steps);
+        changed.push(at);
+    }
+    changed
 }
 
 /// `items` with only the last of those that share an id, in order.
@@ -371,7 +411,7 @@ impl Index {
         self.version += 1;
         let at = Self::segments_of(extension).start;
         let edits = split(edit, [&self.segments[at], &self.segments[at + 1]]);
-        let mut keys_changed = false;
+        let mut edited = [false; SIDES];
         for (side, edits) in edits.into_iter().enumerate() {
             if edits.is_empty() {
                 continue;
@@ -381,6 +421,13 @@ impl Index {
             for edit in edits {
                 segment.edit(edit);
             }
+            edited[side] = true;
+        }
+        let settled = settle(&mut self.segments, |n| !(n / SIDES == extension.0 && edited[n % SIDES]));
+        let mut keys_changed = false;
+        let changed = (0..SIDES).filter(|&side| edited[side]).map(|side| at + side);
+        for n in changed.chain(settled) {
+            let segment = &self.segments[n];
             keys_changed |= segment.keys_changed();
             if segment.verbs_changed() {
                 self.verbs_version += 1;
@@ -390,6 +437,23 @@ impl Index {
             self.keys_version += 1;
         }
         keys_changed
+    }
+
+    /// Stands aside or brings back the placeholders whose Identity an Item
+    /// that doesn't yield took or left, here, at once, as [`Index::edit`]
+    /// does after its change: for a change made elsewhere, such as
+    /// [`Index::clear`]. Returns whether it changed what a search reads.
+    pub fn settle(&mut self) -> bool {
+        let settled = settle(&mut self.segments, |_| true);
+        if settled.is_empty() {
+            return false;
+        }
+        self.version += 1;
+        self.keys_version += 1;
+        if settled.iter().any(|&n| self.segments[n].verbs_changed()) {
+            self.verbs_version += 1;
+        }
+        true
     }
 
     /// Puts in the Segment at `at`, built elsewhere, and returns the one it

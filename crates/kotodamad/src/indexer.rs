@@ -346,6 +346,23 @@ impl Keeping {
     }
 }
 
+/// Stands placeholders aside or brings them back for what changed in
+/// `segments`, and notes each Segment that changes in `changed`, with
+/// `change` for an Extension it holds no change of.
+fn settle(segments: &mut [Arc<Segment>], changed: &mut Vec<(ExtensionId, u64, [bool; SIDES])>, change: u64) {
+    index::settle(segments, |at| {
+        let extension = ExtensionId(at / SIDES);
+        let n = if let Some(n) = changed.iter().position(|(ext, ..)| *ext == extension) {
+            n
+        } else {
+            changed.push((extension, change, [false; SIDES]));
+            changed.len() - 1
+        };
+        let begun = &mut changed[n].2[at % SIDES];
+        !std::mem::replace(begun, true)
+    });
+}
+
 /// Makes the changes from `queue`, all that are waiting at once, and passes
 /// each new version, then what to keep resident, to `send`, until it fails
 /// or the queue closes.
@@ -353,6 +370,9 @@ fn work(queue: &Receiver<Job>, dir: Option<&Arc<Path>>, mut send: impl FnMut(Eve
     let empty = || Arc::new(Segment::new(dir.cloned()));
     let mut segments: Vec<Arc<Segment>> = Vec::new();
     let mut keeping = Keeping::default();
+    // The last change handed over, which a version of placeholders that
+    // stepped aside or came back for it holds.
+    let mut last_change = 0;
     while let Ok(first) = queue.recv() {
         // By Extension, the last change its new version holds, and which of
         // its Segments changed.
@@ -383,6 +403,7 @@ fn work(queue: &Receiver<Job>, dir: Option<&Arc<Path>>, mut send: impl FnMut(Eve
                     };
                     let (_, last, sides) = &mut changed[n];
                     *last = change;
+                    last_change = change;
                     for (side, edits) in edits.into_iter().enumerate() {
                         if edits.is_empty() && !(untouched && side == 0) {
                             continue;
@@ -417,6 +438,9 @@ fn work(queue: &Receiver<Job>, dir: Option<&Arc<Path>>, mut send: impl FnMut(Eve
                 Job::Free(segments) => drop(segments),
             }
         }
+        // Every Segment is here, so placeholders step aside or come back for
+        // the Items of any Extension, in the same versions as the change.
+        settle(&mut segments, &mut changed, last_change);
         for (extension, change, sides) in changed {
             let mut versions = Vec::new();
             let mut reads = Vec::new();

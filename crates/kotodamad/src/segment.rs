@@ -9,7 +9,9 @@
 //!
 //! Of the rest of an Item, a Segment keeps in memory only what ranking reads:
 //! its id, Identity, keyword and Actions. The whole Item waits on a
-//! [`Shelf`], off the heap, until a Result shows it.
+//! [`Shelf`], off the heap, until a Result shows it. A placeholder, an Item
+//! that yields, is kept whole besides, as it leaves its row while it stands
+//! aside and takes one again when it comes back.
 //!
 //! # Owns
 //!
@@ -248,6 +250,19 @@ pub struct Segment {
     /// didn't, or is a Segment emptied, so the Daemon's table of them is
     /// built again.
     verbs_changed: bool,
+    /// The Items that yield, by id, each whole and whether it stands aside:
+    /// a row while it shows, none while it stands aside. Empty for an
+    /// Extension that sends none, which costs its rows nothing.
+    placeholders: HashMap<String, Placeholder>,
+}
+
+/// An Item that yields to any Item of its Identity that doesn't.
+#[derive(Clone, Debug)]
+struct Placeholder {
+    item: Item,
+    /// Whether it is out of the Segment's rows, for an Item of its Identity
+    /// that doesn't yield is indexed.
+    aside: bool,
 }
 
 /// The payloads of the Items one change adds, before they go on the Shelf.
@@ -315,7 +330,12 @@ impl Segment {
                     // A hidden Item stays out of the search.
                     if item.hidden {
                         self.remove(&item.id);
+                    } else if item.yields {
+                        self.add_placeholder(item, &mut shelved);
                     } else {
+                        if !self.placeholders.is_empty() {
+                            self.placeholders.remove(&item.id);
+                        }
                         self.add(&item, &mut shelved);
                     }
                 }
@@ -336,8 +356,70 @@ impl Segment {
         }
     }
 
+    /// Whether the Segment holds no Item, in a row or standing aside.
     pub fn is_empty(&self) -> bool {
-        self.ids.is_empty()
+        self.ids.is_empty() && self.placeholders.is_empty()
+    }
+
+    /// Whether the Segment holds the Item `id`, in a row or standing aside.
+    pub fn holds(&self, id: &str) -> bool {
+        self.ids.contains_key(id) || self.placeholders.contains_key(id)
+    }
+
+    /// Adds `item`, which yields, or replaces the Item with its id. One
+    /// standing aside stays aside, without a row; until
+    /// [`Segment::step`] says otherwise, any other takes a row.
+    fn add_placeholder(&mut self, item: Item, shelved: &mut Shelved) {
+        let aside = self
+            .placeholders
+            .get(&item.id)
+            .is_some_and(|placeholder| placeholder.aside);
+        if !aside {
+            self.add(&item, shelved);
+        }
+        self.placeholders.insert(item.id.clone(), Placeholder { item, aside });
+    }
+
+    /// Each Item that yields: its id, its Identity, and whether it stands
+    /// aside.
+    pub fn placeholders(&self) -> impl Iterator<Item = (&str, Option<&str>, bool)> {
+        self.placeholders
+            .iter()
+            .map(|(id, placeholder)| (id.as_str(), placeholder.item.identity.as_deref(), placeholder.aside))
+    }
+
+    /// Whether an Item of the Identity `identity` that doesn't yield is
+    /// here.
+    pub fn claims(&self, identity: &str) -> bool {
+        self.identified(identity).iter().any(|&row| {
+            self.placeholders.is_empty() || self.id(row).is_none_or(|id| !self.placeholders.contains_key(id))
+        })
+    }
+
+    /// Stands each placeholder `steps` names aside, with `true`, taking it
+    /// out of its row, or brings it back into one, with `false`.
+    pub fn step(&mut self, steps: &[(String, bool)]) {
+        let mut shelved = Shelved {
+            at: self.end,
+            bytes: Vec::new(),
+            item: Vec::new(),
+        };
+        for (id, aside) in steps {
+            let Some(mut placeholder) = self.placeholders.remove(id) else {
+                continue;
+            };
+            if placeholder.aside != *aside {
+                placeholder.aside = *aside;
+                if *aside {
+                    self.remove_row(id);
+                } else {
+                    self.add(&placeholder.item, &mut shelved);
+                }
+            }
+            self.placeholders.insert(id.clone(), placeholder);
+        }
+        self.shelve(&shelved);
+        self.compact();
     }
 
     fn add(&mut self, item: &Item, shelved: &mut Shelved) {
@@ -514,7 +596,16 @@ impl Segment {
         place
     }
 
+    /// Removes the Item `id`, in a row or standing aside.
     fn remove(&mut self, id: &str) {
+        if !self.placeholders.is_empty() {
+            self.placeholders.remove(id);
+        }
+        self.remove_row(id);
+    }
+
+    /// Empties the row of the Item `id`, if it has one.
+    fn remove_row(&mut self, id: &str) {
         let Some(row) = self.ids.remove(id) else {
             return;
         };
