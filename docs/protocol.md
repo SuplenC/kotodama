@@ -1284,6 +1284,21 @@ The menu became visible.
 "shown"
 ```
 
+### `complete_path`
+
+Asks for the paths that complete what is typed into a form's file field.
+
+```json
+{
+  "complete_path": {
+    "extension": "wireguard",
+    "view": "import",
+    "field": "config",
+    "text": "~/Down"
+  }
+}
+```
+
 ## From the Daemon to a Front end: `ToFrontEnd`
 
 Extensions never see these either.
@@ -1685,6 +1700,35 @@ How many menus an `open` or `toggle` reached.
 {
   "reached": {
     "menus": 1
+  }
+}
+```
+
+### `path_completions`
+
+The paths that complete the text typed into a file field, best first: the entries of the directory typed, or with nothing typed the newest files the field takes from the download, documents and desktop directories.
+
+```json
+{
+  "path_completions": {
+    "extension": "wireguard",
+    "view": "import",
+    "field": "config",
+    "text": "~/Down",
+    "entries": [
+      {
+        "path": "/home/kuba/Downloads",
+        "title": "Downloads",
+        "folder": true,
+        "modified": 1761700000,
+        "highlights": [
+          0,
+          1,
+          2,
+          3
+        ]
+      }
+    ]
   }
 }
 ```

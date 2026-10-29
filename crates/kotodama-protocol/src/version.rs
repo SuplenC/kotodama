@@ -107,7 +107,8 @@ impl Since for ToFrontEnd {
             | ToFrontEnd::OfferUndo { .. }
             | ToFrontEnd::WithdrawUndo { .. }
             | ToFrontEnd::SetQuery { .. }
-            | ToFrontEnd::Reached { .. } => 0,
+            | ToFrontEnd::Reached { .. }
+            | ToFrontEnd::PathCompletions { .. } => 0,
         }
     }
 }

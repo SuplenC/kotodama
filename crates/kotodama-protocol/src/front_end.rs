@@ -4,8 +4,9 @@
 //!
 //! # Owns
 //!
-//! - [`FromFrontEnd`], [`ToFrontEnd`], and what they carry: [`ShownResult`], [`Scope`] and its
-//!   [`Intro`], [`Problem`], [`ListMatch`], the references to a Result and an Action.
+//! - [`FromFrontEnd`], [`ToFrontEnd`], and what they carry: [`ShownResult`], [`PathCompletion`],
+//!   [`Scope`] and its [`Intro`], [`Problem`], [`ListMatch`], the references to a Result and an
+//!   Action.
 //! - Where the Daemon's socket is: [`socket_path`].
 //!
 //! # Not here
@@ -102,6 +103,17 @@ pub enum FromFrontEnd {
     /// the time of day has moved to another part since it last ranked them.
     /// It also warms the CPU cache with what the first keystroke reads.
     Shown,
+    /// Asks for the paths that complete `text` in the file field `field` of
+    /// the open form View `view`, as the user types into it. The Daemon
+    /// answers with [`ToFrontEnd::PathCompletions`], unless a newer request
+    /// for the same field came first; a field that isn't a file field gets
+    /// no answer.
+    CompletePath {
+        extension: String,
+        view: String,
+        field: String,
+        text: String,
+    },
 }
 
 /// From the Daemon to a Front end.
@@ -199,6 +211,36 @@ pub enum ToFrontEnd {
     /// passed to. With none running, the Daemon waits a moment for one to
     /// connect first; `0` means none did, so nothing opened.
     Reached { menus: u32 },
+    /// The answer to [`FromFrontEnd::CompletePath`], naming the field and
+    /// the `text` it completes, so a Front end drops an answer to text no
+    /// longer typed. For a partial path, the entries of its directory that
+    /// match what follows the last `/`, best first and folders before files
+    /// within a match tier; for no text, the newest files the field takes
+    /// from the places downloads and documents land.
+    PathCompletions {
+        extension: String,
+        view: String,
+        field: String,
+        text: String,
+        entries: Vec<PathCompletion>,
+    },
+}
+
+/// One path offered to complete a file field.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PathCompletion {
+    /// The absolute path. A folder's has no `/` at the end: add one to
+    /// complete inside it.
+    pub path: PathBuf,
+    /// Its name, as a row shows it.
+    pub title: String,
+    pub folder: bool,
+    /// When it was last modified, in seconds since the Unix epoch; `None`
+    /// when the file system can't tell.
+    pub modified: Option<u64>,
+    /// The positions, in characters, of the title's characters that matched
+    /// what was typed.
+    pub highlights: Vec<u32>,
 }
 
 /// One Result as the Front end shows it.

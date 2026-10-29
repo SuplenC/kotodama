@@ -145,6 +145,7 @@ fn describe(label: &str) -> Option<&'static str> {
         "FromFrontEnd::toggle" => "Asks a menu to open or close, as `kotodama toggle` does.",
         "FromFrontEnd::undo" => "Undoes the change `offer_undo` offered.",
         "FromFrontEnd::shown" => "The menu became visible.",
+        "FromFrontEnd::complete_path" => "Asks for the paths that complete what is typed into a form's file field.",
         "ToFrontEnd::results" => "The whole ranked list for the query, best first, and the app it is in.",
         "ToFrontEnd::status" => "The Extensions that are down, and the problems the user can fix.",
         "ToFrontEnd::close" => "Close the menu, then answer `closed`.",
@@ -161,6 +162,11 @@ fn describe(label: &str) -> Option<&'static str> {
         "ToFrontEnd::withdraw_undo" => "The change can't be undone any more: hide its offer.",
         "ToFrontEnd::set_query" => "Replace the search text, as on entering an app.",
         "ToFrontEnd::reached" => "How many menus an `open` or `toggle` reached.",
+        "ToFrontEnd::path_completions" => {
+            "The paths that complete the text typed into a file field, best first: the entries of the directory \
+             typed, or with nothing typed the newest files the field takes from the download, documents and \
+             desktop directories."
+        }
         _ => return None,
     })
 }
