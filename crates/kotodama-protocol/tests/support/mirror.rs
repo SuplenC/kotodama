@@ -92,6 +92,16 @@ pub mod prost {
         pub alias: Option<String>,
         #[prost(string, optional, tag = "6")]
         pub unavailable: Option<String>,
+        #[prost(message, optional, tag = "7")]
+        pub primary: Option<ActionRef>,
+    }
+
+    #[derive(Clone, PartialEq, ::prost::Message)]
+    pub struct ActionRef {
+        #[prost(string, tag = "1")]
+        pub extension: String,
+        #[prost(string, tag = "2")]
+        pub id: String,
     }
 
     #[derive(Clone, PartialEq, ::prost::Message)]
@@ -243,6 +253,10 @@ pub mod prost {
                         highlights: result.highlights.clone(),
                         alias: result.alias.clone(),
                         unavailable: result.unavailable.clone(),
+                        primary: result.primary.as_ref().map(|primary| ActionRef {
+                            extension: primary.extension.clone(),
+                            id: primary.id.clone(),
+                        }),
                     })
                     .collect(),
                 scope: scope.as_ref().map(|scope| Scope {
@@ -334,6 +348,13 @@ pub mod musli {
         pub highlights: Vec<u32>,
         pub alias: Option<String>,
         pub unavailable: Option<String>,
+        pub primary: Option<ActionRef>,
+    }
+
+    #[derive(Clone, Debug, PartialEq, Encode, Decode, Serialize, Deserialize)]
+    pub struct ActionRef {
+        pub extension: String,
+        pub id: String,
     }
 
     #[derive(Clone, Debug, PartialEq, Encode, Decode, Serialize, Deserialize)]
@@ -429,6 +450,10 @@ pub mod musli {
                     highlights: result.highlights.clone(),
                     alias: result.alias.clone(),
                     unavailable: result.unavailable.clone(),
+                    primary: result.primary.as_ref().map(|primary| ActionRef {
+                        extension: primary.extension.clone(),
+                        id: primary.id.clone(),
+                    }),
                 })
                 .collect(),
             scope: scope.as_ref().map(|scope| Scope {
@@ -511,6 +536,13 @@ pub mod bilrost {
         pub highlights: Vec<u32>,
         pub alias: Option<String>,
         pub unavailable: Option<String>,
+        pub primary: Option<ActionRef>,
+    }
+
+    #[derive(Clone, Debug, PartialEq, ::bilrost::Message)]
+    pub struct ActionRef {
+        pub extension: String,
+        pub id: String,
     }
 
     #[derive(Clone, Debug, PartialEq, ::bilrost::Message)]
@@ -645,6 +677,10 @@ pub mod bilrost {
                         highlights: result.highlights.clone(),
                         alias: result.alias.clone(),
                         unavailable: result.unavailable.clone(),
+                        primary: result.primary.as_ref().map(|primary| ActionRef {
+                            extension: primary.extension.clone(),
+                            id: primary.id.clone(),
+                        }),
                     })
                     .collect(),
                 scope: scope.as_ref().map(|scope| Scope {

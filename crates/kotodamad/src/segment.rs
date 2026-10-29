@@ -44,6 +44,17 @@ use crate::rank::Matched;
 use crate::rank::Searched;
 use crate::rank::Text;
 use crate::rank::Texts;
+use crate::rank::fold_text;
+
+/// Whether `text` folds to `folded`, without making a copy of an ASCII
+/// `text` to fold it.
+fn folds_to(text: &str, folded: &str) -> bool {
+    if text.is_ascii() {
+        text.eq_ignore_ascii_case(folded) && !folded.bytes().any(|byte| byte.is_ascii_uppercase())
+    } else {
+        fold_text(text) == folded
+    }
+}
 
 /// Where an Item lives in its Segment. Stable until the Item is removed, and
 /// not taken by another Item until the change after that.
@@ -177,12 +188,14 @@ struct Held {
     place: Place,
 }
 
-/// An Action the Segment's Items offer: an Item kind and an Action id, and
-/// the rows whose Item has it.
+/// An Action the Segment's Items offer: an Item kind, an Action id and its
+/// keywords, and the rows whose Item has it.
 #[derive(Clone, Debug)]
 struct Offered {
     kind: u16,
     action: Box<str>,
+    /// The Action's keywords, folded as the query is.
+    keywords: Box<[Box<str>]>,
     rows: BTreeSet<Row>,
 }
 
@@ -231,6 +244,10 @@ pub struct Segment {
     /// of a row. A version that only changed Items' Actions ranks every
     /// query as the last one did.
     keys_changed: bool,
+    /// Whether this version offers an Action keyword the version before
+    /// didn't, or is a Segment emptied, so the Daemon's table of them is
+    /// built again.
+    verbs_changed: bool,
 }
 
 /// The payloads of the Items one change adds, before they go on the Shelf.
@@ -259,8 +276,15 @@ impl Segment {
     pub fn emptied(&self) -> Self {
         Segment {
             keys_changed: true,
+            verbs_changed: true,
             ..Segment::new(self.dir.clone())
         }
+    }
+
+    /// Whether this version offers an Action keyword the version before it
+    /// didn't, or is an emptied Segment.
+    pub fn verbs_changed(&self) -> bool {
+        self.verbs_changed
     }
 
     /// Whether this version added, removed or changed what a search reads
@@ -274,6 +298,7 @@ impl Segment {
     pub fn next_version(&mut self) {
         self.free.append(&mut self.freed);
         self.keys_changed = false;
+        self.verbs_changed = false;
     }
 
     /// Makes one change within this version.
@@ -442,21 +467,35 @@ impl Segment {
         item.actions
             .iter()
             .map(|action| {
-                let n = if let Some(n) = self
-                    .offered
-                    .iter()
-                    .position(|offered| offered.kind == kind && *offered.action == *action.id)
-                {
+                let same = |offered: &Offered| {
+                    offered.kind == kind
+                        && *offered.action == *action.id
+                        && offered.keywords.len() == action.keywords.len()
+                        && offered
+                            .keywords
+                            .iter()
+                            .zip(&action.keywords)
+                            .all(|(folded, keyword)| folds_to(keyword, folded))
+                };
+                let n = if let Some(n) = self.offered.iter().position(same) {
                     n
                 } else {
+                    self.verbs_changed |= !action.keywords.is_empty();
                     self.offered.push(Offered {
                         kind,
                         action: action.id.as_str().into(),
+                        keywords: action
+                            .keywords
+                            .iter()
+                            .map(|keyword| fold_text(keyword).into_boxed_str())
+                            .collect(),
                         rows: BTreeSet::new(),
                     });
                     self.offered.len() - 1
                 };
-                self.offered[n].rows.insert(row);
+                let offered = &mut self.offered[n];
+                self.verbs_changed |= offered.rows.is_empty() && !offered.keywords.is_empty();
+                offered.rows.insert(row);
                 n as u32
             })
             .collect()
@@ -748,12 +787,37 @@ impl Segment {
     }
 
     /// The rows whose Item, of kind `kind`, offers the Action `action`, in row order.
-    pub fn offering<'a>(&'a self, kind: &str, action: &str) -> impl Iterator<Item = Row> + 'a {
-        let offered = self
+    pub fn offering(&self, kind: &str, action: &str) -> Vec<Row> {
+        let mut rows: Vec<Row> = self
             .offered
             .iter()
-            .find(|offered| self.kinds[offered.kind as usize] == kind && *offered.action == *action);
-        offered.into_iter().flat_map(|offered| offered.rows.iter().copied())
+            .filter(|offered| self.kinds[offered.kind as usize] == kind && *offered.action == *action)
+            .flat_map(|offered| offered.rows.iter().copied())
+            .collect();
+        // The same Action with other keywords is offered apart.
+        rows.sort_unstable();
+        rows.dedup();
+        rows
+    }
+
+    /// Every keyword of the Actions the Segment's Items offer, folded, with
+    /// repeats.
+    pub fn verbs(&self) -> impl Iterator<Item = &str> {
+        self.offered
+            .iter()
+            .filter(|offered| !offered.rows.is_empty())
+            .flat_map(|offered| offered.keywords.iter().map(|keyword| &**keyword))
+    }
+
+    /// The id of the first of the Actions of the Item in `row` with a
+    /// keyword `names` accepts, given folded.
+    pub fn named_action(&self, row: Row, names: impl Fn(&str) -> bool) -> Option<&str> {
+        let held = self.held(row)?;
+        held.actions
+            .iter()
+            .map(|&n| &self.offered[n as usize])
+            .find(|offered| offered.keywords.iter().any(|keyword| names(keyword)))
+            .map(|offered| &*offered.action)
     }
 
     /// Scores the Item in `row`, if there is one, as [`Texts::score`] does,

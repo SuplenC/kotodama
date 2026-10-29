@@ -34,11 +34,13 @@ use kotodama_protocol::ShownResult;
 #[derive(Clone, Debug, PartialEq)]
 pub struct Row {
     pub result: ResultRef,
-    /// The Item's own Actions, the primary one (what Enter runs) first.
+    /// The Item's own Actions, its usual primary one first.
     own: Vec<Action>,
     /// Other Extensions' Actions for the Item, grouped by Extension. The
     /// Items of a list View share those of their kind.
     contributed: Arc<[OfferedAction]>,
+    /// The Action the query chose for Enter in place of the first of `own`.
+    chosen: Option<Chosen>,
     pub title: String,
     pub subtitle: String,
     pub icon: String,
@@ -50,6 +52,32 @@ pub struct Row {
     pub unavailable: Option<Box<str>>,
     /// Whether it is an app's entry Item, which Tab enters.
     pub enters: bool,
+}
+
+/// Where the Action a query chose for Enter is.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Chosen {
+    /// The `n`th of the Item's own Actions, never the first.
+    Own(usize),
+    /// The `n`th Contributed action.
+    Contributed(usize),
+}
+
+impl Chosen {
+    /// Where `primary` is among `own` and `contributed`, the Actions of a
+    /// Result owned by `extension`: `None` for the first of `own`, which is
+    /// primary anyway, or for an Action the Result doesn't carry.
+    fn find(primary: &ActionRef, extension: &str, own: &[Action], contributed: &[OfferedAction]) -> Option<Self> {
+        if primary.extension == extension
+            && let Some(n) = own.iter().position(|action| action.id == primary.id)
+        {
+            return (n > 0).then_some(Chosen::Own(n));
+        }
+        contributed
+            .iter()
+            .position(|offered| offered.extension == primary.extension && offered.action.id == primary.id)
+            .map(Chosen::Contributed)
+    }
 }
 
 /// One entry of the Action panel.
@@ -71,6 +99,10 @@ impl From<ShownResult> for Row {
         highlights.sort_unstable();
         highlights.dedup();
         let enters = matches!(&item.kind, ItemKind::Namespaced(kind) if kind.as_str() == APP_ENTRY_KIND);
+        let chosen = shown
+            .primary
+            .as_ref()
+            .and_then(|primary| Chosen::find(primary, &shown.extension, &item.actions, &shown.contributed));
         Row {
             result: ResultRef {
                 extension: shown.extension,
@@ -78,6 +110,7 @@ impl From<ShownResult> for Row {
             },
             own: item.actions,
             contributed: shown.contributed.into(),
+            chosen,
             title: item.title,
             subtitle: item.subtitle.unwrap_or_default(),
             icon: item.icon.unwrap_or_default(),
@@ -100,6 +133,7 @@ impl Row {
             },
             own: item.actions.clone(),
             contributed,
+            chosen: None,
             title: item.title.clone(),
             subtitle: item.subtitle.clone().unwrap_or_default(),
             icon: item.icon.clone().unwrap_or_default(),
@@ -140,13 +174,11 @@ impl Row {
     /// The Action panel: the primary Action, which Enter runs, then the
     /// rest of the Item's own Actions, then the Contributed ones, then every
     /// [`Destructive`](ActionRole::Destructive) one but the primary, in the
-    /// same order, so a stray pick through the panel lands on one last.
+    /// same order, so a stray pick through the panel lands on one last. The
+    /// primary is the Action the query chose, if it chose one, and else the
+    /// first of the Item's own.
     /// Built when asked for, since most rows are never opened.
     pub fn actions<'a>(&'a self) -> impl Iterator<Item = PanelEntry<'a>> {
-        let (primary, rest) = match self.own.split_first() {
-            Some((primary, rest)) => (Some(primary), rest),
-            None => (None, &[][..]),
-        };
         let own = |action: &'a Action| PanelEntry {
             action,
             group: None,
@@ -163,29 +195,67 @@ impl Row {
                 .as_deref()
                 .filter(|shortcut| !self.own.iter().any(|own| own.shortcut.as_deref() == Some(*shortcut))),
         };
+        let (primary, chosen_own, chosen_contributed) = match self.chosen {
+            Some(Chosen::Own(n)) => (self.own.get(n).map(own), n, usize::MAX),
+            Some(Chosen::Contributed(n)) => (self.contributed.get(n).map(contributed), usize::MAX, n),
+            None => (self.own.first().map(own), 0, usize::MAX),
+        };
+        let rest = move || {
+            self.own
+                .iter()
+                .enumerate()
+                .filter(move |&(n, _)| n != chosen_own)
+                .map(move |(_, action)| own(action))
+        };
+        let offered = move || {
+            self.contributed
+                .iter()
+                .enumerate()
+                .filter(move |&(n, _)| n != chosen_contributed)
+                .map(move |(_, offered)| contributed(offered))
+        };
         let kept = |entry: &PanelEntry<'a>| entry.action.role != ActionRole::Destructive;
         let last = |entry: &PanelEntry<'a>| entry.action.role == ActionRole::Destructive;
         primary
             .into_iter()
-            .map(own)
-            .chain(rest.iter().map(own).filter(kept))
-            .chain(self.contributed.iter().map(contributed).filter(kept))
-            .chain(rest.iter().map(own).filter(last))
-            .chain(self.contributed.iter().map(contributed).filter(last))
+            .chain(rest().filter(kept))
+            .chain(offered().filter(kept))
+            .chain(rest().filter(last))
+            .chain(offered().filter(last))
+    }
+
+    /// The Action Enter runs; `None` when nothing runs.
+    fn primary(&self) -> Option<&Action> {
+        if self.unavailable.is_some() {
+            return None;
+        }
+        match self.chosen {
+            Some(Chosen::Own(n)) => self.own.get(n),
+            Some(Chosen::Contributed(n)) => self.contributed.get(n).map(|offered| &offered.action),
+            None => self.own.first(),
+        }
     }
 
     /// The role of the Action Enter runs; `None` when nothing runs.
     pub fn primary_role(&self) -> Option<ActionRole> {
-        self.own
-            .first()
-            .filter(|_| self.unavailable.is_none())
-            .map(|primary| primary.role)
+        self.primary().map(|primary| primary.role)
+    }
+
+    /// The title of the Action Enter runs; empty when nothing runs.
+    pub fn primary_title(&self) -> &str {
+        self.primary().map_or("", |primary| primary.title.as_str())
+    }
+
+    /// Whether the query chose the Action Enter runs, in place of the
+    /// Item's usual first Action.
+    pub fn primary_chosen(&self) -> bool {
+        self.chosen.is_some() && self.unavailable.is_none()
     }
 
     /// The keys the row takes, for a footer that teaches them: what Enter
     /// runs, Tab on an entry Item, and Ctrl+K. Empty when nothing runs.
     pub fn hints(&self) -> String {
-        let Some(primary) = self.own.first().filter(|_| self.unavailable.is_none()) else {
+        let Some(primary) = self.primary() else {
             return String::new();
         };
         let mut hints = format!("↵ {}", primary.title);

@@ -364,6 +364,7 @@ message ShownResult {
   repeated uint32 highlights = 4;
   optional string alias = 5;
   optional string unavailable = 6;
+  ActionRef primary = 7;
 }
 
 message ToExtension {

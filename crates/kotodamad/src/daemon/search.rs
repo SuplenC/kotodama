@@ -19,6 +19,9 @@ use kotodama_protocol::Item;
 use kotodama_protocol::Scope;
 use kotodama_protocol::ToExtension;
 use kotodama_protocol::ToFrontEnd;
+use nucleo_matcher::pattern::CaseMatching;
+use nucleo_matcher::pattern::Normalization;
+use nucleo_matcher::pattern::Pattern;
 
 use super::Candidate;
 use super::Class;
@@ -43,12 +46,16 @@ use crate::clock::When;
 use crate::history;
 use crate::history::IDENTITIES;
 use crate::history::Store;
+use crate::history::query_key;
 use crate::index::Reach;
+use crate::index::SIDES;
+use crate::keywords::Alias;
 use crate::most_used::Counts;
 use crate::rank;
 use crate::rank::Haystack;
 use crate::rank::Matched;
 use crate::rank::Tier;
+use crate::verbs::Verbs;
 
 impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
     /// Sends what the last event changed: due Live queries, Results, the Action
@@ -230,7 +237,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             self.scored.iter().copied(),
         );
         // Up to here the candidates are in slot order.
-        let indexed = candidates.len();
+        let indexed = self.add_verb_matches(&mut session, &mut candidates);
         let fallbacks = self.add_live(&session, &mut candidates);
         self.add_own(&session, &mut candidates);
         let indexed = self.add_near_misses(&mut session, &mut candidates, indexed, narrow, fresh);
@@ -339,12 +346,135 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             ranked.splice(0..0, visible);
         }
         session.via_alias = None;
+        session.verb = None;
+        session.by_verb.clear();
+        session.subject = None;
         let results = ranked
             .iter()
             .filter_map(|&source| self.row(session, source, None))
             .collect();
         let shown = ranked.into_iter().map(|source| (source, false)).collect();
         session.send_results(shown, results, app_scope, fresh);
+    }
+
+    /// Builds the table of Action keywords again when the Actions on offer
+    /// changed since it was built.
+    pub(super) fn update_verbs(&mut self) {
+        let version = self.index.verbs_version();
+        if self.verbs_from == Some(version) {
+            return;
+        }
+        self.verbs_from = Some(version);
+        let mut keywords: Vec<Box<str>> = self.index.verbs().map(Box::from).collect();
+        let contributed = self.contributed.values().flatten().map(|(_, action)| action);
+        let offered = contributed.chain(self.targets.actions().map(|(_, action)| action));
+        keywords.extend(
+            offered
+                .flat_map(|action| &action.keywords)
+                .map(|keyword| rank::fold_text(keyword).into_boxed_str()),
+        );
+        self.verbs = Verbs::new(keywords);
+    }
+
+    /// Finds the verb the session's query names, if it names one, and adds
+    /// the Indexed items its subject finds that offer the verb to
+    /// `candidates`, ranked as the subject alone ranks them, in place of
+    /// the same Items the whole query found. `candidates` holds the Indexed
+    /// items alone, in slot order, and keeps them so; returns how many
+    /// there are after.
+    ///
+    /// The table is looked up first: a query naming no verb searches
+    /// nothing more.
+    pub(super) fn add_verb_matches(&mut self, session: &mut Session, candidates: &mut Vec<Candidate>) -> usize {
+        session.by_verb.clear();
+        session.subject = None;
+        self.update_verbs();
+        session.verb = self.verbs.find(session.searched());
+        let Some(verb) = &session.verb else {
+            return candidates.len();
+        };
+        let pattern = Pattern::parse(
+            &rank::fold_text(&verb.subject),
+            CaseMatching::Ignore,
+            Normalization::Never,
+        );
+        let folded = rank::Query::new(&verb.subject);
+        session.subject = Some(pattern.clone());
+        let Daemon {
+            index,
+            matcher,
+            tiers,
+            kind_places,
+            contributed,
+            targets,
+            ..
+        } = self;
+        // By Segment and kind, whether another Extension contributes an
+        // Action the verb names on that kind.
+        let by_kind: Vec<(ExtensionId, &str)> = contributed
+            .iter()
+            .flat_map(|(kind, actions)| actions.iter().map(move |(ext, action)| (*ext, kind.as_str(), action)))
+            .filter(|(_, _, action)| verb.names(action))
+            .map(|(ext, kind, _)| (ext, kind))
+            .collect();
+        let kind_offers: Vec<Vec<bool>> = index
+            .kinds()
+            .enumerate()
+            .map(|(segment, kinds)| {
+                let owner = ExtensionId(segment / SIDES);
+                kinds
+                    .iter()
+                    .map(|kind| by_kind.iter().any(|&(ext, offered)| ext != owner && offered == kind))
+                    .collect()
+            })
+            .collect();
+        let by_target: Vec<(ExtensionId, &str)> = targets
+            .actions()
+            .filter(|(_, action)| verb.names(action))
+            .map(|(ext, action)| (ext, action.id.as_str()))
+            .collect();
+        let targeted = !targets.is_empty() && !by_target.is_empty();
+        let mut found = Vec::new();
+        index.search(
+            &pattern,
+            matcher,
+            folded.filter(),
+            session.reach,
+            None,
+            |slot, ranked, score, matched| {
+                let owner = slot.extension();
+                let offers = kind_offers[slot.segment as usize]
+                    .get(ranked.kind() as usize)
+                    .copied()
+                    .unwrap_or_default()
+                    || index.named_action(slot, |keyword| verb.names_folded(keyword)).is_some()
+                    || (targeted
+                        && index.identity(slot).is_some_and(|identity| {
+                            targets
+                                .on(identity)
+                                .any(|(ext, action)| ext != owner && by_target.contains(&(ext, action.id.as_str())))
+                        }));
+                if !offers {
+                    return;
+                }
+                if let Some(tier) = tiers.texts(ranked.texts(), &folded, matched) {
+                    let kind = kind_places.place(slot.segment, ranked.kind());
+                    let source = Source::Indexed(slot);
+                    found.push(Candidate::new(source, tier, kind, score, ranked.title_len()));
+                }
+            },
+        );
+        session.by_verb.extend(found.iter().map(|candidate| candidate.source));
+        let mut whole = std::mem::take(candidates).into_iter().peekable();
+        for by_verb in found {
+            while let Some(candidate) = whole.next_if(|candidate| candidate.source < by_verb.source) {
+                candidates.push(candidate);
+            }
+            whole.next_if(|candidate| candidate.source == by_verb.source);
+            candidates.push(by_verb);
+        }
+        candidates.extend(whole);
+        candidates.len()
     }
 
     /// Adds the session's Live results to `candidates`, and returns those of
@@ -635,8 +765,10 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
     /// counts as an exact match, which a Learned choice can beat. An app's
     /// word counts as a word start, so an application named like the app
     /// ranks above its entry Item. In an app, only its Extension's Items'
-    /// keywords count, typed first past its word. Returns the Action an Alias
-    /// makes primary, with the Result it is for.
+    /// keywords count, typed first past its word. With a verb, an Alias
+    /// before or after it names its Item too, if the Item offers the verb:
+    /// the Alias picks the Item and the verb its Action. Returns the Action
+    /// an Alias makes primary, with the Result it is for.
     pub(super) fn add_named(
         &self,
         session: &mut Session,
@@ -649,15 +781,15 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
         let first = first.unwrap_or_default();
         let mut named: Vec<Keyword> = Vec::new();
         let mut primary = None;
-        let alias = self
-            .keywords
-            .aliases
-            .get_key_value(session.key.as_str())
-            .or_else(|| self.keywords.aliases.get_key_value(first))
-            .filter(|_| root);
-        if let Some((keyword, alias)) = alias
+        let alias = self.alias_named(session, first).filter(|_| root);
+        if let Some(((keyword, alias), by_subject)) = alias
             && let Some(source) = self.alias_source(session, alias)
+            && let offers_verb = self.verb_choice(session, source).is_some()
+            && (offers_verb || !by_subject)
         {
+            if offers_verb && let Err(at) = session.by_verb.binary_search(&source) {
+                session.by_verb.insert(at, source);
+            }
             named.push(Keyword {
                 source,
                 alias: true,
@@ -689,6 +821,10 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
                 frecency: None,
                 tier: Tier::Exact,
             });
+        }
+        if session.verb.is_some() {
+            let first = first.to_owned();
+            self.add_keyed_subject(session, &first, &mut named);
         }
         for Keyword {
             source,
@@ -730,6 +866,48 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             }
         }
         primary
+    }
+
+    /// The Alias the session's query names, typed alone or before an
+    /// Argument as its `first` word, or else as the subject of its verb, and
+    /// whether it is the subject.
+    fn alias_named(&self, session: &Session, first: &str) -> Option<((&String, &Alias), bool)> {
+        let aliases = &self.keywords.aliases;
+        if let Some(named) = aliases
+            .get_key_value(session.key.as_str())
+            .or_else(|| aliases.get_key_value(first))
+        {
+            return Some((named, false));
+        }
+        let subject = query_key(&session.verb.as_ref()?.subject);
+        Some((aliases.get_key_value(subject.as_str())?, true))
+    }
+
+    /// Adds to `named` the Items the first word of the session's verb's
+    /// subject names by their keyword, as it would typed alone, among those
+    /// that offer the verb, unless that word is `first`, the query's, which
+    /// named them already.
+    fn add_keyed_subject(&self, session: &mut Session, first: &str, named: &mut Vec<Keyword>) {
+        let Some(subject) = session.verb.as_ref().map(|verb| query_key(&verb.subject)) else {
+            return;
+        };
+        let Some(subject_first) = subject.split(' ').next().filter(|&word| word != first) else {
+            return;
+        };
+        for slot in self.index.keyed(subject_first, session.reach) {
+            let source = Source::Indexed(slot);
+            match session.by_verb.binary_search(&source) {
+                Ok(_) => {}
+                Err(at) if self.verb_choice(session, source).is_some() => session.by_verb.insert(at, source),
+                Err(_) => continue,
+            }
+            named.push(Keyword {
+                source,
+                alias: false,
+                frecency: None,
+                tier: Tier::Exact,
+            });
+        }
     }
 
     /// Ranks the strongest Learned choice that applies and is among the

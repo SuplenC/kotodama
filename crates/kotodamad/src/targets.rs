@@ -142,6 +142,14 @@ impl Targets {
         Ok(changed)
     }
 
+    /// Every targeted Action, with the Extension that runs it, whichever
+    /// Identities it is offered on.
+    pub fn actions(&self) -> impl Iterator<Item = (ExtensionId, &Action)> {
+        self.actions
+            .iter()
+            .map(|targeted| (targeted.extension, &targeted.action))
+    }
+
     /// The Actions offered on the Results of `identity`, each with the
     /// Extension that runs it, in Extension order.
     pub fn on(&self, identity: &str) -> impl Iterator<Item = (ExtensionId, &Action)> {

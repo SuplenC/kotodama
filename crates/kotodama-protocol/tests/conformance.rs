@@ -425,6 +425,10 @@ fn results_messages() -> Vec<ToFrontEnd> {
                 highlights: vec![0, 1, 4],
                 alias: Some("code".into()),
                 unavailable: None,
+                primary: Some(ActionRef {
+                    extension: "kubaos".into(),
+                    id: "pin-version".into(),
+                }),
             }],
             scope: None,
         },
@@ -669,6 +673,7 @@ fn unavailable_row() -> ShownResult {
         highlights: vec![],
         alias: Some("ff".into()),
         unavailable: Some("apps isn't running".into()),
+        primary: None,
     }
 }
 

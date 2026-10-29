@@ -254,10 +254,11 @@ pub struct ShownResult {
     /// Other Extensions' Actions for this Item's kind or targeted at its
     /// Identity, grouped by Extension, then the Daemon's own, under the
     /// Extension name `kotodama`, such as `forget` on a Result the History
-    /// keeps anything for. The Action panel lists them after the Item's own
-    /// Actions, so none is ever the primary Action, and lists every
+    /// keeps anything for. The Action panel lists the primary Action first,
+    /// then the Item's other own Actions, then these, and every
     /// [`Destructive`](crate::ActionRole::Destructive) Action but the primary
-    /// after them all. A shortcut that clashes with the owner's is dropped.
+    /// after them all; one of these is primary only when `primary` names it.
+    /// A shortcut that clashes with the owner's is dropped.
     pub contributed: Vec<OfferedAction>,
     /// The positions, in characters, of the title's characters that matched the
     /// query.
@@ -269,6 +270,13 @@ pub struct ShownResult {
     /// its subtitle: the Item an Alias names is gone, or its Extension is
     /// down. Such a Result carries no Actions.
     pub unavailable: Option<String>,
+    /// The Action Enter runs, when the query chose one by its `keywords`
+    /// other than the Item's first own Action: `remove chrome` makes the
+    /// Remove Action primary on Google Chrome. The Action is among the
+    /// Item's own Actions, with the Result's `extension`, or among
+    /// `contributed`. `None` when Enter runs the first of the Item's own
+    /// Actions.
+    pub primary: Option<ActionRef>,
 }
 
 /// A [`ShownResult`] as it arrives, before its Item is checked.
@@ -280,6 +288,7 @@ struct ShownResultOwned {
     highlights: Vec<u32>,
     alias: Option<String>,
     unavailable: Option<String>,
+    primary: Option<ActionRef>,
 }
 
 impl TryFrom<ShownResultOwned> for ShownResult {
@@ -297,6 +306,7 @@ impl TryFrom<ShownResultOwned> for ShownResult {
             highlights: wire.highlights,
             alias: wire.alias,
             unavailable: wire.unavailable,
+            primary: wire.primary,
         })
     }
 }

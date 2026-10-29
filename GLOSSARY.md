@@ -74,7 +74,7 @@ _Avoid_: Delayed result, async result
 
 **Action**:
 Something the user can do to a Result; every Result has one primary Action and may have more, listed in the Action panel.
-_Avoid_: Command, handler, verb
+_Avoid_: Command, handler, verb (a Verb is a word of the query that names one)
 
 **Contributed action**:
 An Action one Extension offers on Items another Extension owns: on every Item of a given Item kind, such as "Pin a version here" on a project, or, when targeted, on every Result whose Identity the contributing Extension names while it runs, such as "Remove" on the apps a package manager installed.
@@ -83,6 +83,10 @@ _Avoid_: Foreign action, plugin action, extension action
 **Action role**:
 What sort of Action an Action is, which a Front end may draw differently: normal, destructive (it removes or destroys something, and the Action panel lists it last unless it is primary) or form (it asks for something in a form first). The Extension sets it; the Daemon also reports form for an Action whose required Arguments the query hasn't filled, unless it is destructive. Whether the Action asks before it runs is apart from its role.
 _Avoid_: Action type, action style, danger flag
+
+**Verb**:
+A word of the query that names an Action by one of its keywords, whole or by its first three letters or more, as `remove` or `rem` in `remove chrome`. The rest of the query, its subject, finds the Results, ranked as it alone would rank them, and Enter runs that Action on each that offers it. A verb alone chooses nothing, and the words of an Action's title are never verbs. A pick through a verb counts towards the query's Learned choice and adds nothing to Frecency.
+_Avoid_: Command word, action word
 
 **Action catalog**:
 The description of every Action on offer (its title, Item kind, Arguments and Extension) that an Extension may ask to read; it never includes the Items themselves.
@@ -125,7 +129,7 @@ The score that combines how often and how recently the user picked a Result, and
 _Avoid_: Popularity, history score
 
 **Learned choice**:
-A Result the user repeatedly picked for a given query, which that query, and the queries that extend it or that it extends, then rank first, over the Results it was picked over.
+A Result the user repeatedly picked for a given query, which that query, and the queries that extend it or that it extends, then rank first, over the Results it was picked over. A pick through a Verb counts towards one too.
 _Avoid_: Pin, favorite
 
 **Empty query**:

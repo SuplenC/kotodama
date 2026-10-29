@@ -48,6 +48,7 @@ mod segment;
 mod server;
 mod targets;
 pub mod usage;
+mod verbs;
 mod views;
 
 use std::io::Write;

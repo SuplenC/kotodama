@@ -67,11 +67,17 @@ impl Store for Nothing {
 pub const START: u64 = 1_792_485_000;
 
 /// The Extensions every Setup runs: `apps` holds the corpus, `clipboard`
-/// whatever a bench sends it.
+/// whatever a bench sends it, and offers [`VERB_ACTION`].
 pub const APPS: ExtensionId = ExtensionId(0);
 pub const CLIPBOARD: ExtensionId = ExtensionId(1);
 /// The emoji Extension, which `Setup::with_emoji` runs too.
 const EMOJI: ExtensionId = ExtensionId(2);
+/// A targeted Contributed action with keywords, aimed at no Item: the
+/// Daemon's table of Action keywords holds its verbs, as on a desktop with a
+/// package manager, and a query is looked up there whether it names one or
+/// not.
+const VERB_ACTION: &str = "[[contributed_actions]]\ntargeted = true\nid = \"remove\"\ntitle = \"Remove\"\n\
+                           keywords = [\"remove\", \"uninstall\", \"delete\"]\nrole = \"destructive\"";
 /// The menu, and a `kotodama toggle` that only passes commands on.
 pub const MENU: FrontEndId = FrontEndId(0);
 pub const COMMAND: FrontEndId = FrontEndId(1);
@@ -152,7 +158,10 @@ impl Setup {
         let found: Vec<Found> = names
             .iter()
             .map(|name| {
-                let toml = format!("name = \"{name}\"\ncommand = [\"x\"]");
+                let mut toml = format!("name = \"{name}\"\ncommand = [\"x\"]\n");
+                if *name == "clipboard" {
+                    toml.push_str(VERB_ACTION);
+                }
                 Found::new(Manifest::from_toml(&toml).unwrap(), PathBuf::from("/")).unwrap()
             })
             .collect();

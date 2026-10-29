@@ -45,12 +45,20 @@ const UNAVAILABLE: i32 = 0x106;
 /// The role of the Action Enter runs (`normal`, `destructive` or `form`),
 /// or empty when nothing runs.
 const PRIMARY_ROLE: i32 = 0x107;
+/// The title of the Action Enter runs, or empty when nothing runs.
+const PRIMARY_TITLE: i32 = 0x108;
+/// Whether the query chose the Action Enter runs by one of its keywords, in
+/// place of the Item's usual first Action, as `remove chrome` does.
+const PRIMARY_CHOSEN: i32 = 0x109;
 
 impl KotodamaSearch {
     pub(crate) fn data(&self, index: &QModelIndex, role: i32) -> QVariant {
         let Some(row) = usize::try_from(index.row()).ok().and_then(|row| self.rows.get(row)) else {
             return QVariant::default();
         };
+        if role == PRIMARY_CHOSEN {
+            return QVariant::from(&row.primary_chosen());
+        }
         let text = match role {
             TITLE => QString::from(&row.title),
             SUBTITLE => QString::from(&row.subtitle),
@@ -60,6 +68,7 @@ impl KotodamaSearch {
             ALIAS => QString::from(row.alias.as_deref().unwrap_or_default()),
             UNAVAILABLE => QString::from(row.unavailable.as_deref().unwrap_or_default()),
             PRIMARY_ROLE => QString::from(row.primary_role().map(ActionRole::as_str).unwrap_or_default()),
+            PRIMARY_TITLE => QString::from(row.primary_title()),
             _ => return QVariant::default(),
         };
         QVariant::from(&text)
@@ -80,6 +89,8 @@ impl KotodamaSearch {
             (ALIAS, "alias"),
             (UNAVAILABLE, "unavailable"),
             (PRIMARY_ROLE, "primaryRole"),
+            (PRIMARY_TITLE, "primaryTitle"),
+            (PRIMARY_CHOSEN, "primaryChosen"),
         ] {
             roles.insert(role, QByteArray::from(name));
         }

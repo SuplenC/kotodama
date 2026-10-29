@@ -48,6 +48,9 @@ fn drop_setup(setup: Setup) {
 #[bench::next_keystroke("firefo", "firefox")]
 // Two words pasted into a cleared box: no last search to narrow.
 #[bench::two_words_pasted("", "fire tool")]
+// A verb and its subject pasted: the subject is searched too, for the Items
+// that offer the verb.
+#[bench::verb_named("", "remove fire")]
 fn keystroke((mut setup, query): (Setup, &'static str)) -> Setup {
     black_box(setup.query(black_box(query)));
     setup

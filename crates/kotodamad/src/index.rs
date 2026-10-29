@@ -263,6 +263,9 @@ pub struct Index {
     /// from an earlier one knows when it can't be trusted. A change to
     /// Items' Actions alone leaves it.
     keys_version: u64,
+    /// Bumped whenever a Segment put in may offer Action keywords others
+    /// didn't, or is emptied: the Daemon's table of them is built again.
+    verbs_version: u64,
     /// Where the Segments keep their payloads: a file in this directory, or
     /// memory.
     dir: Option<Arc<Path>>,
@@ -379,6 +382,9 @@ impl Index {
                 segment.edit(edit);
             }
             keys_changed |= segment.keys_changed();
+            if segment.verbs_changed() {
+                self.verbs_version += 1;
+            }
         }
         if keys_changed {
             self.keys_version += 1;
@@ -392,6 +398,9 @@ impl Index {
         self.version += 1;
         if segment.keys_changed() {
             self.keys_version += 1;
+        }
+        if segment.verbs_changed() {
+            self.verbs_version += 1;
         }
         std::mem::replace(&mut self.segments[at], segment)
     }
@@ -679,8 +688,27 @@ impl Index {
             let segment = at as u32;
             self.segments[at]
                 .offering(kind, action)
+                .into_iter()
                 .map(move |row| Slot { segment, row })
         })
+    }
+
+    /// Every keyword of the Actions the Indexed items offer, folded, with
+    /// repeats.
+    pub fn verbs(&self) -> impl Iterator<Item = &str> {
+        self.segments.iter().flat_map(|segment| segment.verbs())
+    }
+
+    /// Counts up whenever the Action keywords [`Index::verbs`] gives may
+    /// have changed.
+    pub fn verbs_version(&self) -> u64 {
+        self.verbs_version
+    }
+
+    /// The id of the first Action of the Item in `slot` with a keyword
+    /// `names` accepts, given folded.
+    pub fn named_action(&self, slot: Slot, names: impl Fn(&str) -> bool) -> Option<&str> {
+        self.segments.get(slot.segment as usize)?.named_action(slot.row, names)
     }
 
     /// Scores every Item within `reach` against `pattern`, or only the slots

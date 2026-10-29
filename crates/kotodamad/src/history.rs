@@ -898,21 +898,47 @@ impl History {
     /// choice was last picked replaces it. Returns the change, to undo it.
     pub fn pick(&mut self, extension: &str, id: &str, query: &str, above: &[ResultKey], when: When) -> Change {
         let mut change = self.bump(extension, id, when);
-        let at = when.at;
-
-        let key = query_key(query);
-        if !key.is_empty() {
-            let before = self.learned.get(&key).cloned();
-            let learned = self.learned.entry(key.clone()).or_insert_with(|| Learned::empty(at));
-            learned.add(&(extension.to_owned(), id.to_owned()), above, at, &self.settings);
-            let after = Some(learned.clone());
-            change.learned.push(Replaced { key, before, after });
-            if let Some(pick) = &mut change.pick {
-                pick.learned = Some((extension.to_owned(), id.to_owned()));
-            }
-        }
+        self.learn_into(&mut change, extension, id, query, above, when.at);
         self.trim(&mut change);
         change
+    }
+
+    /// Records a pick towards `query`'s Learned choice alone, as
+    /// [`History::pick`] does, with nothing added to Frecency.
+    pub fn learn(&mut self, extension: &str, id: &str, query: &str, above: &[ResultKey], when: When) -> Change {
+        self.version += 1;
+        let mut change = Change {
+            pick: Some(Pick { when, learned: None }),
+            ..Change::default()
+        };
+        self.learn_into(&mut change, extension, id, query, above, when.at);
+        self.trim(&mut change);
+        change
+    }
+
+    /// Counts a pick of `extension`'s `id` at `at` towards `query`'s Learned
+    /// choice, unless `query` is empty, and notes it in `change`.
+    fn learn_into(
+        &mut self,
+        change: &mut Change,
+        extension: &str,
+        id: &str,
+        query: &str,
+        above: &[ResultKey],
+        at: u64,
+    ) {
+        let key = query_key(query);
+        if key.is_empty() {
+            return;
+        }
+        let before = self.learned.get(&key).cloned();
+        let learned = self.learned.entry(key.clone()).or_insert_with(|| Learned::empty(at));
+        learned.add(&(extension.to_owned(), id.to_owned()), above, at, &self.settings);
+        let after = Some(learned.clone());
+        change.learned.push(Replaced { key, before, after });
+        if let Some(pick) = &mut change.pick {
+            pick.learned = Some((extension.to_owned(), id.to_owned()));
+        }
     }
 
     /// Records a pick for Frecency alone, with nothing learned for the query.

@@ -146,7 +146,11 @@ fn describe(label: &str) -> Option<&'static str> {
         "FromFrontEnd::undo" => "Undoes the change `offer_undo` offered.",
         "FromFrontEnd::shown" => "The menu became visible.",
         "FromFrontEnd::complete_path" => "Asks for the paths that complete what is typed into a form's file field.",
-        "ToFrontEnd::results" => "The whole ranked list for the query, best first, and the app it is in.",
+        "ToFrontEnd::results" => {
+            "The whole ranked list for the query, best first, and the app it is in. A Result's `primary` names \
+             the Action Enter runs when the query chose one by its keywords, as `remove chrome` does; without \
+             it, Enter runs the Item's first own Action."
+        }
         "ToFrontEnd::status" => "The Extensions that are down, and the problems the user can fix.",
         "ToFrontEnd::close" => "Close the menu, then answer `closed`.",
         "ToFrontEnd::action_failed" => "An Action failed; show `message` and stay open.",
