@@ -26,6 +26,7 @@ use std::time::Duration;
 use kotodama_protocol::Channel;
 use kotodama_protocol::ChannelWriter;
 use kotodama_protocol::Error;
+use kotodama_protocol::FieldError;
 use kotodama_protocol::FromFrontEnd;
 use kotodama_protocol::Hello;
 use kotodama_protocol::Job;
@@ -117,6 +118,13 @@ pub enum Update {
         field: String,
         text: String,
         entries: Vec<PathCompletion>,
+    },
+    /// The Daemon kept a form this Front end submitted from its Extension:
+    /// these fields are wrong.
+    FormErrors {
+        extension: String,
+        view: String,
+        errors: Vec<FieldError>,
     },
     /// The Daemon hung up; the thread connects again.
     Disconnected,
@@ -368,6 +376,15 @@ fn update(message: ToFrontEnd) -> Option<Update> {
             field,
             text,
             entries,
+        },
+        ToFrontEnd::FormErrors {
+            extension,
+            view,
+            errors,
+        } => Update::FormErrors {
+            extension,
+            view,
+            errors,
         },
     })
 }

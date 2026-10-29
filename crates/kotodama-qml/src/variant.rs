@@ -5,7 +5,7 @@
 //! # Owns
 //!
 //! - The keys of each map QML reads: [`view`], [`jobs`], [`actions`], [`examples`] and
-//!   [`completions`].
+//!   [`completions`], and the list [`field_errors`].
 //!
 //! # Not here
 //!
@@ -20,9 +20,11 @@ use cxx_qt_lib::QMapPair_QString_QVariant;
 use cxx_qt_lib::QString;
 use cxx_qt_lib::QVariant;
 use kotodama_protocol::Example;
+use kotodama_protocol::FormField;
 use kotodama_protocol::FormInput;
 use kotodama_protocol::Job;
 use kotodama_protocol::JobState;
+use kotodama_protocol::SelectOption;
 use kotodama_protocol::Value;
 use kotodama_protocol::ViewContent;
 
@@ -117,13 +119,122 @@ pub fn jobs(views: &Views) -> List {
     list(views.running().map(|(extension, running)| job(extension, running)))
 }
 
+/// A form field's value as QML reads it: a boolean, a string, a number, or
+/// a list of strings.
+fn form_value(value: &Value) -> QVariant {
+    match value {
+        Value::Bool(checked) => QVariant::from(checked),
+        Value::String(value) => text(value),
+        Value::Integer(n) => QVariant::from(n),
+        Value::Float(n) => QVariant::from(n),
+        Value::Array(values) => QVariant::from(&variants(values.iter().map(form_value))),
+        Value::Table(_) => QVariant::default(),
+    }
+}
+
+/// `values` as a JavaScript array.
+fn variants(values: impl IntoIterator<Item = QVariant>) -> List {
+    let mut out = List::default();
+    for value in values {
+        out.append(value);
+    }
+    out
+}
+
+/// What is wrong with each field of the top form, in field order, as the
+/// Daemon said when it was submitted: a string per field, empty for a field
+/// that is right. Empty when the top View isn't a form.
+pub fn field_errors(views: &Views) -> List {
+    variants(views.errors().iter().map(|message| text(message)))
+}
+
+/// A form field as QML reads it; [`view`] lists the keys.
+fn form_field(field: &FormField, value: &Value) -> Map {
+    let value = form_value(value);
+    let mut accepted = List::default();
+    let (mut min, mut max, mut step, mut time, mut said) = (None, None, None, false, "");
+    let select = |options: &[SelectOption]| {
+        list(
+            options
+                .iter()
+                .map(|option| map([("value", text(&option.value)), ("label", text(&option.label))])),
+        )
+    };
+    let (kind, placeholder, secret, options) = match &field.input {
+        FormInput::Text {
+            placeholder, secret, ..
+        } => ("text", placeholder.as_deref(), *secret, List::default()),
+        FormInput::Checkbox { .. } => ("checkbox", None, false, List::default()),
+        FormInput::Select { options, .. } => ("select", None, false, select(options)),
+        FormInput::MultiSelect { options, .. } => ("multiselect", None, false, select(options)),
+        FormInput::TextArea { placeholder, .. } => ("textarea", placeholder.as_deref(), false, List::default()),
+        FormInput::Number {
+            min: least,
+            max: most,
+            step: by,
+            ..
+        } => {
+            (min, max, step) = (*least, *most, *by);
+            ("number", None, false, List::default())
+        }
+        FormInput::Date { time: with_time, .. } => {
+            time = *with_time;
+            ("date", None, false, List::default())
+        }
+        FormInput::Description { text } => {
+            said = text;
+            ("description", None, false, List::default())
+        }
+        FormInput::File {
+            accept,
+            folder,
+            placeholder,
+            ..
+        } => {
+            for kind in accept {
+                accepted.append(text(kind));
+            }
+            let kind = if *folder { "folder" } else { "file" };
+            (kind, placeholder.as_deref(), false, List::default())
+        }
+    };
+    let number = |n: Option<f64>| n.map_or_else(QVariant::default, |n| QVariant::from(&n));
+    map([
+        ("id", text(&field.id)),
+        ("label", text(&field.label)),
+        ("kind", text(kind)),
+        ("optional", QVariant::from(&field.optional)),
+        ("pattern", text(field.pattern.as_deref().unwrap_or_default())),
+        ("min", number(min)),
+        ("max", number(max)),
+        ("step", number(step)),
+        ("time", QVariant::from(&time)),
+        ("text", text(said)),
+        ("placeholder", text(placeholder.unwrap_or_default())),
+        ("secret", QVariant::from(&secret)),
+        ("options", QVariant::from(&options)),
+        ("accept", QVariant::from(&accepted)),
+        ("value", value),
+    ])
+}
+
 /// The top View, or an empty map at the search. `kind` is `list`, `form`,
 /// `detail` or `progress`; the other keys depend on it:
 ///
 /// - a list has `filter`, what is typed to filter it;
-/// - a form has `fields`, each `{label, kind, placeholder, secret, options, accept, value}` with
-///   `kind` `text`, `checkbox`, `select`, `file` or `folder` (a path, `accept` listing the file
-///   extensions or MIME types a `file` takes, none for any), and `submit`;
+/// - a form has `fields`, each `{id, label, kind, optional, pattern, placeholder, secret, options,
+///   accept, min, max, step, time, text, value}`, and `submit`. `optional` is false for a required
+///   field and `pattern` empty without one. `kind` is one of:
+///   - `text`, a line of text, `secret` hiding it, and `textarea`, several lines; `value` a string;
+///   - `checkbox`, `value` a boolean;
+///   - `select`, one of `options`, each `{value, label}`, and `multiselect`, any number of them,
+///     `value` the list of chosen `value`s;
+///   - `file` or `folder`, a path, `accept` listing the file extensions or MIME types a `file`
+///     takes, none for any;
+///   - `number`, `min`, `max` and `step` each a number or `undefined` without one, `value` a
+///     number, or the text typed when it isn't one, or empty;
+///   - `date`, `time` true when it takes a time of day too, `value` an ISO 8601 string;
+///   - `description`, `text` to read, with no value;
 /// - a detail has `markdown` and `metadata`, each `{label, value}`;
 /// - a progress View has `job`, as [`jobs`] lists them.
 pub fn view(views: &Views) -> Map {
@@ -144,52 +255,10 @@ pub fn view(views: &Views) -> Map {
         ViewContent::Form { fields, submit } => {
             put("kind", text("form"));
             put("submit", text(submit));
-            let fields = fields.iter().zip(&open.values).map(|(field, value)| {
-                let value = match value {
-                    Value::Bool(checked) => QVariant::from(checked),
-                    Value::String(value) => text(value),
-                    _ => QVariant::default(),
-                };
-                let mut accepted = List::default();
-                let (kind, placeholder, secret, options) = match &field.input {
-                    FormInput::Text {
-                        placeholder, secret, ..
-                    } => ("text", placeholder.as_deref(), *secret, List::default()),
-                    FormInput::Checkbox { .. } => ("checkbox", None, false, List::default()),
-                    FormInput::Select { options, .. } => (
-                        "select",
-                        None,
-                        false,
-                        list(
-                            options
-                                .iter()
-                                .map(|option| map([("value", text(&option.value)), ("label", text(&option.label))])),
-                        ),
-                    ),
-                    FormInput::File {
-                        accept,
-                        folder,
-                        placeholder,
-                        ..
-                    } => {
-                        for kind in accept {
-                            accepted.append(text(kind));
-                        }
-                        let kind = if *folder { "folder" } else { "file" };
-                        (kind, placeholder.as_deref(), false, List::default())
-                    }
-                };
-                map([
-                    ("id", text(&field.id)),
-                    ("label", text(&field.label)),
-                    ("kind", text(kind)),
-                    ("placeholder", text(placeholder.unwrap_or_default())),
-                    ("secret", QVariant::from(&secret)),
-                    ("options", QVariant::from(&options)),
-                    ("accept", QVariant::from(&accepted)),
-                    ("value", value),
-                ])
-            });
+            let fields = fields
+                .iter()
+                .zip(&open.values)
+                .map(|(field, value)| form_field(field, value));
             put("fields", QVariant::from(&list(fields)));
         }
         ViewContent::Detail { markdown, metadata } => {

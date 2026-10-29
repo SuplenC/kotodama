@@ -84,6 +84,11 @@ pub mod qobject {
         /// The place in the top form of the field `completions` complete, or
         /// -1.
         #[qproperty(i32, completing_field, cxx_name = "completingField", READ, NOTIFY)]
+        /// What is wrong with each field of the top form, in field order: a
+        /// string per field, empty for one that is right, as the Daemon said
+        /// when the form was last submitted. Submitting clears them. See
+        /// `variant::field_errors`.
+        #[qproperty(QList_QVariant, field_errors, cxx_name = "fieldErrors", READ, NOTIFY)]
         /// The Toast: what the change to the History that can be undone did,
         /// such as `Forgot “Firefox”`, or empty when there is none.
         #[qproperty(QString, toast, READ, NOTIFY)]
@@ -173,7 +178,8 @@ pub mod qobject {
         fn pop_view(self: Pin<&mut KotodamaSearch>) -> bool;
 
         /// Sets the text of the top form's `field`th field, or the value of
-        /// the option chosen in a select.
+        /// the option chosen in a select. A number field takes the text
+        /// typed, kept as a number when it is one.
         #[qinvokable]
         #[cxx_name = "setText"]
         fn set_text(self: Pin<&mut KotodamaSearch>, field: i32, text: &QString) -> bool;
@@ -190,6 +196,13 @@ pub mod qobject {
         /// a file field, or the Daemon isn't there to ask.
         #[qinvokable]
         fn complete(self: Pin<&mut KotodamaSearch>, field: i32, text: &QString) -> bool;
+
+        /// Ticks the option `value` of the top form's `field`th field, a
+        /// multi-select, or unticks it. False if there is no such field or
+        /// option.
+        #[qinvokable]
+        #[cxx_name = "toggleOption"]
+        fn toggle_option(self: Pin<&mut KotodamaSearch>, field: i32, value: &QString) -> bool;
 
         /// Submits the top form. False if the top View isn't a form, or the
         /// Daemon isn't there to take it.

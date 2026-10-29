@@ -10,6 +10,7 @@
 //! - A list View's rows as [`rows::diff`](crate::rows::diff) takes them ([`Listed`]), and its
 //!   Contributed actions by Item kind.
 //! - The file field being completed, and the Daemon's paths for it.
+//! - The Daemon's errors for the fields of a form submitted.
 //!
 //! # Not here
 //!
@@ -22,6 +23,7 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
+use kotodama_protocol::FieldError;
 use kotodama_protocol::FormInput;
 use kotodama_protocol::FromFrontEnd;
 use kotodama_protocol::Item;
@@ -30,6 +32,7 @@ use kotodama_protocol::JobState;
 use kotodama_protocol::ListMatch;
 use kotodama_protocol::OfferedAction;
 use kotodama_protocol::PathCompletion;
+use kotodama_protocol::SelectOption;
 use kotodama_protocol::Table;
 use kotodama_protocol::Value;
 use kotodama_protocol::View;
@@ -65,6 +68,10 @@ pub struct Open {
     pub view: View,
     /// A form's values, one per field, in field order. Empty for other Views.
     pub values: Vec<Value>,
+    /// What is wrong with each of a form's fields, in field order, empty
+    /// for a field that is right, as the Daemon last said; empty for other
+    /// Views.
+    errors: Vec<String>,
     /// A list View's Contributed actions by kind, each list shared by the
     /// rows of that kind.
     contributed: Shared,
@@ -85,9 +92,10 @@ impl Open {
             ViewContent::Form { fields, .. } => fields
                 .iter()
                 .map(|field| match &field.input {
-                    FormInput::Text { default, .. } | FormInput::File { default, .. } => {
-                        Value::String(default.clone().unwrap_or_default())
-                    }
+                    FormInput::Text { default, .. }
+                    | FormInput::File { default, .. }
+                    | FormInput::TextArea { default, .. }
+                    | FormInput::Date { default, .. } => Value::String(default.clone().unwrap_or_default()),
                     FormInput::Checkbox { default } => Value::Bool(*default),
                     FormInput::Select { options, default } => Value::String(
                         default
@@ -95,14 +103,21 @@ impl Open {
                             .or_else(|| options.first().map(|option| option.value.clone()))
                             .unwrap_or_default(),
                     ),
+                    FormInput::Number { default, .. } => default.map_or_else(|| Value::String(String::new()), number),
+                    FormInput::MultiSelect { options, default } => {
+                        chosen(options, |value| default.iter().any(|chosen| chosen == value))
+                    }
+                    FormInput::Description { .. } => Value::String(String::new()),
                 })
                 .collect(),
             _ => Vec::new(),
         };
+        let errors = vec![String::new(); values.len()];
         Open {
             extension,
             view,
             values,
+            errors,
             contributed: shared(contributed),
             filter: String::new(),
             matches: None,
@@ -276,7 +291,8 @@ impl Views {
     }
 
     /// Replaces the open View with the same id where it is. What was typed
-    /// into a field the new form still has is kept, and so is a list's
+    /// into a field the new form still has is kept, with the Daemon's error
+    /// for it, and so is a list's
     /// filter, while it is still a list. False if no such View is open, or if
     /// the new form waits for the Daemon's matches for the filter, so what
     /// shows stays as it is.
@@ -301,6 +317,9 @@ impl Views {
                     .position(|old| old.id == field.id && old.input == field.input)
                 {
                     new.values[n] = open.values[at].clone();
+                }
+                if let Some(at) = old.iter().position(|old| old.id == field.id) {
+                    new.errors[n] = std::mem::take(&mut open.errors[at]);
                 }
             }
         }
@@ -367,8 +386,11 @@ impl Views {
     }
 
     /// Sets the value of the top form's `field`th field. False if there is no
-    /// such field or the value doesn't suit it: a string for a text field or
-    /// one of a select's option values, a boolean for a checkbox.
+    /// such field or the value doesn't suit it: a string for a text, text
+    /// area, date or file field or one of a select's option values, a
+    /// boolean for a checkbox, a number or the text typed for a number field,
+    /// which keeps text that isn't a number for the Daemon to refuse, and a
+    /// list of option values for a multi-select. A description takes none.
     pub fn set_value(&mut self, field: usize, value: Value) -> bool {
         let Some(open) = self.stack.last_mut() else {
             return false;
@@ -379,31 +401,112 @@ impl Views {
         let Some(input) = fields.get(field).map(|field| &field.input) else {
             return false;
         };
-        let fits = match (input, &value) {
-            (FormInput::Text { .. } | FormInput::File { .. }, Value::String(_))
-            | (FormInput::Checkbox { .. }, Value::Bool(_)) => true,
-            (FormInput::Select { options, .. }, Value::String(chosen)) => {
-                options.iter().any(|option| option.value == *chosen)
+        let value = match (input, value) {
+            (FormInput::Number { .. }, Value::String(typed)) => match typed.trim().parse::<f64>() {
+                Ok(n) if n.is_finite() => number(n),
+                _ => Value::String(typed),
+            },
+            (FormInput::Number { .. }, Value::Integer(n)) => Value::Integer(n),
+            (FormInput::Number { .. }, Value::Float(n)) if n.is_finite() => number(n),
+            (FormInput::MultiSelect { options, .. }, Value::Array(values)) => {
+                let wanted: Vec<&str> = values
+                    .iter()
+                    .filter_map(|value| match value {
+                        Value::String(value) => Some(value.as_str()),
+                        _ => None,
+                    })
+                    .collect();
+                if wanted.len() != values.len() || !wanted.iter().all(|value| is_option(options, value)) {
+                    return false;
+                }
+                chosen(options, |value| wanted.contains(&value))
             }
-            _ => false,
+            (
+                FormInput::Text { .. } | FormInput::File { .. } | FormInput::TextArea { .. } | FormInput::Date { .. },
+                value @ Value::String(_),
+            )
+            | (FormInput::Checkbox { .. }, value @ Value::Bool(_)) => value,
+            (FormInput::Select { options, .. }, Value::String(chosen)) if is_option(options, &chosen) => {
+                Value::String(chosen)
+            }
+            _ => return false,
         };
-        if fits {
-            open.values[field] = value;
-        }
-        fits
+        open.values[field] = value;
+        true
     }
 
-    /// Submits the top form: what to send the Daemon.
-    pub fn submit(&self) -> Option<FromFrontEnd> {
-        let open = self.stack.last()?;
+    /// Ticks the option `value` of the top form's `field`th field, a
+    /// multi-select, or unticks it if it was ticked. False if there is no
+    /// such field or option.
+    pub fn toggle_option(&mut self, field: usize, value: &str) -> bool {
+        let Some(open) = self.stack.last_mut() else {
+            return false;
+        };
+        let ViewContent::Form { fields, .. } = &open.view.content else {
+            return false;
+        };
+        let Some(FormInput::MultiSelect { options, .. }) = fields.get(field).map(|field| &field.input) else {
+            return false;
+        };
+        if !is_option(options, value) {
+            return false;
+        }
+        let ticked = |option: &str| match &open.values[field] {
+            Value::Array(values) => values
+                .iter()
+                .any(|ticked| matches!(ticked, Value::String(ticked) if ticked == option)),
+            _ => false,
+        };
+        let now_ticked = !ticked(value);
+        let toggled = chosen(
+            options,
+            |option| if option == value { now_ticked } else { ticked(option) },
+        );
+        open.values[field] = toggled;
+        true
+    }
+
+    /// The Daemon's `errors` for the form `view` of `extension`, which it
+    /// kept from the Extension. False, and nothing kept, unless the form is
+    /// open; true when it is the top View, whose errors show.
+    pub fn set_errors(&mut self, extension: &str, view: &str, errors: Vec<FieldError>) -> bool {
+        let Some(at) = self.stack.iter().position(|open| open.is(extension, view)) else {
+            return false;
+        };
+        let open = &mut self.stack[at];
+        let ViewContent::Form { fields, .. } = &open.view.content else {
+            return false;
+        };
+        let mut shown = vec![String::new(); fields.len()];
+        for error in errors {
+            if let Some(n) = fields.iter().position(|field| field.id == error.field) {
+                shown[n] = error.message;
+            }
+        }
+        open.errors = shown;
+        at + 1 == self.stack.len()
+    }
+
+    /// What is wrong with each field of the top form, in field order, empty
+    /// for a field that is right; empty when the top View isn't a form.
+    pub fn errors(&self) -> &[String] {
+        self.stack.last().map_or(&[], |open| &open.errors)
+    }
+
+    /// Submits the top form: what to send the Daemon. Its errors go; the
+    /// Daemon names what is still wrong.
+    pub fn submit(&mut self) -> Option<FromFrontEnd> {
+        let open = self.stack.last_mut()?;
         let ViewContent::Form { fields, .. } = &open.view.content else {
             return None;
         };
         let values: Table = fields
             .iter()
             .zip(&open.values)
+            .filter(|(field, _)| !matches!(field.input, FormInput::Description { .. }))
             .map(|(field, value)| (field.id.clone(), value.clone()))
             .collect();
+        open.errors.iter_mut().for_each(String::clear);
         Some(FromFrontEnd::SubmitForm {
             extension: open.extension.clone(),
             view: open.view.id.clone(),
@@ -516,6 +619,39 @@ impl Views {
         self.jobs
             .retain(|(by, job)| job.state == JobState::Running || stack.iter().any(|open| open.follows(by, &job.id)));
     }
+}
+
+/// The largest integer an `f64` holds exactly, 2^53: a whole number past it
+/// stays a float.
+const EXACT_INTEGERS: f64 = 9_007_199_254_740_992.0;
+
+/// `n` as a number field holds it: an integer when it is whole, as the
+/// Daemon sends it on.
+fn number(n: f64) -> Value {
+    if n.fract() == 0.0 && n.abs() < EXACT_INTEGERS {
+        #[expect(
+            clippy::cast_possible_truncation,
+            reason = "a whole number below 2^53 is an i64 exactly"
+        )]
+        Value::Integer(n as i64)
+    } else {
+        Value::Float(n)
+    }
+}
+
+fn is_option(options: &[SelectOption], value: &str) -> bool {
+    options.iter().any(|option| option.value == value)
+}
+
+/// A multi-select's value: the `options` that are `ticked`, in their order.
+fn chosen(options: &[SelectOption], ticked: impl Fn(&str) -> bool) -> Value {
+    Value::Array(
+        options
+            .iter()
+            .filter(|option| ticked(&option.value))
+            .map(|option| Value::String(option.value.clone()))
+            .collect(),
+    )
 }
 
 // `benches/filter.rs` compiles this file through `#[path]`, which looks for

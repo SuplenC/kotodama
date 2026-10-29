@@ -20,7 +20,9 @@ use std::sync::OnceLock;
 
 use cxx_qt::CxxQtType;
 use cxx_qt_lib::QString;
+use kotodama_protocol::FieldError;
 use kotodama_protocol::Job;
+use kotodama_protocol::PathCompletion;
 use kotodama_protocol::Scope;
 
 use crate::bridge::qobject::KotodamaSearch;
@@ -153,19 +155,51 @@ impl KotodamaSearch {
                 field,
                 text,
                 entries,
-            } => {
-                if self
-                    .as_mut()
-                    .rust_mut()
-                    .views
-                    .completed(&extension, &view, &field, &text, entries)
-                {
-                    self.as_mut().show_completions();
-                }
-                Shown::Same
-            }
+            } => self.take_completions(&extension, &view, &field, &text, entries),
+            Update::FormErrors {
+                extension,
+                view,
+                errors,
+            } => self.take_form_errors(&extension, &view, errors),
             Update::Disconnected => self.daemon_gone(),
         }
+    }
+
+    /// The Daemon's paths for what is typed into a file field, shown when
+    /// they answer what was typed last.
+    fn take_completions(
+        mut self: Pin<&mut Self>,
+        extension: &str,
+        view: &str,
+        field: &str,
+        text: &str,
+        entries: Vec<PathCompletion>,
+    ) -> Shown {
+        if self
+            .as_mut()
+            .rust_mut()
+            .views
+            .completed(extension, view, field, text, entries)
+        {
+            self.as_mut().show_completions();
+        }
+        Shown::Same
+    }
+
+    /// The Daemon's errors for the fields of a form submitted, shown when it
+    /// is the top View.
+    fn take_form_errors(mut self: Pin<&mut Self>, extension: &str, view: &str, errors: Vec<FieldError>) -> Shown {
+        if self.as_mut().rust_mut().views.set_errors(extension, view, errors) {
+            self.as_mut().show_field_errors();
+        }
+        Shown::Same
+    }
+
+    /// Shows what is wrong with the fields of the top form.
+    pub(crate) fn show_field_errors(mut self: Pin<&mut Self>) {
+        let errors = variant::field_errors(&self.views);
+        self.as_mut().rust_mut().field_errors = errors;
+        self.as_mut().field_errors_changed();
     }
 
     /// Shows the paths offered for the file field being completed.
@@ -288,6 +322,9 @@ impl KotodamaSearch {
         let deeper = this.depth != depth;
         this.depth = depth;
         self.as_mut().view_changed();
+        if !self.views.errors().is_empty() || !self.field_errors.is_empty() {
+            self.as_mut().show_field_errors();
+        }
         if self.completing_field >= 0 || self.views.completions().is_some() {
             self.as_mut().show_completions();
         }

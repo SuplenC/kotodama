@@ -1,4 +1,5 @@
 use kotodama_protocol::Action;
+use kotodama_protocol::FieldError;
 use kotodama_protocol::FormField;
 use kotodama_protocol::Fraction;
 use kotodama_protocol::Item;
@@ -20,11 +21,7 @@ fn detail(id: &str) -> View {
 }
 
 fn field(id: &str, input: FormInput) -> FormField {
-    FormField {
-        id: id.into(),
-        label: id.into(),
-        input,
-    }
+    FormField::new(id, id, input)
 }
 
 fn text(default: Option<&str>) -> FormInput {
@@ -559,4 +556,167 @@ fn a_replaced_view_gives_its_place_to_the_new_one_in_one_step() {
 
     views.replace("timer".into(), "not-open", detail("b"), none());
     assert_eq!(ids(&views), ["a", "p", "b"], "it is pushed all the same");
+}
+
+fn options(values: &[&str]) -> Vec<SelectOption> {
+    values
+        .iter()
+        .map(|value| SelectOption {
+            value: (*value).into(),
+            label: value.to_uppercase(),
+        })
+        .collect()
+}
+
+/// A form of every kind a field may be, as a timer's.
+fn every_kind() -> View {
+    form(vec![
+        field(
+            "notes",
+            FormInput::TextArea {
+                placeholder: None,
+                default: Some("Tea".into()),
+            },
+        ),
+        field(
+            "minutes",
+            FormInput::Number {
+                min: Some(1.0),
+                max: None,
+                step: Some(1.0),
+                default: Some(25.0),
+            },
+        ),
+        field(
+            "at",
+            FormInput::Date {
+                time: true,
+                default: None,
+            },
+        ),
+        field(
+            "days",
+            FormInput::MultiSelect {
+                options: options(&["mon", "tue", "wed"]),
+                default: vec!["tue".into(), "sun".into()],
+            },
+        ),
+        field(
+            "about",
+            FormInput::Description {
+                text: "Rings once.".into(),
+            },
+        ),
+    ])
+}
+
+fn submitted_values(views: &mut Views) -> Table {
+    match views.submit() {
+        Some(FromFrontEnd::SubmitForm { values, .. }) => values,
+        other => panic!("expected a form submitted, got {other:?}"),
+    }
+}
+
+#[test]
+fn every_kind_of_field_starts_with_its_default_and_a_description_sends_nothing() {
+    let mut views = Views::default();
+    views.push("timer".into(), every_kind(), none());
+
+    assert_eq!(
+        submitted_values(&mut views),
+        Table::from([
+            ("notes".into(), Value::String("Tea".into())),
+            ("minutes".into(), Value::Integer(25)),
+            ("at".into(), Value::String(String::new())),
+            ("days".into(), Value::Array(vec![Value::String("tue".into())])),
+        ])
+    );
+}
+
+#[test]
+fn a_number_typed_is_sent_as_a_number_and_anything_else_as_typed_for_the_daemon_to_refuse() {
+    let mut views = Views::default();
+    views.push("timer".into(), every_kind(), none());
+
+    assert!(views.set_value(1, Value::String("2.5".into())));
+    assert_eq!(submitted_values(&mut views)["minutes"], Value::Float(2.5));
+    assert!(views.set_value(1, Value::String("soon".into())));
+    assert_eq!(submitted_values(&mut views)["minutes"], Value::String("soon".into()));
+}
+
+#[test]
+fn an_option_of_a_multi_select_is_toggled_and_the_chosen_ones_are_sent_in_the_options_order() {
+    let mut views = Views::default();
+    views.push("timer".into(), every_kind(), none());
+
+    assert!(views.toggle_option(3, "wed"));
+    assert!(views.toggle_option(3, "mon"));
+    assert!(views.toggle_option(3, "tue"));
+    assert!(!views.toggle_option(3, "sun"), "not an option");
+    assert!(!views.toggle_option(0, "mon"), "not a multi-select");
+
+    assert_eq!(
+        submitted_values(&mut views)["days"],
+        Value::Array(vec![Value::String("mon".into()), Value::String("wed".into())])
+    );
+}
+
+#[test]
+fn a_description_takes_no_value() {
+    let mut views = Views::default();
+    views.push("timer".into(), every_kind(), none());
+
+    assert!(!views.set_value(4, Value::String("x".into())));
+}
+
+#[test]
+fn the_daemons_errors_show_under_their_fields_until_the_form_is_submitted_again() {
+    let mut views = Views::default();
+    views.push("timer".into(), every_kind(), none());
+    let errors = vec![
+        FieldError {
+            field: "at".into(),
+            message: "Required".into(),
+        },
+        FieldError {
+            field: "gone".into(),
+            message: "Required".into(),
+        },
+    ];
+
+    assert!(!views.set_errors("timer", "other", errors.clone()), "another form's");
+    assert!(views.set_errors("timer", "form", errors));
+    assert_eq!(views.errors(), ["", "", "Required", "", ""]);
+
+    views.submit();
+    assert_eq!(views.errors(), ["", "", "", "", ""]);
+}
+
+#[test]
+fn a_forms_errors_stay_with_their_fields_when_its_extension_updates_it() {
+    let mut views = Views::default();
+    views.push("timer".into(), every_kind(), none());
+    views.set_errors(
+        "timer",
+        "form",
+        vec![FieldError {
+            field: "at".into(),
+            message: "Required".into(),
+        }],
+    );
+    let ViewContent::Form { mut fields, submit } = every_kind().content else {
+        unreachable!()
+    };
+    fields.remove(0);
+
+    views.update(
+        "timer".into(),
+        View {
+            content: ViewContent::Form { fields, submit },
+            ..every_kind()
+        },
+        none(),
+    );
+
+    assert_eq!(views.errors(), ["", "Required", "", ""]);
 }
