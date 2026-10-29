@@ -56,7 +56,7 @@ pub const DEFAULT_RETRY_MAX: Duration = Duration::from_secs(30);
 pub const DEFAULT_SETTLE: Duration = Duration::from_millis(50);
 
 /// The top-level tables of the config. Anything else is a problem.
-const TABLES: [&str; 11] = [
+const TABLES: [&str; 12] = [
     "paths",
     "search",
     "extensions",
@@ -68,6 +68,7 @@ const TABLES: [&str; 11] = [
     "aliases",
     "quicklinks",
     "quicklink_defaults",
+    "files",
 ];
 
 /// The engine's settings, from the config's `[search]`, `[extensions]`,

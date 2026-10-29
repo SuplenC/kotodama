@@ -44,6 +44,7 @@ use kotodama_protocol::Action;
 use kotodama_protocol::ActionRef;
 use kotodama_protocol::CatalogEntry;
 use kotodama_protocol::Clipboard;
+use kotodama_protocol::FormField;
 use kotodama_protocol::FromExtension;
 use kotodama_protocol::FromFrontEnd;
 use kotodama_protocol::Item;
@@ -68,6 +69,8 @@ use crate::apps::App;
 use crate::apps::Apps;
 use crate::clock::Clock;
 use crate::clock::When;
+use crate::completion;
+use crate::completion::Completions;
 use crate::config;
 use crate::conflict::Conflict;
 use crate::discovery::Discovered;
@@ -224,6 +227,12 @@ pub enum Event {
     /// Items to keep resident, read on the indexing thread: the hot ones,
     /// planned there, and those a keyword or an Alias names.
     Kept(Kept),
+    /// The `completion` thread's answer to a Front end's request for the
+    /// paths that complete a file field.
+    Completed {
+        front_end: FrontEndId,
+        message: ToFrontEnd,
+    },
 }
 
 /// Every field but a Front end's `disconnect`, a closure.
@@ -277,6 +286,11 @@ impl fmt::Debug for Event {
             Event::ProgramsChanged => f.write_str("ProgramsChanged"),
             Event::Indexed(indexed) => f.debug_tuple("Indexed").field(indexed).finish(),
             Event::Kept(kept) => f.debug_tuple("Kept").field(kept).finish(),
+            Event::Completed { front_end, message } => f
+                .debug_struct("Completed")
+                .field("front_end", front_end)
+                .field("message", message)
+                .finish(),
         }
     }
 }
@@ -1233,6 +1247,8 @@ struct ArgumentForm {
     action: ActionRef,
     /// The Arguments already given or typed.
     arguments: BTreeMap<String, String>,
+    /// The form's fields, for completing its file fields.
+    fields: Vec<FormField>,
 }
 
 struct PendingOutput {
@@ -1369,6 +1385,11 @@ pub struct Daemon<L, D, S> {
     /// Where a file Argument's relative path is taken from, and what `~`
     /// stands for: `$HOME`. `None` leaves such paths as they were typed.
     home: Option<PathBuf>,
+    /// Completes what is typed into file fields, off this thread once
+    /// [`complete_in_background`](Self::complete_in_background) is called.
+    completions: Completions,
+    /// `[files]`, as of the last config.
+    files: completion::Settings,
 }
 
 /// The Extensions and the Front ends by count: the rest is the Index, the
@@ -1459,6 +1480,8 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             tiers: Tiers::default(),
             highlights: Vec::new(),
             home: env::var_os("HOME").map(PathBuf::from),
+            completions: Completions::default(),
+            files: completion::Settings::default(),
         };
         daemon.set_config(config, now);
         daemon
@@ -1489,6 +1512,14 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
     pub fn index_in_background(&mut self, events: Sender<Event>) {
         self.indexer = Some(Indexer::start(events, self.index.payload_dir()));
         self.repin();
+    }
+
+    /// Completes what is typed into file fields on a thread of its own from
+    /// here on, which sends each answer to `events` as an
+    /// [`Event::Completed`]. Until then, and in tests, a request is answered
+    /// as it is handled.
+    pub fn complete_in_background(&mut self, events: Sender<Event>) {
+        self.completions.start(events);
     }
 
     /// Keeps what a search doesn't read of Indexed items in files in `dir`
@@ -1537,6 +1568,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
     /// as `$HOME`.
     pub fn set_home(&mut self, home: PathBuf) {
         self.home = Some(home);
+        self.completions.configure(self.home.clone(), self.files.clone());
     }
 
     /// Replaces the wall clock, which starts as the system's.
@@ -1598,6 +1630,11 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             }
             Event::ProgramsChanged => self.programs_changed(now),
             Event::Indexed(indexed) => self.indexed(indexed, now),
+            Event::Completed { front_end, message } => {
+                if let Some(session) = self.sessions.get(&front_end) {
+                    session.send(message);
+                }
+            }
             Event::Kept(Kept { hot, ahead, reads }) => {
                 self.index.keep(reads);
                 match hot {

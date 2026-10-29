@@ -19,12 +19,14 @@ use std::time::Instant;
 
 use kotodama_protocol::ActionRef;
 use kotodama_protocol::FORGET_SHORTCUT;
+use kotodama_protocol::FormInput;
 use kotodama_protocol::Item;
 use kotodama_protocol::KindName;
 use kotodama_protocol::OfferedAction;
 use kotodama_protocol::ResultRef;
 use kotodama_protocol::ToExtension;
 use kotodama_protocol::ToFrontEnd;
+use kotodama_protocol::ViewContent;
 
 use super::ArgumentForm;
 use super::CLEAR_EXTENSION_HISTORY;
@@ -288,9 +290,18 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             }
             let id = format!("arguments-{}", self.next_id);
             self.next_id += 1;
+            let view = arguments::form(id.clone(), &wanted.title, &wanted.arguments, &arguments);
+            let fields = match &view.content {
+                ViewContent::Form { fields, .. } => fields
+                    .iter()
+                    .filter(|field| matches!(field.input, FormInput::File { .. }))
+                    .cloned()
+                    .collect(),
+                _ => Vec::new(),
+            };
             session.send(ToFrontEnd::PushView {
                 extension: OWN.to_owned(),
-                view: arguments::form(id.clone(), &wanted.title, &wanted.arguments, &arguments),
+                view,
                 contributed: BTreeMap::new(),
             });
             self.argument_forms.insert(
@@ -300,6 +311,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
                     result: result.clone(),
                     action: action.clone(),
                     arguments,
+                    fields,
                 },
             );
             return Ok(());

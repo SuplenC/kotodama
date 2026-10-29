@@ -16,6 +16,7 @@
 mod apps;
 mod arguments;
 pub mod clock;
+pub mod completion;
 pub mod config;
 pub mod configured;
 pub mod conflict;
@@ -178,7 +179,6 @@ pub fn run(paths: &Paths) -> Result<(), Error> {
         .map_err(|err| log::error!("not watching for programs that couldn't start: {err}"))
         .ok();
     server::serve(listener, events_tx.clone());
-    let indexed = events_tx.clone();
     let rediscover = events_tx.clone();
 
     let (config, unreadable) = match config {
@@ -189,7 +189,7 @@ pub fn run(paths: &Paths) -> Result<(), Error> {
         found,
         config,
         history::load(&paths.history),
-        host::Processes::new(events_tx),
+        host::Processes::new(events_tx.clone()),
         desktop::Wayland::new(),
         history::Disk::new(paths.history.clone(), paths.usage_log.clone()),
         Instant::now(),
@@ -198,7 +198,8 @@ pub fn run(paths: &Paths) -> Result<(), Error> {
         log::set_max_level(daemon.engine().log.unwrap_or(log::LevelFilter::Info));
     }
     daemon.keep_items_in(&paths.cache);
-    daemon.index_in_background(indexed);
+    daemon.complete_in_background(events_tx.clone());
+    daemon.index_in_background(events_tx);
     // What discovery and the config found wrong, once there is a
     // Daemon to tell.
     daemon.handle(Event::Extensions(discovered), Instant::now());

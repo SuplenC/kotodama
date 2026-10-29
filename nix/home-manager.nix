@@ -109,6 +109,7 @@ let
       inherit (cfg.desktop) paste;
     };
     log = set { inherit (cfg.log) level; };
+    files = set { recent_dirs = cfg.files.recentDirs; };
     empty_query = set {
       most_used = cfg.emptyQuery.mostUsed;
       inherit (cfg.emptyQuery) menu;
@@ -368,6 +369,13 @@ in
             Unset, `ctrl+v`.
           '';
     };
+
+    files.recentDirs = optional (lib.types.listOf lib.types.str) ''
+      `recent_dirs`: where a form's file field finds the newest files to
+      offer before anything is typed. Absolute paths, or starting with `~/`.
+      Unset, the XDG user directories for downloads, documents and the
+      desktop.
+    '';
 
     log.level =
       optional
