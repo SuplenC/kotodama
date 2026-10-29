@@ -18,6 +18,7 @@ use std::path::PathBuf;
 use std::sync::mpsc::SyncSender;
 use std::time::Instant;
 
+use kotodama_protocol::ContributedTo;
 use kotodama_protocol::Job;
 use kotodama_protocol::JobState;
 use kotodama_protocol::ToExtension;
@@ -245,6 +246,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             }
         }
         self.hidden.remove(&id);
+        self.targets.forget(id);
         // Its Views can't be answered any more.
         for session in self.sessions.values_mut() {
             session.filters.retain(|(ext, _, _)| *ext != id);
@@ -312,6 +314,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             })
             .collect();
         self.contributed.clear();
+        let mut targeted = Vec::new();
         for (id, ext) in self.extensions.iter().enumerate() {
             if ext.sender().is_none() {
                 continue;
@@ -320,12 +323,17 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
                 let mut action = contributed.action.clone();
                 // A Manifest problem, reported when it was read.
                 action.shortcut.take_if(|shortcut| is_reserved_shortcut(shortcut));
-                self.contributed
-                    .entry(contributed.kind.as_str().to_owned())
-                    .or_default()
-                    .push((ExtensionId(id), action));
+                match &contributed.to {
+                    ContributedTo::Kind(kind) => self
+                        .contributed
+                        .entry(kind.as_str().to_owned())
+                        .or_default()
+                        .push((ExtensionId(id), action)),
+                    ContributedTo::Identities => targeted.push((ExtensionId(id), action)),
+                }
             }
         }
+        self.targets.set_offered(targeted);
         self.catalog_dirty = true;
         self.mark_late();
         for (id, view_id, contributed) in before {

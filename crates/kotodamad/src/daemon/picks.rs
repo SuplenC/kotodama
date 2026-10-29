@@ -13,10 +13,12 @@
 //! - The History itself: `crate::history`.
 
 use std::collections::BTreeMap;
+use std::collections::HashMap;
 use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Instant;
 
+use kotodama_protocol::Action;
 use kotodama_protocol::ActionRef;
 use kotodama_protocol::FORGET_SHORTCUT;
 use kotodama_protocol::FormInput;
@@ -58,6 +60,7 @@ use crate::index::Slot;
 use crate::pick;
 use crate::pick::Pick;
 use crate::problem;
+use crate::targets::Targets;
 use crate::usage::Entry;
 use crate::usage::Used;
 
@@ -97,7 +100,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
                     .manifest
                     .contributed_actions
                     .iter()
-                    .find(|offered| offered.kind == *kind && offered.action.id == action.id);
+                    .find(|offered| offered.to.kind() == Some(kind) && offered.action.id == action.id);
                 return Err(match contributed {
                     Some(offered) => format!(
                         "pick a {kind} in the search, then “{}” in its Action panel",
@@ -268,11 +271,10 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
                 .extension_named(&action.extension)
                 .filter(|&ext| ext != owner)
                 .and_then(|ext| {
-                    self.contributed
-                        .get(item.kind.name())?
-                        .iter()
-                        .find(|(by, offered)| *by == ext && offered.id == action.id)
-                        .map(|(_, offered)| (ext, offered))
+                    Some((
+                        ext,
+                        contributed_to(&self.contributed, &self.targets, &item, ext, &action.id)?,
+                    ))
                 }),
         }
         .ok_or_else(|| format!("`{}` has no Action `{}`", item.title, action.id))?;
@@ -553,7 +555,9 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             item.actions.push(forget);
             return;
         }
-        let clear = action_titled(CLEAR_EXTENSION_HISTORY, format!("Clear the history of {extension}"));
+        // Without `format!`: every Result the History keeps anything for pays
+        // for this title on every keystroke, and `concat` skips the formatter.
+        let clear = action_titled(CLEAR_EXTENSION_HISTORY, ["Clear the history of ", extension].concat());
         for action in [forget, clear] {
             contributed.push(OfferedAction {
                 extension: OWN.to_owned(),
@@ -644,4 +648,26 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
         self.refresh_empty(Update::Late, None);
         change
     }
+}
+
+/// The Contributed action `id` that the Extension `by` offers on `item`: on
+/// its kind, among `contributed`, or targeted at its Identity.
+fn contributed_to<'a>(
+    contributed: &'a HashMap<String, Vec<(ExtensionId, Action)>>,
+    targets: &'a Targets,
+    item: &Item,
+    by: ExtensionId,
+    id: &str,
+) -> Option<&'a Action> {
+    let by_kind = contributed.get(item.kind.name()).into_iter().flatten();
+    let targeted = item
+        .identity
+        .as_deref()
+        .into_iter()
+        .flat_map(|identity| targets.on(identity));
+    by_kind
+        .map(|(ext, offered)| (*ext, offered))
+        .chain(targeted)
+        .find(|(ext, offered)| *ext == by && offered.id == id)
+        .map(|(_, offered)| offered)
 }

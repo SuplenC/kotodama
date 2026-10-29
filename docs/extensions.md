@@ -70,7 +70,7 @@ confirm = false
 - `command` runs from the Extension's directory, as above.
 - `word`, `title`, `icon`, `about`, `examples`, `commands` and `in_search` describe its app (see [Apps](#apps-and-where-items-show)).
 - `[live_query]` asks for Live queries. It needs at least one of `prefixes`, `triggers` or `fallback` (see [Live queries](#live-queries)).
-- `[[contributed_actions]]` offers an Action on every Item of a kind, whichever Extension owns it (see [Actions](#actions)).
+- `[[contributed_actions]]` offers an Action on other Extensions' Items: on every Item of a `kind`, or, with `targeted = true` in place of `kind`, on the Results whose Identity the Extension names while it runs (see [Actions](#actions)).
 - `action_catalog` lets the Extension read the Action catalog, and propose Actions from it (see [Trust](#trust)).
 
 Unknown keys are refused, so a typo shows up in `kotodama extension check`.
@@ -107,7 +107,8 @@ Both sides use the fastest format they share, in the order postcard, protobuf, m
 
 - a message that doesn't decode, such as an Item missing its kind's field, or with no Actions;
 - an Item of another Extension's kind;
-- `request_action_catalog` without `action_catalog = true`.
+- `request_action_catalog` without `action_catalog = true`;
+- `target_action` for an Action the Manifest doesn't declare with `targeted = true`.
 
 It also says when it takes a message but drops part of it, and keeps the rest:
 
@@ -174,10 +175,25 @@ An Action can also carry:
 - `arguments`: each with a `name`, an optional `placeholder`, and `optional: true` if it may be left out. With an Item `keyword`, the user types them after it. Each Argument takes one word, and the last takes the rest. The Daemon asks for a missing required one in a form, so `run_action` always has them. An Argument that is a path says so with `kind`: `"file"`, with `accept` listing the file extensions (`"conf"`, without the dot) or MIME types it takes, none for any, or `"folder"`; the default is `"text"`, and any other kind is refused with the Items that carry it. Its form field is then a file field, which a Front end may give a picker, and which the Daemon completes as it is typed (`complete_path`: the entries of the directory typed, or with nothing typed the newest files the field takes from the download, documents and desktop directories, `[files] recent_dirs` in the config), so the Extension does nothing for it. Its value reaches `run_action` as an absolute path: the Daemon expands a leading `~` or `~/` (not `~user`), turns a `file://` URI into its path, and takes a relative path from the home directory, the one a person's paths start from. In a Manifest: `arguments = [{ name = "path", kind = "file", accept = ["conf"], placeholder = "~/Downloads/work.conf" }]`; in Rust, `Argument::new("path").file(["conf"])`.
 - `shortcut`: a key binding such as `"ctrl+o"`, which runs the Action without opening the Action panel. It needs Ctrl, Alt or Super, since a bare key types into the search. The menu keeps `ctrl+k`, `ctrl+n`, `ctrl+p`, `ctrl+z` and `ctrl+shift+backspace` for itself, and the Daemon drops an Action's binding to one of them and rejects it (see [Talking to the Daemon](#talking-to-the-daemon)).
 - `confirm: true`: for an Action that can't be undone, such as deleting something or powering off. The menu asks in its footer and runs the Action on a second Enter only, so you need no form of your own.
+- `role`: what sort of Action it is, so a Front end can draw each sort its own way: `"normal"` (the default), `"destructive"` for one that removes or destroys something, such as uninstalling an app, or `"form"` for one that pushes a form View of your own. An Action that is both destructive and a form is `"destructive"`. The Action panel lists the primary Action first, then the Item's other Actions, then the Contributed ones, then every destructive one but the primary. The Daemon reports `"form"` by itself for an Action whose required Arguments the query hasn't filled, as it will ask for them in a form, unless it is destructive. `role` is how the Action looks; whether it asks first is `confirm`, so a destructive Action that can't be undone sets both. In Rust, `Action::new("remove", "Remove").role(ActionRole::Destructive).confirm()`.
+- `keywords`: the verbs the Action is known by, such as `["remove", "uninstall", "delete"]`, never the words of its title. Kotodama keeps them for choosing the Action from what is typed, which it doesn't do yet.
 
 **Withdrawing a pick.** Running an Action counts as picking its Result, which raises it in the ranking. When the run turns out to be a mistake, as when an app the Action launched closed again at once, send `{"withdraw_pick": {"invocation": 7}}` within a minute. The History is then as if the user had never picked it.
 
-**Contributed actions.** An Action under `[[contributed_actions]]` in the Manifest is offered on every Item of that kind, whichever Extension owns it. It arrives as an ordinary `run_action`, carrying the other Item's id, kind and kind field, which is all you ever see of another Extension's Items.
+**Contributed actions.** An Action under `[[contributed_actions]]` in the Manifest is offered on other Extensions' Items, never on your own: put an Action for those among their own `actions`. It arrives as an ordinary `run_action`, carrying the other Item's id, kind and kind field, which is all you ever see of another Extension's Items. It takes the same keys as any Action, `keywords` and `role` among them.
+
+- With `kind`, it is offered on every Item of that kind, whichever Extension owns it.
+- With `targeted = true` in place of `kind`, it is offered on the Results whose Identity you name, whichever Extension owns them: a package manager offers "Remove" on the apps it installed, by `app:<desktop id>`. While you run, send the whole set of Identities for the Action, `{"target_action": {"action": "remove", "identities": ["app:google-chrome.desktop", "app:gimp.desktop"]}}`, and send it again, whole, whenever it changes: each one replaces the set before, and `[]` withdraws the Action from every Result. The sets last while you run, so send them again after every start. The Daemon matches Identities exactly, so spell them as the Extensions that own the Items do (see `identity` under [Items](#items)). An Action the Manifest doesn't declare `targeted` is rejected.
+
+```toml
+[[contributed_actions]]
+targeted = true
+id = "remove"
+title = "Remove"
+keywords = ["remove", "uninstall", "delete"]
+role = "destructive"
+confirm = true
+```
 
 ## Live queries
 

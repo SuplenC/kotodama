@@ -26,6 +26,8 @@ fn item(id: &str, title: &str, actions: &[&str]) -> Item {
                 shortcut: None,
                 arguments: vec![],
                 confirm: false,
+                keywords: Vec::new(),
+                role: kotodama_protocol::ActionRole::Normal,
             })
             .collect(),
     }
@@ -109,4 +111,79 @@ fn each_action_on_offer_comes_with_the_first_row_whose_item_has_it() {
     segment.edit(Edit::Remove(vec!["a".into()]));
     let offered: Vec<_> = segment.offered().collect();
     assert_eq!(offered, [("url", "open", 1), ("url", "copy", 1)]);
+}
+
+#[test]
+fn an_item_resent_with_only_its_actions_changed_keeps_its_search_keys() {
+    let mut segment = Segment::default();
+    segment.edit(Edit::Add(vec![
+        item("a", "Wi-Fi", &["off", "on"]),
+        item("b", "Wiki", &["open"]),
+    ]));
+    let row = segment.find("a").unwrap();
+    let garbage = segment.garbage;
+    segment.next_version();
+
+    segment.edit(Edit::Add(vec![item("a", "Wi-Fi", &["on"])]));
+
+    assert!(!segment.keys_changed());
+    assert_eq!(segment.find("a"), Some(row));
+    assert_eq!(segment.garbage, garbage, "the texts stay where they were");
+    let actions: Vec<String> = read(&segment, "a").unwrap().actions.into_iter().map(|a| a.id).collect();
+    assert_eq!(actions, ["on"]);
+    let offered: Vec<_> = segment.offered().collect();
+    assert_eq!(offered, [("url", "on", row), ("url", "open", 1)]);
+}
+
+#[test]
+fn an_item_resent_with_anything_searched_changed_changes_the_keys() {
+    let wifi = || item("a", "Wi-Fi", &["off"]);
+    let resent = [
+        item("a", "WiFi", &["off"]),
+        Item {
+            subtitle: None,
+            ..wifi()
+        },
+        Item {
+            keywords: vec!["wireless".into()],
+            ..wifi()
+        },
+        Item {
+            keyword: Some("wifi".into()),
+            ..wifi()
+        },
+        Item {
+            weak_keywords: vec!["nm".into()],
+            ..wifi()
+        },
+        Item {
+            identity: Some("setting:wifi".into()),
+            ..wifi()
+        },
+        Item {
+            kind: ItemKind::Namespaced(kotodama_protocol::NamespacedKind::new("x.setting").unwrap()),
+            ..wifi()
+        },
+    ];
+    for resent in resent {
+        let mut segment = Segment::default();
+        segment.edit(Edit::Add(vec![item("a", "Wi-Fi", &["off", "on"])]));
+        segment.next_version();
+
+        segment.edit(Edit::Add(vec![resent.clone()]));
+
+        assert!(segment.keys_changed(), "{resent:?}");
+        assert_eq!(read(&segment, "a").unwrap(), resent);
+    }
+}
+
+#[test]
+fn removing_an_item_changes_the_keys() {
+    let mut segment = Segment::default();
+    segment.edit(Edit::Add(vec![item("a", "Wi-Fi", &["off"])]));
+    segment.next_version();
+
+    segment.edit(Edit::Remove(vec!["a".into()]));
+
+    assert!(segment.keys_changed());
 }

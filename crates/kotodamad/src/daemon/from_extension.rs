@@ -36,6 +36,8 @@ use super::FrontEndId;
 use super::Launcher;
 use super::MAX_LIVE_RESULTS;
 use super::Output;
+use super::Session;
+use super::Source;
 use super::Status;
 use super::Update;
 use crate::history::Store;
@@ -121,6 +123,47 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             }
             FromExtension::JobProgress(job) => self.job_progress(id, &name, job),
             FromExtension::RequestActionCatalog => self.send_catalog(id, &name),
+            FromExtension::TargetAction { action, identities } => self.target_action(id, &name, &action, identities),
+        }
+    }
+
+    /// Offers the Extension `id`'s targeted Action `action` on the Results
+    /// of `identities` alone. The menus showing a Result of an Identity
+    /// named before or in `identities` get their rows again, ranked as they
+    /// were.
+    pub(super) fn target_action(&mut self, id: ExtensionId, name: &str, action: &str, identities: Vec<String>) {
+        let changed = match self.targets.target(id, action, identities) {
+            Ok(changed) => changed,
+            Err(refused) => {
+                let reason = refused.to_string();
+                log::warn!("{name}: {reason}");
+                self.extensions[id.0].send(ToExtension::Rejected { reason });
+                return;
+            }
+        };
+        let changed: HashSet<&str> = changed.iter().map(AsRef::as_ref).collect();
+        self.send_rows_where(|daemon, session, source| {
+            daemon
+                .identity(session, source)
+                .is_some_and(|identity| changed.contains(identity))
+        });
+    }
+
+    /// Has each menu showing a Result that `changed` picks get its rows
+    /// again, without a search: what the Results offer changed, not how they
+    /// rank.
+    pub(super) fn send_rows_where(&mut self, changed: impl Fn(&Self, &Session, Source) -> bool) {
+        let due: Vec<FrontEndId> = self
+            .sessions
+            .iter()
+            .filter(|(_, session)| session.searched && session.update == Update::None)
+            .filter(|(_, session)| session.shown.iter().any(|&(source, _)| changed(self, session, source)))
+            .map(|(&front_end, _)| front_end)
+            .collect();
+        for front_end in due {
+            if let Some(session) = self.sessions.get_mut(&front_end) {
+                session.update = Update::Rows;
+            }
         }
     }
 
@@ -196,9 +239,9 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
         if let Some(indexer) = &mut self.indexer {
             indexer.edit(id, edit);
         } else {
-            self.index.edit(id, edit);
+            let keys_changed = self.index.edit(id, edit);
             self.repin_index();
-            self.items_changed();
+            self.items_changed(id, keys_changed);
             self.items_landed(id);
             self.run_openings(now);
         }
@@ -216,12 +259,17 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
         if change <= self.stale[extension.0] {
             return;
         }
-        for (at, segment) in segments {
-            self.index.replace(at, segment);
+        let keys_changed = segments.iter().any(|(_, segment)| segment.keys_changed());
+        let replaced = segments
+            .into_iter()
+            .map(|(at, segment)| self.index.replace(at, segment))
+            .collect();
+        if let Some(indexer) = &mut self.indexer {
+            indexer.free(replaced);
         }
         self.index.keep(reads);
         self.repin_index();
-        self.items_changed();
+        self.items_changed(extension, keys_changed);
         self.items_landed(extension);
         self.run_openings(now);
     }
@@ -324,7 +372,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
         for item in items {
             let kind = item.kind.name();
             if seen.insert(kind) {
-                let offered = self.contributed_for(owner, kind, &[]);
+                let offered = self.contributed_for(owner, kind, None, &[]);
                 if !offered.is_empty() {
                     by_kind.insert(kind.to_owned(), offered);
                 }
@@ -333,9 +381,17 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
         by_kind
     }
 
-    pub(super) fn items_changed(&mut self) {
+    /// The Extension `id`'s Items changed. Unless what a search reads of
+    /// them did (`keys_changed`), only their Actions or icons changed, and
+    /// no Result ranks anywhere else: the menus showing one of them get
+    /// their rows again, without a search.
+    pub(super) fn items_changed(&mut self, id: ExtensionId, keys_changed: bool) {
         self.catalog_dirty = true;
-        self.mark_late();
+        if keys_changed {
+            self.mark_late();
+        } else {
+            self.send_rows_where(|_, _, source| matches!(source, Source::Indexed(slot) if slot.extension() == id));
+        }
     }
 
     pub(super) fn mark_late(&mut self) {

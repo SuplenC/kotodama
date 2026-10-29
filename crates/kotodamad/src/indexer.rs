@@ -216,6 +216,8 @@ enum Job {
     Plan(Plan),
     /// These Items, by Extension and id, are what the Aliases name.
     Pin(Vec<(ExtensionId, String)>),
+    /// Versions the Index has replaced, to free here.
+    Free(Vec<Arc<Segment>>),
 }
 
 /// The thread that makes changes to the Index, and how to give it more.
@@ -268,6 +270,16 @@ impl Indexer {
     /// as an [`Event::Kept`].
     pub fn plan(&mut self, plan: Plan) {
         let _ = self.jobs.send(Job::Plan(plan));
+    }
+
+    /// Hands the thread versions of Segments the Index replaced, to free
+    /// there: freeing one frees each of its rows' allocations, thousands
+    /// for an Extension with thousands of Items, which the thread
+    /// answering keystrokes would otherwise do.
+    pub fn free(&mut self, segments: Vec<Arc<Segment>>) {
+        if !segments.is_empty() {
+            let _ = self.jobs.send(Job::Free(segments));
+        }
     }
 
     /// Tells the thread the Items the Aliases name, to read and keep read.
@@ -402,6 +414,7 @@ fn work(queue: &Receiver<Job>, dir: Option<&Arc<Path>>, mut send: impl FnMut(Eve
                     keeping.aliases = aliases;
                     pinned = true;
                 }
+                Job::Free(segments) => drop(segments),
             }
         }
         for (extension, change, sides) in changed {

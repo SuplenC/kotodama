@@ -109,6 +109,7 @@ use crate::rank;
 use crate::rank::Haystack;
 use crate::rank::Tier;
 use crate::rank::Tiers;
+use crate::targets::Targets;
 use crate::views::Views;
 
 mod empty;
@@ -777,6 +778,9 @@ impl Live {
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 enum Update {
     None,
+    /// What the Results on screen offer changed, not how they rank: the
+    /// same rows, sent again without a search.
+    Rows,
     /// Results changed under an unchanged query: ranked from scratch while
     /// [`Session::reranks`], and otherwise below the rows on screen.
     Late,
@@ -1054,13 +1058,7 @@ fn clear_history() -> Item {
         hidden: false,
         app_only: false,
         weak_keywords: Vec::new(),
-        actions: vec![Action {
-            id: "run".into(),
-            title: "Clear".into(),
-            shortcut: None,
-            arguments: Vec::new(),
-            confirm: false,
-        }],
+        actions: vec![Action::new("run", "Clear")],
     }
 }
 
@@ -1102,13 +1100,7 @@ fn named_only(id: &str) -> Item {
 
 /// An Action that takes no Arguments and has no shortcut.
 fn action_titled(id: &str, title: String) -> Action {
-    Action {
-        id: id.to_owned(),
-        title,
-        shortcut: None,
-        arguments: Vec::new(),
-        confirm: false,
-    }
+    Action::new(id, title)
 }
 
 /// A change to the History that can be undone until `until`. Changes are
@@ -1312,6 +1304,9 @@ pub struct Daemon<L, D, S> {
     paths: Overrides,
     /// Running Extensions' Contributed actions by Item kind, in Extension order.
     contributed: HashMap<String, Vec<(ExtensionId, Action)>>,
+    /// Running Extensions' targeted Contributed actions, by the Identities
+    /// they name.
+    targets: Targets,
     /// The Action catalog last sent, if any Extension reads it.
     catalog: Option<Vec<CatalogEntry>>,
     catalog_dirty: bool,
@@ -1442,6 +1437,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             engine: Engine::default(),
             paths: Overrides::default(),
             contributed: HashMap::new(),
+            targets: Targets::default(),
             catalog: None,
             catalog_dirty: false,
             down: Vec::new(),

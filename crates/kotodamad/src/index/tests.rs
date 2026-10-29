@@ -103,6 +103,8 @@ fn item(random: &mut Random) -> Item {
                 shortcut: None,
                 arguments: vec![],
                 confirm: false,
+                keywords: Vec::new(),
+                role: kotodama_protocol::ActionRole::Normal,
             })
             .collect(),
         weak_keywords: (0..random.below(3)).map(|_| words(random, 2)).collect(),

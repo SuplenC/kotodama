@@ -64,7 +64,8 @@ pub fn release_message(message: &mut FromExtension) -> Vec<Released> {
         | FromExtension::JobProgress(_)
         | FromExtension::RequestActionCatalog
         | FromExtension::WithdrawPick { .. }
-        | FromExtension::Status { .. } => {}
+        | FromExtension::Status { .. }
+        | FromExtension::TargetAction { .. } => {}
     }
     released
 }
