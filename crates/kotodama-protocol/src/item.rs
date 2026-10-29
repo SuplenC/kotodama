@@ -329,11 +329,19 @@ pub struct Action {
     /// an Action that can't be undone, such as powering off.
     #[serde(default)]
     pub confirm: bool,
+    /// The verbs the Action is known by, such as `remove`, `uninstall` and
+    /// `delete`; never the words of its title.
+    #[serde(default)]
+    pub keywords: Vec<String>,
+    /// What sort of Action it is, which the Front end may draw differently.
+    #[serde(default)]
+    pub role: ActionRole,
 }
 
 impl Action {
-    /// An Action with no shortcut, no Arguments and no confirm step; the
-    /// setters below add them.
+    /// A [`Normal`](ActionRole::Normal) Action with no shortcut, no
+    /// Arguments, no keywords and no confirm step; the setters below add
+    /// them.
     #[must_use]
     pub fn new(id: impl Into<String>, title: impl Into<String>) -> Self {
         Action {
@@ -342,6 +350,8 @@ impl Action {
             shortcut: None,
             arguments: Vec::new(),
             confirm: false,
+            keywords: Vec::new(),
+            role: ActionRole::Normal,
         }
     }
 
@@ -372,6 +382,118 @@ impl Action {
     pub fn arguments(mut self, arguments: Vec<Argument>) -> Self {
         self.arguments = arguments;
         self
+    }
+
+    /// Names the verbs the Action is known by.
+    ///
+    /// ```
+    /// use kotodama_protocol::Action;
+    /// use kotodama_protocol::ActionRole;
+    ///
+    /// let remove = Action::new("remove", "Remove")
+    ///     .keywords(["remove", "uninstall", "delete"])
+    ///     .role(ActionRole::Destructive);
+    /// assert_eq!(remove.keywords, ["remove", "uninstall", "delete"]);
+    /// ```
+    #[must_use]
+    pub fn keywords<S: Into<String>>(mut self, keywords: impl IntoIterator<Item = S>) -> Self {
+        self.keywords = keywords.into_iter().map(Into::into).collect();
+        self
+    }
+
+    /// Gives the Action its `role`.
+    #[must_use]
+    pub fn role(mut self, role: ActionRole) -> Self {
+        self.role = role;
+        self
+    }
+}
+
+/// What sort of Action an [`Action`] is, so a Front end can draw each sort
+/// its own way. It is how the Action looks: whether it asks first is
+/// [`Action::confirm`].
+///
+/// On the wire it is an optional string, `destructive` or `form`, left out
+/// (`null`) for a normal Action, which nearly every one is: the Results of a
+/// keystroke carry one per Action, and nothing is cheaper to write and read.
+/// `normal` and an empty string read as normal too, so that in protobuf an
+/// Action with an empty role is normal. Any other name refuses the message
+/// that carries it.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub enum ActionRole {
+    /// Any other Action.
+    #[default]
+    Normal,
+    /// Removes or destroys something, such as uninstalling an app. The
+    /// Action panel lists it last, and an Action that is destructive and
+    /// asks for a form is `Destructive`.
+    Destructive,
+    /// Asks for something before it runs: it pushes a form View of its
+    /// Extension's, or the Daemon asks for its Arguments in one. The Daemon
+    /// sends `Form` for an Action whose required Arguments the query didn't
+    /// fill, unless it is `Destructive`.
+    Form,
+}
+
+impl ActionRole {
+    /// The role's name: `normal`, `destructive` or `form`.
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            ActionRole::Normal => "normal",
+            ActionRole::Destructive => "destructive",
+            ActionRole::Form => "form",
+        }
+    }
+}
+
+impl Serialize for ActionRole {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        match self {
+            ActionRole::Normal => serializer.serialize_none(),
+            role => serializer.serialize_some(role.as_str()),
+        }
+    }
+}
+
+// By hand rather than `Option<String>`: every Action has a role, and reading
+// it allocates nothing.
+impl<'de> Deserialize<'de> for ActionRole {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        deserializer.deserialize_option(RoleVisitor)
+    }
+}
+
+struct RoleVisitor;
+
+impl<'de> serde::de::Visitor<'de> for RoleVisitor {
+    type Value = ActionRole;
+
+    fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("`normal`, `destructive`, `form` or nothing")
+    }
+
+    fn visit_none<E: serde::de::Error>(self) -> Result<ActionRole, E> {
+        Ok(ActionRole::Normal)
+    }
+
+    fn visit_unit<E: serde::de::Error>(self) -> Result<ActionRole, E> {
+        Ok(ActionRole::Normal)
+    }
+
+    fn visit_some<D: serde::Deserializer<'de>>(self, deserializer: D) -> Result<ActionRole, D::Error> {
+        deserializer.deserialize_str(self)
+    }
+
+    fn visit_str<E: serde::de::Error>(self, name: &str) -> Result<ActionRole, E> {
+        match name {
+            "" | "normal" => Ok(ActionRole::Normal),
+            "destructive" => Ok(ActionRole::Destructive),
+            "form" => Ok(ActionRole::Form),
+            _ => Err(E::custom(format_args!(
+                "`{name}` isn't an Action role: it is `normal`, `destructive` or `form`"
+            ))),
+        }
     }
 }
 

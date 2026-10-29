@@ -23,6 +23,7 @@ use std::sync::Arc;
 use kotodama_protocol::APP_ENTRY_KIND;
 use kotodama_protocol::Action;
 use kotodama_protocol::ActionRef;
+use kotodama_protocol::ActionRole;
 use kotodama_protocol::Item;
 use kotodama_protocol::ItemKind;
 use kotodama_protocol::OfferedAction;
@@ -136,15 +137,22 @@ impl Row {
         true
     }
 
-    /// The Action panel: the Item's own Actions, then the Contributed ones.
+    /// The Action panel: the primary Action, which Enter runs, then the
+    /// rest of the Item's own Actions, then the Contributed ones, then every
+    /// [`Destructive`](ActionRole::Destructive) one but the primary, in the
+    /// same order, so a stray pick through the panel lands on one last.
     /// Built when asked for, since most rows are never opened.
-    pub fn actions(&self) -> impl Iterator<Item = PanelEntry<'_>> {
-        let own = self.own.iter().map(|action| PanelEntry {
+    pub fn actions<'a>(&'a self) -> impl Iterator<Item = PanelEntry<'a>> {
+        let (primary, rest) = match self.own.split_first() {
+            Some((primary, rest)) => (Some(primary), rest),
+            None => (None, &[][..]),
+        };
+        let own = |action: &'a Action| PanelEntry {
             action,
             group: None,
             shortcut: action.shortcut.as_deref(),
-        });
-        let contributed = self.contributed.iter().map(|offered| PanelEntry {
+        };
+        let contributed = |offered: &'a OfferedAction| PanelEntry {
             action: &offered.action,
             group: Some(offered.extension.as_str()),
             // The Daemon settles clashes among contributors, and with a
@@ -154,8 +162,24 @@ impl Row {
                 .shortcut
                 .as_deref()
                 .filter(|shortcut| !self.own.iter().any(|own| own.shortcut.as_deref() == Some(*shortcut))),
-        });
-        own.chain(contributed)
+        };
+        let kept = |entry: &PanelEntry<'a>| entry.action.role != ActionRole::Destructive;
+        let last = |entry: &PanelEntry<'a>| entry.action.role == ActionRole::Destructive;
+        primary
+            .into_iter()
+            .map(own)
+            .chain(rest.iter().map(own).filter(kept))
+            .chain(self.contributed.iter().map(contributed).filter(kept))
+            .chain(rest.iter().map(own).filter(last))
+            .chain(self.contributed.iter().map(contributed).filter(last))
+    }
+
+    /// The role of the Action Enter runs; `None` when nothing runs.
+    pub fn primary_role(&self) -> Option<ActionRole> {
+        self.own
+            .first()
+            .filter(|_| self.unavailable.is_none())
+            .map(|primary| primary.role)
     }
 
     /// The keys the row takes, for a footer that teaches them: what Enter
@@ -183,22 +207,24 @@ impl Row {
             .then(|| format!("{}? ↵ Confirm · Esc Cancel", entry.action.title))
     }
 
+    /// Where the Action panel lists the Action `id` that `group` offers, or
+    /// the Item's own with no `group`.
+    pub fn place_of(&self, group: Option<&str>, id: &str) -> Option<usize> {
+        self.actions()
+            .position(|entry| entry.group == group && entry.action.id == id)
+    }
+
     /// What runs the `n`th entry of the Action panel. Nothing runs on an
     /// unavailable row.
     pub fn action(&self, n: usize) -> Option<ActionRef> {
         if self.unavailable.is_some() {
             return None;
         }
-        match self.own.get(n) {
-            Some(own) => Some(ActionRef {
-                extension: self.result.extension.clone(),
-                id: own.id.clone(),
-            }),
-            None => self.contributed.get(n - self.own.len()).map(|offered| ActionRef {
-                extension: offered.extension.clone(),
-                id: offered.action.id.clone(),
-            }),
-        }
+        let entry = self.actions().nth(n)?;
+        Some(ActionRef {
+            extension: entry.group.unwrap_or(&self.result.extension).to_owned(),
+            id: entry.action.id.clone(),
+        })
     }
 
     /// The title as Qt's `StyledText`, with each run of matched characters set

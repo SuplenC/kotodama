@@ -531,6 +531,8 @@ fn action() -> Action {
             accept: vec!["conf".into()],
         }],
         confirm: true,
+        keywords: vec!["launch".into()],
+        role: ActionRole::Destructive,
     }
 }
 
@@ -703,6 +705,10 @@ fn from_extension() -> Vec<FromExtension> {
         FromExtension::Status {
             usable: true,
             note: Some("Paused for an hour".into()),
+        },
+        FromExtension::TargetAction {
+            action: "remove".into(),
+            identities: vec!["app:firefox.desktop".into(), "app:gimp.desktop".into()],
         },
     ]
 }

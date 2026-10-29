@@ -227,6 +227,10 @@ pub struct Segment {
     end: u64,
     /// How many bytes of the Shelf no row uses any more.
     shelf_garbage: u64,
+    /// Whether this version added, removed or changed what a search reads
+    /// of a row. A version that only changed Items' Actions ranks every
+    /// query as the last one did.
+    keys_changed: bool,
 }
 
 /// The payloads of the Items one change adds, before they go on the Shelf.
@@ -253,13 +257,23 @@ impl Segment {
 
     /// An empty Segment that keeps payloads where this one does.
     pub fn emptied(&self) -> Self {
-        Segment::new(self.dir.clone())
+        Segment {
+            keys_changed: true,
+            ..Segment::new(self.dir.clone())
+        }
+    }
+
+    /// Whether this version added, removed or changed what a search reads
+    /// of a row, rather than only Items' Actions.
+    pub fn keys_changed(&self) -> bool {
+        self.keys_changed
     }
 
     /// Starts the next version of the Segment, which Front ends will see
     /// whole: the rows emptied in the last one are free from here on.
     pub fn next_version(&mut self) {
         self.free.append(&mut self.freed);
+        self.keys_changed = false;
     }
 
     /// Makes one change within this version.
@@ -302,7 +316,12 @@ impl Segment {
     }
 
     fn add(&mut self, item: &Item, shelved: &mut Shelved) {
+        let folded = Folded::new(item);
         let row = if let Some(&row) = self.ids.get(item.id.as_str()) {
+            if self.same_keys(row, item, &folded) {
+                self.reshelve_row(row, item, shelved);
+                return;
+            }
             self.release(row);
             row
         } else {
@@ -318,7 +337,7 @@ impl Segment {
             self.ids.insert(item.id.as_str().into(), row);
             row
         };
-        let folded = Folded::new(item);
+        self.keys_changed = true;
         let starts = self.starts.len() as u32;
         self.starts.extend(&folded.title_starts);
         self.starts.extend(&folded.words_starts);
@@ -360,8 +379,67 @@ impl Segment {
             .identity
             .as_deref()
             .map(|identity| list(&mut self.identities, identity, row));
-        let actions = item
-            .actions
+        let actions = self.offer(kind, row, item);
+        let place = self.put(item, shelved);
+        let id = self
+            .ids
+            .get_key_value(item.id.as_str())
+            .map(|(id, _)| Arc::clone(id))
+            .expect("listed above");
+        self.held[at] = Some(Held {
+            id,
+            identity,
+            keyword,
+            actions,
+            place,
+        });
+    }
+
+    /// Whether `item`, sent again for `row`, is searched by the same keys:
+    /// the same kind, Identity, keyword and folded texts. Only its Actions,
+    /// its icon or its kind's field may differ.
+    fn same_keys(&self, row: Row, item: &Item, folded: &Folded) -> bool {
+        let Some(held) = self.held(row) else {
+            return false;
+        };
+        let keys = &self.keys[row as usize];
+        let texts = self.keys_texts(row, keys);
+        let weak_at = folded.weak_at.unwrap_or(folded.words.len() as u32);
+        self.kinds[keys.kind as usize] == item.kind.name()
+            && held.identity.as_deref() == item.identity.as_deref()
+            && held.keyword.as_deref() == item.keyword.as_ref().map(|keyword| keyword.to_lowercase()).as_deref()
+            && keys.keyword == folded.keyword
+            && keys.letters == folded.letters
+            && keys.subtitle_initials == folded.subtitle_initials
+            && self.every_letter[row as usize] == folded.every_letter
+            && texts.initials == folded.initials
+            && texts.weak_at == weak_at
+            && texts.title.chars == folded.title.slice(..)
+            && texts.title.starts == folded.title_starts.as_slice()
+            && texts.words.chars == folded.words.slice(..)
+            && texts.words.starts == folded.words_starts.as_slice()
+            && texts.subtitle == folded.subtitle.slice(..)
+    }
+
+    /// Puts `item`, sent again for `row` with the same search keys, on the
+    /// Shelf, and offers its Actions: the row keeps its keys and its texts.
+    fn reshelve_row(&mut self, row: Row, item: &Item, shelved: &mut Shelved) {
+        let Some(held) = self.held.get_mut(row as usize).and_then(Option::take) else {
+            return;
+        };
+        for &n in &held.actions {
+            self.offered[n as usize].rows.remove(&row);
+        }
+        self.shelf_garbage += u64::from(held.place.len);
+        let actions = self.offer(self.keys[row as usize].kind, row, item);
+        let place = self.put(item, shelved);
+        self.held[row as usize] = Some(Held { actions, place, ..held });
+    }
+
+    /// Lists `row` among those offering each of `item`'s Actions, and
+    /// returns where those are in [`Segment::offered`].
+    fn offer(&mut self, kind: u16, row: Row, item: &Item) -> Box<[u32]> {
+        item.actions
             .iter()
             .map(|action| {
                 let n = if let Some(n) = self
@@ -381,7 +459,12 @@ impl Segment {
                 self.offered[n].rows.insert(row);
                 n as u32
             })
-            .collect();
+            .collect()
+    }
+
+    /// Encodes `item` after the payloads `shelved` holds, and returns where
+    /// it goes on the Shelf.
+    fn put(&mut self, item: &Item, shelved: &mut Shelved) -> Place {
         encode(item, &mut shelved.item);
         let place = Place {
             at: shelved.at + shelved.bytes.len() as u64,
@@ -389,24 +472,14 @@ impl Segment {
         };
         shelved.bytes.extend_from_slice(&shelved.item);
         self.end = place.end();
-        let id = self
-            .ids
-            .get_key_value(item.id.as_str())
-            .map(|(id, _)| Arc::clone(id))
-            .expect("listed above");
-        self.held[at] = Some(Held {
-            id,
-            identity,
-            keyword,
-            actions,
-            place,
-        });
+        place
     }
 
     fn remove(&mut self, id: &str) {
         let Some(row) = self.ids.remove(id) else {
             return;
         };
+        self.keys_changed = true;
         self.release(row);
         let at = row as usize;
         self.every_letter[at] = Letters::NONE;

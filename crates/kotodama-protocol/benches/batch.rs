@@ -39,6 +39,8 @@ fn batch() -> FromExtension {
                     shortcut: None,
                     arguments: vec![],
                     confirm: false,
+                    keywords: Vec::new(),
+                    role: kotodama_protocol::ActionRole::Normal,
                 },
                 Action {
                     id: "new-window".into(),
@@ -46,6 +48,8 @@ fn batch() -> FromExtension {
                     shortcut: Some("ctrl+n".into()),
                     arguments: vec![],
                     confirm: false,
+                    keywords: Vec::new(),
+                    role: kotodama_protocol::ActionRole::Normal,
                 },
             ],
         })

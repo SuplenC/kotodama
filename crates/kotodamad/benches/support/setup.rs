@@ -15,6 +15,7 @@ use std::sync::mpsc::Receiver;
 use std::time::Duration;
 use std::time::Instant;
 
+use kotodama_protocol::Action;
 use kotodama_protocol::FromExtension;
 use kotodama_protocol::FromFrontEnd;
 use kotodama_protocol::Item;
@@ -230,6 +231,27 @@ impl Setup {
             self.daemon.handle(event, self.now);
         }
         self.results.try_iter().for_each(drop);
+    }
+
+    /// Sends the first Item of the corpus again with a second Action and,
+    /// once that is in, with its two Actions swapped, as an Extension does
+    /// to change which one Enter runs. Returns the indexing thread's
+    /// version for the swap, not yet put in.
+    pub fn reorder(&mut self) -> Event {
+        let mut item = corpus::items().swap_remove(0);
+        item.actions.push(Action::new("info", "Info"));
+        self.send(APPS, vec![item.clone()]);
+        self.settle();
+        item.actions.reverse();
+        self.send(APPS, vec![item]);
+        loop {
+            let event = self.indexed.recv().unwrap();
+            if matches!(event, Event::Indexed(_)) {
+                self.pending -= 1;
+                return event;
+            }
+            self.daemon.handle(event, self.now);
+        }
     }
 
     /// Sends one query and encodes its Results as the socket writer would for a

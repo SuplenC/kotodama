@@ -18,6 +18,8 @@ message Action {
   optional string shortcut = 3;
   repeated Argument arguments = 4;
   bool confirm = 5;
+  repeated string keywords = 6;
+  optional string role = 7;
 }
 
 message ActionRef {
@@ -110,6 +112,7 @@ message FromExtension {
     Empty request_action_catalog = 10;
     FromExtension.WithdrawPick withdraw_pick = 11;
     FromExtension.Status status = 12;
+    FromExtension.TargetAction target_action = 13;
   }
 
   message ActionDone {
@@ -143,6 +146,11 @@ message FromExtension {
   message Status {
     bool usable = 1;
     optional string note = 2;
+  }
+
+  message TargetAction {
+    string action = 1;
+    repeated string identities = 2;
   }
 
   message WithdrawPick {

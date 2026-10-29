@@ -128,6 +128,59 @@ fn the_action_panel_lists_the_items_own_actions_then_contributed_ones_under_thei
 }
 
 #[test]
+fn the_action_panel_lists_every_destructive_action_last_but_the_primary() {
+    let destructive = |id: &str, title: &str| Action::new(id, title).role(ActionRole::Destructive);
+    let mut chrome = row("Google Chrome", &[]);
+    chrome.own = vec![
+        destructive("reset", "Reset profile"),
+        destructive("clear", "Clear data"),
+        Action::new("open", "Open"),
+    ];
+    chrome.contributed = Arc::new([
+        OfferedAction {
+            extension: "packages".into(),
+            action: destructive("remove", "Remove"),
+        },
+        offered("pinner", "pin", "Pin"),
+    ]);
+
+    let panel: Vec<_> = chrome
+        .actions()
+        .enumerate()
+        .map(|(n, entry)| {
+            let runs = chrome.action(n).unwrap();
+            assert_eq!(runs.id, entry.action.id, "the panel runs what it lists");
+            (entry.group, entry.action.title.as_str())
+        })
+        .collect();
+    assert_eq!(
+        panel,
+        [
+            (None, "Reset profile"),
+            (None, "Open"),
+            (Some("pinner"), "Pin"),
+            (None, "Clear data"),
+            (Some("packages"), "Remove"),
+        ]
+    );
+    assert_eq!(chrome.action(5), None);
+    assert_eq!(chrome.confirmation(4), None);
+}
+
+#[test]
+fn an_action_the_panel_listed_is_found_where_the_row_has_it_since() {
+    let mut wifi = row("Wi-Fi", &[]);
+    wifi.own = vec![Action::new("off", "Turn off"), Action::new("on", "Turn on")];
+    wifi.contributed = Arc::new([offered("pinner", "on", "Pin")]);
+
+    wifi.own.reverse();
+
+    assert_eq!(wifi.place_of(None, "off"), Some(1));
+    assert_eq!(wifi.place_of(Some("pinner"), "on"), Some(2));
+    assert_eq!(wifi.place_of(None, "toggle"), None);
+}
+
+#[test]
 fn an_unavailable_row_keeps_its_alias_badge_and_runs_nothing() {
     let shown = ShownResult {
         extension: "apps".into(),

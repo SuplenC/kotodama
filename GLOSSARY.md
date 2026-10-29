@@ -77,8 +77,12 @@ Something the user can do to a Result; every Result has one primary Action and m
 _Avoid_: Command, handler, verb
 
 **Contributed action**:
-An Action one Extension offers for Items of a given Item kind that another Extension owns, such as "Pin a version here" on a project.
+An Action one Extension offers on Items another Extension owns: on every Item of a given Item kind, such as "Pin a version here" on a project, or, when targeted, on every Result whose Identity the contributing Extension names while it runs, such as "Remove" on the apps a package manager installed.
 _Avoid_: Foreign action, plugin action, extension action
+
+**Action role**:
+What sort of Action an Action is, which a Front end may draw differently: normal, destructive (it removes or destroys something, and the Action panel lists it last unless it is primary) or form (it asks for something in a form first). The Extension sets it; the Daemon also reports form for an Action whose required Arguments the query hasn't filled, unless it is destructive. Whether the Action asks before it runs is apart from its role.
+_Avoid_: Action type, action style, danger flag
 
 **Action catalog**:
 The description of every Action on offer (its title, Item kind, Arguments and Extension) that an Extension may ask to read; it never includes the Items themselves.

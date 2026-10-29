@@ -251,11 +251,13 @@ pub struct ShownResult {
     pub extension: String,
     /// The Item the Result shows.
     pub item: Item,
-    /// Other Extensions' Actions for this Item's kind, grouped by Extension,
-    /// then the Daemon's own, under the Extension name `kotodama`, such as
-    /// `forget` on a Result the History keeps anything for. The Action panel
-    /// lists them after the Item's own Actions, so none is ever the primary
-    /// Action. A shortcut that clashes with the owner's is dropped.
+    /// Other Extensions' Actions for this Item's kind or targeted at its
+    /// Identity, grouped by Extension, then the Daemon's own, under the
+    /// Extension name `kotodama`, such as `forget` on a Result the History
+    /// keeps anything for. The Action panel lists them after the Item's own
+    /// Actions, so none is ever the primary Action, and lists every
+    /// [`Destructive`](crate::ActionRole::Destructive) Action but the primary
+    /// after them all. A shortcut that clashes with the owner's is dropped.
     pub contributed: Vec<OfferedAction>,
     /// The positions, in characters, of the title's characters that matched the
     /// query.

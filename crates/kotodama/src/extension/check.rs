@@ -39,6 +39,7 @@ use kotodama_protocol::Channel;
 use kotodama_protocol::ChannelReader;
 use kotodama_protocol::ChannelWriter;
 use kotodama_protocol::Clipboard;
+use kotodama_protocol::ContributedTo;
 use kotodama_protocol::Error;
 use kotodama_protocol::FromExtension;
 use kotodama_protocol::Hello;
@@ -210,6 +211,14 @@ fn reserved(action: &str, shortcut: &str) -> String {
     )
 }
 
+/// Why the Daemon refuses a `target_action`, in its words.
+fn untargeted(action: &str) -> String {
+    format!(
+        "target_action names `{action}`, which the Manifest doesn't declare as a Contributed action with \
+         `targeted = true`; it is offered on nothing"
+    )
+}
+
 /// What the Daemon would make of one message.
 #[derive(Debug, PartialEq, Eq)]
 enum Finding {
@@ -322,6 +331,7 @@ impl Seen {
                 ));
             }
             FromExtension::Status { usable, note } => self.status = Some((usable, note)),
+            FromExtension::TargetAction { action, .. } => findings.extend(undeclared_target(manifest, &action)),
             FromExtension::PushView(view)
             | FromExtension::UpdateView(view)
             | FromExtension::ReplaceView { with: view, .. } => {
@@ -338,6 +348,16 @@ impl Seen {
         }
         findings
     }
+}
+
+/// A rejection of a `target_action` for `action`, unless the Manifest declares
+/// it targeted.
+fn undeclared_target(manifest: &Manifest, action: &str) -> Option<Finding> {
+    let declared = manifest
+        .contributed_actions
+        .iter()
+        .any(|offered| offered.to == ContributedTo::Identities && offered.action.id == action);
+    (!declared).then(|| Finding::Rejected(untargeted(action)))
 }
 
 /// A rejection for each of `actions` bound to a key the menu keeps for itself.

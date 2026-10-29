@@ -173,12 +173,18 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
         let Some(mut session) = self.sessions.remove(&id) else {
             return;
         };
-        let fresh = session.update == Update::Fresh;
+        let update = std::mem::replace(&mut session.update, Update::None);
+        let fresh = update == Update::Fresh;
         let keep = !fresh && !session.reranks(now);
-        session.update = Update::None;
         let typed = !session.searched().trim().is_empty();
         let app = session.scope.and_then(|n| self.apps.get(n));
         let app_scope = app.map(|app| app.scope(typed, self.extensions[app.extension.0].note()));
+
+        if update == Update::Rows {
+            self.send_rows_again(&mut session, app_scope);
+            self.sessions.insert(id, session);
+            return;
+        }
 
         if session.query.is_empty() || (app_scope.is_some() && !typed) {
             self.send_empty(&mut session, keep, fresh, app_scope, now);
@@ -188,7 +194,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
 
         let mut candidates = Vec::new();
         self.scored.clear();
-        let version = self.index.version();
+        let version = self.index.keys_version();
         let within = session
             .last_search
             .within(&session.query[session.rest..], &session.folded, version);
@@ -274,6 +280,28 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             .collect();
         session.send_results(shown, results, app_scope, fresh);
         self.sessions.insert(id, session);
+    }
+
+    /// Sends the Results on screen again, in the same order, with what their
+    /// Items and the Actions on them are at this point: no search, nor any
+    /// ranking.
+    pub(super) fn send_rows_again(&mut self, session: &mut Session, app_scope: Option<Scope>) {
+        let alias_primary = session.via_alias.as_ref().and_then(|(source, keyword)| {
+            let action = self.keywords.aliases.get(keyword)?.action.as_deref()?;
+            Some((*source, action.to_owned()))
+        });
+        let shown = session.shown.clone();
+        let results = shown
+            .iter()
+            .filter_map(|&(source, _)| {
+                let primary = alias_primary
+                    .as_ref()
+                    .filter(|(named, _)| *named == source)
+                    .map(|(_, action)| action.as_str());
+                self.row(session, source, primary)
+            })
+            .collect();
+        session.send_results(shown, results, app_scope, false);
     }
 
     /// Sends what shows before anything is typed: the Empty query's Results,

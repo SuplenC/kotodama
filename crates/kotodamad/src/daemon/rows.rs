@@ -13,6 +13,7 @@
 use std::collections::BTreeMap;
 
 use kotodama_protocol::Action;
+use kotodama_protocol::ActionRole;
 use kotodama_protocol::CatalogEntry;
 use kotodama_protocol::Item;
 use kotodama_protocol::KindName;
@@ -29,6 +30,7 @@ use super::Session;
 use super::Source;
 use super::after_keyword;
 use super::named_only;
+use crate::arguments;
 use crate::history::IDENTITIES;
 use crate::history::Store;
 use crate::index::ItemRef;
@@ -241,10 +243,12 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
         let (extension, mut contributed) = match owner {
             Some(owner) => (
                 self.extensions[owner.0].name().to_owned(),
-                self.contributed_for(owner, item.kind.name(), &item.actions),
+                self.contributed_for(owner, item.kind.name(), item.identity.as_deref(), &item.actions),
             ),
             None => (OWN.to_owned(), Vec::new()),
         };
+        let offered = contributed.iter_mut().map(|offered| &mut offered.action);
+        Self::mark_forms(session, item.keyword.as_deref(), item.actions.iter_mut().chain(offered));
         self.offer_forgetting(&extension, &mut item, &mut contributed);
         let alias = session
             .via_alias
@@ -293,16 +297,35 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
         })
     }
 
-    /// Other running Extensions' Actions for Items of `kind`, in Extension
-    /// order. When a shortcut clashes, the owner's binding in `own` wins, then
-    /// the earlier Extension's.
-    pub(super) fn contributed_for(&self, owner: ExtensionId, kind: &str, own: &[Action]) -> Vec<OfferedAction> {
-        let Some(offered) = self.contributed.get(kind) else {
+    /// Other running Extensions' Actions for an Item of `kind` whose Identity
+    /// is `identity`, in Extension order, and within one Extension those
+    /// offered on the kind before those targeted at the Identity. When a
+    /// shortcut clashes, the owner's binding in `own` wins, then the earlier
+    /// Extension's.
+    pub(super) fn contributed_for(
+        &self,
+        owner: ExtensionId,
+        kind: &str,
+        identity: Option<&str>,
+        own: &[Action],
+    ) -> Vec<OfferedAction> {
+        let by_kind = self.contributed.get(kind);
+        let identity = identity.filter(|_| !self.targets.is_empty());
+        if by_kind.is_none() && identity.is_none() {
             return Vec::new();
-        };
+        }
+        let by_kind = by_kind.into_iter().flatten().map(|(ext, action)| (*ext, action));
+        let mut offered: Vec<(ExtensionId, &Action)> = by_kind.collect();
+        if let Some(identity) = identity {
+            let by_kind = offered.len();
+            offered.extend(self.targets.on(identity));
+            if offered.len() > by_kind && by_kind > 0 {
+                offered.sort_by_key(|(ext, _)| ext.0);
+            }
+        }
         let mut taken: Vec<&str> = own.iter().filter_map(|action| action.shortcut.as_deref()).collect();
         offered
-            .iter()
+            .into_iter()
             .filter(|(ext, _)| *ext != owner)
             .map(|(ext, offered)| {
                 let mut action = offered.clone();
@@ -321,6 +344,33 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             .collect()
     }
 
+    /// Reports [`ActionRole::Form`] for each of `actions` that would ask for
+    /// its Arguments in a form if it ran: a required one is left
+    /// unfilled by what follows the Item's `keyword` in the query. A
+    /// destructive Action stays destructive.
+    pub(super) fn mark_forms<'a>(
+        session: &Session,
+        keyword: Option<&str>,
+        actions: impl IntoIterator<Item = &'a mut Action>,
+    ) {
+        let mut typed = None;
+        for action in actions {
+            if action.role != ActionRole::Normal || action.arguments.iter().all(|argument| argument.optional) {
+                continue;
+            }
+            let typed = typed.get_or_insert_with(|| {
+                keyword
+                    .and_then(|keyword| after_keyword(session.searched(), &keyword.to_lowercase()))
+                    .unwrap_or_default()
+            });
+            let mut given = BTreeMap::new();
+            arguments::fill(&action.arguments, typed, &mut given);
+            if arguments::missing(&action.arguments, &given).is_some() {
+                action.role = ActionRole::Form;
+            }
+        }
+    }
+
     /// Every Action on offer from running Extensions: their Contributed
     /// actions, then the Actions on their Indexed items, one entry per Item
     /// kind and Action id. Never the Items themselves.
@@ -331,9 +381,14 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
                 continue;
             }
             for contributed in &ext.found.manifest.contributed_actions {
+                // The catalog lists Actions by the kind they run on, and a
+                // targeted one runs on no kind.
+                let Some(kind) = contributed.to.kind() else {
+                    continue;
+                };
                 entries.push(CatalogEntry {
                     extension: ext.name().to_owned(),
-                    kind: contributed.kind.clone(),
+                    kind: kind.clone(),
                     action: contributed.action.clone(),
                 });
             }

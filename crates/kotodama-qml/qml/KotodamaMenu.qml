@@ -1018,7 +1018,10 @@ PanelWindow {
                     actionList.current = Math.max(0, actionList.current - 1);
                 } else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
                     menu.failure = "";
-                    search.runAction(actionList.row, actionList.current);
+                    // By what the panel shows, not by its place: the Result
+                    // may have been sent again with its Actions reordered.
+                    const shown = menu.actions[actionList.current];
+                    search.runListed(actionList.row, shown.group, shown.id);
                     menu.closeActions();
                 } else if (search.runShortcut(actionList.row, event.key, event.modifiers)) {
                     menu.failure = "";

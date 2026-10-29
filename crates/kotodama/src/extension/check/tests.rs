@@ -91,6 +91,19 @@ fn the_action_catalog_needs_the_manifest_to_ask_for_it() {
 }
 
 #[test]
+fn an_action_is_targeted_only_when_the_manifest_declares_it_targeted() {
+    let target = message(r#"{"target_action": {"action": "remove", "identities": ["app:gimp.desktop"]}}"#);
+    let by_kind = manifest("[[contributed_actions]]\nkind = \"app\"\nid = \"remove\"\ntitle = \"Remove\"");
+    let targeted = manifest("[[contributed_actions]]\ntargeted = true\nid = \"remove\"\ntitle = \"Remove\"");
+
+    assert_eq!(
+        Seen::default().take(&by_kind, target.clone()),
+        [Finding::Rejected(untargeted("remove"))]
+    );
+    assert_eq!(Seen::default().take(&targeted, target), []);
+}
+
+#[test]
 fn a_frame_that_isnt_one_is_explained() {
     assert!(plain(&Error::BadFrameHeader).contains("stderr"));
 }

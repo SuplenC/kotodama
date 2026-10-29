@@ -253,6 +253,12 @@ fn describe_extension_message(label: &str) -> Option<&'static str> {
              entry Item only while it can. `note`, shown on the app's intro card, says why it can't, or what \
              the user should know. Send it again after every start."
         }
+        "FromExtension::target_action" => {
+            "Offers the Contributed action `action`, declared with `targeted = true` in the Manifest, on every \
+             other Extension's Result whose Identity is in `identities`. Each one replaces the set sent before for \
+             that Action, so send the whole set whenever it changes; an empty one withdraws it. Send it again \
+             after every start."
+        }
         _ => return None,
     })
 }

@@ -31,6 +31,8 @@ fn item(id: &str) -> Item {
             shortcut: None,
             arguments: vec![],
             confirm: false,
+            keywords: Vec::new(),
+            role: kotodama_protocol::ActionRole::Normal,
         }],
     }
 }

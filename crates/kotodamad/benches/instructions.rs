@@ -18,6 +18,7 @@ use gungraun::library_benchmark_group;
 use gungraun::main;
 use kotodama_protocol::Table;
 use kotodama_protocol::Value;
+use kotodamad::daemon::Event;
 
 #[path = "support/corpus.rs"]
 #[expect(dead_code, reason = "the long titles are for `query.rs`")]
@@ -94,9 +95,28 @@ fn emoji_keystroke((mut setup, query): (Setup, &'static str)) -> Setup {
     setup
 }
 
+/// The search with `f` typed, and one of its Items resent with its two
+/// Actions swapped, indexed and waiting to go in.
+fn reordered_then() -> (Setup, Event) {
+    let mut setup = Setup::new();
+    setup.query("f");
+    let event = setup.reorder();
+    (setup, event)
+}
+
+#[library_benchmark(setup = reordered_then, teardown = drop_setup)]
+// Changing which Action is primary changes no row's rank: the menu gets its
+// rows again, with no search.
+#[bench::actions_reordered()]
+fn item_resent((mut setup, event): (Setup, Event)) -> Setup {
+    let now = setup.now;
+    setup.daemon.handle(black_box(event), now);
+    setup
+}
+
 library_benchmark_group!(
     name = query_10k_items,
-    benchmarks = [keystroke, empty_query, emoji_keystroke]
+    benchmarks = [keystroke, empty_query, emoji_keystroke, item_resent]
 );
 
 main!(library_benchmark_groups = query_10k_items);

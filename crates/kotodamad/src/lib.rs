@@ -46,6 +46,7 @@ mod reserved;
 pub mod schema;
 mod segment;
 mod server;
+mod targets;
 pub mod usage;
 mod views;
 

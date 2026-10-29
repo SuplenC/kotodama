@@ -257,9 +257,12 @@ pub struct Index {
     /// By Segment, whether the whole search reads it. It skips the rest
     /// whole.
     searched: Vec<bool>,
-    /// Bumped on every change, so a search narrowed from an earlier one knows
-    /// when it can't be trusted.
+    /// Bumped on every change.
     version: u64,
+    /// Bumped on every change to what a search reads, so a search narrowed
+    /// from an earlier one knows when it can't be trusted. A change to
+    /// Items' Actions alone leaves it.
+    keys_version: u64,
     /// Where the Segments keep their payloads: a file in this directory, or
     /// memory.
     dir: Option<Arc<Path>>,
@@ -315,6 +318,12 @@ impl Index {
         self.version
     }
 
+    /// The version of what a search reads: the same until an Item is
+    /// added, removed or changed other than in its Actions.
+    pub fn keys_version(&self) -> u64 {
+        self.keys_version
+    }
+
     /// Makes the whole search read the Segments `searched` marks, by
     /// Segment, and skip the rest. A search narrowed from one before this
     /// can't be trusted, so it counts as a change.
@@ -322,6 +331,7 @@ impl Index {
         if searched != self.searched {
             self.searched = searched;
             self.version += 1;
+            self.keys_version += 1;
         }
     }
 
@@ -352,11 +362,13 @@ impl Index {
         first
     }
 
-    /// Makes one change to an Extension's Items, here, at once.
-    pub fn edit(&mut self, extension: ExtensionId, edit: Edit) {
+    /// Makes one change to an Extension's Items, here, at once. Returns
+    /// whether it changed what a search reads, rather than only Actions.
+    pub fn edit(&mut self, extension: ExtensionId, edit: Edit) -> bool {
         self.version += 1;
         let at = Self::segments_of(extension).start;
         let edits = split(edit, [&self.segments[at], &self.segments[at + 1]]);
+        let mut keys_changed = false;
         for (side, edits) in edits.into_iter().enumerate() {
             if edits.is_empty() {
                 continue;
@@ -366,25 +378,34 @@ impl Index {
             for edit in edits {
                 segment.edit(edit);
             }
+            keys_changed |= segment.keys_changed();
         }
+        if keys_changed {
+            self.keys_version += 1;
+        }
+        keys_changed
     }
 
-    /// Puts in the Segment at `at`, built elsewhere.
-    pub fn replace(&mut self, at: usize, segment: Arc<Segment>) {
+    /// Puts in the Segment at `at`, built elsewhere, and returns the one it
+    /// replaces.
+    pub fn replace(&mut self, at: usize, segment: Arc<Segment>) -> Arc<Segment> {
         self.version += 1;
-        self.segments[at] = segment;
+        if segment.keys_changed() {
+            self.keys_version += 1;
+        }
+        std::mem::replace(&mut self.segments[at], segment)
     }
 
-    /// Removes every Item of one Extension. Returns whether there were any.
-    pub fn clear(&mut self, extension: ExtensionId) -> bool {
-        let mut cleared = false;
+    /// Removes every Item of one Extension. Returns the Segments that held
+    /// them, none if there were none.
+    pub fn clear(&mut self, extension: ExtensionId) -> Vec<Arc<Segment>> {
+        let mut cleared = Vec::new();
         for at in Self::segments_of(extension) {
             if self.segments[at].is_empty() {
                 continue;
             }
             let empty = self.segments[at].emptied();
-            self.replace(at, Arc::new(empty));
-            cleared = true;
+            cleared.push(self.replace(at, Arc::new(empty)));
         }
         cleared
     }

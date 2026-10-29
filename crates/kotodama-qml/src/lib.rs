@@ -310,6 +310,18 @@ impl KotodamaSearch {
         self.row(row).map(|row| QString::from(&row.hints())).unwrap_or_default()
     }
 
+    fn run_listed(self: Pin<&mut Self>, row: i32, group: &QString, id: &QString) -> bool {
+        let group = String::from(group);
+        let id = String::from(id);
+        let at = self
+            .row(row)
+            .and_then(|found| found.place_of((!group.is_empty()).then_some(group.as_str()), &id));
+        match at.and_then(|at| i32::try_from(at).ok()) {
+            Some(at) => self.run_action(row, at),
+            None => false,
+        }
+    }
+
     fn run_action(mut self: Pin<&mut Self>, row: i32, n: i32) -> bool {
         let Some(row) = self.row(row) else {
             return false;

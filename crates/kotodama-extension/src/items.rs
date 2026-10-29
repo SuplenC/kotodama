@@ -108,9 +108,11 @@ fn fingerprint(item: &Item) -> u64 {
         shortcut,
         arguments,
         confirm,
+        keywords,
+        role,
     } in actions
     {
-        (id, title, shortcut, confirm).hash(&mut hasher);
+        (id, title, shortcut, confirm, keywords, role).hash(&mut hasher);
         for Argument {
             name,
             placeholder,
