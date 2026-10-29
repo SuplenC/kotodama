@@ -167,6 +167,13 @@ pub const KEYS: &[Key] = &[
         "How much the Daemon logs: \"error\", \"warn\", \"info\" or \"debug\". `KOTODAMA_LOG` wins.",
     ),
     key(
+        "files.recent_dirs",
+        None,
+        "Where a file field finds the newest files to offer before anything is typed: absolute paths, \
+         or starting with `~/`. Default: the XDG user directories for downloads, documents and the desktop, \
+         from `user-dirs.dirs`, else `~/Downloads`, `~/Documents` and `~/Desktop`.",
+    ),
+    key(
         "history.picks_to_learn",
         Some("3"),
         "Picks of one Result for one query that make it the query's Learned choice: 1 to 255.",

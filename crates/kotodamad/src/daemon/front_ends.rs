@@ -16,6 +16,8 @@ use std::sync::mpsc::SyncSender;
 use std::time::Instant;
 
 use kotodama_protocol::Clipboard;
+use kotodama_protocol::FormField;
+use kotodama_protocol::FormInput;
 use kotodama_protocol::FromFrontEnd;
 use kotodama_protocol::ResultRef;
 use kotodama_protocol::Table;
@@ -45,6 +47,7 @@ use super::Undoable;
 use super::Update;
 use super::read_query;
 use crate::arguments;
+use crate::completion;
 use crate::history;
 use crate::history::Store;
 use crate::index::Reach;
@@ -296,6 +299,56 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
                 self.shown_last = Some(id);
                 self.shown(id, now);
             }
+            FromFrontEnd::CompletePath {
+                extension,
+                view,
+                field,
+                text,
+            } => self.complete_path(id, extension, view, field, text),
+        }
+    }
+
+    /// Asks for the paths that complete `text` in the file field `field` of
+    /// the form `view`, open in `front_end`; nothing when it isn't one.
+    fn complete_path(&mut self, front_end: FrontEndId, extension: String, view: String, field: String, text: String) {
+        let fields: &[FormField] = if extension == OWN {
+            match self.argument_forms.get(&view) {
+                Some(form) if form.front_end == front_end => &form.fields,
+                _ => &[],
+            }
+        } else {
+            match self
+                .extension_named(&extension)
+                .and_then(|ext| self.views.get(ext, &view))
+                .map(|open| &open.view.content)
+            {
+                Some(ViewContent::Form { fields, .. }) => fields,
+                _ => &[],
+            }
+        };
+        let wanted = fields.iter().find_map(|form_field| match &form_field.input {
+            FormInput::File { accept, folder, .. } if form_field.id == field => Some(completion::Field {
+                accept: accept.clone(),
+                folder: *folder,
+            }),
+            _ => None,
+        });
+        let Some(wanted) = wanted else {
+            log::debug!("no file field `{field}` in `{extension}`'s View `{view}` to complete");
+            return;
+        };
+        let ask = completion::Ask {
+            front_end,
+            extension,
+            view,
+            field,
+            text,
+            wanted,
+        };
+        if let Some((front_end, answer)) = self.completions.ask(ask)
+            && let Some(session) = self.sessions.get(&front_end)
+        {
+            session.send(answer);
         }
     }
 

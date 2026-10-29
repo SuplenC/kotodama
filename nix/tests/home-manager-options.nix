@@ -73,6 +73,7 @@ let
         paste = "ctrl+shift+v";
       };
       log.level = "debug";
+      files.recentDirs = [ "~/Inbox" ];
       emptyQuery = {
         mostUsed = 0;
         menu = [
@@ -249,6 +250,7 @@ pkgs.runCommand "kotodama-home-manager-options-test"
     expect("search", everything["search"], {"rows": 8, "near_misses": False, "fallbacks": False})
     expect("desktop", everything["desktop"], {"settle_ms": 120, "paste": "ctrl+shift+v"})
     expect("log", everything["log"], {"level": "debug"})
+    expect("files", everything["files"], {"recent_dirs": ["~/Inbox"]})
     expect("empty_query", everything["empty_query"], {
         "most_used": 0,
         "menu": [{"extension": "apps", "item": "firefox"}],

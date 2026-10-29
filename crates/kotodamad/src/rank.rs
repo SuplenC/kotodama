@@ -755,6 +755,28 @@ impl Haystack {
         }
     }
 
+    /// A text with a title alone, as a file's name is searched.
+    pub fn of_title(title: &str) -> Self {
+        let folded = fold_text(title);
+        let mut starts = Vec::new();
+        let initials = starts_and_initials(&folded, Some(title), &mut starts);
+        let letters = Letters::in_str(&folded);
+        let title_starts = starts.len();
+        Haystack {
+            title: Utf32String::from(folded),
+            words: Utf32String::default(),
+            subtitle: Utf32String::default(),
+            starts,
+            title_starts,
+            weak_at: 0,
+            keyword: false,
+            initials,
+            subtitle_initials: Letters::NONE,
+            letters,
+            every_letter: letters,
+        }
+    }
+
     pub fn texts(&self) -> Texts<'_> {
         let (title, words) = self.starts.split_at(self.title_starts);
         Texts {

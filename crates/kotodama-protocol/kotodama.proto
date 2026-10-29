@@ -164,6 +164,14 @@ message FromFrontEnd {
     Empty toggle = 10;
     FromFrontEnd.Undo undo = 11;
     Empty shown = 12;
+    FromFrontEnd.CompletePath complete_path = 13;
+  }
+
+  message CompletePath {
+    string extension = 1;
+    string view = 2;
+    string field = 3;
+    string text = 4;
   }
 
   message FilterView {
@@ -311,6 +319,14 @@ message Outcome {
   }
 }
 
+message PathCompletion {
+  string path = 1;
+  string title = 2;
+  bool folder = 3;
+  optional uint64 modified = 4;
+  repeated uint32 highlights = 5;
+}
+
 message Problem {
   string about = 1;
   string message = 2;
@@ -413,6 +429,7 @@ message ToFrontEnd {
     ToFrontEnd.WithdrawUndo withdraw_undo = 14;
     ToFrontEnd.SetQuery set_query = 15;
     ToFrontEnd.Reached reached = 16;
+    ToFrontEnd.PathCompletions path_completions = 17;
   }
 
   message ActionFailed {
@@ -439,6 +456,14 @@ message ToFrontEnd {
   message Open {
     string query = 1;
     optional string view = 2;
+  }
+
+  message PathCompletions {
+    string extension = 1;
+    string view = 2;
+    string field = 3;
+    string text = 4;
+    repeated PathCompletion entries = 5;
   }
 
   message PopView {

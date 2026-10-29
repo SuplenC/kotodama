@@ -4,7 +4,8 @@
 //!
 //! # Owns
 //!
-//! - The keys of each map QML reads: [`view`], [`jobs`], [`actions`] and [`examples`].
+//! - The keys of each map QML reads: [`view`], [`jobs`], [`actions`], [`examples`] and
+//!   [`completions`].
 //!
 //! # Not here
 //!
@@ -82,6 +83,33 @@ pub fn examples(examples: &[Example]) -> List {
             .iter()
             .map(|example| map([("query", text(&example.query)), ("result", text(&example.result))])),
     )
+}
+
+/// The paths offered to complete the file field being completed, best first,
+/// each `{path, title, folder, modified, highlights}`: `modified` in seconds
+/// since the Unix epoch, or -1 when unknown, and `highlights` the positions of
+/// the title's characters that matched. Empty when no field of the top form
+/// is being completed.
+pub fn completions(views: &Views) -> List {
+    let Some((_, entries)) = views.completions() else {
+        return List::default();
+    };
+    list(entries.iter().map(|entry| {
+        let mut highlights = List::default();
+        for &at in &entry.highlights {
+            highlights.append(QVariant::from(&i64::from(at)));
+        }
+        map([
+            ("path", text(&entry.path.to_string_lossy())),
+            ("title", text(&entry.title)),
+            ("folder", QVariant::from(&entry.folder)),
+            (
+                "modified",
+                QVariant::from(&entry.modified.and_then(|at| i64::try_from(at).ok()).unwrap_or(-1)),
+            ),
+            ("highlights", QVariant::from(&highlights)),
+        ])
+    }))
 }
 
 /// The jobs still running, oldest first.

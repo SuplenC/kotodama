@@ -178,6 +178,9 @@ paste = "ctrl+v"  # or "ctrl+shift+v", which terminals take, or "type", which ty
 
 [log]
 level = "info"  # "error", "warn", "info" or "debug"; KOTODAMA_LOG wins
+
+[files]
+# recent_dirs = ["~/Downloads", "~/Documents", "~/Desktop"]  # where a form's file field finds the newest files; the XDG user dirs by default
 ```
 
 A path in `[paths]` is absolute or starts with `~/`. An Extension in a later directory replaces one of the same name before it, so `extension_dirs` can hold a build of a Bundled extension. `[paths]` wins over the XDG variables, and an environment variable named for one setting, `KOTODAMA_SOCKET`, wins over `[paths]`, so Front ends started with it find a moved socket.

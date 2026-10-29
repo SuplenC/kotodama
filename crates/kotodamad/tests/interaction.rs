@@ -133,6 +133,131 @@ fn a_file_argument_left_out_is_asked_for_in_a_file_field_and_runs_with_an_absolu
     assert_eq!(arguments_run(&tools), [strings(&[("config", "/home/kuba/work.conf")])]);
 }
 
+/// A home directory of its own, in the build's target directory rather than
+/// the real home or `/tmp`, holding `paths` (a folder where one ends in `/`).
+fn home_with(paths: &[&str]) -> tempfile::TempDir {
+    let scratch = std::path::Path::new(env!("CARGO_TARGET_TMPDIR"));
+    let home = tempfile::Builder::new().prefix("home-").tempdir_in(scratch).unwrap();
+    for path in paths {
+        let full = home.path().join(path.trim_end_matches('/'));
+        if path.ends_with('/') {
+            std::fs::create_dir_all(full).unwrap();
+        } else {
+            std::fs::create_dir_all(full.parent().unwrap()).unwrap();
+            std::fs::write(full, "").unwrap();
+        }
+    }
+    home
+}
+
+/// The paths each `path_completions` sent to `ui` offered, by title.
+fn completed(ui: &FrontEnd) -> Vec<(String, Vec<String>)> {
+    ui.drain()
+        .into_iter()
+        .filter_map(|message| match message {
+            ToFrontEnd::PathCompletions { text, entries, .. } => {
+                Some((text, entries.into_iter().map(|entry| entry.title).collect()))
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+fn complete(extension: &str, view: &str, field: &str, text: &str) -> FromFrontEnd {
+    FromFrontEnd::CompletePath {
+        extension: extension.into(),
+        view: view.into(),
+        field: field.into(),
+        text: text.into(),
+    }
+}
+
+#[test]
+fn a_file_arguments_form_field_completes_what_is_typed_from_its_directory() {
+    let home = home_with(&["vpn/work.conf", "vpn/notes.txt", "vpn/old/"]);
+    let mut h = Harness::new(vec![plain("tools")]);
+    h.daemon.set_home(home.path().to_path_buf());
+    let tools = h.up(0);
+    h.add(&tools, vec![go(vec![Argument::new("config").file(["conf"])])]);
+    let ui = h.front_end();
+
+    h.query(&ui, "go");
+    run(&mut h, &ui, "tools", "go", "tools", "open");
+    let views = pushed(&ui);
+    let (_, form) = &views[0];
+    h.front_end_sends(&ui, complete("kotodama", &form.id, "config", "~/vpn/"));
+
+    assert_eq!(
+        completed(&ui),
+        [("~/vpn/".to_owned(), vec!["old".to_owned(), "work.conf".to_owned()])]
+    );
+}
+
+#[test]
+fn only_the_front_end_showing_an_argument_form_gets_its_completions() {
+    let home = home_with(&["vpn/work.conf"]);
+    let mut h = Harness::new(vec![plain("tools")]);
+    h.daemon.set_home(home.path().to_path_buf());
+    let tools = h.up(0);
+    h.add(&tools, vec![go(vec![Argument::new("config").file(["conf"])])]);
+    let ui = h.front_end();
+    let other = h.front_end();
+
+    h.query(&ui, "go");
+    run(&mut h, &ui, "tools", "go", "tools", "open");
+    let views = pushed(&ui);
+    let (_, form) = &views[0];
+    other.drain();
+    h.front_end_sends(&other, complete("kotodama", &form.id, "config", "~/vpn/"));
+
+    assert_eq!(completed(&other), []);
+}
+
+#[test]
+fn an_extensions_file_field_completes_and_another_field_does_not() {
+    let home = home_with(&["Downloads/"]);
+    let mut h = Harness::new(vec![plain("tools")]);
+    h.daemon.set_home(home.path().to_path_buf());
+    let tools = h.up(0);
+    let ui = h.front_end();
+    let form = View {
+        id: "import".into(),
+        title: "Import".into(),
+        content: ViewContent::Form {
+            fields: vec![
+                FormField {
+                    id: "into".into(),
+                    label: "Into".into(),
+                    input: FormInput::File {
+                        accept: Vec::new(),
+                        folder: true,
+                        default: None,
+                        placeholder: None,
+                    },
+                },
+                FormField {
+                    id: "name".into(),
+                    label: "Name".into(),
+                    input: FormInput::Text {
+                        placeholder: None,
+                        default: None,
+                        secret: false,
+                    },
+                },
+            ],
+            submit: "Import".into(),
+        },
+    };
+    h.send(&tools, FromExtension::PushView(form));
+    ui.drain();
+
+    h.front_end_sends(&ui, complete("tools", "import", "into", "Dow"));
+    h.front_end_sends(&ui, complete("tools", "import", "name", "Dow"));
+    h.front_end_sends(&ui, complete("tools", "gone", "into", "Dow"));
+
+    assert_eq!(completed(&ui), [("Dow".to_owned(), vec!["Downloads".to_owned()])]);
+}
+
 #[test]
 fn a_file_field_of_an_extensions_form_is_submitted_as_an_absolute_path() {
     let mut h = Harness::new(vec![plain("tools")]);

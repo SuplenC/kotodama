@@ -64,6 +64,7 @@ pub use front_end::FromFrontEnd;
 pub use front_end::Intro;
 pub use front_end::ListMatch;
 pub use front_end::OfferedAction;
+pub use front_end::PathCompletion;
 pub use front_end::Problem;
 pub use front_end::ResultRef;
 pub use front_end::Scope;

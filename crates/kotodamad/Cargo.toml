@@ -50,6 +50,10 @@ harness = false
 name = "memory"
 harness = false
 
+[[bench]]
+name = "completion"
+harness = false
+
 # gungraun, not criterion: scripts/bench-run leaves out every bench target of
 # this name, and CI's `instructions` job runs them.
 [[bench]]

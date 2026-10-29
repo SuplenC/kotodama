@@ -9,6 +9,7 @@
 //!   they come.
 //! - A list View's rows as [`rows::diff`](crate::rows::diff) takes them ([`Listed`]), and its
 //!   Contributed actions by Item kind.
+//! - The file field being completed, and the Daemon's paths for it.
 //!
 //! # Not here
 //!
@@ -28,6 +29,7 @@ use kotodama_protocol::Job;
 use kotodama_protocol::JobState;
 use kotodama_protocol::ListMatch;
 use kotodama_protocol::OfferedAction;
+use kotodama_protocol::PathCompletion;
 use kotodama_protocol::Table;
 use kotodama_protocol::Value;
 use kotodama_protocol::View;
@@ -231,6 +233,21 @@ pub struct Views {
     stack: Vec<Open>,
     /// By the Extension that runs them, in the order they started.
     jobs: Vec<(String, Job)>,
+    /// The file field last asked to be completed, and what was typed in it.
+    completing: Option<Completing>,
+    /// The Daemon's answer for `completing`; empty until it comes.
+    completions: Vec<PathCompletion>,
+}
+
+/// A request for the paths that complete a file field.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct Completing {
+    extension: String,
+    view: String,
+    /// The field's place in its form, and its id.
+    at: usize,
+    field: String,
+    text: String,
 }
 
 impl Views {
@@ -394,6 +411,69 @@ impl Views {
         })
     }
 
+    /// Asks for the paths that complete `text` in the top form's `field`th
+    /// field: what to send the Daemon. `None` if that isn't a file field.
+    /// The paths offered for what was typed before stay until the answer
+    /// comes.
+    pub fn complete(&mut self, field: usize, text: &str) -> Option<FromFrontEnd> {
+        let open = self.stack.last()?;
+        let ViewContent::Form { fields, .. } = &open.view.content else {
+            return None;
+        };
+        let asked = fields
+            .get(field)
+            .filter(|asked| matches!(asked.input, FormInput::File { .. }))?;
+        let completing = Completing {
+            extension: open.extension.clone(),
+            view: open.view.id.clone(),
+            at: field,
+            field: asked.id.clone(),
+            text: text.to_owned(),
+        };
+        let message = FromFrontEnd::CompletePath {
+            extension: completing.extension.clone(),
+            view: completing.view.clone(),
+            field: completing.field.clone(),
+            text: completing.text.clone(),
+        };
+        if self.completing.as_ref().is_some_and(|last| {
+            last.at != field || last.view != completing.view || last.extension != completing.extension
+        }) {
+            self.completions.clear();
+        }
+        self.completing = Some(completing);
+        Some(message)
+    }
+
+    /// The Daemon's paths for `text` in a file field. False, and nothing
+    /// kept, unless they answer the last request: one for text typed since
+    /// is stale.
+    pub fn completed(
+        &mut self,
+        extension: &str,
+        view: &str,
+        field: &str,
+        text: &str,
+        entries: Vec<PathCompletion>,
+    ) -> bool {
+        let answers = self.completing.as_ref().is_some_and(|last| {
+            last.extension == extension && last.view == view && last.field == field && last.text == text
+        });
+        if answers {
+            self.completions = entries;
+        }
+        answers
+    }
+
+    /// The paths offered for the field being completed, and its place in
+    /// the top form; none once that form isn't on top.
+    pub fn completions(&self) -> Option<(usize, &[PathCompletion])> {
+        let completing = self.completing.as_ref()?;
+        let top = self.stack.last()?;
+        top.is(&completing.extension, &completing.view)
+            .then_some((completing.at, self.completions.as_slice()))
+    }
+
     /// A job's latest state.
     pub fn progress(&mut self, extension: String, job: Job) {
         match self
@@ -426,6 +506,8 @@ impl Views {
     pub fn reset(&mut self) {
         self.stack.clear();
         self.jobs.clear();
+        self.completing = None;
+        self.completions.clear();
     }
 
     /// Drops finished jobs no progress View follows.

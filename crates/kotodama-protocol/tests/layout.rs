@@ -746,6 +746,12 @@ fn from_front_end() -> Vec<FromFrontEnd> {
         FromFrontEnd::Toggle,
         FromFrontEnd::Undo { change: 7 },
         FromFrontEnd::Shown,
+        FromFrontEnd::CompletePath {
+            extension: "wireguard".into(),
+            view: "import".into(),
+            field: "config".into(),
+            text: "~/Down".into(),
+        },
     ]
 }
 
@@ -832,6 +838,19 @@ fn to_front_end() -> Vec<ToFrontEnd> {
         ToFrontEnd::WithdrawUndo { change: 7 },
         ToFrontEnd::SetQuery { text: "emoji ".into() },
         ToFrontEnd::Reached { menus: 1 },
+        ToFrontEnd::PathCompletions {
+            extension: "wireguard".into(),
+            view: "import".into(),
+            field: "config".into(),
+            text: "~/Down".into(),
+            entries: vec![PathCompletion {
+                path: PathBuf::from("/home/kuba/Downloads"),
+                title: "Downloads".into(),
+                folder: true,
+                modified: Some(1_761_700_000),
+                highlights: vec![0, 1, 2, 3],
+            }],
+        },
     ]
 }
 

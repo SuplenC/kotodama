@@ -33,6 +33,7 @@ use super::State;
 use super::clear_history;
 use super::read_query;
 use crate::apps::Apps;
+use crate::completion;
 use crate::config;
 use crate::config::extension_settings;
 use crate::configured;
@@ -59,6 +60,8 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
         self.load_engine(&mut report);
         self.load_keywords(&mut report);
         self.load_settings(&mut report);
+        self.files = completion::Settings::from_config(&self.config, &mut report);
+        self.completions.configure(self.home.clone(), self.files.clone());
         let empty_query = EmptyQuery::from_config(&self.config, &mut report);
         if empty_query != self.empty_query {
             self.empty_query = empty_query;

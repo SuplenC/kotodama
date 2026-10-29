@@ -440,6 +440,25 @@ fn results_messages() -> Vec<ToFrontEnd> {
     ]
 }
 
+fn path_completions() -> Vec<PathCompletion> {
+    vec![
+        PathCompletion {
+            path: PathBuf::from("/home/kuba/Downloads/work.conf"),
+            title: "work.conf".into(),
+            folder: false,
+            modified: Some(1_761_700_000),
+            highlights: Vec::new(),
+        },
+        PathCompletion {
+            path: PathBuf::from("/mnt/ünïcode"),
+            title: "ünïcode".into(),
+            folder: true,
+            modified: None,
+            highlights: vec![0, 2],
+        },
+    ]
+}
+
 fn menu_and_view_messages() -> Vec<ToFrontEnd> {
     vec![
         ToFrontEnd::Status {
@@ -525,6 +544,13 @@ fn menu_and_view_messages() -> Vec<ToFrontEnd> {
         ToFrontEnd::WithdrawUndo { change: 3 },
         ToFrontEnd::SetQuery { text: "emoji ".into() },
         ToFrontEnd::Reached { menus: 1 },
+        ToFrontEnd::PathCompletions {
+            extension: "kotodama".into(),
+            view: "arguments-3".into(),
+            field: "config".into(),
+            text: "~".into(),
+            entries: path_completions(),
+        },
     ]
 }
 
@@ -567,6 +593,12 @@ fn from_front_end_messages() -> Vec<FromFrontEnd> {
         FromFrontEnd::Toggle,
         FromFrontEnd::Undo { change: 3 },
         FromFrontEnd::Shown,
+        FromFrontEnd::CompletePath {
+            extension: "kotodama".into(),
+            view: "arguments-3".into(),
+            field: "config".into(),
+            text: "~".into(),
+        },
     ]
 }
 
@@ -588,9 +620,10 @@ fn to_front_end_variant(message: &ToFrontEnd) -> usize {
         ToFrontEnd::WithdrawUndo { .. } => 13,
         ToFrontEnd::SetQuery { .. } => 14,
         ToFrontEnd::Reached { .. } => 15,
+        ToFrontEnd::PathCompletions { .. } => 16,
     }
 }
-const TO_FRONT_END_VARIANTS: usize = 16;
+const TO_FRONT_END_VARIANTS: usize = 17;
 
 fn from_front_end_variant(message: &FromFrontEnd) -> usize {
     match message {
@@ -606,9 +639,10 @@ fn from_front_end_variant(message: &FromFrontEnd) -> usize {
         FromFrontEnd::Toggle => 9,
         FromFrontEnd::Undo { .. } => 10,
         FromFrontEnd::Shown => 11,
+        FromFrontEnd::CompletePath { .. } => 12,
     }
 }
-const FROM_FRONT_END_VARIANTS: usize = 12;
+const FROM_FRONT_END_VARIANTS: usize = 13;
 
 /// The row the Daemon shows for an Alias whose Item it can't run: the Item
 /// as last seen, with its Actions taken off.

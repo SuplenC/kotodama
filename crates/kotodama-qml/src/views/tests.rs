@@ -3,6 +3,7 @@ use kotodama_protocol::FormField;
 use kotodama_protocol::Fraction;
 use kotodama_protocol::Item;
 use kotodama_protocol::ItemKind;
+use kotodama_protocol::PathCompletion;
 use kotodama_protocol::SelectOption;
 
 use super::*;
@@ -255,6 +256,73 @@ fn a_file_field_starts_with_its_default_and_takes_a_typed_path() {
             ]),
         })
     );
+}
+
+fn import_form() -> View {
+    form(vec![
+        field("name", text(None)),
+        field(
+            "config",
+            FormInput::File {
+                accept: vec!["conf".into()],
+                folder: false,
+                default: None,
+                placeholder: None,
+            },
+        ),
+    ])
+}
+
+fn path(title: &str) -> PathCompletion {
+    PathCompletion {
+        path: format!("/home/kuba/{title}").into(),
+        title: title.into(),
+        folder: false,
+        modified: None,
+        highlights: Vec::new(),
+    }
+}
+
+#[test]
+fn a_file_field_asks_the_daemon_to_complete_what_is_typed() {
+    let mut views = Views::default();
+    views.push("wireguard".into(), import_form(), none());
+
+    assert_eq!(
+        views.complete(1, "~/wo"),
+        Some(FromFrontEnd::CompletePath {
+            extension: "wireguard".into(),
+            view: "form".into(),
+            field: "config".into(),
+            text: "~/wo".into(),
+        })
+    );
+    assert_eq!(views.complete(0, "~/wo"), None, "a text field isn't completed");
+}
+
+#[test]
+fn only_the_answer_to_what_was_typed_last_is_offered() {
+    let mut views = Views::default();
+    views.push("wireguard".into(), import_form(), none());
+    views.complete(1, "~/w");
+    views.complete(1, "~/wo");
+
+    assert!(!views.completed("wireguard", "form", "config", "~/w", vec![path("stale.conf")]));
+    assert!(views.completed("wireguard", "form", "config", "~/wo", vec![path("work.conf")]));
+
+    assert_eq!(views.completions(), Some((1, [path("work.conf")].as_slice())));
+}
+
+#[test]
+fn completions_go_with_their_form() {
+    let mut views = Views::default();
+    views.push("wireguard".into(), import_form(), none());
+    views.complete(1, "");
+    views.completed("wireguard", "form", "config", "", vec![path("work.conf")]);
+
+    views.push("git".into(), detail("a"), none());
+
+    assert_eq!(views.completions(), None);
 }
 
 #[test]
