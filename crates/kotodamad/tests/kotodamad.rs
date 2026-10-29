@@ -86,6 +86,10 @@ fn with_home<'a>(command: &'a mut Command, root: &Path) -> &'a mut Command {
         .env("XDG_STATE_HOME", root.join("state"))
         .env("HOME", root)
         .env_remove("WAYLAND_DISPLAY")
+        // A test run from an app Kotodama started inherits its prefix, and its
+        // KOTODAMA_LAUNCH_SCOPED would hide the prefix a test sets.
+        .env_remove(LAUNCH_PREFIX)
+        .env_remove(LAUNCH_SCOPED)
 }
 
 /// Starts the Daemon the way systemd's socket activation does: `listener` as
