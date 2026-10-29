@@ -158,6 +158,19 @@
                 </match>
               </fontconfig>
             '';
+            # Link through Nix's cc wrapper, whatever linker a global
+            # ~/.cargo/config.toml names. A host clang (or mold, even through
+            # the wrapper) leaves kotodama-qml's test binary no runpath to the
+            # shell's Qt, so it loads the host's older Qt instead. The linker
+            # variables outrank the config file's. Cargo appends a target's
+            # rustflags from every source, so an empty
+            # CARGO_TARGET_<triple>_RUSTFLAGS can't drop a global
+            # `-fuse-ld=mold`; a set RUSTFLAGS, even empty, replaces them all.
+            # The repo sets no rustflags of its own, and a rustc-wrapper such
+            # as sccache is left alone.
+            CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER = "cc";
+            CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER = "cc";
+            RUSTFLAGS = "";
             RUST_SRC_PATH = "${pkgs.rustPlatform.rustLibSrc}";
             TZDIR = "${pkgs.tzdata}/share/zoneinfo";
           };
