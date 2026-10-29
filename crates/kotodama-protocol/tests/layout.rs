@@ -775,6 +775,10 @@ fn to_front_end() -> Vec<ToFrontEnd> {
                 highlights: vec![0, 2],
                 alias: Some("ff".into()),
                 unavailable: Some("apps isn't running".into()),
+                primary: Some(ActionRef {
+                    extension: "shell".into(),
+                    id: "open".into(),
+                }),
             }],
             scope: Some(Scope {
                 word: "emoji".into(),

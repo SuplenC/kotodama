@@ -1365,7 +1365,7 @@ Extensions never see these either.
 
 ### `results`
 
-The whole ranked list for the query, best first, and the app it is in.
+The whole ranked list for the query, best first, and the app it is in. A Result's `primary` names the Action Enter runs when the query chose one by its keywords, as `remove chrome` does; without it, Enter runs the Item's first own Action.
 
 ```json
 {
@@ -1449,7 +1449,11 @@ The whole ranked list for the query, best first, and the app it is in.
           2
         ],
         "alias": "ff",
-        "unavailable": "apps isn't running"
+        "unavailable": "apps isn't running",
+        "primary": {
+          "extension": "shell",
+          "id": "open"
+        }
       }
     ],
     "scope": {

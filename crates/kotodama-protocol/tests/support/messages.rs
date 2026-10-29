@@ -66,6 +66,7 @@ pub fn results() -> ToFrontEnd {
                 highlights: vec![0, 1, 2, 3, 8],
                 alias: None,
                 unavailable: None,
+                primary: None,
             })
             .collect(),
         scope: Some(Scope {
