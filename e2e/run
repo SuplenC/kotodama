@@ -78,6 +78,10 @@ if ! has_keyboard; then
     exit 1
 fi
 export QT_QPA_PLATFORM=wayland QT_QUICK_BACKEND=software
+# A user profile's Qt paths, such as ~/.nix-profile's, would load another
+# Kotodama module or Qt plugins built against another Qt in place of the ones
+# under test.
+unset QML2_IMPORT_PATH QT_PLUGIN_PATH
 
 failed=0
 for name in "${tests[@]}"; do
