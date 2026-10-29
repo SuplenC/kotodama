@@ -21,6 +21,7 @@ use kotodama_protocol::ResultRef;
 use kotodama_protocol::Table;
 use kotodama_protocol::ToExtension;
 use kotodama_protocol::ToFrontEnd;
+use kotodama_protocol::ViewContent;
 use nucleo_matcher::pattern::Pattern;
 
 use super::ArgumentForm;
@@ -245,11 +246,17 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             FromFrontEnd::SubmitForm {
                 extension,
                 view,
-                values,
+                mut values,
             } => {
                 if extension == OWN {
                     self.submit_arguments(id, &view, values, now);
                 } else if let Some(ext) = self.extension_named(&extension) {
+                    if let Some(home) = &self.home
+                        && let Some(open) = self.views.get(ext, &view)
+                        && let ViewContent::Form { fields, .. } = &open.view.content
+                    {
+                        arguments::absolute_fields(fields, &mut values, home);
+                    }
                     self.extensions[ext.0].send(ToExtension::SubmitForm { view, values });
                 }
             }

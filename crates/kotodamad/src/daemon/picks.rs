@@ -304,6 +304,9 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             );
             return Ok(());
         }
+        if let Some(home) = &self.home {
+            arguments::absolute_paths(&wanted.arguments, &mut arguments, home);
+        }
 
         let ext = &self.extensions[target.0];
         if ext.sender().is_none() {

@@ -171,7 +171,7 @@ The Daemon does the typing, pasting and copying, so don't call `wtype` or `wl-co
 
 An Action can also carry:
 
-- `arguments`: each with a `name`, an optional `placeholder`, and `optional: true` if it may be left out. With an Item `keyword`, the user types them after it. Each Argument takes one word, and the last takes the rest. The Daemon asks for a missing required one in a form, so `run_action` always has them.
+- `arguments`: each with a `name`, an optional `placeholder`, and `optional: true` if it may be left out. With an Item `keyword`, the user types them after it. Each Argument takes one word, and the last takes the rest. The Daemon asks for a missing required one in a form, so `run_action` always has them. An Argument that is a path says so with `kind`: `"file"`, with `accept` listing the file extensions (`"conf"`, without the dot) or MIME types it takes, none for any, or `"folder"`; the default is `"text"`. Its form field is then a file field, which a Front end may give a picker, and its value reaches `run_action` as an absolute path: the Daemon expands a leading `~`, and takes a relative path from the home directory, the one a person's paths start from. In a Manifest: `arguments = [{ name = "path", kind = "file", accept = ["conf"], placeholder = "~/Downloads/work.conf" }]`; in Rust, `Argument::new("path").file(["conf"])`.
 - `shortcut`: a key binding such as `"ctrl+o"`, which runs the Action without opening the Action panel. It needs Ctrl, Alt or Super, since a bare key types into the search. The menu keeps `ctrl+k`, `ctrl+n`, `ctrl+p`, `ctrl+z` and `ctrl+shift+backspace` for itself, and the Daemon drops an Action's binding to one of them and rejects it (see [Talking to the Daemon](#talking-to-the-daemon)).
 - `confirm: true`: for an Action that can't be undone, such as deleting something or powering off. The menu asks in its footer and runs the Action on a second Enter only, so you need no form of your own.
 
@@ -214,7 +214,7 @@ Results that arrive late never move a row the user is looking at once the select
 An Action can push a View over the search: `{"push_view": {"id": "...", "title": "...", "content": ...}}`, answering its `run_action` with `"keep_open"`. The content is one of:
 
 - `list`: Items, which typing filters as the search does. To filter it yourself, as for results from a web service, set `filters_itself: true`. You then get `filter_view` with the whole text on each keystroke, and answer with an `update_view`.
-- `form`: fields of `text`, `checkbox` or `select` input. Submitting it sends `submit_form` with the values by field id.
+- `form`: fields of `text`, `checkbox`, `select` or `file` input. A `file` input asks for a path, to a folder with `folder: true`, and its value arrives as an absolute path, as a file Argument's does. Submitting it sends `submit_form` with the values by field id.
 - `detail`: Markdown, with optional metadata beside it.
 - `progress`: follows a job.
 

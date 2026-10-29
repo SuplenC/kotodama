@@ -5,6 +5,8 @@
 //!
 //! - [`fill`]: the Arguments an Action takes, filled from what follows its keyword.
 //! - [`missing`], [`form`] and [`submitted`]: the form that asks for the rest, and its answers.
+//! - [`absolute`]: a file or folder Argument, or a form's file field, as the absolute path it
+//!   reaches the Extension as.
 //!
 //! # Not here
 //!
@@ -12,8 +14,10 @@
 //! - Running the Action: `daemon/picks.rs`.
 
 use std::collections::BTreeMap;
+use std::path::Path;
 
 use kotodama_protocol::Argument;
+use kotodama_protocol::ArgumentKind;
 use kotodama_protocol::FormField;
 use kotodama_protocol::FormInput;
 use kotodama_protocol::Table;
@@ -60,14 +64,27 @@ pub fn form(id: String, title: &str, wanted: &[Argument], given: &BTreeMap<Strin
         content: ViewContent::Form {
             fields: wanted
                 .iter()
-                .map(|argument| FormField {
-                    id: argument.name.clone(),
-                    label: argument.name.clone(),
-                    input: FormInput::Text {
-                        placeholder: argument.placeholder.clone(),
-                        default: given.get(&argument.name).cloned(),
-                        secret: false,
-                    },
+                .map(|argument| {
+                    let placeholder = argument.placeholder.clone();
+                    let default = given.get(&argument.name).cloned();
+                    let input = match argument.kind {
+                        ArgumentKind::Text => FormInput::Text {
+                            placeholder,
+                            default,
+                            secret: false,
+                        },
+                        ArgumentKind::File | ArgumentKind::Folder => FormInput::File {
+                            accept: argument.accept.clone(),
+                            folder: argument.kind == ArgumentKind::Folder,
+                            default,
+                            placeholder,
+                        },
+                    };
+                    FormField {
+                        id: argument.name.clone(),
+                        label: argument.name.clone(),
+                        input,
+                    }
                 })
                 .collect(),
             submit: title.to_owned(),
@@ -85,3 +102,52 @@ pub fn submitted(values: Table) -> BTreeMap<String, String> {
         })
         .collect()
 }
+
+/// Makes the file and folder Arguments among `given` absolute paths, as
+/// [`absolute`] does, however they were filled in: typed after the
+/// keyword, in a form, or by the Front end.
+pub fn absolute_paths(wanted: &[Argument], given: &mut BTreeMap<String, String>, home: &Path) {
+    for argument in wanted.iter().filter(|argument| argument.kind != ArgumentKind::Text) {
+        if let Some(path) = given.get_mut(&argument.name) {
+            *path = absolute(path, home);
+        }
+    }
+}
+
+/// Makes the values of a form's file fields in `values` absolute paths, as
+/// [`absolute`] does.
+pub fn absolute_fields(fields: &[FormField], values: &mut Table, home: &Path) {
+    for field in fields
+        .iter()
+        .filter(|field| matches!(field.input, FormInput::File { .. }))
+    {
+        if let Some(Value::String(path)) = values.get_mut(&field.id) {
+            *path = absolute(path, home);
+        }
+    }
+}
+
+/// `path` as an absolute path: `~` and `~/…` expand to `home`, and a
+/// relative path is taken from `home`, the directory a person's paths start
+/// from in a file manager and a new terminal; the Daemon's own working
+/// directory is wherever systemd started it. An empty path stays empty: it
+/// was left out.
+pub fn absolute(path: &str, home: &Path) -> String {
+    if path.is_empty() || path.starts_with('/') {
+        return path.to_owned();
+    }
+    let rest = match path.strip_prefix('~') {
+        Some("") => "",
+        Some(rest) if rest.starts_with('/') => rest.trim_start_matches('/'),
+        _ => path,
+    };
+    let joined = if rest.is_empty() {
+        home.to_path_buf()
+    } else {
+        home.join(rest)
+    };
+    joined.to_string_lossy().into_owned()
+}
+
+#[cfg(test)]
+mod tests;

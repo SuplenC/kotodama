@@ -19,9 +19,8 @@ use kotodamad::usage::Used;
 
 fn argument(name: &str, optional: bool) -> Argument {
     Argument {
-        name: name.into(),
-        placeholder: Some(format!("the {name}")),
         optional,
+        ..Argument::new(name).placeholder(format!("the {name}"))
     }
 }
 
@@ -68,6 +67,122 @@ fn an_items_keyword_takes_the_rest_of_the_query_as_its_arguments() {
     assert_eq!(titles(&h.query(&ui, "go 1.23")), ["Go toolchain"]);
     run(&mut h, &ui, "tools", "go", "tools", "open");
     assert_eq!(arguments_run(&tools), [strings(&[("version", "1.23")])]);
+}
+
+#[test]
+fn a_file_argument_reaches_the_action_as_an_absolute_path() {
+    let mut h = Harness::new(vec![plain("tools")]);
+    h.daemon.set_home("/home/kuba".into());
+    let tools = h.up(0);
+    h.add(
+        &tools,
+        vec![go(vec![
+            Argument::new("into").folder(),
+            Argument::new("config").file(["conf"]),
+        ])],
+    );
+    let ui = h.front_end();
+    tools.drain();
+
+    h.query(&ui, "go vpn ~/Downloads/work.conf");
+    run(&mut h, &ui, "tools", "go", "tools", "open");
+
+    assert_eq!(
+        arguments_run(&tools),
+        [strings(&[
+            ("into", "/home/kuba/vpn"),
+            ("config", "/home/kuba/Downloads/work.conf")
+        ])]
+    );
+}
+
+#[test]
+fn a_file_argument_left_out_is_asked_for_in_a_file_field_and_runs_with_an_absolute_path() {
+    let mut h = Harness::new(vec![plain("tools")]);
+    h.daemon.set_home("/home/kuba".into());
+    let tools = h.up(0);
+    h.add(&tools, vec![go(vec![Argument::new("config").file(["conf"])])]);
+    let ui = h.front_end();
+    tools.drain();
+
+    h.query(&ui, "go");
+    run(&mut h, &ui, "tools", "go", "tools", "open");
+    let views = pushed(&ui);
+    let (_, form) = &views[0];
+    let ViewContent::Form { fields, .. } = &form.content else {
+        panic!("expected a form, got {form:?}")
+    };
+    assert_eq!(
+        fields[0].input,
+        FormInput::File {
+            accept: vec!["conf".into()],
+            folder: false,
+            default: None,
+            placeholder: None,
+        }
+    );
+    h.front_end_sends(
+        &ui,
+        FromFrontEnd::SubmitForm {
+            extension: "kotodama".into(),
+            view: form.id.clone(),
+            values: BTreeMap::from([("config".into(), Value::String("~/work.conf".into()))]),
+        },
+    );
+
+    assert_eq!(arguments_run(&tools), [strings(&[("config", "/home/kuba/work.conf")])]);
+}
+
+#[test]
+fn a_file_field_of_an_extensions_form_is_submitted_as_an_absolute_path() {
+    let mut h = Harness::new(vec![plain("tools")]);
+    h.daemon.set_home("/home/kuba".into());
+    let tools = h.up(0);
+    let ui = h.front_end();
+    let form = View {
+        id: "import".into(),
+        title: "Import".into(),
+        content: ViewContent::Form {
+            fields: vec![FormField {
+                id: "config".into(),
+                label: "Config".into(),
+                input: FormInput::File {
+                    accept: Vec::new(),
+                    folder: false,
+                    default: None,
+                    placeholder: None,
+                },
+            }],
+            submit: "Import".into(),
+        },
+    };
+    h.send(&tools, FromExtension::PushView(form));
+    tools.drain();
+
+    h.front_end_sends(
+        &ui,
+        FromFrontEnd::SubmitForm {
+            extension: "tools".into(),
+            view: "import".into(),
+            values: BTreeMap::from([("config".into(), Value::String("work.conf".into()))]),
+        },
+    );
+
+    let submitted: Vec<Table> = tools
+        .drain()
+        .into_iter()
+        .filter_map(|message| match message {
+            ToExtension::SubmitForm { values, .. } => Some(values),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        submitted,
+        [Table::from([(
+            "config".into(),
+            Value::String("/home/kuba/work.conf".into())
+        )])]
+    );
 }
 
 /// The Views pushed to a Front end, with the Extension each came from.
