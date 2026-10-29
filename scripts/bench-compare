@@ -2,11 +2,13 @@
 # Compares two criterion `--output-format bencher` outputs and fails when a
 # benchmark is higher than its baseline by more than the threshold. Only lines
 # in UNIT are compared: `ns/iter` for timings, or `bytes` for the memory lines
-# some benchmarks print in the same format.
-# Usage: bench-compare BASELINE CURRENT [THRESHOLD_PERCENT] [UNIT]
+# some benchmarks print in the same format. A benchmark also has to grow by
+# more than FLOOR (in UNIT) to fail: timings of a few nanoseconds swing about
+# 2x between runners, so a percentage alone fails them on noise.
+# Usage: bench-compare BASELINE CURRENT [THRESHOLD_PERCENT] [UNIT] [FLOOR]
 set -euo pipefail
 
-baseline=$1 current=$2 threshold=${3:-50} unit=${4:-ns/iter}
+baseline=$1 current=$2 threshold=${3:-50} unit=${4:-ns/iter} floor=${5:-0}
 
 if [ ! -f "$baseline" ]; then
     echo "no baseline at $baseline; nothing to compare against"
@@ -19,14 +21,14 @@ parse() {
         awk -F'\t' -v OFS='\t' -v unit="$unit" '$3 == unit { gsub(/,/, "", $2); print $1, $2 }'
 }
 
-awk -F'\t' -v threshold="$threshold" -v unit="$unit" '
+awk -F'\t' -v threshold="$threshold" -v unit="$unit" -v floor="$floor" '
     NR == FNR { base[$1] = $2; next }
     {
         if (!($1 in base)) {
             printf "new        %s: %d %s\n", $1, $2, unit
             next
         }
-        if ($2 > base[$1] * (1 + threshold / 100)) {
+        if ($2 > base[$1] * (1 + threshold / 100) && $2 - base[$1] > floor) {
             printf "REGRESSION %s: %d -> %d %s\n", $1, base[$1], $2, unit
             failed = 1
         }

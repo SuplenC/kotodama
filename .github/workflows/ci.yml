@@ -297,7 +297,7 @@ jobs:
           SAVED: ${{ steps.saved.outputs.cache-matched-key != '' }}
         run: |
           scripts/bench-compare bench-base.txt bench-current.txt 10 bytes
-          if scripts/bench-compare bench-base.txt bench-current.txt 50; then
+          if scripts/bench-compare bench-base.txt bench-current.txt 50 ns/iter 100; then
             exit 0
           fi
           if [ "$SAVED" != true ]; then
@@ -309,7 +309,7 @@ jobs:
         if: steps.compare.outputs.confirm
         run: |
           scripts/bench-run "${{ steps.base.outputs.dir }}" bench-base-here.txt
-          scripts/bench-compare bench-base-here.txt bench-current.txt 50
+          scripts/bench-compare bench-base-here.txt bench-current.txt 50 ns/iter 100
       # Saved even when the comparison failed: they are still this commit's
       # results, which the PRs based on it compare against.
       - name: Save this commit's results
