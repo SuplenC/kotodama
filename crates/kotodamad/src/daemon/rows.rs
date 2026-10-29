@@ -15,6 +15,7 @@ use std::collections::BTreeMap;
 use kotodama_protocol::Action;
 use kotodama_protocol::ActionRef;
 use kotodama_protocol::ActionRole;
+use kotodama_protocol::ArgumentKind;
 use kotodama_protocol::CatalogEntry;
 use kotodama_protocol::Item;
 use kotodama_protocol::KindName;
@@ -388,7 +389,12 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
     ) {
         let mut typed = None;
         for action in actions {
-            if action.role != ActionRole::Normal || action.arguments.iter().all(|argument| argument.optional) {
+            if action.role != ActionRole::Normal
+                || action
+                    .arguments
+                    .iter()
+                    .all(|argument| argument.optional && argument.kind != ArgumentKind::Number)
+            {
                 continue;
             }
             let typed = typed.get_or_insert_with(|| {
@@ -398,7 +404,9 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             });
             let mut given = BTreeMap::new();
             arguments::fill(&action.arguments, typed, &mut given);
-            if arguments::missing(&action.arguments, &given).is_some() {
+            if arguments::missing(&action.arguments, &given).is_some()
+                || !arguments::invalid(&action.arguments, &given).is_empty()
+            {
                 action.role = ActionRole::Form;
             }
         }

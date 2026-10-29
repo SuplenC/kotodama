@@ -41,6 +41,7 @@ use kotodama_protocol::ChannelWriter;
 use kotodama_protocol::Clipboard;
 use kotodama_protocol::ContributedTo;
 use kotodama_protocol::Error;
+use kotodama_protocol::FormField;
 use kotodama_protocol::FromExtension;
 use kotodama_protocol::Hello;
 use kotodama_protocol::Item;
@@ -334,13 +335,7 @@ impl Seen {
             FromExtension::TargetAction { action, .. } => findings.extend(undeclared_target(manifest, &action)),
             FromExtension::PushView(view)
             | FromExtension::UpdateView(view)
-            | FromExtension::ReplaceView { with: view, .. } => {
-                if let ViewContent::List { items, .. } = &view.content {
-                    for item in items {
-                        findings.extend(reserved_shortcuts(&item.actions));
-                    }
-                }
-            }
+            | FromExtension::ReplaceView { with: view, .. } => findings.extend(view_findings(&view.content)),
             FromExtension::RequestActionCatalog
             | FromExtension::PopView { .. }
             | FromExtension::JobProgress(_)
@@ -358,6 +353,33 @@ fn undeclared_target(manifest: &Manifest, action: &str) -> Option<Finding> {
         .iter()
         .any(|offered| offered.to == ContributedTo::Identities && offered.action.id == action);
     (!declared).then(|| Finding::Rejected(untargeted(action)))
+}
+
+/// What the Daemon rejects of a View: a reserved key on a list's Items, a
+/// form field's pattern that isn't a regular expression.
+fn view_findings(content: &ViewContent) -> Vec<Finding> {
+    match content {
+        ViewContent::List { items, .. } => items
+            .iter()
+            .flat_map(|item| reserved_shortcuts(&item.actions))
+            .collect(),
+        ViewContent::Form { fields, .. } => bad_patterns(fields).collect(),
+        ViewContent::Detail { .. } | ViewContent::Progress { .. } => Vec::new(),
+    }
+}
+
+/// A rejection for each of a form's `fields` whose pattern isn't a regular
+/// expression, which the Daemon drops, as `kotodamad`'s `validation.rs` does.
+fn bad_patterns(fields: &[FormField]) -> impl Iterator<Item = Finding> {
+    fields.iter().filter_map(|field| {
+        let pattern = field.pattern.as_deref()?;
+        // Compiled as `kotodamad` checks it, matching the whole text.
+        let error = Regex::new(&format!("^(?:{pattern})$")).err()?;
+        Some(Finding::Rejected(format!(
+            "form field `{}`'s pattern `{pattern}` isn't a regular expression, so the field takes any text: {error}",
+            field.id
+        )))
+    })
 }
 
 /// A rejection for each of `actions` bound to a key the menu keeps for itself.

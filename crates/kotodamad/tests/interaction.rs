@@ -225,25 +225,25 @@ fn an_extensions_file_field_completes_and_another_field_does_not() {
         title: "Import".into(),
         content: ViewContent::Form {
             fields: vec![
-                FormField {
-                    id: "into".into(),
-                    label: "Into".into(),
-                    input: FormInput::File {
+                FormField::new(
+                    "into",
+                    "Into",
+                    FormInput::File {
                         accept: Vec::new(),
                         folder: true,
                         default: None,
                         placeholder: None,
                     },
-                },
-                FormField {
-                    id: "name".into(),
-                    label: "Name".into(),
-                    input: FormInput::Text {
+                ),
+                FormField::new(
+                    "name",
+                    "Name",
+                    FormInput::Text {
                         placeholder: None,
                         default: None,
                         secret: false,
                     },
-                },
+                ),
             ],
             submit: "Import".into(),
         },
@@ -268,16 +268,16 @@ fn a_file_field_of_an_extensions_form_is_submitted_as_an_absolute_path() {
         id: "import".into(),
         title: "Import".into(),
         content: ViewContent::Form {
-            fields: vec![FormField {
-                id: "config".into(),
-                label: "Config".into(),
-                input: FormInput::File {
+            fields: vec![FormField::new(
+                "config",
+                "Config",
+                FormInput::File {
                     accept: Vec::new(),
                     folder: false,
                     default: None,
                     placeholder: None,
                 },
-            }],
+            )],
             submit: "Import".into(),
         },
     };
@@ -769,4 +769,389 @@ fn an_action_waiting_on_its_arguments_is_recorded_once_it_runs() {
     );
     assert_eq!(arguments_run(&tools), [strings(&[("version", "1.23")])]);
     assert_eq!(picks(&h), [pick("go", "open")]);
+}
+
+/// A form View `id` of `fields`, as an Extension pushes it.
+fn form_of(id: &str, fields: Vec<FormField>) -> View {
+    View {
+        id: id.into(),
+        title: "Timer".into(),
+        content: ViewContent::Form {
+            fields,
+            submit: "Start".into(),
+        },
+    }
+}
+
+fn submit(extension: &str, view: &str, values: &[(&str, Value)]) -> FromFrontEnd {
+    FromFrontEnd::SubmitForm {
+        extension: extension.into(),
+        view: view.into(),
+        values: values
+            .iter()
+            .map(|(id, value)| ((*id).to_owned(), value.clone()))
+            .collect(),
+    }
+}
+
+/// The values of each form submitted to the Extension.
+fn submitted(ext: &Ext) -> Vec<Table> {
+    ext.drain()
+        .into_iter()
+        .filter_map(|message| match message {
+            ToExtension::SubmitForm { values, .. } => Some(values),
+            _ => None,
+        })
+        .collect()
+}
+
+/// The errors each `form_errors` sent to `ui` named, as `(field, message)`.
+fn form_errors(ui: &FrontEnd) -> Vec<Vec<(String, String)>> {
+    ui.drain()
+        .into_iter()
+        .filter_map(|message| match message {
+            ToFrontEnd::FormErrors { errors, .. } => {
+                Some(errors.into_iter().map(|error| (error.field, error.message)).collect())
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+fn errors(pairs: &[(&str, &str)]) -> Vec<(String, String)> {
+    pairs
+        .iter()
+        .map(|(field, message)| ((*field).to_owned(), (*message).to_owned()))
+        .collect()
+}
+
+fn timer_fields() -> Vec<FormField> {
+    vec![
+        FormField::new(
+            "label",
+            "Label",
+            FormInput::Text {
+                placeholder: None,
+                default: None,
+                secret: false,
+            },
+        )
+        .optional(),
+        FormField::new(
+            "minutes",
+            "Minutes",
+            FormInput::Number {
+                min: Some(1.0),
+                max: Some(120.0),
+                step: Some(1.0),
+                default: None,
+            },
+        ),
+        FormField::new(
+            "about",
+            "",
+            FormInput::Description {
+                text: "Rings once.".into(),
+            },
+        ),
+    ]
+}
+
+#[test]
+fn a_form_with_a_wrong_field_stays_open_and_the_front_end_is_told_which_and_why() {
+    let mut h = Harness::new(vec![plain("tools")]);
+    let tools = h.up(0);
+    let ui = h.front_end();
+    h.send(&tools, FromExtension::PushView(form_of("timer", timer_fields())));
+    tools.drain();
+    ui.drain();
+
+    h.front_end_sends(&ui, submit("tools", "timer", &[("minutes", Value::Integer(300))]));
+
+    assert_eq!(submitted(&tools), Vec::<Table>::new(), "the Extension gets nothing");
+    let sent = ui.drain();
+    assert_eq!(
+        sent,
+        [ToFrontEnd::FormErrors {
+            extension: "tools".into(),
+            view: "timer".into(),
+            errors: vec![FieldError {
+                field: "minutes".into(),
+                message: "At most 120".into(),
+            }],
+        }],
+        "nothing pops the form"
+    );
+}
+
+#[test]
+fn only_the_front_end_that_submitted_a_form_is_told_what_is_wrong() {
+    let mut h = Harness::new(vec![plain("tools")]);
+    let tools = h.up(0);
+    let ui = h.front_end();
+    let other = h.front_end();
+    h.send(&tools, FromExtension::PushView(form_of("timer", timer_fields())));
+    other.drain();
+
+    h.front_end_sends(&ui, submit("tools", "timer", &[]));
+
+    assert_eq!(form_errors(&ui), [errors(&[("minutes", "Required")])]);
+    assert_eq!(form_errors(&other), Vec::<Vec<(String, String)>>::new());
+}
+
+#[test]
+fn a_right_form_reaches_its_extension_with_its_numbers_as_numbers_and_no_description() {
+    let mut h = Harness::new(vec![plain("tools")]);
+    let tools = h.up(0);
+    let ui = h.front_end();
+    h.send(&tools, FromExtension::PushView(form_of("timer", timer_fields())));
+    tools.drain();
+    ui.drain();
+
+    h.front_end_sends(
+        &ui,
+        submit(
+            "tools",
+            "timer",
+            &[
+                ("label", Value::String(String::new())),
+                ("minutes", Value::String("25".into())),
+                ("about", Value::String("Rings once.".into())),
+            ],
+        ),
+    );
+
+    assert_eq!(
+        submitted(&tools),
+        [Table::from([
+            ("label".into(), Value::String(String::new())),
+            ("minutes".into(), Value::Integer(25)),
+        ])]
+    );
+    assert_eq!(form_errors(&ui), Vec::<Vec<(String, String)>>::new());
+}
+
+#[test]
+fn a_form_field_whose_pattern_isnt_a_regular_expression_takes_any_text_and_the_extension_is_told() {
+    let mut h = Harness::new(vec![plain("tools")]);
+    let tools = h.up(0);
+    let ui = h.front_end();
+    let code = FormField::new(
+        "code",
+        "Code",
+        FormInput::Text {
+            placeholder: None,
+            default: None,
+            secret: false,
+        },
+    )
+    .pattern("[0-9");
+    tools.drain();
+
+    h.send(&tools, FromExtension::PushView(form_of("pair", vec![code])));
+
+    let rejected: Vec<String> = tools
+        .drain()
+        .into_iter()
+        .filter_map(|message| match message {
+            ToExtension::Rejected { reason } => Some(reason),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(rejected.len(), 1);
+    assert!(
+        rejected[0].contains("`code`'s pattern `[0-9` isn't a regular expression"),
+        "{rejected:?}"
+    );
+    let views = pushed(&ui);
+    let ViewContent::Form { fields, .. } = &views[0].1.content else {
+        panic!("expected a form, got {views:?}")
+    };
+    assert_eq!(fields[0].pattern, None);
+}
+
+#[test]
+fn a_number_argument_runs_with_the_number_typed_after_the_keyword() {
+    let mut h = Harness::new(vec![plain("tools")]);
+    let tools = h.up(0);
+    h.add(&tools, vec![go(vec![Argument::new("minutes").number()])]);
+    let ui = h.front_end();
+    tools.drain();
+
+    h.query(&ui, "go 25");
+    run(&mut h, &ui, "tools", "go", "tools", "open");
+
+    assert_eq!(arguments_run(&tools), [strings(&[("minutes", "25")])]);
+}
+
+#[test]
+fn a_number_argument_typed_as_something_else_is_asked_for_again_in_a_number_field() {
+    let mut h = Harness::new(vec![plain("tools")]);
+    let tools = h.up(0);
+    h.add(&tools, vec![go(vec![Argument::new("minutes").number()])]);
+    let ui = h.front_end();
+    tools.drain();
+
+    h.query(&ui, "go soon");
+    run(&mut h, &ui, "tools", "go", "tools", "open");
+
+    assert_eq!(arguments_run(&tools), [], "nothing runs until it is a number");
+    let sent = ui.drain();
+    let form = sent
+        .iter()
+        .find_map(|message| match message {
+            ToFrontEnd::PushView { view, .. } => Some(view.clone()),
+            _ => None,
+        })
+        .expect("the argument form");
+    let ViewContent::Form { fields, .. } = &form.content else {
+        panic!("expected a form, got {form:?}")
+    };
+    assert_eq!(
+        fields[0].input,
+        FormInput::Number {
+            min: None,
+            max: None,
+            step: None,
+            default: None,
+        }
+    );
+    assert!(sent.contains(&ToFrontEnd::FormErrors {
+        extension: "kotodama".into(),
+        view: form.id.clone(),
+        errors: vec![FieldError {
+            field: "minutes".into(),
+            message: "“soon” isn't a number".into(),
+        }],
+    }));
+
+    h.front_end_sends(&ui, submit("kotodama", &form.id, &[("minutes", Value::Integer(5))]));
+
+    assert_eq!(arguments_run(&tools), [strings(&[("minutes", "5")])]);
+}
+
+#[test]
+fn an_argument_form_submitted_with_a_required_field_blank_stays_open_and_runs_nothing() {
+    let mut h = Harness::new(vec![plain("tools")]);
+    let tools = h.up(0);
+    h.add(
+        &tools,
+        vec![go(vec![argument("signal", false), argument("process", false)])],
+    );
+    let ui = h.front_end();
+    tools.drain();
+    h.query(&ui, "go 9");
+    run(&mut h, &ui, "tools", "go", "tools", "open");
+    let form = pushed(&ui).remove(0).1;
+
+    h.front_end_sends(
+        &ui,
+        submit(
+            "kotodama",
+            &form.id,
+            &[
+                ("signal", Value::String("9".into())),
+                ("process", Value::String(" ".into())),
+            ],
+        ),
+    );
+
+    assert_eq!(arguments_run(&tools), [], "nothing runs");
+    assert_eq!(
+        form_errors(&ui),
+        [errors(&[("process", "Required")])],
+        "and nothing pops the form"
+    );
+
+    h.front_end_sends(
+        &ui,
+        submit(
+            "kotodama",
+            &form.id,
+            &[
+                ("signal", Value::String("9".into())),
+                ("process", Value::String("firefox".into())),
+            ],
+        ),
+    );
+
+    assert_eq!(
+        arguments_run(&tools),
+        [strings(&[("signal", "9"), ("process", "firefox")])]
+    );
+}
+
+#[test]
+fn an_optional_number_argument_typed_wrong_then_left_blank_in_its_form_runs_without_it() {
+    let mut h = Harness::new(vec![plain("tools")]);
+    let tools = h.up(0);
+    h.add(
+        &tools,
+        vec![go(vec![
+            Argument::new("minutes").number(),
+            Argument::new("seconds").number().optional(),
+        ])],
+    );
+    let ui = h.front_end();
+    tools.drain();
+    h.query(&ui, "go 5 soon");
+    run(&mut h, &ui, "tools", "go", "tools", "open");
+    let form = pushed(&ui).remove(0).1;
+
+    h.front_end_sends(
+        &ui,
+        submit(
+            "kotodama",
+            &form.id,
+            &[
+                ("minutes", Value::Integer(5)),
+                ("seconds", Value::String(String::new())),
+            ],
+        ),
+    );
+
+    assert_eq!(arguments_run(&tools), [strings(&[("minutes", "5")])]);
+}
+
+#[test]
+fn an_optional_argument_cleared_in_its_form_runs_without_what_was_typed() {
+    let mut h = Harness::new(vec![plain("tools")]);
+    let tools = h.up(0);
+    h.add(
+        &tools,
+        vec![go(vec![argument("note", true), argument("process", false)])],
+    );
+    let ui = h.front_end();
+    tools.drain();
+    h.query(&ui, "go draft");
+    run(&mut h, &ui, "tools", "go", "tools", "open");
+    let form = pushed(&ui).remove(0).1;
+
+    h.front_end_sends(
+        &ui,
+        submit(
+            "kotodama",
+            &form.id,
+            &[
+                ("note", Value::String(String::new())),
+                ("process", Value::String("firefox".into())),
+            ],
+        ),
+    );
+
+    assert_eq!(arguments_run(&tools), [strings(&[("process", "firefox")])]);
+}
+
+#[test]
+fn a_number_argument_typed_in_another_way_reaches_the_action_written_one_way() {
+    let mut h = Harness::new(vec![plain("tools")]);
+    let tools = h.up(0);
+    h.add(&tools, vec![go(vec![Argument::new("minutes").number()])]);
+    let ui = h.front_end();
+    tools.drain();
+
+    h.query(&ui, "go 2.50");
+    run(&mut h, &ui, "tools", "go", "tools", "open");
+
+    assert_eq!(arguments_run(&tools), [strings(&[("minutes", "2.5")])]);
 }

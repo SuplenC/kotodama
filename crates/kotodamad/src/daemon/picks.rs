@@ -20,8 +20,10 @@ use std::time::Instant;
 
 use kotodama_protocol::Action;
 use kotodama_protocol::ActionRef;
+use kotodama_protocol::Argument;
 use kotodama_protocol::FORGET_SHORTCUT;
-use kotodama_protocol::FormInput;
+use kotodama_protocol::FieldError;
+use kotodama_protocol::FormField;
 use kotodama_protocol::Item;
 use kotodama_protocol::KindName;
 use kotodama_protocol::OfferedAction;
@@ -279,33 +281,28 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
         }
         .ok_or_else(|| format!("`{}` has no Action `{}`", item.title, action.id))?;
 
-        // Arguments are typed in the search, after the Item's keyword.
+        // Arguments are typed in the search, after the Item's keyword. A
+        // submitted form held them already, and what it left out stays out.
         if found_searched
+            && missing == Missing::AskInForm
             && let Some(keyword) = &item.keyword
             && let Some(typed) = after_keyword(session.searched(), &keyword.to_lowercase())
         {
             arguments::fill(&wanted.arguments, typed, &mut arguments);
         }
-        if let Some(absent) = arguments::missing(&wanted.arguments, &arguments) {
+        let absent = arguments::missing(&wanted.arguments, &arguments);
+        let invalid = arguments::invalid(&wanted.arguments, &arguments);
+        if absent.is_some() || !invalid.is_empty() {
             if missing == Missing::Fail {
-                return Err(format!("`{}` needs {}", wanted.title, absent.name));
+                return Err(cant_run(wanted, absent, &invalid));
+            }
+            // The form asks for a wrong value again rather than keeping it.
+            for wrong in &invalid {
+                arguments.remove(&wrong.field);
             }
             let id = format!("arguments-{}", self.next_id);
             self.next_id += 1;
-            let view = arguments::form(id.clone(), &wanted.title, &wanted.arguments, &arguments);
-            let fields = match &view.content {
-                ViewContent::Form { fields, .. } => fields
-                    .iter()
-                    .filter(|field| matches!(field.input, FormInput::File { .. }))
-                    .cloned()
-                    .collect(),
-                _ => Vec::new(),
-            };
-            session.send(ToFrontEnd::PushView {
-                extension: OWN.to_owned(),
-                view,
-                contributed: BTreeMap::new(),
-            });
+            let fields = ask_in_form(session, &id, wanted, &arguments, invalid);
             self.argument_forms.insert(
                 id,
                 ArgumentForm {
@@ -321,6 +318,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
         if let Some(home) = &self.home {
             arguments::absolute_paths(&wanted.arguments, &mut arguments, home);
         }
+        arguments::written_numbers(&wanted.arguments, &mut arguments);
 
         let ext = &self.extensions[target.0];
         if ext.sender().is_none() {
@@ -692,4 +690,49 @@ fn contributed_to<'a>(
         .chain(targeted)
         .find(|(ext, offered)| *ext == by && offered.id == id)
         .map(|(_, offered)| offered)
+}
+
+/// Shows `session` the form `id` that asks for `wanted`'s Arguments, with
+/// what `given` holds filled in and `invalid` named, and returns its fields.
+fn ask_in_form(
+    session: &Session,
+    id: &str,
+    wanted: &Action,
+    given: &BTreeMap<String, String>,
+    invalid: Vec<FieldError>,
+) -> Vec<FormField> {
+    let view = arguments::form(id.to_owned(), &wanted.title, &wanted.arguments, given);
+    let fields = match &view.content {
+        ViewContent::Form { fields, .. } => fields.clone(),
+        _ => Vec::new(),
+    };
+    session.send(ToFrontEnd::PushView {
+        extension: OWN.to_owned(),
+        view,
+        contributed: BTreeMap::new(),
+    });
+    if !invalid.is_empty() {
+        session.send(ToFrontEnd::FormErrors {
+            extension: OWN.to_owned(),
+            view: id.to_owned(),
+            errors: invalid,
+        });
+    }
+    fields
+}
+
+/// Why `wanted` can't run with the Arguments a submitted form left it: the
+/// one `absent`, else the ones `invalid`.
+fn cant_run(wanted: &Action, absent: Option<&Argument>, invalid: &[FieldError]) -> String {
+    let why = absent.map_or_else(
+        || {
+            invalid
+                .iter()
+                .map(|wrong| wrong.message.clone())
+                .collect::<Vec<_>>()
+                .join(", ")
+        },
+        |absent| format!("needs {}", absent.name),
+    );
+    format!("`{}` {why}", wanted.title)
 }

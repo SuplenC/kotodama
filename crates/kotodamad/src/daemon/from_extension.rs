@@ -44,6 +44,7 @@ use crate::history::Store;
 use crate::indexer::Indexed;
 use crate::reserved;
 use crate::segment::Edit;
+use crate::validation;
 use crate::views::Open;
 
 impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
@@ -53,6 +54,15 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             let reason = released.reason();
             log::warn!("{name}: {reason}");
             self.extensions[id.0].send(ToExtension::Rejected { reason });
+        }
+        if let FromExtension::PushView(view)
+        | FromExtension::UpdateView(view)
+        | FromExtension::ReplaceView { with: view, .. } = &mut message
+        {
+            for reason in validation::drop_bad_patterns(view) {
+                log::warn!("{name}: {reason}");
+                self.extensions[id.0].send(ToExtension::Rejected { reason });
+            }
         }
         match message {
             FromExtension::AddItems { items } => self.add_items(id, &name, items, now),

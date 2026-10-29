@@ -2,6 +2,7 @@ use std::collections::BTreeMap;
 use std::path::Path;
 
 use kotodama_protocol::Argument;
+use kotodama_protocol::FieldError;
 use kotodama_protocol::FormField;
 use kotodama_protocol::FormInput;
 use kotodama_protocol::Table;
@@ -12,7 +13,9 @@ use super::absolute;
 use super::absolute_fields;
 use super::absolute_paths;
 use super::form;
+use super::invalid;
 use super::submitted;
+use super::written_numbers;
 
 const HOME: &str = "/home/kuba";
 
@@ -87,11 +90,13 @@ fn only_file_and_folder_arguments_become_absolute_paths() {
         Argument::new("config").file(["conf"]),
         Argument::new("into").folder(),
         Argument::new("name"),
+        Argument::new("minutes").number(),
     ];
     let mut given = BTreeMap::from([
         ("config".to_owned(), "~/Downloads/work.conf".to_owned()),
         ("into".to_owned(), "vpn".to_owned()),
         ("name".to_owned(), "~work".to_owned()),
+        ("minutes".to_owned(), "5".to_owned()),
     ]);
 
     absolute_paths(&wanted, &mut given, Path::new(HOME));
@@ -99,30 +104,31 @@ fn only_file_and_folder_arguments_become_absolute_paths() {
     assert_eq!(given["config"], "/home/kuba/Downloads/work.conf");
     assert_eq!(given["into"], "/home/kuba/vpn");
     assert_eq!(given["name"], "~work");
+    assert_eq!(given["minutes"], "5");
 }
 
 #[test]
 fn only_a_forms_file_fields_become_absolute_paths() {
     let fields = [
-        FormField {
-            id: "config".into(),
-            label: "Config".into(),
-            input: FormInput::File {
+        FormField::new(
+            "config",
+            "Config",
+            FormInput::File {
                 accept: Vec::new(),
                 folder: false,
                 default: None,
                 placeholder: None,
             },
-        },
-        FormField {
-            id: "name".into(),
-            label: "Name".into(),
-            input: FormInput::Text {
+        ),
+        FormField::new(
+            "name",
+            "Name",
+            FormInput::Text {
                 placeholder: None,
                 default: None,
                 secret: false,
             },
-        },
+        ),
     ];
     let mut values = Table::from([
         ("config".into(), Value::String("~/work.conf".into())),
@@ -174,4 +180,97 @@ fn a_file_argument_is_asked_for_in_a_file_field() {
             },
         ]
     );
+}
+
+#[test]
+fn a_number_argument_is_asked_for_in_a_number_field_with_what_was_typed() {
+    let wanted = [
+        Argument::new("minutes").number(),
+        Argument::new("seconds").number().optional(),
+    ];
+    let given = BTreeMap::from([("minutes".to_owned(), "25".to_owned())]);
+
+    let view = form("arguments-1".into(), "Timer", &wanted, &given);
+
+    let ViewContent::Form { fields, .. } = view.content else {
+        panic!("{view:?}");
+    };
+    let number = |default| FormInput::Number {
+        min: None,
+        max: None,
+        step: None,
+        default,
+    };
+    assert_eq!(fields[0].input, number(Some(25.0)));
+    assert_eq!(fields[1].input, number(None));
+    assert_eq!((fields[0].optional, fields[1].optional), (false, true));
+}
+
+#[test]
+fn a_number_argument_typed_as_anything_else_is_wrong() {
+    let wanted = [Argument::new("minutes").number(), Argument::new("label")];
+    let given = BTreeMap::from([
+        ("minutes".to_owned(), "soon".to_owned()),
+        ("label".to_owned(), "tea".to_owned()),
+    ]);
+
+    assert_eq!(
+        invalid(&wanted, &given),
+        [FieldError {
+            field: "minutes".into(),
+            message: "“soon” isn't a number".into(),
+        }]
+    );
+    assert_eq!(
+        invalid(&wanted, &BTreeMap::from([("minutes".to_owned(), " 2.5 ".to_owned())])),
+        []
+    );
+}
+
+#[test]
+fn a_number_from_a_form_is_its_argument_as_text() {
+    let values = Table::from([
+        ("minutes".into(), Value::Integer(25)),
+        ("ratio".into(), Value::Float(0.5)),
+    ]);
+
+    assert_eq!(
+        submitted(values),
+        BTreeMap::from([
+            ("minutes".to_owned(), "25".to_owned()),
+            ("ratio".to_owned(), "0.5".to_owned()),
+        ])
+    );
+}
+
+#[test]
+fn a_number_argument_reaches_the_action_written_one_way() {
+    let wanted = [
+        Argument::new("a").number(),
+        Argument::new("b").number(),
+        Argument::new("c"),
+    ];
+    let mut given = BTreeMap::from([
+        ("a".to_owned(), "1e3".to_owned()),
+        ("b".to_owned(), " 2.50".to_owned()),
+        ("c".to_owned(), "1e3".to_owned()),
+    ]);
+
+    written_numbers(&wanted, &mut given);
+
+    assert_eq!(
+        (given["a"].as_str(), given["b"].as_str(), given["c"].as_str()),
+        ("1000", "2.5", "1e3")
+    );
+}
+
+#[test]
+fn a_blank_number_argument_is_wrong_as_a_missing_one_would_be_asked_for() {
+    let wanted = [Argument::new("minutes").number()];
+
+    assert_eq!(
+        invalid(&wanted, &BTreeMap::from([("minutes".to_owned(), " ".to_owned())])).len(),
+        1
+    );
+    assert_eq!(invalid(&wanted, &BTreeMap::new()), []);
 }
