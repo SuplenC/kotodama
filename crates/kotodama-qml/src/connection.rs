@@ -30,6 +30,7 @@ use kotodama_protocol::FromFrontEnd;
 use kotodama_protocol::Hello;
 use kotodama_protocol::Job;
 use kotodama_protocol::ListMatch;
+use kotodama_protocol::PathCompletion;
 use kotodama_protocol::Scope;
 use kotodama_protocol::ToFrontEnd;
 use kotodama_protocol::View;
@@ -109,6 +110,14 @@ pub enum Update {
     OfferUndo { change: u64, title: String },
     /// The change can't be undone any more.
     WithdrawUndo { change: u64 },
+    /// The Daemon's paths for what is typed into a file field.
+    PathCompletions {
+        extension: String,
+        view: String,
+        field: String,
+        text: String,
+        entries: Vec<PathCompletion>,
+    },
     /// The Daemon hung up; the thread connects again.
     Disconnected,
 }
@@ -347,6 +356,19 @@ fn update(message: ToFrontEnd) -> Option<Update> {
         ToFrontEnd::WithdrawUndo { change } => Update::WithdrawUndo { change },
         ToFrontEnd::SetQuery { text } => Update::SetQuery(text),
         ToFrontEnd::Reached { .. } => return None,
+        ToFrontEnd::PathCompletions {
+            extension,
+            view,
+            field,
+            text,
+            entries,
+        } => Update::PathCompletions {
+            extension,
+            view,
+            field,
+            text,
+            entries,
+        },
     })
 }
 

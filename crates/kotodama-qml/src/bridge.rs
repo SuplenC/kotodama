@@ -75,6 +75,15 @@ pub mod qobject {
         #[qproperty(i32, depth, READ, NOTIFY)]
         /// The jobs still running, oldest first. See `variant::jobs`.
         #[qproperty(QList_QVariant, jobs, READ, NOTIFY)]
+        /// The paths offered to complete a file field of the top form, best
+        /// first, as `complete` last asked: the Daemon's answer to what is
+        /// typed there, or with nothing typed the newest files the field takes.
+        /// Each is `{path, title, folder, modified, highlights}`; see
+        /// `variant::completions`. Empty when no field is being completed.
+        #[qproperty(QList_QVariant, completions, READ, NOTIFY)]
+        /// The place in the top form of the field `completions` complete, or
+        /// -1.
+        #[qproperty(i32, completing_field, cxx_name = "completingField", READ, NOTIFY)]
         /// The Toast: what the change to the History that can be undone did,
         /// such as `Forgot “Firefox”`, or empty when there is none.
         #[qproperty(QString, toast, READ, NOTIFY)]
@@ -165,6 +174,14 @@ pub mod qobject {
         #[qinvokable]
         #[cxx_name = "setChecked"]
         fn set_checked(self: Pin<&mut KotodamaSearch>, field: i32, checked: bool) -> bool;
+
+        /// Asks the Daemon for the paths that complete `text` in the top
+        /// form's `field`th field, a file or folder field, as the user types
+        /// into it; `completions` holds them once they come. With `text`
+        /// empty, the newest files the field takes. False if the field isn't
+        /// a file field, or the Daemon isn't there to ask.
+        #[qinvokable]
+        fn complete(self: Pin<&mut KotodamaSearch>, field: i32, text: &QString) -> bool;
 
         /// Submits the top form. False if the top View isn't a form, or the
         /// Daemon isn't there to take it.

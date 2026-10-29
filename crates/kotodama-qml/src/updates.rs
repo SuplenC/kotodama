@@ -147,8 +147,36 @@ impl KotodamaSearch {
                 }
                 Shown::Same
             }
+            Update::PathCompletions {
+                extension,
+                view,
+                field,
+                text,
+                entries,
+            } => {
+                if self
+                    .as_mut()
+                    .rust_mut()
+                    .views
+                    .completed(&extension, &view, &field, &text, entries)
+                {
+                    self.as_mut().show_completions();
+                }
+                Shown::Same
+            }
             Update::Disconnected => self.daemon_gone(),
         }
+    }
+
+    /// Shows the paths offered for the file field being completed.
+    pub(crate) fn show_completions(mut self: Pin<&mut Self>) {
+        let completions = variant::completions(&self.views);
+        let field = self.views.completions().map_or(-1, |(at, _)| at as i32);
+        let mut this = self.as_mut().rust_mut();
+        this.completions = completions;
+        this.completing_field = field;
+        self.as_mut().completions_changed();
+        self.as_mut().completing_field_changed();
     }
 
     /// Starts over with a Daemon that connected, by sending it what is typed.
@@ -260,6 +288,9 @@ impl KotodamaSearch {
         let deeper = this.depth != depth;
         this.depth = depth;
         self.as_mut().view_changed();
+        if self.completing_field >= 0 || self.views.completions().is_some() {
+            self.as_mut().show_completions();
+        }
         if deeper {
             self.as_mut().cancel_confirm();
             self.as_mut().depth_changed();
