@@ -52,6 +52,10 @@ _Avoid_: Cached item, preloaded item
 An Item an Extension sends ahead of time that the search never shows; only `kotodama open --view` reaches it, to run its primary Action, which usually pushes a View.
 _Avoid_: Private item, internal item
 
+**Placeholder**:
+An Indexed item that `yields`: it stands for a thing, named by its Identity, that no Extension offers yet, such as an app not installed whose primary Action installs it. While an Item of the same Identity that doesn't yield is indexed, from any Extension, the Placeholder is hidden entirely, its Actions with it, and it comes back once none is.
+_Avoid_: Stub, stand-in, ghost item
+
 **Weak keyword**:
 A word an Item is found by that never ranks it as a title would: the query matches it only inside a word, and an Item found by its Weak keywords alone stays below every title that starts with the query, however often it is picked. The Apps Extension's desktop ids are Weak keywords.
 _Avoid_: Hidden keyword, secondary keyword, id keyword
