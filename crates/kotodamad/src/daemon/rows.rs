@@ -13,6 +13,7 @@
 use std::collections::BTreeMap;
 
 use kotodama_protocol::Action;
+use kotodama_protocol::ActionRef;
 use kotodama_protocol::ActionRole;
 use kotodama_protocol::CatalogEntry;
 use kotodama_protocol::Item;
@@ -37,6 +38,7 @@ use crate::index::ItemRef;
 use crate::keywords::Alias;
 use crate::rank;
 use crate::rank::Text;
+use crate::verbs::Verb;
 
 impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
     /// Where the Result `alias` names comes from in this session:
@@ -250,6 +252,14 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
         let offered = contributed.iter_mut().map(|offered| &mut offered.action);
         Self::mark_forms(session, item.keyword.as_deref(), item.actions.iter_mut().chain(offered));
         self.offer_forgetting(&extension, &mut item, &mut contributed);
+        let chosen = session
+            .verb
+            .as_ref()
+            .filter(|_| session.by_verb.binary_search(&source).is_ok())
+            .and_then(|verb| verb_choice(verb, &extension, &item.actions, &contributed))
+            .filter(|chosen| {
+                !(chosen.extension == extension && item.actions.first().is_some_and(|first| first.id == chosen.id))
+            });
         let alias = session
             .via_alias
             .as_ref()
@@ -262,6 +272,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             highlights: self.highlights.clone(),
             alias,
             unavailable: None,
+            primary: chosen,
         })
     }
 
@@ -294,7 +305,22 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             highlights: Vec::new(),
             alias: Some(keyword.clone()),
             unavailable: Some(why),
+            primary: None,
         })
+    }
+
+    /// The Action the session's verb names on the Result `source`, as Enter
+    /// would run it, if the Result offers one: see [`verb_choice`].
+    pub(super) fn verb_choice(&self, session: &Session, source: Source) -> Option<ActionRef> {
+        let verb = session.verb.as_ref()?;
+        let owner = match source {
+            Source::Indexed(slot) => slot.extension(),
+            Source::Live(ext, _) => ext,
+            Source::Own(_) | Source::Unavailable => return None,
+        };
+        let (extension, item) = self.item(session, source)?;
+        let contributed = self.contributed_for(owner, item.kind.name(), item.identity.as_deref(), &item.actions);
+        verb_choice(verb, extension, &item.actions, &contributed)
     }
 
     /// Other running Extensions' Actions for an Item of `kind` whose Identity
@@ -410,4 +436,21 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
         }
         entries
     }
+}
+
+/// The Action `verb` names among a Result's Actions: the first of its own,
+/// `own`, owned by `owner`, with a keyword the verb names, else the first
+/// such of `contributed`.
+fn verb_choice(verb: &Verb, owner: &str, own: &[Action], contributed: &[OfferedAction]) -> Option<ActionRef> {
+    if let Some(action) = own.iter().find(|action| verb.names(action)) {
+        return Some(ActionRef {
+            extension: owner.to_owned(),
+            id: action.id.clone(),
+        });
+    }
+    let offered = contributed.iter().find(|offered| verb.names(&offered.action))?;
+    Some(ActionRef {
+        extension: offered.extension.clone(),
+        id: offered.action.id.clone(),
+    })
 }

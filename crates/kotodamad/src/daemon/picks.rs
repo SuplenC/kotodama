@@ -571,7 +571,10 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
     /// An answer goes in the Usage log only: neither Frecency nor Learned
     /// choices count it, and a Result picked below one isn't learned as
     /// picked over it. A pick in an app kept out of the search is never a
-    /// Learned choice, and goes in the Usage log without its query.
+    /// Learned choice, and goes in the Usage log without its query. A pick
+    /// of the Action the query's verb named counts towards the query's
+    /// Learned choice alone, never towards Frecency: the verb chose what
+    /// ran, not how much the Result is used.
     /// Returns the change to the History, to undo it.
     pub(super) fn picked(
         &mut self,
@@ -588,6 +591,9 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
         let source = self.source_of(session, &result.extension, &result.id);
         let row = session.shown.iter().position(|(shown, _)| Some(*shown) == source);
         let private = session.in_private_app(&self.apps);
+        let by_verb = source.is_some_and(|source| {
+            session.by_verb.binary_search(&source).is_ok() && self.verb_choice(session, source).as_ref() == Some(action)
+        });
         if self.history.settings().usage_log {
             self.store.log(Entry {
                 at,
@@ -600,7 +606,11 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
                 },
             });
         }
-        let change = if let Some((_, alias)) = session.via_alias.as_ref().filter(|(named, _)| Some(*named) == source) {
+        let change = if let Some((_, alias)) = session
+            .via_alias
+            .as_ref()
+            .filter(|(named, _)| Some(*named) == source && !by_verb)
+        {
             self.history.touch(OWN, &alias_id(alias), when)
         } else if source.is_some_and(|source| session.is_answer(source)) {
             // An answer is the query worked out, a new Result for every
@@ -615,6 +625,9 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             // among the real matches.
             self.history.touch(&result.extension, &result.id, when)
         } else if private {
+            if by_verb {
+                return Change::default();
+            }
             self.history.touch(&result.extension, &result.id, when)
         } else {
             let key = source
@@ -636,13 +649,17 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
                 .unwrap_or_default();
             let (extension, id) = (key.0.to_owned(), key.1.to_owned());
             let query = session.key.clone();
-            let mut change = self.history.pick(&extension, &id, &query, &above, when);
-            if extension == IDENTITIES {
-                // The Result itself too, so it goes ahead of the same thing
-                // from other Extensions.
-                change.and(self.history.touch(&result.extension, &result.id, when));
+            if by_verb {
+                self.history.learn(&extension, &id, &query, &above, when)
+            } else {
+                let mut change = self.history.pick(&extension, &id, &query, &above, when);
+                if extension == IDENTITIES {
+                    // The Result itself too, so it goes ahead of the same thing
+                    // from other Extensions.
+                    change.and(self.history.touch(&result.extension, &result.id, when));
+                }
+                change
             }
-            change
         };
         self.store.save(&self.history);
         self.refresh_empty(Update::Late, None);

@@ -336,6 +336,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             }
         }
         self.targets.set_offered(targeted);
+        self.verbs_from = None;
         self.catalog_dirty = true;
         self.mark_late();
         for (id, view_id, contributed) in before {

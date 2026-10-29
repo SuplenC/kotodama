@@ -110,6 +110,8 @@ use crate::rank::Haystack;
 use crate::rank::Tier;
 use crate::rank::Tiers;
 use crate::targets::Targets;
+use crate::verbs::Verb;
+use crate::verbs::Verbs;
 use crate::views::Views;
 
 mod empty;
@@ -838,6 +840,11 @@ struct Session {
     /// The Result an Alias named, and the Alias: picking it counts for the
     /// Alias alone.
     via_alias: Option<(Source, String)>,
+    /// The verb the query names, if it names one.
+    verb: Option<Verb>,
+    /// The Results the verb's subject found that offer it, in order: Enter
+    /// runs the Action the verb names on them.
+    by_verb: Vec<Source>,
     /// Whether it has sent a query. A Front end that only passes on commands
     /// never does, and gets no Results.
     searched: bool,
@@ -1307,6 +1314,12 @@ pub struct Daemon<L, D, S> {
     /// Running Extensions' targeted Contributed actions, by the Identities
     /// they name.
     targets: Targets,
+    /// Every keyword of the Actions on offer, which a query's verb is looked
+    /// up in.
+    verbs: Verbs,
+    /// The [`Index::verbs_version`] `verbs` was built at; `None` when the
+    /// Contributed actions changed since.
+    verbs_from: Option<u64>,
     /// The Action catalog last sent, if any Extension reads it.
     catalog: Option<Vec<CatalogEntry>>,
     catalog_dirty: bool,
@@ -1438,6 +1451,8 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             paths: Overrides::default(),
             contributed: HashMap::new(),
             targets: Targets::default(),
+            verbs: Verbs::default(),
+            verbs_from: None,
             catalog: None,
             catalog_dirty: false,
             down: Vec::new(),
