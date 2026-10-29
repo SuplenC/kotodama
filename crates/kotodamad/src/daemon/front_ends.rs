@@ -16,6 +16,7 @@ use std::sync::mpsc::SyncSender;
 use std::time::Instant;
 
 use kotodama_protocol::Clipboard;
+use kotodama_protocol::FieldError;
 use kotodama_protocol::FormField;
 use kotodama_protocol::FormInput;
 use kotodama_protocol::FromFrontEnd;
@@ -23,6 +24,7 @@ use kotodama_protocol::ResultRef;
 use kotodama_protocol::Table;
 use kotodama_protocol::ToExtension;
 use kotodama_protocol::ToFrontEnd;
+use kotodama_protocol::Value;
 use kotodama_protocol::ViewContent;
 use nucleo_matcher::pattern::Pattern;
 
@@ -57,6 +59,7 @@ use crate::problem;
 use crate::rank;
 use crate::usage::Entry;
 use crate::usage::Used;
+use crate::validation;
 
 impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
     /// Nothing goes into a window, so there is no waiting for the menus to
@@ -252,18 +255,12 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             FromFrontEnd::SubmitForm {
                 extension,
                 view,
-                mut values,
+                values,
             } => {
                 if extension == OWN {
                     self.submit_arguments(id, &view, values, now);
-                } else if let Some(ext) = self.extension_named(&extension) {
-                    if let Some(home) = &self.home
-                        && let Some(open) = self.views.get(ext, &view)
-                        && let ViewContent::Form { fields, .. } = &open.view.content
-                    {
-                        arguments::absolute_fields(fields, &mut values, home);
-                    }
-                    self.extensions[ext.0].send(ToExtension::SubmitForm { view, values });
+                } else {
+                    self.submit_form(id, extension, view, values);
                 }
             }
             FromFrontEnd::ViewPopped { extension, view } => {
@@ -463,9 +460,58 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
         }
     }
 
+    /// The user submitted the form View `view` of the Extension `extension`:
+    /// it goes to the Extension once its fields are right, its file fields'
+    /// paths made absolute. A form with a field that is wrong stays, and the
+    /// Front end is told which.
+    fn submit_form(&mut self, front_end: FrontEndId, extension: String, view: String, mut values: Table) {
+        let Some(ext) = self.extension_named(&extension) else {
+            return;
+        };
+        if let Some(open) = self.views.get(ext, &view)
+            && let ViewContent::Form { fields, .. } = &open.view.content
+        {
+            let errors = validation::check(fields, &mut values);
+            if !errors.is_empty() {
+                self.form_errors(front_end, extension, view, errors);
+                return;
+            }
+            if let Some(home) = &self.home {
+                arguments::absolute_fields(fields, &mut values, home);
+            }
+        }
+        self.extensions[ext.0].send(ToExtension::SubmitForm { view, values });
+    }
+
+    /// Tells `front_end`, which submitted the form `view`, which of its
+    /// fields are wrong; the form stays open.
+    pub(super) fn form_errors(&self, front_end: FrontEndId, extension: String, view: String, errors: Vec<FieldError>) {
+        if let Some(session) = self.sessions.get(&front_end) {
+            session.send(ToFrontEnd::FormErrors {
+                extension,
+                view,
+                errors,
+            });
+        }
+    }
+
     /// The user filled in the form that asked for an Action's Arguments: the
-    /// form goes, and the Action runs.
-    pub(super) fn submit_arguments(&mut self, front_end: FrontEndId, view: &str, values: Table, now: Instant) {
+    /// form goes, and the Action runs. A form with a field that is wrong
+    /// stays, and the Front end is told which.
+    pub(super) fn submit_arguments(&mut self, front_end: FrontEndId, view: &str, mut values: Table, now: Instant) {
+        let Some(form) = self.argument_forms.get(view).filter(|form| form.front_end == front_end) else {
+            return;
+        };
+        for (name, given) in &form.arguments {
+            values
+                .entry(name.clone())
+                .or_insert_with(|| Value::String(given.clone()));
+        }
+        let errors = validation::check(&form.fields, &mut values);
+        if !errors.is_empty() {
+            self.form_errors(front_end, OWN.to_owned(), view.to_owned(), errors);
+            return;
+        }
         let Some(form) = self.take_argument_form(front_end, view) else {
             return;
         };
@@ -475,7 +521,10 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
                 view: view.to_owned(),
             });
         }
+        // The form's values stand for its fields, so a field cleared in it
+        // isn't given what was typed before.
         let mut arguments = form.arguments;
+        arguments.retain(|name, _| form.fields.iter().all(|field| field.id != *name));
         arguments.extend(arguments::submitted(values));
         let run = self.run_action(front_end, &form.result, &form.action, arguments, Missing::Fail, now);
         self.failed(front_end, run);

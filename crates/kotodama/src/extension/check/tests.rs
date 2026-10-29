@@ -143,3 +143,20 @@ fn a_few_names_are_listed() {
         "`a`, `b`, `c`, `d`, `e`, and 2 more"
     );
 }
+
+#[test]
+fn a_form_fields_pattern_that_isnt_a_regular_expression_is_rejected() {
+    let findings = Seen::default().take(
+        &manifest(""),
+        message(
+            r#"{"push_view":{"id":"pair","title":"Pair","content":{"form":{"submit":"Pair","fields":[
+                {"id":"code","label":"Code","pattern":"[0-9","input":{"text":{}}},
+                {"id":"name","label":"Name","pattern":"[a-z]+","input":{"text":{}}}]}}}}"#,
+        ),
+    );
+
+    assert!(
+        matches!(&findings[..], [Finding::Rejected(reason)] if reason.contains("`code`'s pattern `[0-9`")),
+        "{findings:?}"
+    );
+}

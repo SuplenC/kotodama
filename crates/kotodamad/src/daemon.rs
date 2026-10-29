@@ -1240,7 +1240,9 @@ fn read_query(apps: &Apps, matcher: &mut Matcher, session: &mut Session) {
 enum Missing {
     /// Asks for it in a form, and runs the Action once it is submitted.
     AskInForm,
-    /// Fails, as when the form was already submitted without it.
+    /// Fails, as when the form was already submitted without it. The
+    /// Arguments typed in the search were the form's, so they aren't taken
+    /// again.
     Fail,
 }
 
@@ -1252,7 +1254,8 @@ struct ArgumentForm {
     action: ActionRef,
     /// The Arguments already given or typed.
     arguments: BTreeMap<String, String>,
-    /// The form's fields, for completing its file fields.
+    /// The form's fields, for checking it once submitted and completing its
+    /// file fields.
     fields: Vec<FormField>,
 }
 

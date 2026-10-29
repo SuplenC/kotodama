@@ -515,9 +515,11 @@ pub struct Argument {
     /// The Action runs without it.
     #[serde(default)]
     pub optional: bool,
-    /// Whether it is text, or the path to a file or a folder. A path reaches
-    /// the Action absolute: the Daemon expands a leading `~` and puts the
-    /// home directory before a relative one.
+    /// Whether it is text, a number, or the path to a file or a folder. A
+    /// path reaches the Action absolute: the Daemon expands a leading `~` and
+    /// puts the home directory before a relative one. A number reaches it
+    /// written out as Rust writes it, `25` or `2.5`, once the Daemon has
+    /// checked that it is one.
     #[serde(default)]
     pub kind: ArgumentKind,
     /// For a file, the ones it takes, by extension (`conf`, without the dot)
@@ -579,11 +581,19 @@ impl Argument {
         self.accept = Vec::new();
         self
     }
+
+    /// Asks for a number.
+    #[must_use]
+    pub fn number(mut self) -> Self {
+        self.kind = ArgumentKind::Number;
+        self.accept = Vec::new();
+        self
+    }
 }
 
 /// What an [`Argument`] asks for, and so how a form asks for it.
 ///
-/// On the wire it is a string, `text`, `file` or `folder`, so that in
+/// On the wire it is a string, `text`, `number`, `file` or `folder`, so that in
 /// protobuf an Argument without one, or with an empty one, is text. Any
 /// other name refuses the message that carries it.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -596,6 +606,8 @@ pub enum ArgumentKind {
     File,
     /// The path to a folder: a file field that asks for a folder.
     Folder,
+    /// A number: a number field.
+    Number,
 }
 
 impl From<ArgumentKind> for &'static str {
@@ -604,6 +616,7 @@ impl From<ArgumentKind> for &'static str {
             ArgumentKind::Text => "text",
             ArgumentKind::File => "file",
             ArgumentKind::Folder => "folder",
+            ArgumentKind::Number => "number",
         }
     }
 }
@@ -616,14 +629,15 @@ impl TryFrom<String> for ArgumentKind {
             "" | "text" => Ok(ArgumentKind::Text),
             "file" => Ok(ArgumentKind::File),
             "folder" => Ok(ArgumentKind::Folder),
+            "number" => Ok(ArgumentKind::Number),
             _ => Err(ArgumentKindError(name)),
         }
     }
 }
 
-/// An Argument's `kind` that is none of `text`, `file` and `folder`.
+/// An Argument's `kind` that is none of `text`, `number`, `file` and `folder`.
 #[derive(Debug, thiserror::Error)]
-#[error("`{0}` isn't an Argument kind: it is `text`, `file` or `folder`")]
+#[error("`{0}` isn't an Argument kind: it is `text`, `number`, `file` or `folder`")]
 pub struct ArgumentKindError(String);
 
 /// Why an Item or an [`ItemRef`] that arrived isn't valid. Serde reads it into

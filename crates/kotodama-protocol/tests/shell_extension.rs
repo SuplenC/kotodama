@@ -363,6 +363,8 @@ fn the_shell_examples_labelled_timer_asks_in_a_form_then_times_what_was_submitte
     };
     let ids: Vec<_> = fields.iter().map(|field| field.id.as_str()).collect();
     assert_eq!(ids, ["label", "seconds"]);
+    assert!(fields[0].optional, "a timer without a label is called Timer");
+    assert!(matches!(fields[1].input, FormInput::Number { min: Some(1.0), .. }));
     assert_eq!(
         extension.recv(),
         FromExtension::ActionDone {
@@ -375,7 +377,7 @@ fn the_shell_examples_labelled_timer_asks_in_a_form_then_times_what_was_submitte
         view: form.id.clone(),
         values: BTreeMap::from([
             ("label".into(), Value::String("Tea".into())),
-            ("seconds".into(), Value::String("1".into())),
+            ("seconds".into(), Value::Integer(1)),
         ]),
     });
     // The progress View takes the form's place in one step, so the menu never

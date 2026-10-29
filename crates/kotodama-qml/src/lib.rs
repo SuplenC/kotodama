@@ -100,6 +100,7 @@ pub struct SearchRust {
     jobs: variant::List,
     completions: variant::List,
     completing_field: i32,
+    field_errors: variant::List,
     toast: QString,
     /// The change to the History the Toast offers to undo.
     offered: Option<u64>,
@@ -147,6 +148,7 @@ impl Default for SearchRust {
             jobs: variant::List::default(),
             completions: variant::List::default(),
             completing_field: -1,
+            field_errors: variant::List::default(),
             toast: QString::default(),
             offered: None,
             scope: QString::default(),
@@ -437,10 +439,22 @@ impl KotodamaSearch {
     }
 
     fn submit(mut self: Pin<&mut Self>) -> bool {
-        let Some(message) = self.views.submit() else {
+        let Some(message) = self.as_mut().rust_mut().views.submit() else {
             return false;
         };
+        self.as_mut().show_field_errors();
         self.as_mut().rust_mut().send(&message)
+    }
+
+    fn toggle_option(mut self: Pin<&mut Self>, field: i32, value: &QString) -> bool {
+        // The field shows the tick already, so the view isn't told.
+        let Ok(field) = usize::try_from(field) else {
+            return false;
+        };
+        self.as_mut()
+            .rust_mut()
+            .views
+            .toggle_option(field, &String::from(value))
     }
 
     fn select(mut self: Pin<&mut Self>, row: i32) {

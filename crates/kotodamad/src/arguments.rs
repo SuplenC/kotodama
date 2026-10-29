@@ -5,6 +5,8 @@
 //!
 //! - [`fill`]: the Arguments an Action takes, filled from what follows its keyword.
 //! - [`missing`], [`form`] and [`submitted`]: the form that asks for the rest, and its answers.
+//! - [`invalid`]: a number Argument that isn't one; [`written_numbers`]: one that is, written out
+//!   the one way.
 //! - [`absolute`]: a file or folder Argument, or a form's file field, as the absolute path it
 //!   reaches the Extension as.
 //!
@@ -12,18 +14,22 @@
 //!
 //! - Matching the keyword: `keywords.rs`, and the search in `daemon/search.rs`.
 //! - Running the Action: `daemon/picks.rs`.
+//! - Checking a submitted form, the argument form too: `validation.rs`.
 
 use std::collections::BTreeMap;
 use std::path::Path;
 
 use kotodama_protocol::Argument;
 use kotodama_protocol::ArgumentKind;
+use kotodama_protocol::FieldError;
 use kotodama_protocol::FormField;
 use kotodama_protocol::FormInput;
 use kotodama_protocol::Table;
 use kotodama_protocol::Value;
 use kotodama_protocol::View;
 use kotodama_protocol::ViewContent;
+
+use crate::validation;
 
 /// Fills the Arguments `wanted` that `given` lacks, or has empty, from
 /// `typed`, the text after the keyword: one word each, in order, except the
@@ -56,6 +62,41 @@ pub fn missing<'a>(wanted: &'a [Argument], given: &BTreeMap<String, String>) -> 
         .find(|argument| !argument.optional && given.get(&argument.name).is_none_or(String::is_empty))
 }
 
+/// A [`FieldError`] for each number Argument in `wanted` that `given` holds
+/// something other than a number for, in `wanted`'s order.
+pub fn invalid(wanted: &[Argument], given: &BTreeMap<String, String>) -> Vec<FieldError> {
+    wanted
+        .iter()
+        .filter(|argument| argument.kind == ArgumentKind::Number)
+        .filter_map(|argument| {
+            let typed = given.get(&argument.name).filter(|typed| !typed.is_empty())?;
+            validation::number(&Value::String(typed.clone()))
+                .is_none()
+                .then(|| FieldError {
+                    field: argument.name.clone(),
+                    message: format!("“{}” isn't a number", typed.trim()),
+                })
+        })
+        .collect()
+}
+
+/// Writes each number Argument in `wanted` that `given` holds as Rust writes
+/// the number, `1e3` as `1000` and ` 2.50` as `2.5`, however it was filled
+/// in, so an Action gets one form of it. One that isn't a number stays as it
+/// is: [`invalid`] names it.
+pub fn written_numbers(wanted: &[Argument], given: &mut BTreeMap<String, String>) {
+    for argument in wanted.iter().filter(|argument| argument.kind == ArgumentKind::Number) {
+        let Some(typed) = given.get_mut(&argument.name) else {
+            continue;
+        };
+        match validation::number_value(&Value::String(typed.clone())) {
+            Some(Value::Integer(n)) => *typed = n.to_string(),
+            Some(Value::Float(n)) => *typed = n.to_string(),
+            _ => {}
+        }
+    }
+}
+
 /// The form that asks for `wanted`, with what `given` has already filled in.
 pub fn form(id: String, title: &str, wanted: &[Argument], given: &BTreeMap<String, String>) -> View {
     View {
@@ -79,12 +120,15 @@ pub fn form(id: String, title: &str, wanted: &[Argument], given: &BTreeMap<Strin
                             default,
                             placeholder,
                         },
+                        ArgumentKind::Number => FormInput::Number {
+                            min: None,
+                            max: None,
+                            step: None,
+                            default: default.and_then(|typed| validation::number(&Value::String(typed))),
+                        },
                     };
-                    FormField {
-                        id: argument.name.clone(),
-                        label: argument.name.clone(),
-                        input,
-                    }
+                    let field = FormField::new(argument.name.clone(), argument.name.clone(), input);
+                    if argument.optional { field.optional() } else { field }
                 })
                 .collect(),
             submit: title.to_owned(),
@@ -92,12 +136,15 @@ pub fn form(id: String, title: &str, wanted: &[Argument], given: &BTreeMap<Strin
     }
 }
 
-/// The Arguments a submitted form holds: its text fields that aren't blank.
+/// The Arguments a submitted form holds: its text fields that aren't blank,
+/// and its numbers, written out.
 pub fn submitted(values: Table) -> BTreeMap<String, String> {
     values
         .into_iter()
         .filter_map(|(name, value)| match value {
             Value::String(value) if !value.trim().is_empty() => Some((name, value)),
+            Value::Integer(n) => Some((name, n.to_string())),
+            Value::Float(n) => Some((name, n.to_string())),
             _ => None,
         })
         .collect()
@@ -107,7 +154,10 @@ pub fn submitted(values: Table) -> BTreeMap<String, String> {
 /// [`absolute`] does, however they were filled in: typed after the
 /// keyword, in a form, or by the Front end.
 pub fn absolute_paths(wanted: &[Argument], given: &mut BTreeMap<String, String>, home: &Path) {
-    for argument in wanted.iter().filter(|argument| argument.kind != ArgumentKind::Text) {
+    for argument in wanted
+        .iter()
+        .filter(|argument| matches!(argument.kind, ArgumentKind::File | ArgumentKind::Folder))
+    {
         if let Some(path) = given.get_mut(&argument.name) {
             *path = absolute(path, home);
         }

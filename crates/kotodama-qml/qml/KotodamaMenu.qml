@@ -771,9 +771,15 @@ PanelWindow {
                     height: visible ? formFields.implicitHeight : 0
                     property int current: 0
 
+                    // A description takes no keys, so moving passes over it.
                     function move(by) {
-                        if (fields.count > 0)
-                            fields.itemAt((current + by + fields.count) % fields.count).take();
+                        for (let step = 1; step <= fields.count; ++step) {
+                            const next = fields.itemAt(((current + by * step) % fields.count + fields.count) % fields.count);
+                            if (next.modelData.kind !== "description") {
+                                next.take();
+                                return;
+                            }
+                        }
                     }
 
                     Column {
@@ -790,13 +796,21 @@ PanelWindow {
                                 required property int index
                                 required property var modelData
                                 width: formFields.width
-                                height: menu.rowHeight
+                                // The menu doesn't draw a description yet, so it leaves it out.
+                                visible: modelData.kind !== "description"
+                                height: visible ? menu.rowHeight : 0
                                 readonly property bool current: typed.activeFocus || toggle.activeFocus || choice.activeFocus
-                                // The menu has no picker: a file or folder field is typed into as a text field is.
-                                readonly property bool typedIn: modelData.kind === "text" || modelData.kind === "file" || modelData.kind === "folder"
+                                // The menu has no picker and draws no text area, number, date or
+                                // multi-select of its own yet: each is typed into as a text field is.
+                                readonly property bool typedIn: !["checkbox", "select", "description"].includes(modelData.kind)
 
                                 function take() {
                                     const kind = modelData.kind;
+                                    if (kind === "description") {
+                                        form.current = index;
+                                        form.move(1);
+                                        return;
+                                    }
                                     (kind === "checkbox" ? toggle : kind === "select" ? choice : typed).forceActiveFocus();
                                 }
 
@@ -841,6 +855,8 @@ PanelWindow {
                                         font.family: menu.fontFamily
                                         font.pixelSize: menu.fontSize
                                         echoMode: formField.modelData.secret ? TextInput.Password : TextInput.Normal
+                                        // Its options are toggled, never typed: it shows the chosen ones.
+                                        readOnly: formField.modelData.kind === "multiselect"
                                         Component.onCompleted: {
                                             if (formField.typedIn)
                                                 text = formField.modelData.value;
@@ -915,8 +931,10 @@ PanelWindow {
                     id: submitHint
                     x: 18
                     visible: menu.kind === "form"
-                    text: "Enter: " + (search.view.submit ?? "")
-                    color: menu.dimmed
+                    // Until each field draws its own error, the first wrong field's shows here.
+                    readonly property int wrong: search.fieldErrors.findIndex(error => error !== "")
+                    text: wrong < 0 ? "Enter: " + (search.view.submit ?? "") : search.view.fields[wrong].label + ": " + search.fieldErrors[wrong]
+                    color: wrong < 0 ? menu.dimmed : menu.error
                     font.family: menu.fontFamily
                     font.pixelSize: menu.fontSize - 3
                 }

@@ -207,6 +207,10 @@ ToFrontEnd::path_completions postcard 10 09 77 69 72 65 67 75 61 72 64 06 69 6d 
 ToFrontEnd::path_completions protobuf 8a 01 54 0a 09 77 69 72 65 67 75 61 72 64 12 06 69 6d 70 6f 72 74 1a 06 63 6f 6e 66 69 67 22 06 7e 2f 44 6f 77 6e 2a 2f 0a 14 2f 68 6f 6d 65 2f 6b 75 62 61 2f 44 6f 77 6e 6c 6f 61 64 73 12 09 44 6f 77 6e 6c 6f 61 64 73 18 01 20 a0 d1 85 c8 06 2a 04 00 01 02 03
 ToFrontEnd::path_completions msgpack 81 b0 70 61 74 68 5f 63 6f 6d 70 6c 65 74 69 6f 6e 73 85 a9 65 78 74 65 6e 73 69 6f 6e a9 77 69 72 65 67 75 61 72 64 a4 76 69 65 77 a6 69 6d 70 6f 72 74 a5 66 69 65 6c 64 a6 63 6f 6e 66 69 67 a4 74 65 78 74 a6 7e 2f 44 6f 77 6e a7 65 6e 74 72 69 65 73 91 85 a4 70 61 74 68 b4 2f 68 6f 6d 65 2f 6b 75 62 61 2f 44 6f 77 6e 6c 6f 61 64 73 a5 74 69 74 6c 65 a9 44 6f 77 6e 6c 6f 61 64 73 a6 66 6f 6c 64 65 72 c3 a8 6d 6f 64 69 66 69 65 64 ce 69 01 68 a0 aa 68 69 67 68 6c 69 67 68 74 73 94 00 01 02 03
 ToFrontEnd::path_completions json {"path_completions":{"extension":"wireguard","view":"import","field":"config","text":"~/Down","entries":[{"path":"/home/kuba/Downloads","title":"Downloads","folder":true,"modified":1761700000,"highlights":[0,1,2,3]}]}}
+ToFrontEnd::form_errors postcard 11 05 74 69 6d 65 72 03 6e 65 77 01 07 6d 69 6e 75 74 65 73 0b 41 74 20 6d 6f 73 74 20 31 32 30
+ToFrontEnd::form_errors protobuf 92 01 24 0a 05 74 69 6d 65 72 12 03 6e 65 77 1a 16 0a 07 6d 69 6e 75 74 65 73 12 0b 41 74 20 6d 6f 73 74 20 31 32 30
+ToFrontEnd::form_errors msgpack 81 ab 66 6f 72 6d 5f 65 72 72 6f 72 73 83 a9 65 78 74 65 6e 73 69 6f 6e a5 74 69 6d 65 72 a4 76 69 65 77 a3 6e 65 77 a6 65 72 72 6f 72 73 91 82 a5 66 69 65 6c 64 a7 6d 69 6e 75 74 65 73 a7 6d 65 73 73 61 67 65 ab 41 74 20 6d 6f 73 74 20 31 32 30
+ToFrontEnd::form_errors json {"form_errors":{"extension":"timer","view":"new","errors":[{"field":"minutes","message":"At most 120"}]}}
 Outcome::close postcard 00
 Outcome::close protobuf 0a 00
 Outcome::close msgpack a5 63 6c 6f 73 65
@@ -247,10 +251,10 @@ ViewContent::list postcard 00 01 02 69 64 04 66 69 6c 65 00 01 07 2f 61 2f 66 69
 ViewContent::list protobuf 0a ba 01 0a b5 01 0a 02 69 64 12 04 66 69 6c 65 22 07 2f 61 2f 66 69 6c 65 3a 13 61 70 70 3a 66 69 72 65 66 6f 78 2e 64 65 73 6b 74 6f 70 42 05 54 69 74 6c 65 4a 08 53 75 62 74 69 74 6c 65 52 04 69 63 6f 6e 5a 02 67 6f 62 07 62 72 6f 77 73 65 72 6a 4a 0a 04 6f 70 65 6e 12 04 4f 70 65 6e 1a 06 63 74 72 6c 2b 6f 22 1d 0a 07 76 65 72 73 69 6f 6e 12 04 31 2e 32 33 18 01 22 04 66 69 6c 65 2a 04 63 6f 6e 66 28 01 32 06 6c 61 75 6e 63 68 3a 0b 64 65 73 74 72 75 63 74 69 76 65 70 01 78 01 82 01 13 6f 72 67 2e 6d 6f 7a 69 6c 6c 61 2e 66 69 72 65 66 6f 78 88 01 01 10 01
 ViewContent::list msgpack 81 a4 6c 69 73 74 82 a5 69 74 65 6d 73 91 de 00 11 a2 69 64 a2 69 64 a4 6b 69 6e 64 a4 66 69 6c 65 aa 64 65 73 6b 74 6f 70 5f 69 64 c0 a4 70 61 74 68 a7 2f 61 2f 66 69 6c 65 a7 61 64 64 72 65 73 73 c0 a3 75 72 6c c0 a8 69 64 65 6e 74 69 74 79 b3 61 70 70 3a 66 69 72 65 66 6f 78 2e 64 65 73 6b 74 6f 70 a5 74 69 74 6c 65 a5 54 69 74 6c 65 a8 73 75 62 74 69 74 6c 65 a8 53 75 62 74 69 74 6c 65 a4 69 63 6f 6e a4 69 63 6f 6e a7 6b 65 79 77 6f 72 64 a2 67 6f a8 6b 65 79 77 6f 72 64 73 91 a7 62 72 6f 77 73 65 72 a7 61 63 74 69 6f 6e 73 91 87 a2 69 64 a4 6f 70 65 6e a5 74 69 74 6c 65 a4 4f 70 65 6e a8 73 68 6f 72 74 63 75 74 a6 63 74 72 6c 2b 6f a9 61 72 67 75 6d 65 6e 74 73 91 85 a4 6e 61 6d 65 a7 76 65 72 73 69 6f 6e ab 70 6c 61 63 65 68 6f 6c 64 65 72 a4 31 2e 32 33 a8 6f 70 74 69 6f 6e 61 6c c3 a4 6b 69 6e 64 a4 66 69 6c 65 a6 61 63 63 65 70 74 91 a4 63 6f 6e 66 a7 63 6f 6e 66 69 72 6d c3 a8 6b 65 79 77 6f 72 64 73 91 a6 6c 61 75 6e 63 68 a4 72 6f 6c 65 ab 64 65 73 74 72 75 63 74 69 76 65 a6 68 69 64 64 65 6e c3 a8 61 70 70 5f 6f 6e 6c 79 c3 ad 77 65 61 6b 5f 6b 65 79 77 6f 72 64 73 91 b3 6f 72 67 2e 6d 6f 7a 69 6c 6c 61 2e 66 69 72 65 66 6f 78 a6 79 69 65 6c 64 73 c3 ae 66 69 6c 74 65 72 73 5f 69 74 73 65 6c 66 c3
 ViewContent::list json {"list":{"items":[{"id":"id","kind":"file","desktop_id":null,"path":"/a/file","address":null,"url":null,"identity":"app:firefox.desktop","title":"Title","subtitle":"Subtitle","icon":"icon","keyword":"go","keywords":["browser"],"actions":[{"id":"open","title":"Open","shortcut":"ctrl+o","arguments":[{"name":"version","placeholder":"1.23","optional":true,"kind":"file","accept":["conf"]}],"confirm":true,"keywords":["launch"],"role":"destructive"}],"hidden":true,"app_only":true,"weak_keywords":["org.mozilla.firefox"],"yields":true}],"filters_itself":true}}
-ViewContent::form postcard 01 01 04 6e 61 6d 65 04 4e 61 6d 65 01 01 02 47 6f
-ViewContent::form protobuf 12 18 0a 12 0a 04 6e 61 6d 65 12 04 4e 61 6d 65 1a 04 12 02 08 01 12 02 47 6f
-ViewContent::form msgpack 81 a4 66 6f 72 6d 82 a6 66 69 65 6c 64 73 91 83 a2 69 64 a4 6e 61 6d 65 a5 6c 61 62 65 6c a4 4e 61 6d 65 a5 69 6e 70 75 74 81 a8 63 68 65 63 6b 62 6f 78 81 a7 64 65 66 61 75 6c 74 c3 a6 73 75 62 6d 69 74 a2 47 6f
-ViewContent::form json {"form":{"fields":[{"id":"name","label":"Name","input":{"checkbox":{"default":true}}}],"submit":"Go"}}
+ViewContent::form postcard 01 02 04 6e 61 6d 65 04 4e 61 6d 65 01 01 00 00 04 63 6f 64 65 04 43 6f 64 65 00 00 00 00 01 01 08 5b 30 2d 39 5d 7b 36 7d 02 47 6f
+ViewContent::form protobuf 12 3a 0a 14 0a 04 6e 61 6d 65 12 04 4e 61 6d 65 1a 04 12 02 08 01 20 00 0a 1e 0a 04 63 6f 64 65 12 04 43 6f 64 65 1a 04 0a 02 18 00 20 01 2a 08 5b 30 2d 39 5d 7b 36 7d 12 02 47 6f
+ViewContent::form msgpack 81 a4 66 6f 72 6d 82 a6 66 69 65 6c 64 73 92 85 a2 69 64 a4 6e 61 6d 65 a5 6c 61 62 65 6c a4 4e 61 6d 65 a5 69 6e 70 75 74 81 a8 63 68 65 63 6b 62 6f 78 81 a7 64 65 66 61 75 6c 74 c3 a8 6f 70 74 69 6f 6e 61 6c c2 a7 70 61 74 74 65 72 6e c0 85 a2 69 64 a4 63 6f 64 65 a5 6c 61 62 65 6c a4 43 6f 64 65 a5 69 6e 70 75 74 81 a4 74 65 78 74 83 ab 70 6c 61 63 65 68 6f 6c 64 65 72 c0 a7 64 65 66 61 75 6c 74 c0 a6 73 65 63 72 65 74 c2 a8 6f 70 74 69 6f 6e 61 6c c3 a7 70 61 74 74 65 72 6e a8 5b 30 2d 39 5d 7b 36 7d a6 73 75 62 6d 69 74 a2 47 6f
+ViewContent::form json {"form":{"fields":[{"id":"name","label":"Name","input":{"checkbox":{"default":true}},"optional":false,"pattern":null},{"id":"code","label":"Code","input":{"text":{"placeholder":null,"default":null,"secret":false}},"optional":true,"pattern":"[0-9]{6}"}],"submit":"Go"}}
 ViewContent::detail postcard 02 04 23 20 48 69 01 04 53 69 7a 65 04 33 20 4d 42
 ViewContent::detail protobuf 1a 14 0a 04 23 20 48 69 12 0c 0a 04 53 69 7a 65 12 04 33 20 4d 42
 ViewContent::detail msgpack 81 a6 64 65 74 61 69 6c 82 a8 6d 61 72 6b 64 6f 77 6e a4 23 20 48 69 a8 6d 65 74 61 64 61 74 61 91 82 a5 6c 61 62 65 6c a4 53 69 7a 65 a5 76 61 6c 75 65 a4 33 20 4d 42
@@ -275,6 +279,26 @@ FormInput::file postcard 03 01 04 63 6f 6e 66 01 01 0b 7e 2f 77 6f 72 6b 2e 63 6
 FormInput::file protobuf 22 1f 0a 04 63 6f 6e 66 10 01 1a 0b 7e 2f 77 6f 72 6b 2e 63 6f 6e 66 22 08 41 20 63 6f 6e 66 69 67
 FormInput::file msgpack 81 a4 66 69 6c 65 84 a6 61 63 63 65 70 74 91 a4 63 6f 6e 66 a6 66 6f 6c 64 65 72 c3 a7 64 65 66 61 75 6c 74 ab 7e 2f 77 6f 72 6b 2e 63 6f 6e 66 ab 70 6c 61 63 65 68 6f 6c 64 65 72 a8 41 20 63 6f 6e 66 69 67
 FormInput::file json {"file":{"accept":["conf"],"folder":true,"default":"~/work.conf","placeholder":"A config"}}
+FormInput::text_area postcard 04 01 06 41 20 6e 6f 74 65 01 08 48 69 0a 74 68 65 72 65
+FormInput::text_area protobuf 2a 12 0a 06 41 20 6e 6f 74 65 12 08 48 69 0a 74 68 65 72 65
+FormInput::text_area msgpack 81 a9 74 65 78 74 5f 61 72 65 61 82 ab 70 6c 61 63 65 68 6f 6c 64 65 72 a6 41 20 6e 6f 74 65 a7 64 65 66 61 75 6c 74 a8 48 69 0a 74 68 65 72 65
+FormInput::text_area json {"text_area":{"placeholder":"A note","default":"Hi\nthere"}}
+FormInput::number postcard 05 01 00 00 00 00 00 00 00 00 01 00 00 00 00 00 00 59 40 01 00 00 00 00 00 00 e0 3f 01 00 00 00 00 00 40 45 40
+FormInput::number protobuf 32 24 09 00 00 00 00 00 00 00 00 11 00 00 00 00 00 00 59 40 19 00 00 00 00 00 00 e0 3f 21 00 00 00 00 00 40 45 40
+FormInput::number msgpack 81 a6 6e 75 6d 62 65 72 84 a3 6d 69 6e cb 00 00 00 00 00 00 00 00 a3 6d 61 78 cb 40 59 00 00 00 00 00 00 a4 73 74 65 70 cb 3f e0 00 00 00 00 00 00 a7 64 65 66 61 75 6c 74 cb 40 45 40 00 00 00 00 00
+FormInput::number json {"number":{"min":0.0,"max":100.0,"step":0.5,"default":42.5}}
+FormInput::date postcard 06 01 01 10 32 30 32 36 2d 31 30 2d 33 30 54 30 39 3a 33 30
+FormInput::date protobuf 3a 14 08 01 12 10 32 30 32 36 2d 31 30 2d 33 30 54 30 39 3a 33 30
+FormInput::date msgpack 81 a4 64 61 74 65 82 a4 74 69 6d 65 c3 a7 64 65 66 61 75 6c 74 b0 32 30 32 36 2d 31 30 2d 33 30 54 30 39 3a 33 30
+FormInput::date json {"date":{"time":true,"default":"2026-10-30T09:30"}}
+FormInput::multi_select postcard 07 02 01 61 01 41 01 62 01 42 01 01 62
+FormInput::multi_select protobuf 42 13 0a 06 0a 01 61 12 01 41 0a 06 0a 01 62 12 01 42 12 01 62
+FormInput::multi_select msgpack 81 ac 6d 75 6c 74 69 5f 73 65 6c 65 63 74 82 a7 6f 70 74 69 6f 6e 73 92 82 a5 76 61 6c 75 65 a1 61 a5 6c 61 62 65 6c a1 41 82 a5 76 61 6c 75 65 a1 62 a5 6c 61 62 65 6c a1 42 a7 64 65 66 61 75 6c 74 91 a1 62
+FormInput::multi_select json {"multi_select":{"options":[{"value":"a","label":"A"},{"value":"b","label":"B"}],"default":["b"]}}
+FormInput::description postcard 08 0f 52 65 61 64 20 74 68 69 73 20 66 69 72 73 74
+FormInput::description protobuf 4a 11 0a 0f 52 65 61 64 20 74 68 69 73 20 66 69 72 73 74
+FormInput::description msgpack 81 ab 64 65 73 63 72 69 70 74 69 6f 6e 81 a4 74 65 78 74 af 52 65 61 64 20 74 68 69 73 20 66 69 72 73 74
+FormInput::description json {"description":{"text":"Read this first"}}
 JobState::running postcard 00
 JobState::running protobuf 0a 00
 JobState::running msgpack a7 72 75 6e 6e 69 6e 67

@@ -849,20 +849,36 @@ fn to_front_end() -> Vec<ToFrontEnd> {
         ToFrontEnd::WithdrawUndo { change: 7 },
         ToFrontEnd::SetQuery { text: "emoji ".into() },
         ToFrontEnd::Reached { menus: 1 },
-        ToFrontEnd::PathCompletions {
-            extension: "wireguard".into(),
-            view: "import".into(),
-            field: "config".into(),
-            text: "~/Down".into(),
-            entries: vec![PathCompletion {
-                path: PathBuf::from("/home/kuba/Downloads"),
-                title: "Downloads".into(),
-                folder: true,
-                modified: Some(1_761_700_000),
-                highlights: vec![0, 1, 2, 3],
-            }],
-        },
+        path_completions(),
+        form_errors(),
     ]
+}
+
+fn path_completions() -> ToFrontEnd {
+    ToFrontEnd::PathCompletions {
+        extension: "wireguard".into(),
+        view: "import".into(),
+        field: "config".into(),
+        text: "~/Down".into(),
+        entries: vec![PathCompletion {
+            path: PathBuf::from("/home/kuba/Downloads"),
+            title: "Downloads".into(),
+            folder: true,
+            modified: Some(1_761_700_000),
+            highlights: vec![0, 1, 2, 3],
+        }],
+    }
+}
+
+fn form_errors() -> ToFrontEnd {
+    ToFrontEnd::FormErrors {
+        extension: "timer".into(),
+        view: "new".into(),
+        errors: vec![FieldError {
+            field: "minutes".into(),
+            message: "At most 120".into(),
+        }],
+    }
 }
 
 fn outcomes() -> Vec<Outcome> {
@@ -899,11 +915,20 @@ fn view_contents() -> Vec<ViewContent> {
             filters_itself: true,
         },
         ViewContent::Form {
-            fields: vec![FormField {
-                id: "name".into(),
-                label: "Name".into(),
-                input: FormInput::Checkbox { default: true },
-            }],
+            fields: vec![
+                FormField::new("name", "Name", FormInput::Checkbox { default: true }),
+                FormField::new(
+                    "code",
+                    "Code",
+                    FormInput::Text {
+                        placeholder: None,
+                        default: None,
+                        secret: false,
+                    },
+                )
+                .optional()
+                .pattern("[0-9]{6}"),
+            ],
             submit: "Go".into(),
         },
         ViewContent::Detail {
@@ -937,6 +962,36 @@ fn form_inputs() -> Vec<FormInput> {
             folder: true,
             default: Some("~/work.conf".into()),
             placeholder: Some("A config".into()),
+        },
+        FormInput::TextArea {
+            placeholder: Some("A note".into()),
+            default: Some("Hi\nthere".into()),
+        },
+        FormInput::Number {
+            min: Some(0.0),
+            max: Some(100.0),
+            step: Some(0.5),
+            default: Some(42.5),
+        },
+        FormInput::Date {
+            time: true,
+            default: Some("2026-10-30T09:30".into()),
+        },
+        FormInput::MultiSelect {
+            options: vec![
+                SelectOption {
+                    value: "a".into(),
+                    label: "A".into(),
+                },
+                SelectOption {
+                    value: "b".into(),
+                    label: "B".into(),
+                },
+            ],
+            default: vec!["b".into()],
+        },
+        FormInput::Description {
+            text: "Read this first".into(),
         },
     ]
 }

@@ -48,6 +48,7 @@ mod segment;
 mod server;
 mod targets;
 pub mod usage;
+mod validation;
 mod verbs;
 mod views;
 

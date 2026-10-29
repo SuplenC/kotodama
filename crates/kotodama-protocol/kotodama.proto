@@ -61,10 +61,17 @@ message Example {
   string result = 2;
 }
 
+message FieldError {
+  string field = 1;
+  string message = 2;
+}
+
 message FormField {
   string id = 1;
   string label = 2;
   FormInput input = 3;
+  bool optional = 4;
+  optional string pattern = 5;
 }
 
 message FormInput {
@@ -73,10 +80,24 @@ message FormInput {
     FormInput.Checkbox checkbox = 2;
     FormInput.Select select = 3;
     FormInput.File file = 4;
+    FormInput.TextArea text_area = 5;
+    FormInput.Number number = 6;
+    FormInput.Date date = 7;
+    FormInput.MultiSelect multi_select = 8;
+    FormInput.Description description = 9;
   }
 
   message Checkbox {
     bool default = 1;
+  }
+
+  message Date {
+    bool time = 1;
+    optional string default = 2;
+  }
+
+  message Description {
+    string text = 1;
   }
 
   message File {
@@ -84,6 +105,18 @@ message FormInput {
     bool folder = 2;
     optional string default = 3;
     optional string placeholder = 4;
+  }
+
+  message MultiSelect {
+    repeated SelectOption options = 1;
+    repeated string default = 2;
+  }
+
+  message Number {
+    optional double min = 1;
+    optional double max = 2;
+    optional double step = 3;
+    optional double default = 4;
   }
 
   message Select {
@@ -95,6 +128,11 @@ message FormInput {
     optional string placeholder = 1;
     optional string default = 2;
     bool secret = 3;
+  }
+
+  message TextArea {
+    optional string placeholder = 1;
+    optional string default = 2;
   }
 }
 
@@ -440,6 +478,7 @@ message ToFrontEnd {
     ToFrontEnd.SetQuery set_query = 15;
     ToFrontEnd.Reached reached = 16;
     ToFrontEnd.PathCompletions path_completions = 17;
+    ToFrontEnd.FormErrors form_errors = 18;
   }
 
   message ActionFailed {
@@ -451,6 +490,12 @@ message ToFrontEnd {
     string view = 2;
     string text = 3;
     repeated ListMatch matches = 4;
+  }
+
+  message FormErrors {
+    string extension = 1;
+    string view = 2;
+    repeated FieldError errors = 3;
   }
 
   message JobProgress {

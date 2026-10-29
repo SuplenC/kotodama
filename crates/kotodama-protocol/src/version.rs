@@ -108,7 +108,8 @@ impl Since for ToFrontEnd {
             | ToFrontEnd::WithdrawUndo { .. }
             | ToFrontEnd::SetQuery { .. }
             | ToFrontEnd::Reached { .. }
-            | ToFrontEnd::PathCompletions { .. } => 0,
+            | ToFrontEnd::PathCompletions { .. }
+            | ToFrontEnd::FormErrors { .. } => 0,
         }
     }
 }
@@ -152,9 +153,15 @@ impl Since for ViewContent {
 impl Since for FormInput {
     fn since(&self) -> u32 {
         match self {
-            FormInput::Text { .. } | FormInput::Checkbox { .. } | FormInput::Select { .. } | FormInput::File { .. } => {
-                0
-            }
+            FormInput::Text { .. }
+            | FormInput::Checkbox { .. }
+            | FormInput::Select { .. }
+            | FormInput::File { .. }
+            | FormInput::TextArea { .. }
+            | FormInput::Number { .. }
+            | FormInput::Date { .. }
+            | FormInput::MultiSelect { .. }
+            | FormInput::Description { .. } => 0,
         }
     }
 }

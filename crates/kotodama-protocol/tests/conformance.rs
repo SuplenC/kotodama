@@ -238,6 +238,119 @@ fn item_messages() -> Vec<FromExtension> {
     ]
 }
 
+/// The options of a select and a multi-select.
+fn options() -> Vec<SelectOption> {
+    vec![
+        SelectOption {
+            value: "stable".into(),
+            label: "Stable".into(),
+        },
+        SelectOption {
+            value: "beta".into(),
+            label: "Beta".into(),
+        },
+    ]
+}
+
+/// A form field of each kind, required and optional, with and without a
+/// pattern.
+fn form_fields() -> Vec<FormField> {
+    vec![
+        FormField::new(
+            "name",
+            "Name",
+            FormInput::Text {
+                placeholder: Some("suite".into()),
+                default: None,
+                secret: false,
+            },
+        )
+        .pattern("[a-z-]+"),
+        FormField::new(
+            "token",
+            "Token",
+            FormInput::Text {
+                placeholder: None,
+                default: None,
+                secret: true,
+            },
+        )
+        .optional(),
+        FormField::new("force", "Force", FormInput::Checkbox { default: true }),
+        FormField::new(
+            "channel",
+            "Channel",
+            FormInput::Select {
+                options: options(),
+                default: Some("stable".into()),
+            },
+        ),
+        FormField::new(
+            "config",
+            "Config",
+            FormInput::File {
+                accept: vec!["conf".into()],
+                folder: false,
+                default: Some("~/Downloads/work.conf".into()),
+                placeholder: Some("A WireGuard config".into()),
+            },
+        ),
+        FormField::new(
+            "into",
+            "Into",
+            FormInput::File {
+                accept: Vec::new(),
+                folder: true,
+                default: None,
+                placeholder: None,
+            },
+        ),
+        FormField::new(
+            "notes",
+            "Notes",
+            FormInput::TextArea {
+                placeholder: Some("What changed".into()),
+                default: None,
+            },
+        )
+        .optional(),
+        FormField::new(
+            "jobs",
+            "Jobs",
+            FormInput::Number {
+                min: Some(1.0),
+                max: Some(64.0),
+                step: Some(1.0),
+                default: Some(8.0),
+            },
+        ),
+        FormField::new(
+            "when",
+            "When",
+            FormInput::Date {
+                time: true,
+                default: Some("2026-10-30T09:30".into()),
+            },
+        ),
+        FormField::new(
+            "channels",
+            "Channels",
+            FormInput::MultiSelect {
+                options: options(),
+                default: vec!["beta".into()],
+            },
+        )
+        .optional(),
+        FormField::new(
+            "about",
+            "",
+            FormInput::Description {
+                text: "A suite is a set of projects built together.".into(),
+            },
+        ),
+    ]
+}
+
 fn view_messages() -> Vec<FromExtension> {
     vec![
         FromExtension::PushView(view(ViewContent::List {
@@ -249,68 +362,7 @@ fn view_messages() -> Vec<FromExtension> {
             filters_itself: true,
         })),
         FromExtension::PushView(view(ViewContent::Form {
-            fields: vec![
-                FormField {
-                    id: "name".into(),
-                    label: "Name".into(),
-                    input: FormInput::Text {
-                        placeholder: Some("suite".into()),
-                        default: None,
-                        secret: false,
-                    },
-                },
-                FormField {
-                    id: "token".into(),
-                    label: "Token".into(),
-                    input: FormInput::Text {
-                        placeholder: None,
-                        default: None,
-                        secret: true,
-                    },
-                },
-                FormField {
-                    id: "force".into(),
-                    label: "Force".into(),
-                    input: FormInput::Checkbox { default: true },
-                },
-                FormField {
-                    id: "channel".into(),
-                    label: "Channel".into(),
-                    input: FormInput::Select {
-                        options: vec![
-                            SelectOption {
-                                value: "stable".into(),
-                                label: "Stable".into(),
-                            },
-                            SelectOption {
-                                value: "beta".into(),
-                                label: "Beta".into(),
-                            },
-                        ],
-                        default: Some("stable".into()),
-                    },
-                },
-                FormField {
-                    id: "config".into(),
-                    label: "Config".into(),
-                    input: FormInput::File {
-                        accept: vec!["conf".into()],
-                        folder: false,
-                        default: Some("~/Downloads/work.conf".into()),
-                        placeholder: Some("A WireGuard config".into()),
-                    },
-                },
-                FormField {
-                    id: "into".into(),
-                    label: "Into".into(),
-                    input: FormInput::File {
-                        accept: Vec::new(),
-                        folder: true,
-                        default: None,
-                        placeholder: None,
-                    },
-                },
-            ],
+            fields: form_fields(),
             submit: "Create".into(),
         })),
         FromExtension::UpdateView(view(ViewContent::Detail {
@@ -571,7 +623,25 @@ fn menu_and_view_messages() -> Vec<ToFrontEnd> {
             text: "~".into(),
             entries: path_completions(),
         },
+        form_errors(),
     ]
+}
+
+fn form_errors() -> ToFrontEnd {
+    ToFrontEnd::FormErrors {
+        extension: "kubaos".into(),
+        view: "new".into(),
+        errors: vec![
+            FieldError {
+                field: "name".into(),
+                message: "Required".into(),
+            },
+            FieldError {
+                field: "jobs".into(),
+                message: "At most 64".into(),
+            },
+        ],
+    }
 }
 
 fn from_front_end_messages() -> Vec<FromFrontEnd> {
@@ -641,9 +711,10 @@ fn to_front_end_variant(message: &ToFrontEnd) -> usize {
         ToFrontEnd::SetQuery { .. } => 14,
         ToFrontEnd::Reached { .. } => 15,
         ToFrontEnd::PathCompletions { .. } => 16,
+        ToFrontEnd::FormErrors { .. } => 17,
     }
 }
-const TO_FRONT_END_VARIANTS: usize = 17;
+const TO_FRONT_END_VARIANTS: usize = 18;
 
 fn from_front_end_variant(message: &FromFrontEnd) -> usize {
     match message {
@@ -870,6 +941,70 @@ fn an_extension_asks_for_a_file_in_a_form() {
             placeholder: None,
         }
     );
+}
+
+#[test]
+fn a_form_field_is_required_and_takes_any_text_unless_it_says_otherwise() {
+    let field: FormField = WireFormat::Json
+        .decode(br#"{"id": "name", "label": "Name", "input": {"text": {}}}"#)
+        .unwrap();
+
+    assert!(!field.optional);
+    assert_eq!(field.pattern, None);
+}
+
+#[test]
+fn an_extension_asks_for_a_number_a_date_several_options_and_more_text_in_a_form() {
+    let fields: Vec<FormField> = WireFormat::Json
+        .decode(
+            br#"[
+                {"id": "notes", "label": "Notes", "input": {"text_area": {}}},
+                {"id": "minutes", "label": "Minutes", "input": {"number": {"min": 1, "step": 1}}},
+                {"id": "on", "label": "On", "input": {"date": {}}},
+                {"id": "tags", "label": "Tags", "optional": true,
+                 "input": {"multi_select": {"options": [{"value": "a", "label": "A"}]}}},
+                {"id": "about", "label": "", "input": {"description": {"text": "Read me"}}}
+            ]"#,
+        )
+        .unwrap();
+
+    let inputs: Vec<FormInput> = fields.into_iter().map(|field| field.input).collect();
+    assert_eq!(
+        inputs,
+        [
+            FormInput::TextArea {
+                placeholder: None,
+                default: None,
+            },
+            FormInput::Number {
+                min: Some(1.0),
+                max: None,
+                step: Some(1.0),
+                default: None,
+            },
+            FormInput::Date {
+                time: false,
+                default: None,
+            },
+            FormInput::MultiSelect {
+                options: vec![SelectOption {
+                    value: "a".into(),
+                    label: "A".into(),
+                }],
+                default: Vec::new(),
+            },
+            FormInput::Description { text: "Read me".into() },
+        ]
+    );
+}
+
+#[test]
+fn an_extension_asks_for_a_number_with_an_argument_of_kind_number() {
+    let argument: Argument = WireFormat::Json
+        .decode(br#"{"name": "minutes", "kind": "number"}"#)
+        .unwrap();
+
+    assert_eq!(argument, Argument::new("minutes").number());
 }
 
 /// An Argument as protobuf code generated from `kotodama.proto` may write

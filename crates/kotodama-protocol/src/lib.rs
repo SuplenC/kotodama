@@ -60,6 +60,7 @@ pub use channel::ChannelWriter;
 pub use front_end::APP_ENTRY_KIND;
 pub use front_end::ActionRef;
 pub use front_end::Example;
+pub use front_end::FieldError;
 pub use front_end::FromFrontEnd;
 pub use front_end::Intro;
 pub use front_end::ListMatch;
