@@ -143,6 +143,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             via_alias: None,
             verb: None,
             by_verb: Vec::new(),
+            subject: None,
             searched: false,
             asked_for_menu: false,
             update: Update::None,

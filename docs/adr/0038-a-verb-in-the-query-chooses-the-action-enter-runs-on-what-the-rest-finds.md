@@ -12,11 +12,11 @@ ADR 0037 gave every Action `keywords`, its verbs, and let a package manager offe
 
 ## How the Results come
 
-- **The whole query is searched as before**, and so is the subject alone (`verbs.rs:Verbs::find`, `Daemon::add_verb_matches`). Of what the subject finds, the Indexed items that offer the verb join the Results, each ranked exactly as the subject alone ranks it: its Tier, nucleo's score and its Frecency are those of `chrome`. An Item the whole query found too takes the subject's rank. The rest of what the whole query found stays, so `rem chrome` still finds Chrome Remote Desktop by its title.
+- **The whole query is searched as before**, and so is the subject alone (`verbs.rs:Verbs::find`, `Daemon::add_verb_matches`). Of what the subject finds, the Indexed items that offer the verb join the Results, each ranked as the subject alone ranks it: its Tier, nucleo's score and its Frecency are those of `chrome`, an Item's keyword typed first in the subject names it as it would typed alone, and its title is highlighted as for `chrome`. An Item the whole query found too takes the subject's rank. The rest of what the whole query found stays, so `rem chrome` still finds Chrome Remote Desktop by its title. Learned choices are the exception: they go by the whole query, `remove chrome`, which is what a pick through the verb teaches.
 - **An Item offers the verb** when one of its own Actions, a Contributed action on its kind, or a targeted one on its Identity has a keyword the verb names; a Contributed action from the Item's own Extension doesn't count, as it is never offered there. The search checks this without reading an Item off its Shelf: a Segment keeps each Action it offers with its folded keywords (`Offered`), and each row the indexes of its Actions there (`Segment::named_action`).
-- **Aliases.** When the subject is an Alias, the Alias names its Item and the verb its Action: `remove ff` shows Firefox, badged `ff`, with Remove primary. An Alias whose Item doesn't offer the verb is not named by the subject.
+- **Aliases.** When the subject is an Alias, before or after the verb, the Alias names its Item and the verb its Action: `remove ff` and `ff remove` show Firefox, badged `ff`, with Remove primary. An Alias whose Item doesn't offer the verb is not named by the subject.
 - **Which Action.** Of the Result's Actions, the first of its own with a keyword the verb names, else the first such Contributed one (`rows.rs:verb_choice`), worked out when the row is built, so the menu follows when the Actions change. The other Actions stay in the Action panel.
-- **Live results** keep their own rank and get no verb: the Extension answering a Live query was asked the whole query, and can read the verb itself.
+- **Live results** keep their own rank and get no verb, even through an Alias: the Extension answering a Live query was asked the whole query, and can read the verb itself.
 
 ## On the wire
 
@@ -26,25 +26,25 @@ kotodama-qml makes the chosen Action the primary entry of the Action panel, then
 
 ## What a pick teaches
 
-A pick of the Action the verb chose counts towards the query's Learned choice (`History::learn`), so `remove chrome` ranks Chrome first once the user has removed it that way often enough, and adds nothing to Frecency: the verb chose what ran, not how much the user uses the Result, and removing an app is no reason to rank it higher for `chrome`. Picking another Action of the same Result, through the Action panel, is an ordinary pick. Through an Alias, the verb wins: nothing is added to the Alias's Frecency either. In an app kept out of the search, a verb pick keeps nothing.
+A pick of the Action the verb chose, when it isn't the Item's first own Action, counts towards the query's Learned choice (`History::learn`), so `remove chrome` ranks Chrome first once the user has removed it that way often enough, and adds nothing to Frecency: the verb chose what ran, not how much the user uses the Result, and removing an app is no reason to rank it higher for `chrome`. Picking another Action of the same Result, through the Action panel, is an ordinary pick, and so is a pick where the verb names the Action Enter runs anyway (`open notes`), which the row doesn't mark as chosen either. Through an Alias, the verb wins: nothing is added to the Alias's Frecency either. In an app kept out of the search, a verb pick keeps nothing.
 
 ## Cost
 
-The verb lookup is in `Verbs`, every Action keyword on offer, folded, sorted: a binary search per query word, with an ASCII word folded on the stack. It is built again only when the Actions on offer may have changed: a Segment put in with a keyword no version before it had, or emptied (`Index::verbs_version`), or the running Extensions' Contributed actions changing. Never by scanning Items. Only when a word names a keyword is the subject searched, and for each of its matches the Daemon checks whether it offers the verb.
+The verb lookup is in `Verbs`, every Action keyword on offer, folded, sorted: a binary search per query word, with an ASCII word folded on the stack. It is built again only when the Actions on offer may have changed: a Segment put in offering a keyword the version before it didn't, or emptied (`Index::verbs_version`), or the running Extensions' Contributed actions changing. Never by scanning Items. Only when a word names a keyword is the subject searched, and for each of its matches the Daemon checks whether it offers the verb.
 
 `instructions` bench, base (main) against this change, both counted in the same directory. Every Setup now runs a targeted Contributed action with three keywords and aimed at nothing, so the table is full and each query is looked up in it:
 
 | Bench | Base | This change |
 |---|---|---|
-| first keystroke | 2,473,433 | 2,480,711 (+0.3%) |
-| next keystroke | 1,445,296 | 1,447,171 (+0.1%) |
-| two words pasted | 2,947,349 | 2,953,059 (+0.2%) |
-| a verb and its subject pasted, `remove fire` | (new) | 3,744,716 |
-| Empty query, 2k picked | 35,655 | 36,322 (+1.9%) |
-| emoji in the root search | 3,916,079 | 3,923,102 (+0.2%) |
-| emoji, app scoped out | 2,435,176 | 2,440,821 (+0.2%) |
-| emoji, app searched | 2,111,592 | 2,118,834 (+0.3%) |
-| an Item resent, Actions swapped | 195,071 | 197,760 (+1.4%) |
+| first keystroke | 2,473,433 | 2,481,042 (+0.3%) |
+| next keystroke | 1,445,296 | 1,447,369 (+0.1%) |
+| two words pasted | 2,947,349 | 2,953,825 (+0.2%) |
+| a verb and its subject pasted, `remove fire` | (new) | 3,746,035 |
+| Empty query, 2k picked | 35,655 | 36,345 (+1.9%) |
+| emoji in the root search | 3,916,079 | 3,923,436 (+0.2%) |
+| emoji, app scoped out | 2,435,176 | 2,441,151 (+0.2%) |
+| emoji, app searched | 2,111,592 | 2,119,146 (+0.4%) |
+| an Item resent, Actions swapped | 195,071 | 198,057 (+1.5%) |
 
 The increase on a query without a verb is the `primary` field of every Result, cloned, encoded and dropped, and the table built on the first keystroke after a change. A query with a verb searches the Index twice: `remove fire` costs about what `fire tool` does plus a search for `fire`.
 

@@ -842,9 +842,12 @@ struct Session {
     via_alias: Option<(Source, String)>,
     /// The verb the query names, if it names one.
     verb: Option<Verb>,
-    /// The Results the verb's subject found that offer it, in order: Enter
-    /// runs the Action the verb names on them.
+    /// The Indexed items the verb's subject found that offer it, in order:
+    /// Enter runs the Action the verb names on them.
     by_verb: Vec<Source>,
+    /// The verb's subject as nucleo matches it, which highlights the titles
+    /// of `by_verb`.
+    subject: Option<Pattern>,
     /// Whether it has sent a query. A Front end that only passes on commands
     /// never does, and gets no Results.
     searched: bool,

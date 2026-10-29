@@ -187,3 +187,32 @@ fn removing_an_item_changes_the_keys() {
 
     assert!(segment.keys_changed());
 }
+
+fn with_verbs(id: &str, keywords: &[&str]) -> Item {
+    let mut item = item(id, "Trash", &[]);
+    item.actions = vec![Action::new("trash", "Move to Trash").keywords(keywords.iter().copied())];
+    item
+}
+
+#[test]
+fn a_version_offering_an_action_keyword_the_last_one_didnt_says_so() {
+    let mut segment = Segment::default();
+    segment.edit(Edit::Add(vec![with_verbs("a", &["Delete"])]));
+    assert!(segment.verbs_changed());
+    assert_eq!(segment.verbs().collect::<Vec<_>>(), ["delete"]);
+
+    segment.next_version();
+    segment.edit(Edit::Add(vec![with_verbs("b", &["delete"])]));
+    assert!(!segment.verbs_changed(), "the same keyword, folded");
+
+    segment.next_version();
+    segment.edit(Edit::Remove(vec!["a".into(), "b".into()]));
+    assert_eq!(segment.verbs().count(), 0);
+
+    segment.next_version();
+    segment.edit(Edit::Add(vec![with_verbs("a", &["delete"])]));
+    assert!(segment.verbs_changed(), "offered again");
+    let row = segment.find("a").unwrap();
+    assert_eq!(segment.named_action(row, |keyword| keyword == "delete"), Some("trash"));
+    assert_eq!(segment.named_action(row, |keyword| keyword == "remove"), None);
+}

@@ -244,8 +244,9 @@ pub struct Segment {
     /// of a row. A version that only changed Items' Actions ranks every
     /// query as the last one did.
     keys_changed: bool,
-    /// Whether this version offers an Action keyword no version before did,
-    /// or is a Segment emptied, so the Daemon's table of them is built again.
+    /// Whether this version offers an Action keyword the version before
+    /// didn't, or is a Segment emptied, so the Daemon's table of them is
+    /// built again.
     verbs_changed: bool,
 }
 
@@ -280,8 +281,8 @@ impl Segment {
         }
     }
 
-    /// Whether this version offers an Action keyword no version before it
-    /// did, or is an emptied Segment.
+    /// Whether this version offers an Action keyword the version before it
+    /// didn't, or is an emptied Segment.
     pub fn verbs_changed(&self) -> bool {
         self.verbs_changed
     }
@@ -492,7 +493,9 @@ impl Segment {
                     });
                     self.offered.len() - 1
                 };
-                self.offered[n].rows.insert(row);
+                let offered = &mut self.offered[n];
+                self.verbs_changed |= offered.rows.is_empty() && !offered.keywords.is_empty();
+                offered.rows.insert(row);
                 n as u32
             })
             .collect()

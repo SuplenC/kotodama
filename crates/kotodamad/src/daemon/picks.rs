@@ -572,9 +572,9 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
     /// choices count it, and a Result picked below one isn't learned as
     /// picked over it. A pick in an app kept out of the search is never a
     /// Learned choice, and goes in the Usage log without its query. A pick
-    /// of the Action the query's verb named counts towards the query's
-    /// Learned choice alone, never towards Frecency: the verb chose what
-    /// ran, not how much the Result is used.
+    /// of the Action the query's verb chose, other than the Item's first,
+    /// counts towards the query's Learned choice alone, never towards
+    /// Frecency: the verb chose what ran, not how much the Result is used.
     /// Returns the change to the History, to undo it.
     pub(super) fn picked(
         &mut self,
@@ -591,8 +591,13 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
         let source = self.source_of(session, &result.extension, &result.id);
         let row = session.shown.iter().position(|(shown, _)| Some(*shown) == source);
         let private = session.in_private_app(&self.apps);
+        // The verb chose what ran only when it chose other than what Enter
+        // runs anyway, as the row's `primary` says.
         let by_verb = source.is_some_and(|source| {
-            session.by_verb.binary_search(&source).is_ok() && self.verb_choice(session, source).as_ref() == Some(action)
+            session.by_verb.binary_search(&source).is_ok()
+                && self
+                    .verb_choice(session, source)
+                    .is_some_and(|(chosen, first)| !first && chosen == *action)
         });
         if self.history.settings().usage_log {
             self.store.log(Entry {

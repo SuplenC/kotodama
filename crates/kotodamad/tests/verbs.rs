@@ -220,6 +220,47 @@ fn a_verb_on_an_items_own_action_chooses_it() {
 }
 
 #[test]
+fn the_subject_is_highlighted_as_it_would_be_typed_alone() {
+    let mut desk = Desk::new();
+
+    let alone = desk.query("chrome")[0].highlights.clone();
+    let with_verb = desk.query("remove chrome");
+
+    assert_eq!(with_verb[0].item.title, "Google Chrome");
+    assert_eq!(with_verb[0].highlights, alone);
+}
+
+#[test]
+fn an_items_keyword_after_the_verb_names_it() {
+    let mut desk = Desk::new();
+    let mut gimp = identified("Gimp");
+    gimp.keyword = Some("zz".into());
+    desk.h.add(&desk.apps, vec![gimp]);
+    desk.target(&["gimp", "google-chrome"]);
+
+    let alone = titles(&desk.query("zz")).first().map(|title| (*title).to_owned());
+    let rows = desk.query("remove zz");
+
+    assert_eq!(alone.as_deref(), Some("Gimp"));
+    assert_eq!(rows[0].item.title, "Gimp");
+    assert_eq!(rows[0].primary, Some(remove()));
+}
+
+#[test]
+fn a_verb_naming_the_usual_first_action_makes_an_ordinary_pick() {
+    let mut desk = Desk::new();
+    let mut notes = app("Notes");
+    notes.actions = vec![Action::new("open", "Open").keywords(["open"])];
+    desk.h.add(&desk.apps, vec![notes]);
+    desk.query("open notes");
+
+    run(&mut desk.h, &desk.ui, "apps", "notes", "apps", "open");
+
+    let history = desk.h.saved.0.borrow().clone().expect("the History was saved");
+    assert!(history.picks("apps", "notes").is_some());
+}
+
+#[test]
 fn a_verb_isnt_a_word_of_an_actions_title() {
     let mut desk = Desk::new();
     let mut notes = app("Notes");

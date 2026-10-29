@@ -49,6 +49,7 @@ use crate::history::Store;
 use crate::history::query_key;
 use crate::index::Reach;
 use crate::index::SIDES;
+use crate::keywords::Alias;
 use crate::most_used::Counts;
 use crate::rank;
 use crate::rank::Haystack;
@@ -347,6 +348,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
         session.via_alias = None;
         session.verb = None;
         session.by_verb.clear();
+        session.subject = None;
         let results = ranked
             .iter()
             .filter_map(|&source| self.row(session, source, None))
@@ -365,7 +367,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
         self.verbs_from = Some(version);
         let mut keywords: Vec<Box<str>> = self.index.verbs().map(Box::from).collect();
         let contributed = self.contributed.values().flatten().map(|(_, action)| action);
-        let offered = contributed.chain(self.targets.actions());
+        let offered = contributed.chain(self.targets.actions().map(|(_, action)| action));
         keywords.extend(
             offered
                 .flat_map(|action| &action.keywords)
@@ -385,6 +387,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
     /// nothing more.
     pub(super) fn add_verb_matches(&mut self, session: &mut Session, candidates: &mut Vec<Candidate>) -> usize {
         session.by_verb.clear();
+        session.subject = None;
         self.update_verbs();
         session.verb = self.verbs.find(session.searched());
         let Some(verb) = &session.verb else {
@@ -396,6 +399,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             Normalization::Never,
         );
         let folded = rank::Query::new(&verb.subject);
+        session.subject = Some(pattern.clone());
         let Daemon {
             index,
             matcher,
@@ -424,7 +428,12 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
                     .collect()
             })
             .collect();
-        let targeted = !targets.is_empty();
+        let by_target: Vec<(ExtensionId, &str)> = targets
+            .actions()
+            .filter(|(_, action)| verb.names(action))
+            .map(|(ext, action)| (ext, action.id.as_str()))
+            .collect();
+        let targeted = !targets.is_empty() && !by_target.is_empty();
         let mut found = Vec::new();
         index.search(
             &pattern,
@@ -443,7 +452,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
                         && index.identity(slot).is_some_and(|identity| {
                             targets
                                 .on(identity)
-                                .any(|(ext, action)| ext != owner && verb.names(action))
+                                .any(|(ext, action)| ext != owner && by_target.contains(&(ext, action.id.as_str())))
                         }));
                 if !offers {
                     return;
@@ -772,17 +781,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
         let first = first.unwrap_or_default();
         let mut named: Vec<Keyword> = Vec::new();
         let mut primary = None;
-        let alias = self
-            .keywords
-            .aliases
-            .get_key_value(session.key.as_str())
-            .or_else(|| self.keywords.aliases.get_key_value(first))
-            .map(|named| (named, false))
-            .or_else(|| {
-                let subject = query_key(&session.verb.as_ref()?.subject);
-                Some((self.keywords.aliases.get_key_value(subject.as_str())?, true))
-            })
-            .filter(|_| root);
+        let alias = self.alias_named(session, first).filter(|_| root);
         if let Some(((keyword, alias), by_subject)) = alias
             && let Some(source) = self.alias_source(session, alias)
             && let offers_verb = self.verb_choice(session, source).is_some()
@@ -822,6 +821,10 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
                 frecency: None,
                 tier: Tier::Exact,
             });
+        }
+        if session.verb.is_some() {
+            let first = first.to_owned();
+            self.add_keyed_subject(session, &first, &mut named);
         }
         for Keyword {
             source,
@@ -863,6 +866,48 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             }
         }
         primary
+    }
+
+    /// The Alias the session's query names, typed alone or before an
+    /// Argument as its `first` word, or else as the subject of its verb, and
+    /// whether it is the subject.
+    fn alias_named(&self, session: &Session, first: &str) -> Option<((&String, &Alias), bool)> {
+        let aliases = &self.keywords.aliases;
+        if let Some(named) = aliases
+            .get_key_value(session.key.as_str())
+            .or_else(|| aliases.get_key_value(first))
+        {
+            return Some((named, false));
+        }
+        let subject = query_key(&session.verb.as_ref()?.subject);
+        Some((aliases.get_key_value(subject.as_str())?, true))
+    }
+
+    /// Adds to `named` the Items the first word of the session's verb's
+    /// subject names by their keyword, as it would typed alone, among those
+    /// that offer the verb, unless that word is `first`, the query's, which
+    /// named them already.
+    fn add_keyed_subject(&self, session: &mut Session, first: &str, named: &mut Vec<Keyword>) {
+        let Some(subject) = session.verb.as_ref().map(|verb| query_key(&verb.subject)) else {
+            return;
+        };
+        let Some(subject_first) = subject.split(' ').next().filter(|&word| word != first) else {
+            return;
+        };
+        for slot in self.index.keyed(subject_first, session.reach) {
+            let source = Source::Indexed(slot);
+            match session.by_verb.binary_search(&source) {
+                Ok(_) => {}
+                Err(at) if self.verb_choice(session, source).is_some() => session.by_verb.insert(at, source),
+                Err(_) => continue,
+            }
+            named.push(Keyword {
+                source,
+                alias: false,
+                frecency: None,
+                tier: Tier::Exact,
+            });
+        }
     }
 
     /// Ranks the strongest Learned choice that applies and is among the

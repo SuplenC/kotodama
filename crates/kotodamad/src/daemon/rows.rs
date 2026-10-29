@@ -202,8 +202,11 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             Source::Unavailable => return self.unavailable_row(session),
         };
         self.highlights.clear();
-        if session
-            .pattern
+        let pattern = match &session.subject {
+            Some(subject) if session.by_verb.binary_search(&source).is_ok() => subject,
+            _ => &session.pattern,
+        };
+        if pattern
             .indices(title.chars, &mut self.matcher, &mut self.highlights)
             .is_some()
         {
@@ -257,9 +260,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             .as_ref()
             .filter(|_| session.by_verb.binary_search(&source).is_ok())
             .and_then(|verb| verb_choice(verb, &extension, &item.actions, &contributed))
-            .filter(|chosen| {
-                !(chosen.extension == extension && item.actions.first().is_some_and(|first| first.id == chosen.id))
-            });
+            .filter(|chosen| !is_first(chosen, &extension, &item.actions));
         let alias = session
             .via_alias
             .as_ref()
@@ -309,18 +310,24 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
         })
     }
 
-    /// The Action the session's verb names on the Result `source`, as Enter
-    /// would run it, if the Result offers one: see [`verb_choice`].
-    pub(super) fn verb_choice(&self, session: &Session, source: Source) -> Option<ActionRef> {
+    /// The Action the session's verb names on the Indexed item `source`, if
+    /// it offers one, and whether that is the Item's first own Action: see
+    /// [`verb_choice`].
+    pub(super) fn verb_choice(&self, session: &Session, source: Source) -> Option<(ActionRef, bool)> {
         let verb = session.verb.as_ref()?;
-        let owner = match source {
-            Source::Indexed(slot) => slot.extension(),
-            Source::Live(ext, _) => ext,
-            Source::Own(_) | Source::Unavailable => return None,
+        let Source::Indexed(slot) = source else {
+            return None;
         };
         let (extension, item) = self.item(session, source)?;
-        let contributed = self.contributed_for(owner, item.kind.name(), item.identity.as_deref(), &item.actions);
-        verb_choice(verb, extension, &item.actions, &contributed)
+        let contributed = self.contributed_for(
+            slot.extension(),
+            item.kind.name(),
+            item.identity.as_deref(),
+            &item.actions,
+        );
+        let chosen = verb_choice(verb, extension, &item.actions, &contributed)?;
+        let first = is_first(&chosen, extension, &item.actions);
+        Some((chosen, first))
     }
 
     /// Other running Extensions' Actions for an Item of `kind` whose Identity
@@ -418,12 +425,10 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
                     action: contributed.action.clone(),
                 });
             }
-            let own: BTreeMap<(String, String), Action> = self
-                .index
-                .offered(ExtensionId(id))
-                .into_iter()
-                .map(|(kind, action)| ((kind, action.id.clone()), action))
-                .collect();
+            let mut own: BTreeMap<(String, String), Action> = BTreeMap::new();
+            for (kind, action) in self.index.offered(ExtensionId(id)) {
+                own.entry((kind, action.id.clone())).or_insert(action);
+            }
             for ((kind, _), action) in own {
                 if let Ok(kind) = KindName::new(&kind) {
                     entries.push(CatalogEntry {
@@ -453,4 +458,10 @@ fn verb_choice(verb: &Verb, owner: &str, own: &[Action], contributed: &[OfferedA
         extension: offered.extension.clone(),
         id: offered.action.id.clone(),
     })
+}
+
+/// Whether `chosen` is the first of `own`, the Actions of a Result `owner`
+/// owns: the Action Enter runs anyway.
+fn is_first(chosen: &ActionRef, owner: &str, own: &[Action]) -> bool {
+    chosen.extension == owner && own.first().is_some_and(|first| first.id == chosen.id)
 }

@@ -93,9 +93,14 @@ impl Verbs {
             if subject.is_empty() {
                 return None;
             }
+            let mut subject = subject.join(" ");
+            // A query ending in a space asks for its last word whole.
+            if query.ends_with(char::is_whitespace) {
+                subject.push(' ');
+            }
             return Some(Verb {
                 named: named.to_vec(),
-                subject: subject.join(" "),
+                subject,
             });
         }
         None
