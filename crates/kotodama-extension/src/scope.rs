@@ -84,6 +84,19 @@ impl Launched {
     }
 }
 
+/// Keeps the launch prefix from the program `command` starts: it is for
+/// Extensions, and a program the user picked would pass it on to all it
+/// starts, such as every shell in a terminal, where a leftover
+/// [`LAUNCH_SCOPED`] would hide a prefix the user sets.
+fn for_the_user(command: &mut Command) -> &mut Command {
+    command.env_remove(LAUNCH_PREFIX).env_remove(LAUNCH_SCOPED)
+}
+
+/// Spawns `command` for the user, in no scope.
+fn spawn_unscoped(command: &mut Command) -> io::Result<Launched> {
+    for_the_user(command).spawn().map(Launched::unscoped)
+}
+
 /// Whether no process is left in the cgroup at `cgroup`, as when a scope
 /// emptied and went. Unreadable for another reason, it counts as not empty.
 #[must_use]
@@ -94,7 +107,7 @@ pub fn is_empty(cgroup: &Path) -> bool {
     }
 }
 
-/// Spawns `command`. Without systemd there is no scope to start it in.
+/// Spawns `command`, without the launch prefix. Without systemd there is no scope to start it in.
 ///
 /// # Errors
 ///
@@ -105,7 +118,7 @@ pub fn spawn(
     _app_id: Option<&str>,
     _unscoped: impl FnOnce(crate::dbus::Error) + Send + 'static,
 ) -> io::Result<Launched> {
-    command.spawn().map(Launched::unscoped)
+    spawn_unscoped(command)
 }
 
 /// What names the scope of `command`: `app_id`, the desktop id of the app it
