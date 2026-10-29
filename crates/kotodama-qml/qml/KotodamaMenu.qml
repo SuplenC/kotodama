@@ -42,7 +42,8 @@ PanelWindow {
     // at the search.
     readonly property string kind: search.view.kind ?? ""
     // The Action panel of the selected row while Ctrl+K shows it: each entry
-    // `{title, group, shortcut}`, as `KotodamaSearch.actions` gives them.
+    // `{id, title, group, shortcut, role, keywords}`, as
+    // `KotodamaSearch.actions` gives them.
     property var actions: []
     readonly property bool actionsOpen: actions.length > 0
     // The keys the selected row takes, built for that row alone. Reading the
@@ -54,7 +55,50 @@ PanelWindow {
             return "";
         row.markup;
         row.unavailable;
+        row.primaryTitle;
+        row.primaryChosen;
         return search.hints(list.currentIndex);
+    }
+    // The hints as StyledText when the query chose the Action Enter runs: its
+    // `↵` hint takes the colour of the row's pill. Empty otherwise.
+    readonly property string chosenHints: {
+        const row = list.currentItem;
+        const enter = row ? "↵ " + row.primaryTitle : "";
+        if (!row || !row.primaryChosen || !menu.hints.startsWith(enter))
+            return "";
+        const named = "↵ " + menu.actionTitle(row.primaryTitle, row.primaryRole);
+        return "<font color=\"" + menu.roleText(row.primaryRole) + "\">" + menu.escaped(named) + "</font>" + menu.escaped(menu.hints.slice(enter.length));
+    }
+
+    // An Action's title as the menu shows it: one that opens a form ends in
+    // an ellipsis, unless its title already does.
+    function actionTitle(title, role) {
+        return role === "form" && !title.endsWith("…") && !title.endsWith("...") ? title + "…" : title;
+    }
+
+    // The colour of an Action's title where its role shows, and the border
+    // of the pill around it.
+    function roleText(role) {
+        return role === "destructive" ? menu.error : role === "form" ? menu.accent : menu.dimmed;
+    }
+    function roleBorder(role) {
+        return role === "destructive" ? menu.error : role === "form" ? menu.accent : menu.border;
+    }
+
+    function escaped(text) {
+        return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    }
+
+    // Which part of the Action panel its `n`th entry is in: the Item's own
+    // Actions (0), the Contributed ones (1) or the destructive ones (2). The
+    // entry Enter runs comes first, whatever it is: it leads the Item's own,
+    // or stands alone (-1) when another Extension offers it, so its heading
+    // doesn't seem to cover the Item's own Actions under it.
+    function panelSection(n) {
+        const entry = menu.actions[n];
+        if (n === 0)
+            return entry.group === "" ? 0 : -1;
+        return entry.role === "destructive" ? 2 : entry.group !== "" ? 1 : 0;
     }
 
     function show(query) {
@@ -595,6 +639,11 @@ PanelWindow {
                     // Why the Result can't run, shown in place of its
                     // subtitle; the row is greyed out. Empty when it can run.
                     required property string unavailable
+                    // The Action Enter runs, its role, and whether the query
+                    // chose it by a verb in place of the Item's first Action.
+                    required property string primaryTitle
+                    required property string primaryRole
+                    required property bool primaryChosen
 
                     width: ListView.view.width
                     height: menu.rowHeight
@@ -617,10 +666,35 @@ PanelWindow {
                         source: row.icon.startsWith("/") ? "file://" + row.icon : Quickshell.iconPath(row.icon, true)
                     }
 
+                    // The Action a verb in the query chose, which Enter runs,
+                    // in its role's colour.
                     Rectangle {
-                        id: badge
+                        id: verb
                         anchors.right: parent.right
                         anchors.rightMargin: 16
+                        anchors.verticalCenter: parent.verticalCenter
+                        visible: row.primaryChosen
+                        width: visible ? verbText.implicitWidth + 18 : 0
+                        height: verbText.implicitHeight + 4
+                        radius: height / 2
+                        color: "transparent"
+                        border.color: menu.roleBorder(row.primaryRole)
+
+                        Text {
+                            id: verbText
+                            anchors.centerIn: parent
+                            text: "↵ " + menu.actionTitle(row.primaryTitle, row.primaryRole)
+                            textFormat: Text.PlainText
+                            color: menu.roleText(row.primaryRole)
+                            font.family: menu.fontFamily
+                            font.pixelSize: menu.fontSize - 4
+                        }
+                    }
+
+                    Rectangle {
+                        id: badge
+                        anchors.right: verb.left
+                        anchors.rightMargin: verb.visible && badge.visible ? 6 : 0
                         anchors.verticalCenter: parent.verticalCenter
                         visible: row.alias !== ""
                         width: visible ? badgeText.implicitWidth + 12 : 0
@@ -643,7 +717,7 @@ PanelWindow {
                         anchors.left: parent.left
                         anchors.leftMargin: 16 + menu.rowHeight - 16 + 12
                         anchors.right: badge.left
-                        anchors.rightMargin: badge.visible ? 8 : 0
+                        anchors.rightMargin: badge.visible || verb.visible ? 8 : 0
                         anchors.verticalCenter: parent.verticalCenter
 
                         Text {
@@ -930,7 +1004,11 @@ PanelWindow {
                 color: search.confirming !== "" || menu.failure !== "" ? menu.error : menu.dimmed
                 font.family: menu.fontFamily
                 font.pixelSize: menu.fontSize - 3
-                text: search.confirming !== "" ? search.confirming : menu.failure !== "" ? menu.failure : search.down.length > 0 ? "Unavailable: " + search.down.join(", ") : menu.hints
+                // Hints are all the footer shows, and the query chose what
+                // Enter runs.
+                readonly property bool chosen: search.confirming === "" && menu.failure === "" && search.down.length === 0 && menu.chosenHints !== ""
+                textFormat: chosen ? Text.StyledText : Text.AutoText
+                text: search.confirming !== "" ? search.confirming : menu.failure !== "" ? menu.failure : search.down.length > 0 ? "Unavailable: " + search.down.join(", ") : chosen ? menu.chosenHints : menu.hints
             }
 
             Text {
@@ -990,8 +1068,10 @@ PanelWindow {
         }
 
         // The Action panel: Ctrl+K lists the selected Result's Actions, the
-        // Item's own first, then the Contributed ones under the Extension that
-        // offers each. Up and Down choose, Enter runs, Esc or Ctrl+K closes it.
+        // one Enter runs and the Item's own first, then the Contributed ones
+        // under the Extension that offers each, then the destructive ones in
+        // red, with a line between each part. Up and Down choose, Enter runs,
+        // Esc or Ctrl+K closes it.
         Rectangle {
             id: actionPanel
             visible: menu.actionsOpen
@@ -1045,7 +1125,27 @@ PanelWindow {
                         required property int index
                         required property var modelData
                         width: actionList.width
-                        readonly property bool heading: modelData.group !== "" && (index === 0 || menu.actions[index - 1].group !== modelData.group)
+                        readonly property int section: menu.panelSection(index)
+                        readonly property bool divided: index > 0 && menu.panelSection(index - 1) !== section
+                        // The destructive part names no Extension: its red
+                        // sets it apart, whoever offers each.
+                        readonly property bool heading: modelData.group !== "" && section !== 2 && (index === 0 || divided || menu.actions[index - 1].group !== modelData.group)
+
+                        Item {
+                            visible: entry.divided
+                            width: parent.width
+                            height: visible ? 9 : 0
+
+                            Rectangle {
+                                anchors.left: parent.left
+                                anchors.right: parent.right
+                                anchors.leftMargin: 12
+                                anchors.rightMargin: 12
+                                anchors.verticalCenter: parent.verticalCenter
+                                height: 1
+                                color: menu.border
+                            }
+                        }
 
                         Text {
                             visible: entry.heading
@@ -1078,8 +1178,8 @@ PanelWindow {
                                 anchors.rightMargin: 8
                                 anchors.verticalCenter: parent.verticalCenter
                                 elide: Text.ElideRight
-                                text: entry.modelData.title
-                                color: menu.foreground
+                                text: menu.actionTitle(entry.modelData.title, entry.modelData.role)
+                                color: entry.modelData.role === "destructive" ? menu.error : menu.foreground
                                 font.family: menu.fontFamily
                                 font.pixelSize: menu.fontSize
                             }
