@@ -138,6 +138,7 @@ impl Power {
             hidden: false,
             app_only: false,
             weak_keywords: Vec::new(),
+            yields: false,
             actions: vec![self.action()],
         }
     }

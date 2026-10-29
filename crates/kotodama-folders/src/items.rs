@@ -72,6 +72,7 @@ pub fn project(project: &Project, home: Option<&Path>, settings: &Settings) -> I
         hidden: false,
         app_only: false,
         weak_keywords: Vec::new(),
+        yields: false,
         actions,
     }
 }
@@ -105,6 +106,7 @@ pub fn script(script: &Script, home: Option<&Path>) -> Item {
         hidden: false,
         app_only: false,
         weak_keywords: Vec::new(),
+        yields: false,
         // Found by its file's name when its header renames it.
         keywords: if script.header.name.is_some() {
             vec![script.stem.clone()]

@@ -73,6 +73,7 @@
 //!                     hidden: false,
 //!                     app_only: false,
 //!                     weak_keywords: Vec::new(),
+//!                     yields: false,
 //!                     actions: vec![Action::new("open", "Open")],
 //!                 };
 //!                 sent.publish(&mut writer, [item])?;

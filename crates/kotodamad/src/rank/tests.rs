@@ -145,6 +145,7 @@ fn untitled() -> Item {
         app_only: false,
         actions: vec![],
         weak_keywords: vec![],
+        yields: false,
     }
 }
 

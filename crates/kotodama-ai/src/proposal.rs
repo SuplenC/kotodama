@@ -82,6 +82,7 @@ impl Proposal {
             hidden: false,
             app_only: false,
             weak_keywords: Vec::new(),
+            yields: false,
         }
     }
 
@@ -150,6 +151,7 @@ pub fn ask_result(query: &str) -> LiveResult {
             hidden: false,
             app_only: false,
             weak_keywords: Vec::new(),
+            yields: false,
         },
         score: Fraction::new(0.0).expect("0 is a fraction"),
         answer: false,

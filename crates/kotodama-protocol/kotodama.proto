@@ -248,6 +248,7 @@ message Item {
   bool hidden = 14;
   bool app_only = 15;
   repeated string weak_keywords = 16;
+  bool yields = 17;
 }
 
 message ItemRef {

@@ -68,6 +68,8 @@ pub mod prost {
         pub app_only: bool,
         #[prost(string, repeated, tag = "16")]
         pub weak_keywords: Vec<String>,
+        #[prost(bool, tag = "17")]
+        pub yields: bool,
     }
 
     #[derive(Clone, PartialEq, ::prost::Message)]
@@ -211,6 +213,7 @@ pub mod prost {
             hidden: item.hidden,
             app_only: item.app_only,
             weak_keywords: item.weak_keywords.clone(),
+            yields: item.yields,
             ..Item::default()
         };
         match &item.kind {
@@ -332,6 +335,7 @@ pub mod musli {
         pub hidden: bool,
         pub app_only: bool,
         pub weak_keywords: Vec<String>,
+        pub yields: bool,
     }
 
     #[derive(Clone, Debug, PartialEq, Encode, Decode, Serialize, Deserialize)]
@@ -420,6 +424,7 @@ pub mod musli {
             hidden: mirror.hidden,
             app_only: mirror.app_only,
             weak_keywords: mirror.weak_keywords,
+            yields: mirror.yields,
         }
     }
 
@@ -519,6 +524,7 @@ pub mod bilrost {
         pub hidden: bool,
         pub app_only: bool,
         pub weak_keywords: Vec<String>,
+        pub yields: bool,
     }
 
     #[derive(Clone, Debug, PartialEq, ::bilrost::Message)]
@@ -646,6 +652,7 @@ pub mod bilrost {
             hidden: mirror.hidden,
             app_only: mirror.app_only,
             weak_keywords: mirror.weak_keywords,
+            yields: mirror.yields,
         }
     }
 

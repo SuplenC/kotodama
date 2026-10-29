@@ -63,6 +63,7 @@ fn item(n: u32) -> Item {
         hidden: false,
         app_only: false,
         weak_keywords: Vec::new(),
+        yields: false,
         actions: vec![
             Action::new("paste", "Paste"),
             Action::new("copy", "Copy").shortcut("ctrl+c"),

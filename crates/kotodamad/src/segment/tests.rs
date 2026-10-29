@@ -18,6 +18,7 @@ fn item(id: &str, title: &str, actions: &[&str]) -> Item {
         hidden: false,
         app_only: false,
         weak_keywords: Vec::new(),
+        yields: false,
         actions: actions
             .iter()
             .map(|&id| Action {

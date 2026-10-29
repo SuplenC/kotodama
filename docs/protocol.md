@@ -220,7 +220,8 @@ Indexes Items. An Item whose id was sent before replaces the old one, which is h
         "app_only": true,
         "weak_keywords": [
           "org.mozilla.firefox"
-        ]
+        ],
+        "yields": true
       }
     ]
   }
@@ -294,7 +295,8 @@ Results for Live query `live_query`, in as many batches as you like; `done` says
           "app_only": true,
           "weak_keywords": [
             "org.mozilla.firefox"
-          ]
+          ],
+          "yields": true
         },
         "score": 0.75,
         "answer": true
@@ -615,7 +617,8 @@ An application, by its desktop file id.
   "app_only": true,
   "weak_keywords": [
     "org.mozilla.firefox"
-  ]
+  ],
+  "yields": true
 }
 ```
 
@@ -666,7 +669,8 @@ A file, by its absolute path.
   "app_only": true,
   "weak_keywords": [
     "org.mozilla.firefox"
-  ]
+  ],
+  "yields": true
 }
 ```
 
@@ -717,7 +721,8 @@ A folder, by its absolute path.
   "app_only": true,
   "weak_keywords": [
     "org.mozilla.firefox"
-  ]
+  ],
+  "yields": true
 }
 ```
 
@@ -768,7 +773,8 @@ A project's folder, by its absolute path.
   "app_only": true,
   "weak_keywords": [
     "org.mozilla.firefox"
-  ]
+  ],
+  "yields": true
 }
 ```
 
@@ -819,7 +825,8 @@ An open window, by the compositor's address for it.
   "app_only": true,
   "weak_keywords": [
     "org.mozilla.firefox"
-  ]
+  ],
+  "yields": true
 }
 ```
 
@@ -870,7 +877,8 @@ A web address.
   "app_only": true,
   "weak_keywords": [
     "org.mozilla.firefox"
-  ]
+  ],
+  "yields": true
 }
 ```
 
@@ -921,7 +929,8 @@ Any other kind belongs to one Extension and is named `<extension>.<kind>`, witho
   "app_only": true,
   "weak_keywords": [
     "org.mozilla.firefox"
-  ]
+  ],
+  "yields": true
 }
 ```
 
@@ -979,7 +988,8 @@ Items to pick from, whose Actions run like a Result's. Typing filters them in th
         "app_only": true,
         "weak_keywords": [
           "org.mozilla.firefox"
-        ]
+        ],
+        "yields": true
       }
     ],
     "filters_itself": true
@@ -1416,7 +1426,8 @@ The whole ranked list for the query, best first, and the app it is in. A Result'
           "app_only": true,
           "weak_keywords": [
             "org.mozilla.firefox"
-          ]
+          ],
+          "yields": true
         },
         "contributed": [
           {

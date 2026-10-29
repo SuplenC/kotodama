@@ -87,6 +87,7 @@ fn fingerprint(item: &Item) -> u64 {
         actions,
         app_only,
         weak_keywords,
+        yields,
     } = item;
     (
         id,
@@ -100,6 +101,7 @@ fn fingerprint(item: &Item) -> u64 {
         hidden,
         app_only,
         weak_keywords,
+        yields,
     )
         .hash(&mut hasher);
     for Action {

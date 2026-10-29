@@ -170,6 +170,7 @@ impl Character {
             hidden: false,
             app_only: false,
             weak_keywords: Vec::new(),
+            yields: false,
         }
     }
 }
