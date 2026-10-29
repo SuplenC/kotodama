@@ -5,8 +5,8 @@
 //! # Owns
 //!
 //! - [`FromFrontEnd`], [`ToFrontEnd`], and what they carry: [`ShownResult`], [`PathCompletion`],
-//!   [`Scope`] and its [`Intro`], [`Problem`], [`ListMatch`], the references to a Result and an
-//!   Action.
+//!   [`FieldError`], [`Scope`] and its [`Intro`], [`Problem`], [`ListMatch`], the references to a
+//!   Result and an Action.
 //! - Where the Daemon's socket is: [`socket_path`].
 //!
 //! # Not here
@@ -224,6 +224,26 @@ pub enum ToFrontEnd {
         text: String,
         entries: Vec<PathCompletion>,
     },
+    /// The form `view` that this Front end submitted has fields that are
+    /// wrong, so the Daemon kept it from its Extension and it stays open.
+    /// Show each error under its field. A Front end drops a form's errors
+    /// when it submits the form again, and the Daemon sends them again for
+    /// whatever is still wrong.
+    FormErrors {
+        extension: String,
+        view: String,
+        /// One per field that is wrong, in the form's order.
+        errors: Vec<FieldError>,
+    },
+}
+
+/// Why a submitted form's field is wrong.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FieldError {
+    /// The field's `id`.
+    pub field: String,
+    /// What is wrong, in words for the user, as `Required` or `At most 100`.
+    pub message: String,
 }
 
 /// One path offered to complete a file field.

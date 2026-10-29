@@ -82,6 +82,9 @@ const SECTIONS: [(&str, &str, &str); 11] = [
 
 /// What each sample is for, by its label in the layout.
 fn describe(label: &str) -> Option<&'static str> {
+    if let Some(words) = describe_form_input(label) {
+        return Some(words);
+    }
     if label.starts_with("ToExtension::") || label.starts_with("FromExtension::") {
         return describe_extension_message(label);
     }
@@ -112,16 +115,14 @@ fn describe(label: &str) -> Option<&'static str> {
             "Items to pick from, whose Actions run like a Result's. Typing filters them in the Daemon, unless \
              `filters_itself` is set: then the Extension gets `filter_view`."
         }
-        "ViewContent::form" => "Fields to fill in, and the submit button's label; submitting sends `submit_form`.",
+        "ViewContent::form" => {
+            "Fields to fill in, and the submit button's label; submitting sends `submit_form`. A field is required \
+             unless it is `optional`, and a text field's `pattern` is a regular expression its whole value must \
+             match. The Daemon checks a submitted form against its fields first: one that fails stays open, the \
+             Front end gets `form_errors`, and the Extension nothing."
+        }
         "ViewContent::detail" => "Markdown, with label and value pairs beside it.",
         "ViewContent::progress" => "Follows the job with this id as the Extension reports it.",
-        "FormInput::text" => "A line of text; `secret` hides what is typed. Submitted as a string.",
-        "FormInput::checkbox" => "A checkbox. Submitted as a boolean.",
-        "FormInput::select" => "One of a list of options. Submitted as the option's `value`.",
-        "FormInput::file" => {
-            "A path to a file, or with `folder` to a folder; `accept` lists the extensions or MIME types a file may \
-             have. Submitted as a string, the path made absolute by the Daemon."
-        }
         "JobState::running" => "Still going.",
         "JobState::succeeded" => "Done.",
         "JobState::failed" => "Gave up; the `message` says why.",
@@ -166,11 +167,42 @@ fn describe(label: &str) -> Option<&'static str> {
         "ToFrontEnd::withdraw_undo" => "The change can't be undone any more: hide its offer.",
         "ToFrontEnd::set_query" => "Replace the search text, as on entering an app.",
         "ToFrontEnd::reached" => "How many menus an `open` or `toggle` reached.",
+        "ToFrontEnd::form_errors" => {
+            "The form this Front end submitted has fields that are wrong: show each `message` under its \
+             `field`. The form stays open, and the Extension got nothing."
+        }
         "ToFrontEnd::path_completions" => {
             "The paths that complete the text typed into a file field, best first: the entries of the directory \
              typed, or with nothing typed the newest files the field takes from the download, documents and \
              desktop directories."
         }
+        _ => return None,
+    })
+}
+
+/// The words for a sample of a form input.
+fn describe_form_input(label: &str) -> Option<&'static str> {
+    Some(match label {
+        "FormInput::text" => "A line of text; `secret` hides what is typed. Submitted as a string.",
+        "FormInput::checkbox" => "A checkbox. Submitted as a boolean.",
+        "FormInput::select" => "One of a list of options. Submitted as the option's `value`.",
+        "FormInput::file" => {
+            "A path to a file, or with `folder` to a folder; `accept` lists the extensions or MIME types a file may \
+             have. Submitted as a string, the path made absolute by the Daemon."
+        }
+        "FormInput::text_area" => "Several lines of text. Submitted as a string.",
+        "FormInput::number" => {
+            "A number from `min` to `max`, on a `step` from `min` (or 0). Submitted as a number: an integer when \
+             it is whole, else a float."
+        }
+        "FormInput::date" => {
+            "A date, or with `time` a date and a time of day. Submitted as an ISO 8601 string in local time, \
+             `2026-10-30` or `2026-10-30T09:30`."
+        }
+        "FormInput::multi_select" => {
+            "Any number of a list of options. Submitted as the list of the chosen options' `value`s."
+        }
+        "FormInput::description" => "Text to read between the fields. It has no value.",
         _ => return None,
     })
 }
@@ -194,7 +226,7 @@ fn describe_extension_message(label: &str) -> Option<&'static str> {
         "ToExtension::run_action" => {
             "Runs one of the Extension's Actions on an Item: its own, or another Extension's for a Contributed \
              action, of which `item` is all it sees. `arguments` holds the Arguments by name; one of kind `file` or \
-             `folder` is an absolute path. Answer with `action_done` and the same `invocation`."
+             `folder` is an absolute path, and one of kind `number` a number written out, `25` or `2.5`. Answer with `action_done` and the same `invocation`."
         }
         "ToExtension::submit_form" => {
             "The user submitted a form View the Extension pushed: the values by field id, a `file` field's as an \

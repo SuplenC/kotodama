@@ -57,18 +57,79 @@ pub enum ViewContent {
     Progress { job: String },
 }
 
-/// One field of a form View.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+/// One field of a form View. The Daemon checks a submitted form against its
+/// fields before the Extension gets it: a required field is filled in, a
+/// number is one the field takes, a date is a date, a choice is among the
+/// options and a text matches the `pattern`. A form that fails stays open, and
+/// the Front end is told which fields are wrong and why.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct FormField {
     /// The key this field's value has in the submitted values.
     pub id: String,
     pub label: String,
     pub input: FormInput,
+    /// The form may be submitted with it empty. A required field, the
+    /// default, can't be: a blank text, a missing number or date, or no
+    /// option chosen. A checkbox always has a value, and a description none,
+    /// so neither is ever missing.
+    #[serde(default)]
+    pub optional: bool,
+    /// A regular expression, in the syntax of Rust's `regex` crate, that the
+    /// whole of a text or text area field's value must match; other fields
+    /// ignore it. An optional field left empty isn't checked. The Daemon drops
+    /// a pattern that isn't a regular expression and tells the Extension.
+    #[serde(default)]
+    pub pattern: Option<String>,
+}
+
+impl FormField {
+    /// A required field `id`, labelled `label`, with no pattern; the setters
+    /// below change that.
+    ///
+    /// ```
+    /// use kotodama_protocol::FormField;
+    /// use kotodama_protocol::FormInput;
+    ///
+    /// let minutes = FormInput::Number {
+    ///     min: Some(1.0),
+    ///     max: Some(120.0),
+    ///     step: Some(1.0),
+    ///     default: Some(25.0),
+    /// };
+    /// let field = FormField::new("minutes", "Minutes", minutes).optional();
+    /// assert!(field.optional);
+    /// ```
+    #[must_use]
+    pub fn new(id: impl Into<String>, label: impl Into<String>, input: FormInput) -> Self {
+        FormField {
+            id: id.into(),
+            label: label.into(),
+            input,
+            optional: false,
+            pattern: None,
+        }
+    }
+
+    /// Lets the form be submitted with this field empty.
+    #[must_use]
+    pub fn optional(mut self) -> Self {
+        self.optional = true;
+        self
+    }
+
+    /// Has the whole of a text value match `pattern`, a regular expression.
+    #[must_use]
+    pub fn pattern(mut self, pattern: impl Into<String>) -> Self {
+        self.pattern = Some(pattern.into());
+        self
+    }
 }
 
 /// A form field's control, and so the type of its submitted value: a string for
-/// text, a select and a file, a boolean for a checkbox.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+/// text, a text area, a select, a date and a file, a number for a number, a
+/// boolean for a checkbox, a list of strings for a multi-select, and nothing
+/// for a description.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum FormInput {
     /// A line of text.
@@ -111,10 +172,55 @@ pub enum FormInput {
         #[serde(default)]
         placeholder: Option<String>,
     },
+    /// Several lines of text: a note, a commit message, a prompt.
+    TextArea {
+        #[serde(default)]
+        placeholder: Option<String>,
+        #[serde(default)]
+        default: Option<String>,
+    },
+    /// A number, which the Extension gets as an integer when it is whole and
+    /// as a float otherwise. A Front end may step it by `step`, or by 1
+    /// without one.
+    Number {
+        /// The least it may be.
+        #[serde(default)]
+        min: Option<f64>,
+        /// The most it may be.
+        #[serde(default)]
+        max: Option<f64>,
+        /// The value must be `min`, or 0 without a `min`, plus a whole number
+        /// of steps; any number goes without one.
+        #[serde(default)]
+        step: Option<f64>,
+        #[serde(default)]
+        default: Option<f64>,
+    },
+    /// A date, or with `time` a date and a time of day, submitted as ISO 8601
+    /// in local time with no offset: `2026-10-30`, or `2026-10-30T09:30`
+    /// (seconds may follow, `09:30:15`).
+    Date {
+        #[serde(default)]
+        time: bool,
+        /// The date filled in at first, written as it is submitted.
+        #[serde(default)]
+        default: Option<String>,
+    },
+    /// Any number of a list of options, submitted as the list of the chosen
+    /// options' `value`s, in the order of `options`.
+    MultiSelect {
+        options: Vec<SelectOption>,
+        /// The `value`s of the options chosen at first.
+        #[serde(default)]
+        default: Vec<String>,
+    },
+    /// Text between the fields, to read; it has no value, and the submitted
+    /// values leave it out.
+    Description { text: String },
 }
 
-/// One option of a [`FormInput::Select`]: the `value` submitted and the
-/// `label` shown.
+/// One option of a [`FormInput::Select`] or a [`FormInput::MultiSelect`]:
+/// the `value` submitted and the `label` shown.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SelectOption {
     pub value: String,

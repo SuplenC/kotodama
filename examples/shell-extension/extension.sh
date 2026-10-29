@@ -188,8 +188,8 @@ while read_frame; do
         start-labelled)
             send '{"push_view":{"id":"timer-form","title":"Labelled timer","content":{"form":{
                 "fields":[
-                    {"id":"label","label":"Label","input":{"text":{"placeholder":"Tea"}}},
-                    {"id":"seconds","label":"Seconds","input":{"text":{"default":"3"}}}
+                    {"id":"label","label":"Label","optional":true,"input":{"text":{"placeholder":"Tea"}}},
+                    {"id":"seconds","label":"Seconds","input":{"number":{"min":1,"max":9999,"step":1,"default":3}}}
                 ],
                 "submit":"Start"}}}}'
             done_with "$(jq -r '.run_action.invocation' <<<"$frame")" '"keep_open"'

@@ -53,7 +53,7 @@ The query changed or the menu closed: results for Live query `id` are no longer 
 
 ### `run_action`
 
-Runs one of the Extension's Actions on an Item: its own, or another Extension's for a Contributed action, of which `item` is all it sees. `arguments` holds the Arguments by name; one of kind `file` or `folder` is an absolute path. Answer with `action_done` and the same `invocation`.
+Runs one of the Extension's Actions on an Item: its own, or another Extension's for a Contributed action, of which `item` is all it sees. `arguments` holds the Arguments by name; one of kind `file` or `folder` is an absolute path, and one of kind `number` a number written out, `25` or `2.5`. Answer with `action_done` and the same `invocation`.
 
 ```json
 {
@@ -999,7 +999,7 @@ Items to pick from, whose Actions run like a Result's. Typing filters them in th
 
 ### `form`
 
-Fields to fill in, and the submit button's label; submitting sends `submit_form`.
+Fields to fill in, and the submit button's label; submitting sends `submit_form`. A field is required unless it is `optional`, and a text field's `pattern` is a regular expression its whole value must match. The Daemon checks a submitted form against its fields first: one that fails stays open, the Front end gets `form_errors`, and the Extension nothing.
 
 ```json
 {
@@ -1012,7 +1012,22 @@ Fields to fill in, and the submit button's label; submitting sends `submit_form`
           "checkbox": {
             "default": true
           }
-        }
+        },
+        "optional": false,
+        "pattern": null
+      },
+      {
+        "id": "code",
+        "label": "Code",
+        "input": {
+          "text": {
+            "placeholder": null,
+            "default": null,
+            "secret": false
+          }
+        },
+        "optional": true,
+        "pattern": "[0-9]{6}"
       }
     ],
     "submit": "Go"
@@ -1111,6 +1126,83 @@ A path to a file, or with `folder` to a folder; `accept` lists the extensions or
     "folder": true,
     "default": "~/work.conf",
     "placeholder": "A config"
+  }
+}
+```
+
+### `text_area`
+
+Several lines of text. Submitted as a string.
+
+```json
+{
+  "text_area": {
+    "placeholder": "A note",
+    "default": "Hi\nthere"
+  }
+}
+```
+
+### `number`
+
+A number from `min` to `max`, on a `step` from `min` (or 0). Submitted as a number: an integer when it is whole, else a float.
+
+```json
+{
+  "number": {
+    "min": 0.0,
+    "max": 100.0,
+    "step": 0.5,
+    "default": 42.5
+  }
+}
+```
+
+### `date`
+
+A date, or with `time` a date and a time of day. Submitted as an ISO 8601 string in local time, `2026-10-30` or `2026-10-30T09:30`.
+
+```json
+{
+  "date": {
+    "time": true,
+    "default": "2026-10-30T09:30"
+  }
+}
+```
+
+### `multi_select`
+
+Any number of a list of options. Submitted as the list of the chosen options' `value`s.
+
+```json
+{
+  "multi_select": {
+    "options": [
+      {
+        "value": "a",
+        "label": "A"
+      },
+      {
+        "value": "b",
+        "label": "B"
+      }
+    ],
+    "default": [
+      "b"
+    ]
+  }
+}
+```
+
+### `description`
+
+Text to read between the fields. It has no value.
+
+```json
+{
+  "description": {
+    "text": "Read this first"
   }
 }
 ```
@@ -1822,6 +1914,25 @@ The paths that complete the text typed into a file field, best first: the entrie
           2,
           3
         ]
+      }
+    ]
+  }
+}
+```
+
+### `form_errors`
+
+The form this Front end submitted has fields that are wrong: show each `message` under its `field`. The form stays open, and the Extension got nothing.
+
+```json
+{
+  "form_errors": {
+    "extension": "timer",
+    "view": "new",
+    "errors": [
+      {
+        "field": "minutes",
+        "message": "At most 120"
       }
     ]
   }
