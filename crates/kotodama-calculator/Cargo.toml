@@ -21,6 +21,8 @@ thiserror = "2.0.21"
 kotodama-extension = { path = "../kotodama-extension", features = ["testing"] }
 # The answer benchmark runs the real Daemon in process.
 kotodamad = { path = "../kotodamad" }
+# The Manifest's triggers, read in the tests as the Daemon reads them.
+regex = "1.13.1"
 tempfile = "3.27.0"
 
 [[bench]]

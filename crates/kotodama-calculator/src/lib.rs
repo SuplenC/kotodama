@@ -3,7 +3,7 @@
 //!
 //! # Owns
 //!
-//! - [`Calculator`]: trying a query as a date or time, then as math.
+//! - [`Calculator`]: trying a query as a date or time, then as math, and the dates the user named.
 //! - [`Answer`] and its Live query result, with the Actions that copy it.
 //!
 //! # Not here
@@ -28,6 +28,8 @@ use kotodama_protocol::ItemKind;
 use kotodama_protocol::LiveResult;
 use kotodama_protocol::NamespacedKind;
 
+pub use crate::dates::DateError;
+pub use crate::dates::NamedDate;
 pub use crate::locale::DecimalSeparator;
 pub use crate::rates::Rates;
 
@@ -62,6 +64,7 @@ pub struct Answer {
 #[derive(Debug)]
 pub struct Calculator {
     math: math::Math,
+    dates: Vec<NamedDate>,
 }
 
 impl Calculator {
@@ -71,7 +74,14 @@ impl Calculator {
     pub fn new(rates: Rates) -> Self {
         Calculator {
             math: math::Math::new(rates),
+            dates: Vec::new(),
         }
+    }
+
+    /// Reads `dates` wherever a query has a date: `days until my birthday`.
+    /// They replace those set before.
+    pub fn set_dates(&mut self, dates: Vec<NamedDate>) {
+        self.dates = dates;
     }
 
     /// Reads and writes decimals with `separator`: `3,5` is three and a half
@@ -98,7 +108,7 @@ impl Calculator {
                 value,
             })
         };
-        if let Some(value) = dates::evaluate(query, now) {
+        if let Some(value) = dates::evaluate(query, now, &self.dates) {
             return answer(value);
         }
         match self.math.evaluate(query, routed) {

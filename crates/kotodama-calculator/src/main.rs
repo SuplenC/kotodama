@@ -12,6 +12,12 @@
 //! # How decimals are written, "dot" (3.5) or "comma" (3,5); the other groups
 //! # thousands. Unset, the locale's (`LC_ALL`, `LC_NUMERIC` or `LANG`).
 //! decimal_separator = "comma"
+//!
+//! # Dates to count to by name: `days until my birthday`. A month and day
+//! # comes back every year; a full date is one day.
+//! [extensions.calculator.dates]
+//! birthday = "mar 14"
+//! launch = "2027-05-01"
 //! ```
 //!
 //! # Owns
@@ -44,6 +50,7 @@ use kotodama_calculator::COPY_EXPRESSION;
 use kotodama_calculator::Calculator;
 use kotodama_calculator::DecimalSeparator;
 use kotodama_calculator::Evaluation;
+use kotodama_calculator::NamedDate;
 use kotodama_calculator::Rates;
 use kotodama_calculator::rates;
 use kotodama_calculator::rates::FetchError;
@@ -58,6 +65,7 @@ use kotodama_protocol::FromExtension;
 use kotodama_protocol::Outcome;
 use kotodama_protocol::Table;
 use kotodama_protocol::ToExtension;
+use kotodama_protocol::Value;
 
 /// The curl the rates are fetched with. A package may build in its path.
 const CURL: &str = match option_env!("KOTODAMA_CURL") {
@@ -148,6 +156,7 @@ struct Settings {
     rates_url: String,
     /// `None` for the locale's.
     decimal_separator: Option<DecimalSeparator>,
+    dates: Vec<NamedDate>,
 }
 
 impl Default for Settings {
@@ -156,6 +165,7 @@ impl Default for Settings {
             network: true,
             rates_url: rates::DEFAULT_URL.to_owned(),
             decimal_separator: None,
+            dates: Vec::new(),
         }
     }
 }
@@ -179,8 +189,34 @@ impl Settings {
                 ));
             }
         }
+        if let Some(dates) = table.get("dates") {
+            settings.dates = named_dates(dates);
+        }
         settings
     }
+}
+
+/// The `dates` table: each date the user named, leaving out with a warning
+/// any that can't be read.
+fn named_dates(dates: &Value) -> Vec<NamedDate> {
+    let Value::Table(dates) = dates else {
+        config::warn("`dates` should be a table of names and dates, such as `birthday = \"mar 14\"`");
+        return Vec::new();
+    };
+    let mut named = Vec::new();
+    for (name, date) in dates {
+        let Value::String(date) = date else {
+            config::warn(format_args!(
+                "`dates.{name}` should be a date written as a string, such as \"mar 14\""
+            ));
+            continue;
+        };
+        match NamedDate::new(name, date) {
+            Ok(date) => named.push(date),
+            Err(err) => config::warn(format_args!("`dates.{name}`: {err}")),
+        }
+    }
+    named
 }
 
 /// Where the exchange rates stand.
@@ -227,6 +263,7 @@ impl Extension {
                 self.settings = Settings::from_config(&config);
                 let separator = self.settings.decimal_separator.unwrap_or(self.locale);
                 self.calculator.set_decimal_separator(separator);
+                self.calculator.set_dates(std::mem::take(&mut self.settings.dates));
                 // Its value is written with the separator it was worked out with.
                 self.last = None;
                 Ok(())

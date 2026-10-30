@@ -8,7 +8,10 @@ use jiff::Zoned;
 use kotodama_calculator::Calculator;
 use kotodama_calculator::DecimalSeparator;
 use kotodama_calculator::Evaluation;
+use kotodama_calculator::NamedDate;
 use kotodama_calculator::Rates;
+use kotodama_protocol::Manifest;
+use regex::Regex;
 
 /// Tuesday 20 October 2026, 10:00 in Warsaw.
 fn now() -> Zoned {
@@ -140,6 +143,130 @@ fn days_until_and_since_count_to_the_next_or_from_the_last() {
     assert_eq!(answer("days since jan 1").as_deref(), Some("292 days"));
     assert_eq!(answer("days until tomorrow").as_deref(), Some("1 day"));
     assert_eq!(answer("days until 2026-10-20").as_deref(), Some("0 days"));
+}
+
+/// Questions about dates and times as people ask them, and their answers as
+/// of [`now`].
+const ASKED: [(&str, &str); 40] = [
+    ("days until christmas", "66 days"),
+    ("days til xmas", "66 days"),
+    ("days till christmas", "66 days"),
+    ("days 'til christmas", "66 days"),
+    ("days to christmas", "66 days"),
+    ("Days Until Christmas!", "66 days"),
+    ("how many days until christmas?", "66 days"),
+    ("how many days are left until christmas", "66 days"),
+    ("days left until christmas", "66 days"),
+    ("days until next christmas", "66 days"),
+    ("days untill christmas", "66 days"),
+    ("days until christams", "66 days"),
+    ("how long until christmas", "66 days"),
+    ("days until christmas eve", "65 days"),
+    ("days until new year", "73 days"),
+    ("days until new year's eve", "72 days"),
+    ("days until halloween", "11 days"),
+    ("days until valentine's day", "117 days"),
+    ("days since last christmas", "299 days"),
+    ("days since easter", "198 days"),
+    ("days until friday", "3 days"),
+    ("days until next friday", "3 days"),
+    ("days until christmas 2027", "431 days"),
+    ("in 3 weeks", "Tuesday, 10 November 2026"),
+    ("in a week", "Tuesday, 27 October 2026"),
+    ("3 weeks from now", "Tuesday, 10 November 2026"),
+    ("2 days from today", "Thursday, 22 October 2026"),
+    ("10 days ago", "Saturday, 10 October 2026"),
+    ("a week ago", "Tuesday, 13 October 2026"),
+    ("christmas - 1 week", "Friday, 18 December 2026"),
+    ("next friday + 2 days", "Sunday, 25 October 2026"),
+    ("halloween + a week", "Saturday, 7 November 2026"),
+    ("time in tokyo", "17:00 JST, Tuesday 20 October"),
+    ("what time is it in tokyo?", "17:00 JST, Tuesday 20 October"),
+    ("what's the time in Tokyo", "17:00 JST, Tuesday 20 October"),
+    ("what is the time in tokyo", "17:00 JST, Tuesday 20 October"),
+    ("current time in tokyo", "17:00 JST, Tuesday 20 October"),
+    ("tokyo time", "17:00 JST, Tuesday 20 October"),
+    ("Tokyo time?", "17:00 JST, Tuesday 20 October"),
+    ("time in new york", "04:00 EDT, Tuesday 20 October"),
+];
+
+/// Queries that mention a date or a time without asking anything the
+/// calculator answers.
+const NOT_ASKED: [&str; 17] = [
+    "christmas",
+    "last christmas",
+    "christmas playlist",
+    "days until christmas party",
+    "days until",
+    "days of our lives",
+    "how long is a piece of string",
+    "next song",
+    "friday night",
+    "new year",
+    "screen time",
+    "time in",
+    "time to go",
+    "in a while",
+    "a while ago",
+    "days until halowen",
+    "what time",
+];
+
+#[test]
+fn dates_and_times_are_answered_however_they_are_asked() {
+    for (query, expected) in ASKED {
+        assert_eq!(answer(query).as_deref(), Some(expected), "{query}");
+    }
+}
+
+#[test]
+fn a_query_that_only_mentions_a_date_or_time_gets_no_answer() {
+    for query in NOT_ASKED {
+        assert_eq!(answer(query), None, "{query}");
+    }
+}
+
+#[test]
+fn the_manifest_sends_every_way_of_asking_to_the_calculator() {
+    let manifest = Manifest::from_toml(include_str!("../manifest.toml")).unwrap();
+    let triggers: Vec<Regex> = manifest
+        .live_query
+        .unwrap()
+        .triggers
+        .iter()
+        .map(|trigger| Regex::new(trigger).unwrap())
+        .collect();
+
+    for (query, _) in ASKED {
+        assert!(triggers.iter().any(|trigger| trigger.is_match(query)), "{query}");
+    }
+    assert!(
+        triggers.iter().any(|trigger| trigger.is_match("my birthday + 1 month")),
+        "a named date of the user's"
+    );
+}
+
+#[test]
+fn a_date_the_user_named_is_read_by_its_name() {
+    let mut calculator = Calculator::new(Rates::default());
+    calculator.set_dates(vec![
+        NamedDate::new("birthday", "mar 14").unwrap(),
+        NamedDate::new("launch", "2027-05-01").unwrap(),
+    ]);
+
+    assert_eq!(
+        answer_with(&mut calculator, "days until my birthday").as_deref(),
+        Some("145 days")
+    );
+    assert_eq!(
+        answer_with(&mut calculator, "how many days til launch?").as_deref(),
+        Some("193 days")
+    );
+    assert_eq!(
+        answer_with(&mut calculator, "my birthday + 1 month").as_deref(),
+        Some("Wednesday, 14 April 2027")
+    );
+    assert_eq!(answer("days until my birthday"), None, "without the setting");
 }
 
 #[test]

@@ -858,6 +858,7 @@ dependencies = [
  "kotodama-extension",
  "kotodama-protocol",
  "kotodamad",
+ "regex",
  "serde_json",
  "tempfile",
  "thiserror 2.0.21",
