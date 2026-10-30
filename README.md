@@ -74,7 +74,7 @@ Every config table below also has typed options, so a typo or a value of the wro
 | `extensions.<name>.{word, inSearch, boost}`, for every Extension above and below, and `system` and `hyprland` (`prefix` is the old name of `word`, still read) | `word`, `in_search` and `boost` in `[extensions.<name>]` (see [Apps](#apps) and [Ranking that learns](#ranking-that-learns)) |
 | `extensions.apps.{terminal, hidden, names, withdrawWithin}` | `[extensions.apps]` |
 | `extensions.clipboard.{maxEntries, maxAgeDays}` | `[extensions.clipboard]` |
-| `extensions.calculator.{network, ratesUrl, decimalSeparator}` | `[extensions.calculator]` |
+| `extensions.calculator.{network, ratesUrl, decimalSeparator, dates}` | `[extensions.calculator]` |
 | `extensions.emoji.skinTone` | `[extensions.emoji]` |
 | `extensions.web-search.engines` | `[extensions.web-search]` |
 | `extensions.ai.{apiKeyCommand, apiKeyFile, url, model, effort, debounceMs}` | `[extensions.ai]` (see [AI](#ai)) |
@@ -418,13 +418,13 @@ Its `manifest.toml` runs `./kotodama-clipboard`, so a package installs the binar
 | `42*2`, `(3 + 4) * 2`, `2^10`, `sqrt 2` | `84`, `14`, `1024`, `1.4142135624` |
 | `5 km in mi`, `100 F to C`, `3 weeks in days` | `3.1068559612 mi`, `37.7777777778 °C`, `21 days` |
 | `100 usd to eur` | in euros, at the European Central Bank's rate |
-| `today + 3 weeks`, `dec 25 - 1 month` | `Tuesday, 10 November 2026` |
-| `days until dec 25`, `days since 2026-01-01` | `66 days` |
-| `5pm PT in Warsaw`, `now in Tokyo`, `17:00 UTC to Europe/Lisbon` | `02:00 CEST, Wednesday 21 October` |
+| `today + 3 weeks`, `christmas - 1 month`, `in 3 weeks`, `10 days ago` | `Tuesday, 10 November 2026` |
+| `days until dec 25`, `how many days til xmas?`, `days since last easter` | `66 days` |
+| `5pm PT in Warsaw`, `now in Tokyo`, `what time is it in Tokyo`, `17:00 UTC to Europe/Lisbon` | `02:00 CEST, Wednesday 21 October` |
 
-A query goes to it when it looks like math: it starts with a number (or a sign, bracket or currency symbol and then a number), a function such as `sqrt`, `today`/`tomorrow`/`yesterday` or a month and day followed by `+` or `-`, `now in`, or `days until`/`days since`. Even then it answers only if the query does something: a number or quantity alone (`42`, `5 kg`) and words (`fi`) get no answer, so they don't push the other Results down. After its `=` prefix, anything that evaluates is answered: `= pi`.
+A query goes to it when it looks like math: it starts with a number (or a sign, bracket or currency symbol and then a number), a function such as `sqrt`, a date followed by `+` or `-` and an amount, `now in`, `time in` or a query ending in `time`, `in` and an amount, one ending in `ago` or `from now`, or one starting with `days`, `how many days` or `how long`. Even then it answers only if the query does something: a number or quantity alone (`42`, `5 kg`) and words (`fi`) get no answer, so they don't push the other Results down. After its `=` prefix, anything that evaluates is answered: `= pi`.
 
-Arithmetic, units and currency come from [fend](https://github.com/printfn/fend), with each evaluation cut off after 50 ms. An approximate answer shows at most 12 significant digits, without trailing zeros: `42 km in mi` is `26.097590074 mi`. Dates and time zones are its own, as fend has no clock and no time zones: dates are `today`, `tomorrow`, `yesterday`, `2026-12-25`, `dec 25` or `25 december`, with or without a year (without one, the next such day, or for `days since` the last); amounts are days, weeks, months and years. A zone is an abbreviation (`PT`, `ET`, `UTC`, `CET`, `JST` and others, each standing for its region's zone all year), an IANA name, or the city one ends in (`Warsaw`, `New York`), read from the system's time zone database (`$TZDIR`, or `/usr/share/zoneinfo`). A time without a zone is local. Natural-language dates (`next friday`) are out of scope.
+Arithmetic, units and currency come from [fend](https://github.com/printfn/fend), with each evaluation cut off after 50 ms. An approximate answer shows at most 12 significant digits, without trailing zeros: `42 km in mi` is `26.097590074 mi`. Dates and time zones are its own, as fend has no clock and no time zones: dates are `today`, `tomorrow`, `yesterday`, `2026-12-25`, `dec 25` or `25 december`, a weekday (`friday`), a holiday (`christmas`, `christmas eve`, `new year`, `new year's eve`, `halloween`, `valentine's day`, `easter`), or a date of your own from `dates`. One that comes back every year may have a year after it (`christmas 2027`); without one it is the next such day, or for `days since` the last, unless `next` or `last` before it says otherwise. Amounts are days, weeks, months and years (`a week` is one). A question may be asked many ways: `til`, `till` and `to` say `until`; words such as `the`, `my`, `is it`, `are there` and `left` are skipped; a keyword of five letters or more (`until`, `christmas`, `february`) is read through one typo. Every word must still be read, so `christmas playlist` gets no answer. A zone is an abbreviation (`PT`, `ET`, `UTC`, `CET`, `JST` and others, each standing for its region's zone all year), an IANA name, or the city one ends in (`Warsaw`, `New York`), read from the system's time zone database (`$TZDIR`, or `/usr/share/zoneinfo`). A time without a zone is local. Languages other than English are out of scope.
 
 Decimals are written as the locale writes them (`LC_ALL`, `LC_NUMERIC` or `LANG`): in `de_DE` or `pl_PL`, `3,5 * 2` is `7`, `10 / 4` is `2,5`, and `1.000` is a thousand. The other separator only groups thousands, and only in groups of three: in an English locale `1,000 + 1` is `1001`, while `3,5 * 2` gets no answer rather than a wrong one, as does `3.5 * 2` where decimals take a comma. `decimal_separator` overrides the locale.
 
@@ -440,6 +440,13 @@ rates_url = "https://api.frankfurter.app/latest"
 # How decimals are written, "dot" (3.5) or "comma" (3,5); the other separator
 # groups thousands. Unset, the locale's.
 decimal_separator = "comma"
+
+# Dates to count to by name: `days until my birthday`, `launch - 2 weeks`. A
+# month and day comes back every year; a full date is one day. A name that is
+# also a holiday's replaces it.
+[extensions.calculator.dates]
+birthday = "mar 14"
+launch = "2027-05-01"
 ```
 
 ### Emoji and symbols

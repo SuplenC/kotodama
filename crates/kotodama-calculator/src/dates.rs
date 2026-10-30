@@ -1,24 +1,33 @@
 //! Dates and time zones, which fend can't do: its `today` has no clock to
-//! read, and it knows no time zones. Three forms, in English:
+//! read, and it knows no time zones. These forms, in English, each asked
+//! several ways:
 //!
-//! - date arithmetic: `today + 3 weeks`, `dec 25 - 1 month 2 days`;
-//! - counting days: `days until dec 25`, `days since 2026-01-01`;
-//! - a time in another zone: `5pm PT in Warsaw`, `now in Tokyo`, `17:00 UTC to Europe/Lisbon`.
+//! - counting days: `days until dec 25`, `how many days til xmas?`, `days since last easter`;
+//! - date arithmetic: `today + 3 weeks`, `christmas - 1 month 2 days`;
+//! - a date relative to today: `in 3 weeks`, `10 days from now`, `a week ago`;
+//! - a time in another zone: `5pm PT in Warsaw`, `now in Tokyo`, `what time is it in Tokyo`, `tokyo
+//!   time`.
 //!
-//! A date is `today`, `tomorrow`, `yesterday`, `2026-12-25`, `dec 25` or
-//! `25 december`, with or without a year. A zone is an abbreviation from
+//! Dates are read by `calendar.rs`. A zone is an abbreviation from
 //! [`ABBREVIATIONS`], an IANA name, or the city an IANA name ends in. Zones
-//! come from the system's time zone database.
+//! come from the system's time zone database. Every word of a query must be
+//! read for it to be answered, so a query that only mentions a date
+//! (`christmas playlist`) never takes the top row.
 //!
 //! # Owns
 //!
-//! - Reading the three forms above, and answering them as of a given instant.
+//! - The forms above, and answering them as of a given instant.
 //! - The zone abbreviations people type.
 //!
 //! # Not here
 //!
+//! - Cleaning the query, its filler words, synonyms and typos: `dates/words.rs`.
+//! - Reading a date, holidays and the user's named dates: `dates/calendar.rs`.
 //! - Durations and units that need no calendar (`3 weeks in days`): `math.rs`, through fend.
 //! - The time zone database: the system's, read by jiff.
+
+mod calendar;
+mod words;
 
 use jiff::Span;
 use jiff::Zoned;
@@ -26,58 +35,35 @@ use jiff::civil::Date;
 use jiff::civil::Time;
 use jiff::tz::TimeZone;
 
-/// Evaluates `query` as of `now`, if it has one of the forms above.
-pub fn evaluate(query: &str, now: &Zoned) -> Option<String> {
-    let lower = query.to_lowercase();
-    let words = words(&lower);
-    count_days(&words, now)
-        .or_else(|| arithmetic(&words, now))
+pub use self::calendar::DateError;
+use self::calendar::Lean;
+pub use self::calendar::NamedDate;
+
+/// Evaluates `query` as of `now`, if it has one of the forms above, reading
+/// the user's `named` dates where it reads a date.
+pub fn evaluate(query: &str, now: &Zoned, named: &[NamedDate]) -> Option<String> {
+    let clean = words::clean(query);
+    let words = words::words(&clean);
+    count_days(&words, now, named)
+        .or_else(|| relative(&words, now))
+        .or_else(|| arithmetic(&words, now, named))
+        .or_else(|| time_elsewhere(&words, now))
         .or_else(|| convert_time(&words, now))
 }
 
-/// The query's words, with `+` and `-` as words of their own except inside a
-/// date (`2026-12-25`) or a zone name (`america/port-au-prince`).
-fn words(query: &str) -> Vec<&str> {
-    let mut words = Vec::new();
-    for word in query.split_whitespace() {
-        let mut rest = word;
-        while !rest.is_empty() {
-            if let Some(sign) = rest.strip_prefix(['+', '-']) {
-                words.push(&rest[..1]);
-                rest = sign;
-                continue;
-            }
-            if iso_date(rest).is_some() || rest.contains('/') {
-                words.push(rest);
-                break;
-            }
-            let Some(at) = rest.find(['+', '-']) else {
-                words.push(rest);
-                break;
-            };
-            words.push(&rest[..at]);
-            rest = &rest[at..];
-        }
-    }
-    words
-}
-
-/// Which way a date without a year leans: the next `dec 25`, or the last.
-#[derive(Clone, Copy, PartialEq)]
-enum Lean {
-    Next,
-    Last,
-}
-
-/// `days until <date>` or `days since <date>`.
-fn count_days(words: &[&str], now: &Zoned) -> Option<String> {
-    let (lean, rest) = match words {
-        ["days", "until" | "till" | "to", rest @ ..] => (Lean::Next, rest),
-        ["days", "since" | "from", rest @ ..] => (Lean::Last, rest),
+/// `days until <date>` or `days since <date>`, also asked `how many days` or
+/// `how long`.
+fn count_days(words: &[&str], now: &Zoned, named: &[NamedDate]) -> Option<String> {
+    let (["how", "many", "days", rest @ ..] | ["how", "long", rest @ ..] | ["days", rest @ ..]) = words else {
+        return None;
+    };
+    let (lean, rest) = match rest {
+        [word, rest @ ..] if words::until(word) => (Lean::Next, rest),
+        [word, rest @ ..] if words::since(word) => (Lean::Last, rest),
         _ => return None,
     };
     let today = now.date();
-    let (date, used) = date(rest, today, lean)?;
+    let (date, used) = calendar::date(rest, today, lean, named)?;
     if used != rest.len() {
         return None;
     }
@@ -94,32 +80,50 @@ fn count_days(words: &[&str], now: &Zoned) -> Option<String> {
     })
 }
 
+/// A date relative to today: `in 3 weeks`, `3 weeks from now`, `2 days ago`.
+fn relative(words: &[&str], now: &Zoned) -> Option<String> {
+    let today = now.date();
+    let date = match words {
+        ["in", amounts @ ..] | [amounts @ .., "from", "now" | "today"] => shift(today, amounts, false)?,
+        [amounts @ .., "ago"] => shift(today, amounts, true)?,
+        _ => return None,
+    };
+    Some(long_date(date))
+}
+
 /// `<date>` followed by at least one `+` or `-` and an amount of time.
-fn arithmetic(words: &[&str], now: &Zoned) -> Option<String> {
-    let (mut date, used) = date(words, now.date(), Lean::Next)?;
+fn arithmetic(words: &[&str], now: &Zoned, named: &[NamedDate]) -> Option<String> {
+    let (mut date, used) = calendar::date(words, now.date(), Lean::Next, named)?;
     let mut rest = &words[used..];
-    if rest.is_empty() {
+    if !matches!(rest.first(), Some(&("+" | "-"))) {
         return None;
     }
-    let mut negative = false;
-    while !rest.is_empty() {
-        match rest[0] {
-            "+" => {
-                negative = false;
-                rest = &rest[1..];
-            }
-            "-" => {
-                negative = true;
-                rest = &rest[1..];
-            }
-            _ if rest.len() == words.len() - used => return None,
-            _ => {}
-        }
-        let [amount, unit, more @ ..] = rest else {
-            return None;
+    while let [sign, more @ ..] = rest {
+        let end = more
+            .iter()
+            .position(|word| matches!(*word, "+" | "-"))
+            .unwrap_or(more.len());
+        date = shift(date, &more[..end], *sign == "-")?;
+        rest = &more[end..];
+    }
+    Some(long_date(date))
+}
+
+/// `date` moved by the amounts of time `words` write (`1 year 2 days`, `a week`), back if
+/// `back`; at least one.
+fn shift(mut date: Date, words: &[&str], back: bool) -> Option<Date> {
+    let (pairs, []) = words.as_chunks::<2>() else {
+        return None;
+    };
+    if pairs.is_empty() {
+        return None;
+    }
+    for [amount, unit] in pairs {
+        let amount: i64 = match *amount {
+            "a" | "an" => 1,
+            amount => amount.parse().ok()?,
         };
-        let amount: i64 = amount.parse().ok()?;
-        let amount = if negative { -amount } else { amount };
+        let amount = if back { -amount } else { amount };
         let span = match *unit {
             "d" | "day" | "days" => Span::new().try_days(amount),
             "w" | "wk" | "wks" | "week" | "weeks" => Span::new().try_weeks(amount),
@@ -129,92 +133,27 @@ fn arithmetic(words: &[&str], now: &Zoned) -> Option<String> {
         }
         .ok()?;
         date = date.checked_add(span).ok()?;
-        rest = more;
     }
-    Some(date.strftime("%A, %-d %B %Y").to_string())
+    Some(date)
 }
 
-/// A date at the start of `words`, and how many words it took.
-fn date(words: &[&str], today: Date, lean: Lean) -> Option<(Date, usize)> {
-    let first = *words.first()?;
-    match first {
-        "today" => return Some((today, 1)),
-        "tomorrow" => return Some((today.tomorrow().ok()?, 1)),
-        "yesterday" => return Some((today.yesterday().ok()?, 1)),
-        _ => {}
-    }
-    if let Some(date) = iso_date(first) {
-        return Some((date, 1));
-    }
-    // `dec 25` or `25 dec`, then perhaps a year.
-    let second = *words.get(1)?;
-    let (month, day) = match (month(first), month(second)) {
-        (Some(month), None) => (month, day(second)?),
-        (None, Some(month)) => (month, day(first)?),
-        _ => return None,
-    };
-    if let Some(year) = words.get(2).and_then(|word| year(word)) {
-        return Some((Date::new(year, month, day).ok()?, 3));
-    }
-    let date = Date::new(today.year(), month, day).ok()?;
-    let date = match lean {
-        Lean::Next if date < today => Date::new(today.year() + 1, month, day).ok()?,
-        Lean::Last if date > today => Date::new(today.year() - 1, month, day).ok()?,
-        _ => date,
-    };
-    Some((date, 2))
+fn long_date(date: Date) -> String {
+    date.strftime("%A, %-d %B %Y").to_string()
 }
 
-/// A date written `2026-12-25`, or `2026-1-5`.
-fn iso_date(word: &str) -> Option<Date> {
-    let mut parts = word.splitn(3, '-');
-    let (year, month, day) = (parts.next()?, parts.next()?, parts.next()?);
-    if year.len() != 4 || !(1..=2).contains(&month.len()) || !(1..=2).contains(&day.len()) {
+/// The current time in a zone, asked as `time in tokyo`, `what time is it in
+/// tokyo` or `tokyo time`.
+fn time_elsewhere(words: &[&str], now: &Zoned) -> Option<String> {
+    let (["what" | "whats" | "current", "time", "in", zone @ ..] | ["time", "in", zone @ ..] | [zone @ .., "time"]) =
+        words
+    else {
+        return None;
+    };
+    if zone.is_empty() {
         return None;
     }
-    Date::new(year.parse().ok()?, month.parse().ok()?, day.parse().ok()?).ok()
-}
-
-/// The month, 1 to 12, that a word names with at least its first three
-/// letters (`dec`, `sept.`, `december,`).
-fn month(word: &str) -> Option<i8> {
-    const MONTHS: [&str; 12] = [
-        "january",
-        "february",
-        "march",
-        "april",
-        "may",
-        "june",
-        "july",
-        "august",
-        "september",
-        "october",
-        "november",
-        "december",
-    ];
-    let word = word.trim_end_matches(['.', ',']);
-    if word.len() < 3 {
-        return None;
-    }
-    let at = MONTHS
-        .iter()
-        .position(|month| month.starts_with(word) || (word == "sept" && *month == "september"))?;
-    Some(at as i8 + 1)
-}
-
-/// A day of the month: `25`, `25th`, `1st,`.
-fn day(word: &str) -> Option<i8> {
-    let word = word.trim_end_matches(',');
-    let digits = ["st", "nd", "rd", "th"]
-        .iter()
-        .find_map(|suffix| word.strip_suffix(suffix))
-        .unwrap_or(word);
-    let day: i8 = digits.parse().ok()?;
-    (1..=31).contains(&day).then_some(day)
-}
-
-fn year(word: &str) -> Option<i16> {
-    (word.len() == 4).then(|| word.parse().ok()).flatten()
+    let asked: Vec<&str> = ["now", "in"].into_iter().chain(zone.iter().copied()).collect();
+    convert_time(&asked, now)
 }
 
 /// `<time> [<zone>] in|to <zone>`, where the time is `now`, `17:00`, `5pm`,

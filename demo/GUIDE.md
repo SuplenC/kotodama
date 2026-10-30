@@ -96,9 +96,10 @@ Expression and Answer".
 - Units: `12 km in mi`, `100 F to C`, `3 weeks in days`.
 - Currency: `100 usd to eur`, at the European Central Bank's rate (it needs
   the network).
-- Dates: `today + 3 weeks`, `dec 25 - 1 month`.
-- Days between: `days until dec 25`, `days since 2026-01-01`.
-- Time zones: `5pm PT in Warsaw`, `now in Tokyo`.
+- Dates: `today + 3 weeks`, `christmas - 1 month`, `in 3 weeks`, `10 days ago`.
+- Days between: `days until dec 25`, `how many days til xmas?`, `days since
+  last easter`, `days until friday`.
+- Time zones: `5pm PT in Warsaw`, `now in Tokyo`, `what time is it in Tokyo`.
 - Anything after `=` that evaluates: `= pi`.
 
 A number alone (`42`) or words get no answer, so they never push other

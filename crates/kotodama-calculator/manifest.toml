@@ -14,7 +14,7 @@ about = "Arithmetic, units, currency, dates and time zones. Enter copies the ans
 examples = [
     { query = "15min in sec", result = "900 secs" },
     { query = "$100 to eur", result = "€ at today's rate" },
-    { query = "days until dec 25", result = "The days left" },
+    { query = "days until christmas", result = "The days left" },
     { query = "now in Tokyo", result = "The time there" },
 ]
 
@@ -31,9 +31,20 @@ triggers = [
     # Date arithmetic: `today + 3 weeks`, `dec 25 - 1 month`.
     '(?i)^\s*(today|tomorrow|yesterday)\s*[-+]',
     '(?i)^\s*(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?\s+[0-9]{1,2}(st|nd|rd|th)?,?(\s+[0-9]{4})?\s*[-+]',
-    # The time elsewhere: `now in Tokyo`.
+    # A named date, perhaps after `next` or `last`, and then an amount:
+    # `christmas - 1 week`, `next friday + 2 days`, `my birthday + 1 month`.
+    '(?i)^\s*[a-z\x27’]+(\s+[a-z\x27’]+){0,3}\s+[-+]\s*(an?\s|[0-9])',
+    # The time elsewhere: `now in Tokyo`, `time in Tokyo`, `what time is it
+    # in Tokyo`, `what's the time in Tokyo`, `Tokyo time`.
     '(?i)^\s*now\s+(in|to)\s',
-    # Counting days: `days until dec 25`.
-    '(?i)^\s*days\s+(until|till|to|since|from)\s',
+    '(?i)^\s*((what|current)\b.*\s)?time\s+(is\s+it\s+)?in\s',
+    '(?i)\stime\s*[?!]?\s*$',
+    # Counting days, however it is asked: `days til xmas`, `how many days
+    # until christmas?`, `how long since easter`.
+    '(?i)^\s*(days|how\s+many\s+days|how\s+long)\s',
+    # A date relative to today: `in 3 weeks`, `in a week`, `a week ago`,
+    # `10 days from now`.
+    '(?i)^\s*in\s+(an?|[0-9]+)\s',
+    '(?i)\s(ago|from\s+(now|today))\s*[?!]?\s*$',
 ]
 debounce_ms = 0

@@ -254,6 +254,22 @@ fn dates_and_times_are_answered() {
 }
 
 #[test]
+fn the_dates_the_config_names_are_read_and_one_that_isnt_a_date_is_left_out() {
+    let dates = Table::from([
+        ("launch".to_owned(), Value::String("2027-01-01".into())),
+        ("party".to_owned(), Value::String("soon".into())),
+        ("count".to_owned(), Value::Integer(3)),
+    ]);
+    let mut calc = Calculator::start(tempfile::tempdir().unwrap(), config(&[("dates", Value::Table(dates))]));
+
+    assert_eq!(
+        calc.answer("launch + 1 day").as_deref(),
+        Some("Saturday, 2 January 2027")
+    );
+    assert_eq!(calc.answer("party + 1 day"), None);
+}
+
+#[test]
 fn rates_are_fetched_only_once_currency_is_asked_for_and_then_cached() {
     let endpoint = Endpoint::start();
     let cache = tempfile::tempdir().unwrap();

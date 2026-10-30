@@ -107,6 +107,7 @@ let
           network = false;
           ratesUrl = "http://localhost:8080/latest";
           decimalSeparator = "comma";
+          dates.birthday = "mar 14";
         };
         clipboard = {
           maxEntries = 50;
@@ -275,6 +276,7 @@ pkgs.runCommand "kotodama-home-manager-options-test"
         "network": False,
         "rates_url": "http://localhost:8080/latest",
         "decimal_separator": "comma",
+        "dates": {"birthday": "mar 14"},
     })
     expect("clipboard", extensions["clipboard"], {
         "max_entries": 50,

@@ -139,6 +139,7 @@ let
             inherit (ext.calculator) network;
             rates_url = ext.calculator.ratesUrl;
             decimal_separator = ext.calculator.decimalSeparator;
+            inherit (ext.calculator) dates;
           }
           // appSettings ext.calculator
         );
@@ -472,6 +473,10 @@ in
             "comma"
           ])
           "`decimal_separator`: how decimals are written, `dot` (3.5) or `comma` (3,5); the other separator groups thousands. Unset, the locale's.";
+      dates = optional (lib.types.attrsOf lib.types.str) ''
+        `dates`: dates to count to by name (`days until my birthday`), each a
+        month and day for every year (`"mar 14"`) or one day (`"2027-05-01"`).
+      '';
     }
     // app "`calc`" "true";
 
