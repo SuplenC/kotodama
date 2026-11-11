@@ -68,6 +68,7 @@ use kotodama_extension::watch::Watcher;
 use paths::Overrides;
 use paths::Paths;
 use problem::Report;
+pub use server::take_activation;
 
 /// How long the directories of programs that couldn't start must stay still
 /// before they are tried again, so a build or an install that writes many

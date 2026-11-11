@@ -2,6 +2,8 @@
 //!
 //! # Owns
 //!
+//! - [`take_activation`]: reading socket activation, and keeping its variables from the processes
+//!   the Daemon starts.
 //! - [`listen`] and [`serve`]: the socket, and a Front end's handshake.
 //!
 //! # Not here
@@ -14,6 +16,7 @@ use std::net::Shutdown;
 use std::os::unix::net::UnixListener;
 use std::os::unix::net::UnixStream;
 use std::path::Path;
+use std::sync::OnceLock;
 use std::sync::mpsc::Sender;
 
 use kotodama_protocol::Channel;
@@ -40,21 +43,46 @@ pub fn listen(path: &Path) -> io::Result<UnixListener> {
     }
 }
 
-/// The listening socket systemd passed in as file descriptor 3, if `LISTEN_PID`
-/// names this process and `LISTEN_FDS` counts at least one (`sd_listen_fds(3)`).
-/// systemd owns its socket file and keeps it while the Daemon is stopped, so
-/// connections made meanwhile wait for the next Daemon.
+/// The variables socket activation sets (`sd_listen_fds(3)`).
+const ACTIVATION_VARS: [&str; 4] = ["LISTEN_PID", "LISTEN_FDS", "LISTEN_FDNAMES", "LISTEN_PIDFDID"];
+
+/// Whether systemd handed this process a socket, as [`take_activation`] read
+/// it. Unset when it never ran, and then the Daemon binds its own socket.
+static HANDED_A_SOCKET: OnceLock<bool> = OnceLock::new();
+
+/// Reads whether systemd handed this process a socket, then takes the
+/// activation variables out of the environment, as
+/// `sd_listen_fds(unset_environment=1)` does. Left in, every Extension and
+/// every program the Daemon starts would inherit them, and one that does
+/// socket activation itself would take its own descriptor 3 for a socket.
+/// Removing them here, rather than at each spawn, also covers a spawn added
+/// later.
+///
+/// # Safety
+///
+/// No other thread may be running: one could be reading the environment.
+pub unsafe fn take_activation() {
+    let number = |name| std::env::var(name).ok()?.parse::<u32>().ok();
+    let handed = number("LISTEN_PID") == Some(std::process::id()) && number("LISTEN_FDS").is_some_and(|fds| fds > 0);
+    let _ = HANDED_A_SOCKET.set(handed);
+    for name in ACTIVATION_VARS {
+        // SAFETY: the caller guarantees no other thread is running.
+        unsafe { std::env::remove_var(name) };
+    }
+}
+
+/// The listening socket systemd passed in as file descriptor 3, if
+/// [`take_activation`] found `LISTEN_PID` naming this process and `LISTEN_FDS`
+/// counting at least one. systemd owns its socket file and keeps it while the
+/// Daemon is stopped, so connections made meanwhile wait for the next Daemon.
 #[cfg(target_os = "linux")]
 fn activated() -> Option<UnixListener> {
-    use std::env;
     use std::os::fd::BorrowedFd;
     use std::os::fd::FromRawFd;
     use std::os::fd::RawFd;
 
     const SD_LISTEN_FDS_START: RawFd = 3;
-    let pid: u32 = env::var("LISTEN_PID").ok()?.parse().ok()?;
-    let fds: u32 = env::var("LISTEN_FDS").ok()?.parse().ok()?;
-    if pid != std::process::id() || fds == 0 {
+    if HANDED_A_SOCKET.get() != Some(&true) {
         return None;
     }
     // Not passed on to Extensions or the programs the Daemon starts. This also
