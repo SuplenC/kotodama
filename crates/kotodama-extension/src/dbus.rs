@@ -3,7 +3,7 @@
 //! long as the calls.
 //!
 //! Kotodama calls D-Bus only on rare events, a notification when a job ends,
-//! a scope for a program it starts, or logind when the user powers off, so a
+//! a service for a program it starts, or logind when the user powers off, so a
 //! D-Bus library would keep a connection and a thread for the process's
 //! whole life to save a few milliseconds on each.
 //!
@@ -11,18 +11,20 @@
 //!
 //! Finding and connecting to the session bus, the system bus and the systemd
 //! user manager, the EXTERNAL authentication, marshalling method calls and
-//! their returns, and reading calls, replies and signals and the values in
-//! them, variants, arrays and dict entries included, as properties come.
+//! their returns, passing file descriptors with a call, and reading calls,
+//! replies and signals and the values in them, variants, arrays and dict
+//! entries included, as properties come.
 //!
 //! # Not here
 //!
-//! What is called: notifications are `kotodamad`'s `notify`, scopes
-//! `crate::scope`, logind the `system` Extension's.
+//! What is called: notifications are `kotodamad`'s `notify`, services
+//! `crate::service`, logind the `system` Extension's.
 
 use std::fmt::Write as _;
 use std::io;
 use std::io::Read;
 use std::io::Write;
+use std::os::fd::BorrowedFd;
 use std::os::unix::net::UnixStream;
 use std::path::Path;
 use std::time::Duration;
@@ -45,6 +47,7 @@ const REPLY_SERIAL: u8 = 5;
 const DESTINATION: u8 = 6;
 const SENDER: u8 = 7;
 const SIGNATURE: u8 = 8;
+const UNIX_FDS: u8 = 9;
 
 /// Where the system bus listens when `DBUS_SYSTEM_BUS_ADDRESS` is unset, as
 /// the D-Bus specification fixes it.
@@ -74,6 +77,9 @@ pub enum Error {
     /// The call failed: the error's name and message.
     #[error("the call failed: {0}")]
     Failed(String),
+    /// A call would pass file descriptors to a peer that takes none.
+    #[error("the bus takes no file descriptors")]
+    NoUnixFds,
 }
 
 impl Error {
@@ -95,6 +101,8 @@ pub struct Bus {
     stream: UnixStream,
     /// The serial of the last message sent.
     serial: u32,
+    /// Whether the peer agreed to take file descriptors with a message.
+    unix_fds: bool,
 }
 
 impl Bus {
@@ -149,7 +157,8 @@ impl Bus {
     /// Connects to the systemd user manager's own socket,
     /// `$XDG_RUNTIME_DIR/systemd/private`, as `systemctl --user` does. It is
     /// a peer, not a bus: it takes no hello, and sends its signals to every
-    /// peer without being asked.
+    /// peer without being asked. It is asked to take file descriptors, as a
+    /// service's output may be one.
     ///
     /// # Errors
     ///
@@ -159,20 +168,32 @@ impl Bus {
         let dir = std::env::var_os("XDG_RUNTIME_DIR").ok_or(Error::NoAddress)?;
         let path = Path::new(&dir).join("systemd/private");
         let stream = UnixStream::connect(path).map_err(Error::Connect)?;
-        Bus::authenticated(stream)
+        Bus::connected(stream, true)
     }
 
     fn authenticated(stream: UnixStream) -> Result<Bus, Error> {
+        Bus::connected(stream, false)
+    }
+
+    /// Authenticates on `stream`, asking the peer to take file descriptors
+    /// if `unix_fds`.
+    fn connected(stream: UnixStream, unix_fds: bool) -> Result<Bus, Error> {
         stream.set_read_timeout(Some(TIMEOUT)).map_err(Error::Io)?;
         stream.set_write_timeout(Some(TIMEOUT)).map_err(Error::Io)?;
-        let mut bus = Bus { stream, serial: 0 };
-        bus.authenticate()?;
+        let mut bus = Bus {
+            stream,
+            serial: 0,
+            unix_fds: false,
+        };
+        bus.authenticate(unix_fds)?;
         Ok(bus)
     }
 
     /// The EXTERNAL mechanism: the peer checks the uid on the socket against
-    /// the one claimed. `BEGIN` goes out with the first message.
-    fn authenticate(&mut self) -> Result<(), Error> {
+    /// the one claimed. Then, if `unix_fds`, whether the peer takes file
+    /// descriptors; one that doesn't still serves calls without them.
+    /// `BEGIN` goes out with the first message.
+    fn authenticate(&mut self, unix_fds: bool) -> Result<(), Error> {
         let uid = uid().to_string().bytes().fold(String::new(), |mut hex, byte| {
             let _ = write!(hex, "{byte:02x}");
             hex
@@ -180,6 +201,19 @@ impl Bus {
         self.stream
             .write_all(format!("\0AUTH EXTERNAL {uid}\r\n").as_bytes())
             .map_err(Error::Io)?;
+        let line = self.auth_line()?;
+        if !line.starts_with(b"OK ") {
+            return Err(Error::Refused(String::from_utf8_lossy(&line).trim().to_owned()));
+        }
+        if unix_fds {
+            self.stream.write_all(b"NEGOTIATE_UNIX_FD\r\n").map_err(Error::Io)?;
+            self.unix_fds = self.auth_line()?.starts_with(b"AGREE_UNIX_FD");
+        }
+        self.stream.write_all(b"BEGIN\r\n").map_err(Error::Io)
+    }
+
+    /// The peer's next line of the authentication, up to its `\r\n`.
+    fn auth_line(&mut self) -> Result<Vec<u8>, Error> {
         let mut line = Vec::new();
         let mut byte = [0];
         while !line.ends_with(b"\r\n") {
@@ -189,10 +223,7 @@ impl Bus {
                 break;
             }
         }
-        if !line.starts_with(b"OK ") {
-            return Err(Error::Refused(String::from_utf8_lossy(&line).trim().to_owned()));
-        }
-        self.stream.write_all(b"BEGIN\r\n").map_err(Error::Io)
+        Ok(line)
     }
 
     /// Waits for every later message without a time limit, as a service
@@ -202,7 +233,17 @@ impl Bus {
     ///
     /// When the socket refuses the change.
     pub fn wait_forever(&mut self) -> Result<(), Error> {
-        self.stream.set_read_timeout(None).map_err(Error::Io)
+        self.wait_at_most(None)
+    }
+
+    /// Waits for each later message at most `timeout`, or without a limit
+    /// for `None`. A read that times out fails with [`Error::Io`].
+    ///
+    /// # Errors
+    ///
+    /// When the socket refuses the change, as it does a zero `timeout`.
+    pub fn wait_at_most(&mut self, timeout: Option<Duration>) -> Result<(), Error> {
+        self.stream.set_read_timeout(timeout).map_err(Error::Io)
     }
 
     /// Answers the method call `to` with a return whose body, of type
@@ -241,8 +282,15 @@ impl Bus {
     ///
     /// When it can't be written.
     pub fn send(&mut self, call: &Call) -> Result<u32, Error> {
+        if !call.fds.is_empty() && !self.unix_fds {
+            return Err(Error::NoUnixFds);
+        }
         let message = self.call_message(call);
-        self.write(&message)?;
+        if call.fds.is_empty() {
+            self.write(&message)?;
+        } else {
+            self.write_with_fds(&message, call.fds)?;
+        }
         Ok(self.serial)
     }
 
@@ -275,6 +323,59 @@ impl Bus {
 
     fn write(&mut self, bytes: &[u8]) -> Result<(), Error> {
         self.stream.write_all(bytes).map_err(Error::Io)
+    }
+
+    /// Writes `bytes`, the message, with `fds` attached to its first byte,
+    /// as `SCM_RIGHTS`.
+    #[cfg(target_os = "linux")]
+    fn write_with_fds(&mut self, bytes: &[u8], fds: &[BorrowedFd<'_>]) -> Result<(), Error> {
+        use std::os::fd::AsRawFd;
+        use std::os::fd::RawFd;
+
+        let raw: Vec<RawFd> = fds.iter().map(AsRawFd::as_raw_fd).collect();
+        let data_len = u32::try_from(size_of_val(raw.as_slice())).map_err(|_| Error::TooLarge)?;
+        // SAFETY: CMSG_SPACE only computes a size.
+        let space = unsafe { libc::CMSG_SPACE(data_len) } as usize;
+        // u64s, so the buffer is aligned as a `cmsghdr` must be.
+        let mut control = vec![0u64; space.div_ceil(8)];
+        let mut iov = libc::iovec {
+            iov_base: bytes.as_ptr().cast_mut().cast(),
+            iov_len: bytes.len(),
+        };
+        // SAFETY: msghdr is plain data, for which all zeroes is valid.
+        let mut msg: libc::msghdr = unsafe { std::mem::zeroed() };
+        msg.msg_iov = &raw mut iov;
+        msg.msg_iovlen = 1;
+        msg.msg_control = control.as_mut_ptr().cast();
+        msg.msg_controllen = space as _;
+        // SAFETY: `msg` names a control buffer of CMSG_SPACE(data_len)
+        // bytes, so it has a first header with room for `raw` after it.
+        unsafe {
+            let header = libc::CMSG_FIRSTHDR(&raw const msg);
+            (*header).cmsg_level = libc::SOL_SOCKET;
+            (*header).cmsg_type = libc::SCM_RIGHTS;
+            (*header).cmsg_len = libc::CMSG_LEN(data_len) as _;
+            std::ptr::copy_nonoverlapping(raw.as_ptr(), libc::CMSG_DATA(header).cast(), raw.len());
+        }
+        let sent = loop {
+            // SAFETY: `msg` and the buffers it names outlive the call, and the
+            // descriptors in it are open: `fds` borrows them.
+            let sent = unsafe { libc::sendmsg(self.stream.as_raw_fd(), &raw const msg, libc::MSG_NOSIGNAL) };
+            if let Ok(sent) = usize::try_from(sent) {
+                break sent;
+            }
+            let err = io::Error::last_os_error();
+            if err.kind() != io::ErrorKind::Interrupted {
+                return Err(Error::Io(err));
+            }
+        };
+        // The descriptors went with the first byte; the rest needs none.
+        self.write(&bytes[sent..])
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    fn write_with_fds(&mut self, _bytes: &[u8], _fds: &[BorrowedFd<'_>]) -> Result<(), Error> {
+        Err(Error::NoUnixFds)
     }
 
     /// Reads the next message.
@@ -333,6 +434,9 @@ pub struct Call<'a> {
     pub signature: &'a str,
     /// The body, marshalled with [`Marshal`].
     pub body: Vec<u8>,
+    /// The file descriptors passed with it, which the body names by their
+    /// index here ([`Marshal::fd`]).
+    pub fds: &'a [BorrowedFd<'a>],
 }
 
 impl<'a> Call<'a> {
@@ -346,6 +450,7 @@ impl<'a> Call<'a> {
             destination,
             signature: "",
             body: Vec::new(),
+            fds: &[],
         }
     }
 
@@ -354,6 +459,13 @@ impl<'a> Call<'a> {
     pub fn with_body(mut self, signature: &'a str, body: Marshal) -> Self {
         self.signature = signature;
         self.body = body.0;
+        self
+    }
+
+    /// The call with `fds` passed along, which its body names by index.
+    #[must_use]
+    pub fn with_fds(mut self, fds: &'a [BorrowedFd<'a>]) -> Self {
+        self.fds = fds;
         self
     }
 
@@ -370,6 +482,12 @@ impl<'a> Call<'a> {
             m.field(DESTINATION, "s", self.destination);
             if !self.signature.is_empty() {
                 m.field(SIGNATURE, "g", self.signature);
+            }
+            if !self.fds.is_empty() {
+                m.pad(8);
+                m.byte(UNIX_FDS);
+                m.signature("u");
+                m.u32(self.fds.len() as u32);
             }
         });
         m.pad(8);
@@ -403,6 +521,12 @@ impl Marshal {
     pub fn i32(&mut self, value: i32) {
         self.pad(4);
         self.0.extend_from_slice(&value.to_le_bytes());
+    }
+
+    /// A D-Bus `h`: the file descriptor at `index` of those passed with the
+    /// call ([`Call::with_fds`]).
+    pub fn fd(&mut self, index: u32) {
+        self.u32(index);
     }
 
     /// A D-Bus `b`: a `u32`, 0 or 1.
@@ -511,6 +635,13 @@ impl Message {
     #[must_use]
     pub fn is_signal(&self, member: &str, signature: &str) -> bool {
         self.kind == SIGNAL && self.member.as_deref() == Some(member) && self.signature == signature
+    }
+
+    /// The object it is about: the one a call is made on, or a signal sent
+    /// from.
+    #[must_use]
+    pub fn path(&self) -> Option<&str> {
+        self.path.as_deref()
     }
 
     /// Whether it is a call of `interface.member` on the object `path`.

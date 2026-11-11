@@ -2,8 +2,9 @@
 # user whose systemd user manager runs from boot. It checks that the socket
 # starts the Daemon, that home-manager's settings reach it, that it reaches
 # the session bus and finds apps wherever NixOS installs them, that the
-# Folder source lists projects and scripts, that the programs it starts
-# outlive it, that a Bundled extension left off is neither installed nor
+# Folder source lists projects and scripts, that the programs it starts are
+# services of the user manager that inherit nothing of its own and outlive
+# it, that a Bundled extension left off is neither installed nor
 # started, and that apps and Extensions a switch installs show up without a
 # restart.
 {
@@ -212,18 +213,30 @@ pkgs.testers.runNixOSTest {
         user(f"{front_end} --run vm sync")
         machine.wait_until_succeeds("grep -q 'string \"VM sync\"' /tmp/notifications")
 
-    with subtest("programs started from the menu get scopes of their own, named for the app where it has a desktop id"):
+    with subtest("programs started from the menu are services of their own, named for the app where it has a desktop id"):
         # The Daemon starts the Quicklink, which has no desktop id, so its
-        # scope is named for its program; the apps Extension starts
+        # service is named for its program; the apps Extension starts
         # sleeper.desktop.
         user(f"{front_end} --run nap")
         user(f"{front_end} --run sleeper")
-        scopes = {"sleep 1001": "app-kotodama-sleep-", "sleep 1002": "app-kotodama-sleeper-"}
-        for program, scope in scopes.items():
+        services = {"sleep 1001": "app-kotodama-sleep@", "sleep 1002": "app-kotodama-sleeper@"}
+        daemon = user("systemctl --user show -P MainPID kotodamad.service").strip()
+        daemon_invocation = user("systemctl --user show -P InvocationID kotodamad.service").strip()
+        for program, service in services.items():
             machine.wait_until_succeeds(pgrep(program))
             cgroup = cgroup_of(program)
             assert "kotodamad.service" not in cgroup, f"{program} runs in the Daemon's cgroup: {cgroup}"
-            assert f"/app.slice/{scope}" in cgroup, f"{program} isn't in a scope named {scope}*: {cgroup}"
+            assert f"/app.slice/{service}" in cgroup, f"{program} isn't in a service named {service}*: {cgroup}"
+            pid = machine.succeed(pgrep(program)).strip()
+            # The user manager started it, not the Daemon or an Extension, so
+            # it inherits nothing of the Daemon's socket-activated service.
+            parent = machine.succeed(f"ps -o ppid= -p {pid}").strip()
+            assert parent != daemon, f"{program} is the Daemon's child"
+            environ = machine.succeed(f"tr '\\0' '\\n' < /proc/{pid}/environ").splitlines()
+            leaked = [var for var in environ if var.startswith("LISTEN_") or var == f"INVOCATION_ID={daemon_invocation}"]
+            assert not leaked, f"{program} inherited the Daemon's {leaked}"
+            cwd = machine.succeed(f"readlink /proc/{pid}/cwd").strip()
+            assert cwd == "/home/alice", f"{program} started in {cwd}"
 
     with subtest("stopping the Daemon leaves them running, and the next toggle brings it back"):
         user("systemctl --user stop kotodamad.service")

@@ -50,9 +50,161 @@ pub(crate) fn job_removed(unit: &str, result: &str) -> Vec<u8> {
     message(SIGNAL, |m| m.field(MEMBER, "s", "JobRemoved"), "uoss", &signal)
 }
 
+/// The return of the call `serial`, whose body, of type `signature`, is
+/// `body`.
+pub(crate) fn answer(serial: u32, signature: &str, body: &Marshal) -> Vec<u8> {
+    message(METHOD_RETURN, |m| reply_serial(m, serial), signature, body)
+}
+
+/// The error `name`, saying `text`, in answer to the call `serial`.
+pub(crate) fn error(serial: u32, name: &str, text: &str) -> Vec<u8> {
+    let mut body = Marshal::default();
+    body.string(text);
+    message(
+        ERROR,
+        |m| {
+            m.field(ERROR_NAME, "s", name);
+            reply_serial(m, serial);
+        },
+        "s",
+        &body,
+    )
+}
+
+/// The signal `interface.member` from the object `path`, whose body, of
+/// type `signature`, is `body`.
+pub(crate) fn signal(path: &str, interface: &str, member: &str, signature: &str, body: &Marshal) -> Vec<u8> {
+    message(
+        SIGNAL,
+        |m| {
+            m.field(PATH, "o", path);
+            m.field(INTERFACE, "s", interface);
+            m.field(MEMBER, "s", member);
+        },
+        signature,
+        body,
+    )
+}
+
+/// The message `bytes` hold, as a peer reads it.
+pub(crate) fn read_message(bytes: &[u8]) -> Message {
+    let (mut theirs, ours) = UnixStream::pair().unwrap();
+    theirs.write_all(bytes).unwrap();
+    Bus {
+        stream: ours,
+        serial: 0,
+        unix_fds: false,
+    }
+    .read()
+    .unwrap()
+}
+
+/// A message a peer read, with the file descriptors passed along with it.
+#[cfg(target_os = "linux")]
+pub(crate) struct Received {
+    pub(crate) bytes: Vec<u8>,
+    pub(crate) fds: Vec<std::os::fd::OwnedFd>,
+}
+
+/// Plays a peer that takes file descriptors, as the systemd user manager
+/// does, on the other end of `stream`: accepts the authentication, then
+/// answers each message it reads with what `answer` makes of its serial and
+/// its bytes, until the other end hangs up. Returns every message read.
+#[cfg(target_os = "linux")]
+pub(crate) fn fd_peer(
+    stream: UnixStream,
+    mut answer: impl FnMut(u32, &[u8]) -> Vec<u8> + Send + 'static,
+) -> thread::JoinHandle<Vec<Received>> {
+    thread::spawn(move || {
+        let mut writer = stream.try_clone().unwrap();
+        let mut reader = stream;
+        assert!(auth_line(&mut reader).starts_with(b"\0AUTH EXTERNAL "));
+        writer.write_all(b"OK 0123456789abcdef\r\n").unwrap();
+        assert_eq!(auth_line(&mut reader), b"NEGOTIATE_UNIX_FD\r\n");
+        writer.write_all(b"AGREE_UNIX_FD\r\n").unwrap();
+        assert_eq!(auth_line(&mut reader), b"BEGIN\r\n");
+        let mut read = Vec::new();
+        while let Some(received) = receive(&writer) {
+            let word = |at: usize| u32::from_le_bytes(received.bytes[at..at + 4].try_into().unwrap());
+            // The other end may have hung up once it had what it waited for.
+            let _ = writer.write_all(&answer(word(8), &received.bytes));
+            read.push(received);
+        }
+        read
+    })
+}
+
+/// The next line of the authentication on `stream`, read a byte at a time,
+/// so nothing after it is read too.
+#[cfg(target_os = "linux")]
+fn auth_line(stream: &mut UnixStream) -> Vec<u8> {
+    let mut line = Vec::new();
+    let mut byte = [0];
+    while !line.ends_with(b"\n") && stream.read(&mut byte).unwrap() == 1 {
+        line.push(byte[0]);
+    }
+    line
+}
+
+/// The next whole message on `stream`, with its descriptors, or `None` once
+/// the other end hangs up.
+#[cfg(target_os = "linux")]
+fn receive(stream: &UnixStream) -> Option<Received> {
+    use std::os::fd::AsRawFd;
+    use std::os::fd::FromRawFd;
+    use std::os::fd::OwnedFd;
+    use std::os::fd::RawFd;
+
+    let mut fixed = [0u8; 16];
+    let mut control = [0u64; 16];
+    let mut iov = libc::iovec {
+        iov_base: fixed.as_mut_ptr().cast(),
+        iov_len: fixed.len(),
+    };
+    // SAFETY: msghdr is plain data, for which all zeroes is valid.
+    let mut msg: libc::msghdr = unsafe { std::mem::zeroed() };
+    msg.msg_iov = &raw mut iov;
+    msg.msg_iovlen = 1;
+    msg.msg_control = control.as_mut_ptr().cast();
+    msg.msg_controllen = size_of_val(&control) as _;
+    // SAFETY: `msg` names buffers that outlive the call.
+    let got = unsafe { libc::recvmsg(stream.as_raw_fd(), &raw mut msg, libc::MSG_CMSG_CLOEXEC) };
+    let got = usize::try_from(got).ok().filter(|&got| got > 0)?;
+    let mut fds = Vec::new();
+    // SAFETY: the kernel filled `control` with `msg_controllen` bytes of
+    // headers, which these macros walk.
+    unsafe {
+        let mut header = libc::CMSG_FIRSTHDR(&raw const msg);
+        while !header.is_null() {
+            if (*header).cmsg_level == libc::SOL_SOCKET && (*header).cmsg_type == libc::SCM_RIGHTS {
+                let data = libc::CMSG_DATA(header).cast::<RawFd>();
+                let count = ((*header).cmsg_len as usize - libc::CMSG_LEN(0) as usize) / size_of::<RawFd>();
+                for n in 0..count {
+                    fds.push(OwnedFd::from_raw_fd(data.add(n).read_unaligned()));
+                }
+            }
+            header = libc::CMSG_NXTHDR(&raw const msg, header);
+        }
+    }
+    let mut stream = stream;
+    stream.read_exact(&mut fixed[got..]).ok()?;
+    let word = |at: usize| u32::from_le_bytes(fixed[at..at + 4].try_into().unwrap());
+    let mut bytes = fixed.to_vec();
+    bytes.resize(16 + (word(12) as usize).next_multiple_of(8) + word(4) as usize, 0);
+    stream.read_exact(&mut bytes[16..]).ok()?;
+    Some(Received { bytes, fds })
+}
+
 /// A connection to the peer at the other end of `stream`.
 pub(crate) fn bus(stream: UnixStream) -> Bus {
     Bus::authenticated(stream).unwrap()
+}
+
+/// A connection to the peer at the other end of `stream`, asking it to take
+/// file descriptors, as the user manager's is.
+#[cfg(target_os = "linux")]
+pub(crate) fn bus_passing_fds(stream: UnixStream) -> Bus {
+    Bus::connected(stream, true).unwrap()
 }
 
 /// Plays the peer on the other end of `stream`: accepts the authentication,
@@ -181,16 +333,62 @@ fn a_call_answered_with_an_error_fails_with_its_name_and_message() {
     peer.join().unwrap();
 }
 
+#[cfg(target_os = "linux")]
+#[test]
+fn a_call_passes_its_file_descriptors_to_a_peer_that_agreed_to_take_them() {
+    use std::os::fd::AsFd;
+
+    let (ours, theirs) = UnixStream::pair().unwrap();
+    let peer = fd_peer(theirs, |serial, _| method_return(serial, "/job/4"));
+    let (mut reader, writer) = io::pipe().unwrap();
+    let fds = [writer.as_fd()];
+    let mut bus = bus_passing_fds(ours);
+
+    bus.call(&call().with_fds(&fds), |_| {}).unwrap();
+    drop((bus, writer));
+    let mut received = peer.join().unwrap();
+
+    let message = received.pop().unwrap();
+    let unix_fds = [UNIX_FDS, 1, b'u', 0, 1, 0, 0, 0];
+    assert!(
+        message.bytes.windows(8).any(|field| field == unix_fds),
+        "no UNIX_FDS field"
+    );
+    let [fd] = <[_; 1]>::try_from(message.fds).unwrap();
+    std::fs::File::from(fd).write_all(b"through the peer").unwrap();
+    let mut out = String::new();
+    reader.read_to_string(&mut out).unwrap();
+    assert_eq!(out, "through the peer");
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn a_peer_that_takes_no_file_descriptors_is_never_sent_one() {
+    use std::os::fd::AsFd;
+
+    let (ours, _theirs) = UnixStream::pair().unwrap();
+    let (_reader, writer) = io::pipe().unwrap();
+    let fds = [writer.as_fd()];
+    let mut bus = Bus {
+        stream: ours,
+        serial: 0,
+        unix_fds: false,
+    };
+    assert!(matches!(bus.send(&call().with_fds(&fds)), Err(Error::NoUnixFds)));
+}
+
 #[test]
 fn a_call_read_by_a_service_is_answered_to_its_serial() {
     let (ours, theirs) = UnixStream::pair().unwrap();
     let mut caller = Bus {
         stream: ours,
         serial: 0,
+        unix_fds: false,
     };
     let mut service = Bus {
         stream: theirs,
         serial: 40,
+        unix_fds: false,
     };
 
     let serial = caller.send(&call()).unwrap();
@@ -264,6 +462,7 @@ fn reply(little: bool, signature: &str, body: &[u8]) -> Message {
     let message = Bus {
         stream: ours,
         serial: 1,
+        unix_fds: false,
     }
     .read()
     .unwrap();

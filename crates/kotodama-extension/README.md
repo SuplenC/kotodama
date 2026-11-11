@@ -1,6 +1,6 @@
 # kotodama-extension
 
-What every Rust Extension of [Kotodama](https://github.com/SuplenC/kotodama) needs, so each one only holds what it does: the handshake and the Daemon's messages over stdio, lean memory, the config readers, sending only the Items that changed, the Extension's status, starting programs in a systemd scope of their own, and, with the `watch` feature, watching directories. Kotodama's Bundled extensions are built on it.
+What every Rust Extension of [Kotodama](https://github.com/SuplenC/kotodama) needs, so each one only holds what it does: the handshake and the Daemon's messages over stdio, lean memory, the config readers, sending only the Items that changed, the Extension's status, starting programs as services of the systemd user manager, which inherit nothing of the Extension, and, with the `watch` feature, watching directories. Kotodama's Bundled extensions are built on it.
 
 `kotodama extension new <name> --lang rust` writes an Extension to start from, and the crate docs show a whole one. [docs/extensions.md](https://github.com/SuplenC/kotodama/blob/main/docs/extensions.md) describes what an Extension can do.
 

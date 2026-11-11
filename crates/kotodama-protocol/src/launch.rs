@@ -8,8 +8,8 @@
 //!
 //! # Not here
 //!
-//! - Running the command, detached and in a scope of its own: `kotodama-extension`'s `launch.rs`
-//!   and `scope.rs`.
+//! - Running the command, as a service of the user manager or detached: `kotodama-extension`'s
+//!   `launch.rs` and `service.rs`.
 
 use std::env;
 use std::ffi::OsStr;
@@ -22,30 +22,35 @@ use std::process::Command;
 /// whitespace, that every program the user picks runs after. Extensions get
 /// it from the Daemon's environment.
 ///
-/// Under systemd every process the Daemon starts sits in its service's
-/// cgroup, so stopping the service would kill the user's apps with it.
-/// When the prefix isn't set, the Daemon and the Rust Extensions therefore
-/// ask the user manager for a scope for each program
-/// (`kotodama_extension::scope`). Setting it, even empty, replaces that
-/// scope: for another way to start apps, such as `uwsm app --`, or for none.
+/// A program the user picks belongs to the session, not to the Daemon: it
+/// should inherit nothing of the Daemon's service, and outlive it. When the
+/// prefix isn't set, the Daemon and the Rust Extensions therefore ask the
+/// user manager to start each program as a service of its own
+/// (`kotodama_extension::service`). Setting it, even empty, replaces that
+/// service: for another way to start apps, such as `uwsm app --`, or for
+/// none.
 pub const LAUNCH_PREFIX: &str = "KOTODAMA_LAUNCH_PREFIX";
 
-/// Set, beside [`LAUNCH_PREFIX`], when the prefix is only there to give
-/// each program a scope: the Daemon then hands Extensions [`SCOPE_PREFIX`],
-/// so one that starts programs through the prefix gets the scope too. A
-/// launcher that asks for the scope itself ignores such a prefix
-/// ([`launch_prefix`]).
-pub const LAUNCH_SCOPED: &str = "KOTODAMA_LAUNCH_SCOPED";
+/// Set, beside [`LAUNCH_PREFIX`], when the prefix is only there to start
+/// each program as a service: the Daemon then hands Extensions
+/// [`SERVICE_PREFIX`], so one that starts programs through the prefix starts
+/// services too. A launcher that asks the user manager itself ignores such a
+/// prefix ([`launch_prefix`]).
+pub const LAUNCH_AS_SERVICE: &str = "KOTODAMA_LAUNCH_AS_SERVICE";
 
-/// The launch prefix that gives a program a scope of its own, for
-/// Extensions that don't ask the user manager for one themselves.
-pub const SCOPE_PREFIX: &str = "systemd-run --user --scope --slice=app.slice --collect --quiet";
+/// The launch prefix that has the user manager start a program as a service
+/// of its own, in the manager's environment and not its caller's, for
+/// Extensions that don't ask the manager themselves. `--same-dir` keeps the
+/// directory an Action names; `ExitType=cgroup` keeps the service while
+/// anything in it runs, so a launcher that exits leaves its app running;
+/// `--expand-environment=no` passes a `$` in the arguments on as it is.
+pub const SERVICE_PREFIX: &str = "systemd-run --user --slice=app.slice --collect --quiet --same-dir --property=Type=exec --property=ExitType=cgroup --expand-environment=no";
 
 /// The launch prefix in effect: [`LAUNCH_PREFIX`], unless it is unset or
-/// only stands in for a scope ([`LAUNCH_SCOPED`]).
+/// only stands in for a service ([`LAUNCH_AS_SERVICE`]).
 #[must_use]
 pub fn launch_prefix() -> Option<String> {
-    if env::var_os(LAUNCH_SCOPED).is_some() {
+    if env::var_os(LAUNCH_AS_SERVICE).is_some() {
         return None;
     }
     env::var(LAUNCH_PREFIX).ok()

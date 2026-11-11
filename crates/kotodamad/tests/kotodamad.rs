@@ -87,10 +87,10 @@ fn with_home<'a>(command: &'a mut Command, root: &Path) -> &'a mut Command {
         .env("HOME", root)
         .env_remove("WAYLAND_DISPLAY")
         // A test run from a shell an older Kotodama started still inherits
-        // its prefix, and its KOTODAMA_LAUNCH_SCOPED would hide the prefix a
+        // its prefix, and its KOTODAMA_LAUNCH_AS_SERVICE would hide the prefix a
         // test sets.
         .env_remove(LAUNCH_PREFIX)
-        .env_remove(LAUNCH_SCOPED)
+        .env_remove(LAUNCH_AS_SERVICE)
 }
 
 /// Starts the Daemon the way systemd's socket activation does: `listener` as
@@ -807,7 +807,7 @@ fn a_quicklinks_command_inherits_no_launch_prefix() {
     fs::write(
         &seen,
         format!(
-            "#!/bin/sh\necho \"${{KOTODAMA_LAUNCH_PREFIX-unset}} ${{KOTODAMA_LAUNCH_SCOPED-unset}}\" > {0}.tmp\nmv {0}.tmp {0}\n",
+            "#!/bin/sh\necho \"${{KOTODAMA_LAUNCH_PREFIX-unset}} ${{KOTODAMA_LAUNCH_AS_SERVICE-unset}}\" > {0}.tmp\nmv {0}.tmp {0}\n",
             out.display()
         ),
     )
@@ -844,18 +844,18 @@ fn a_quicklinks_command_inherits_no_launch_prefix() {
     });
 }
 
-/// With no prefix of its own and a user manager to make scopes, the Daemon
-/// hands its Extensions the prefix that makes one.
+/// With no prefix of its own and a user manager to start services, the
+/// Daemon hands its Extensions the prefix that starts one.
 #[cfg(target_os = "linux")]
 #[test]
-fn an_extension_gets_the_scope_prefix_when_there_is_a_user_manager() {
+fn an_extension_gets_the_service_prefix_when_there_is_a_user_manager() {
     let root = Daemon::home();
     fs::create_dir(root.path().join("runtime/systemd")).unwrap();
     let _manager = std::os::unix::net::UnixListener::bind(root.path().join("runtime/systemd/private")).unwrap();
     install(&root, "bookmarks", "", &[item("fir", "Fir")]);
     let mut command = Command::new(env!("CARGO_BIN_EXE_kotodamad"));
     // A prefix the user set in the shell running the tests would replace the
-    // scope prefix.
+    // service prefix.
     with_home(&mut command, root.path()).env_remove(LAUNCH_PREFIX);
     let daemon = Daemon {
         child: command.spawn().unwrap(),
@@ -865,8 +865,8 @@ fn an_extension_gets_the_scope_prefix_when_there_is_a_user_manager() {
     ui.wait_for_titles("fir", &["Fir"]);
 
     let vars = extension_environ(&daemon, "bookmarks");
-    assert!(vars.contains(&format!("{LAUNCH_PREFIX}={SCOPE_PREFIX}")), "{vars:?}");
-    assert!(vars.contains(&format!("{LAUNCH_SCOPED}=1")), "{vars:?}");
+    assert!(vars.contains(&format!("{LAUNCH_PREFIX}={SERVICE_PREFIX}")), "{vars:?}");
+    assert!(vars.contains(&format!("{LAUNCH_AS_SERVICE}=1")), "{vars:?}");
 }
 
 /// The environment the running Extension `name` started with.

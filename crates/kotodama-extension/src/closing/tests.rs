@@ -18,16 +18,6 @@ fn the_start_time_is_read_past_a_name_with_spaces_and_parentheses() {
     assert_eq!(stat_start_time("42 (short) S 1"), None);
 }
 
-#[test]
-fn an_empty_or_vanished_cgroup_is_empty() {
-    let dir = tempfile::tempdir().unwrap();
-    assert!(crate::scope::is_empty(&dir.path().join("gone")));
-    std::fs::write(dir.path().join("cgroup.procs"), "").unwrap();
-    assert!(crate::scope::is_empty(dir.path()));
-    std::fs::write(dir.path().join("cgroup.procs"), "1234\n").unwrap();
-    assert!(!crate::scope::is_empty(dir.path()));
-}
-
 #[cfg(target_os = "linux")]
 #[test]
 fn a_launch_ends_once_its_process_group_does() {
@@ -42,8 +32,8 @@ fn a_launch_ends_once_its_process_group_does() {
     let group = launcher.id();
     launcher.wait().unwrap();
     let started = Instant::now();
-    assert!(!ended_by(None, group, started + Duration::from_millis(300)));
-    assert!(ended_by(None, group, started + Duration::from_secs(5)));
+    assert!(!group_ended_by(group, started + Duration::from_millis(300)));
+    assert!(group_ended_by(group, started + Duration::from_secs(5)));
 }
 
 #[cfg(target_os = "linux")]

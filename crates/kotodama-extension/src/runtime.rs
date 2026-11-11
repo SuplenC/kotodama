@@ -80,7 +80,7 @@ pub fn pass_wayland_display(command: &mut Command) {
 
 /// The display to pass on: none if this process has one, else the first
 /// `wayland-N` socket in the runtime directory.
-fn missing_wayland_display(own: Option<&OsStr>, runtime: Option<&Path>) -> Option<OsString> {
+pub(crate) fn missing_wayland_display(own: Option<&OsStr>, runtime: Option<&Path>) -> Option<OsString> {
     if own.is_some_and(|own| !own.is_empty()) {
         return None;
     }

@@ -110,10 +110,10 @@ fn settle_left(requested: Instant, settle: Duration, now: Instant) -> Duration {
 }
 
 /// Starts `command` as an Extension starts a program
-/// (`kotodama_extension::launch::launch`): in a systemd scope of its own
-/// when it can have one, and reaped when it exits. A thread of its own
-/// starts it, because starting waits until the user manager has made the
-/// scope, and the Daemon never waits for the user manager.
+/// (`kotodama_extension::launch::launch`): as a service of the user manager
+/// when there is one, else as a child reaped when it exits. A thread of its
+/// own starts it, because starting waits until the user manager has run it,
+/// and the Daemon never waits for the user manager.
 fn launch(command: Vec<String>) {
     let Some(program) = command.first() else {
         return;
