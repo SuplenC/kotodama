@@ -57,12 +57,12 @@ impl Apps {
                 .env("LANG", "pl_PL.UTF-8")
                 .env_remove("LC_ALL")
                 .env_remove("LC_MESSAGES")
-                // Started directly, not in a scope of the user's systemd. A
+                // Started as children, not as services of the user's systemd. A
                 // test run from a shell an older Kotodama started still
-                // inherits its KOTODAMA_LAUNCH_SCOPED, which would hide a
+                // inherits its KOTODAMA_LAUNCH_AS_SERVICE, which would hide a
                 // test's prefix.
                 .env("KOTODAMA_LAUNCH_PREFIX", "")
-                .env_remove("KOTODAMA_LAUNCH_SCOPED")
+                .env_remove("KOTODAMA_LAUNCH_AS_SERVICE")
                 .envs(env.iter().copied()),
             WAIT,
         );
@@ -536,8 +536,8 @@ fn an_action_on_a_missing_app_or_program_fails_with_a_message() {
     }
 }
 
-/// Under systemd the prefix starts each app in a scope of its own, so stopping
-/// the Daemon doesn't take the user's apps with it.
+/// A prefix the user sets, such as `uwsm app --`, replaces the service each
+/// app would get from the user manager.
 #[test]
 fn apps_start_through_the_launch_prefix_and_a_missing_program_still_fails() {
     let dir = data_dirs();
@@ -568,13 +568,13 @@ fn apps_start_through_the_launch_prefix_and_a_missing_program_still_fails() {
     );
     let mut apps = Apps::start_with(
         dir,
-        &[("KOTODAMA_LAUNCH_PREFIX", &format!("{} --scope", wrapper.display()))],
+        &[("KOTODAMA_LAUNCH_PREFIX", &format!("{} --unit", wrapper.display()))],
     );
     apps.send(ToExtension::Config(Table::new()));
     apps.added();
 
     assert_eq!(apps.run("app", "open"), Outcome::Close);
-    assert_eq!(wait_for(&out), format!("--scope\ntouch\n{}\n", ran.display()));
+    assert_eq!(wait_for(&out), format!("--unit\ntouch\n{}\n", ran.display()));
     for _ in 0..100 {
         if ran.exists() {
             break;
@@ -585,10 +585,10 @@ fn apps_start_through_the_launch_prefix_and_a_missing_program_still_fails() {
     assert!(matches!(apps.run("broken", "open"), Outcome::Failed { .. }));
 }
 
-/// The Daemon hands Extensions a prefix that only makes a scope, for those
-/// that can't make one themselves; this one makes its own.
+/// The Daemon hands Extensions a prefix that only starts a service, for those
+/// that can't ask the user manager themselves; this one asks it.
 #[test]
-fn a_prefix_that_only_makes_a_scope_is_passed_over() {
+fn a_prefix_that_only_starts_a_service_is_passed_over() {
     let dir = data_dirs();
     let out = dir.path().join("wrapped");
     let ran = dir.path().join("ran");
@@ -609,8 +609,8 @@ fn a_prefix_that_only_makes_a_scope_is_passed_over() {
         dir,
         &[
             ("KOTODAMA_LAUNCH_PREFIX", wrapper.to_str().unwrap()),
-            ("KOTODAMA_LAUNCH_SCOPED", "1"),
-            // No user manager, so the app starts without a scope.
+            ("KOTODAMA_LAUNCH_AS_SERVICE", "1"),
+            // No user manager, so the app starts as a child.
             ("XDG_RUNTIME_DIR", "/nonexistent"),
         ],
     );
@@ -638,7 +638,7 @@ fn launch_variables_seen_by(name: &str, env: &[(&str, &str)]) -> String {
         dir.path(),
         name,
         &format!(
-            "echo \"${{KOTODAMA_LAUNCH_PREFIX-unset}} ${{KOTODAMA_LAUNCH_SCOPED-unset}}\" > {0}.tmp\nmv {0}.tmp {0}",
+            "echo \"${{KOTODAMA_LAUNCH_PREFIX-unset}} ${{KOTODAMA_LAUNCH_AS_SERVICE-unset}}\" > {0}.tmp\nmv {0}.tmp {0}",
             out.display()
         ),
     );
@@ -652,13 +652,13 @@ fn launch_variables_seen_by(name: &str, env: &[(&str, &str)]) -> String {
 }
 
 #[test]
-fn an_app_started_without_a_scope_inherits_no_launch_prefix() {
+fn an_app_started_as_a_child_inherits_no_launch_prefix() {
     let seen = launch_variables_seen_by(
         "unscoped-app",
         &[
-            ("KOTODAMA_LAUNCH_PREFIX", "/nonexistent/systemd-run --scope"),
-            ("KOTODAMA_LAUNCH_SCOPED", "1"),
-            // No user manager, so the app starts without a scope.
+            ("KOTODAMA_LAUNCH_PREFIX", "/nonexistent/systemd-run"),
+            ("KOTODAMA_LAUNCH_AS_SERVICE", "1"),
+            // No user manager, so the app starts as a child.
             ("XDG_RUNTIME_DIR", "/nonexistent"),
         ],
     );

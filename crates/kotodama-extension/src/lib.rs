@@ -15,8 +15,9 @@
 //! - [`config`] reads settings from the Extension's config table, logging the ones of the wrong
 //!   shape.
 //! - [`dirs`] finds where the Extension keeps its state and cache.
-//! - [`launch`] starts the programs Actions run, detached from the Extension, each in a systemd
-//!   scope of its own ([`scope`], over [`dbus`]) when there is a user manager to make one.
+//! - [`launch`] starts the programs Actions run, each as a service the systemd user manager starts
+//!   ([`service`], over [`dbus`]), so it inherits nothing of the Extension's; without a user
+//!   manager, as a detached child.
 //! - `watch` (with the `watch` feature) watches directories, and acts once they settle after a
 //!   change.
 //!
@@ -94,7 +95,7 @@ mod items;
 pub mod launch;
 #[cfg(target_os = "linux")]
 pub mod runtime;
-pub mod scope;
+pub mod service;
 mod status;
 #[cfg(feature = "testing")]
 pub mod testing;

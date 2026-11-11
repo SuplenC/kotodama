@@ -67,6 +67,8 @@ fn parse(args: &[String]) -> Option<(Option<PathBuf>, Command)> {
 }
 
 fn main() -> ExitCode {
+    // SAFETY: first thing in main, so no other thread is running yet.
+    unsafe { kotodamad::take_activation() };
     // The Daemon's threads mostly wait on I/O, so one malloc arena costs no
     // speed.
     kotodama_extension::lean_memory();

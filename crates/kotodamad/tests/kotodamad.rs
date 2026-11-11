@@ -87,14 +87,15 @@ fn with_home<'a>(command: &'a mut Command, root: &Path) -> &'a mut Command {
         .env("HOME", root)
         .env_remove("WAYLAND_DISPLAY")
         // A test run from a shell an older Kotodama started still inherits
-        // its prefix, and its KOTODAMA_LAUNCH_SCOPED would hide the prefix a
+        // its prefix, and its KOTODAMA_LAUNCH_AS_SERVICE would hide the prefix a
         // test sets.
         .env_remove(LAUNCH_PREFIX)
-        .env_remove(LAUNCH_SCOPED)
+        .env_remove(LAUNCH_AS_SERVICE)
 }
 
 /// Starts the Daemon the way systemd's socket activation does: `listener` as
-/// file descriptor 3, named by `LISTEN_PID` and `LISTEN_FDS`.
+/// file descriptor 3, named by `LISTEN_PID` and `LISTEN_FDS`, with the
+/// `LISTEN_FDNAMES` and `LISTEN_PIDFDID` systemd sets beside them.
 #[cfg(target_os = "linux")]
 fn spawn_activated(root: &Path, listener: &std::os::unix::net::UnixListener) -> Child {
     use std::os::fd::AsRawFd;
@@ -106,7 +107,9 @@ fn spawn_activated(root: &Path, listener: &std::os::unix::net::UnixListener) -> 
     let mut command = Command::new("bash");
     command
         .args(["-c", "LISTEN_PID=$$ LISTEN_FDS=1 exec \"$0\""])
-        .arg(env!("CARGO_BIN_EXE_kotodamad"));
+        .arg(env!("CARGO_BIN_EXE_kotodamad"))
+        .env("LISTEN_FDNAMES", "kotodamad.socket")
+        .env("LISTEN_PIDFDID", "1");
     with_home(&mut command, root);
     // SAFETY: dup2 and fcntl are async-signal-safe, as code between fork and
     // exec must be. A copy made by dup2 stays open across exec; dup2 onto
@@ -804,7 +807,7 @@ fn a_quicklinks_command_inherits_no_launch_prefix() {
     fs::write(
         &seen,
         format!(
-            "#!/bin/sh\necho \"${{KOTODAMA_LAUNCH_PREFIX-unset}} ${{KOTODAMA_LAUNCH_SCOPED-unset}}\" > {0}.tmp\nmv {0}.tmp {0}\n",
+            "#!/bin/sh\necho \"${{KOTODAMA_LAUNCH_PREFIX-unset}} ${{KOTODAMA_LAUNCH_AS_SERVICE-unset}}\" > {0}.tmp\nmv {0}.tmp {0}\n",
             out.display()
         ),
     )
@@ -841,18 +844,18 @@ fn a_quicklinks_command_inherits_no_launch_prefix() {
     });
 }
 
-/// With no prefix of its own and a user manager to make scopes, the Daemon
-/// hands its Extensions the prefix that makes one.
+/// With no prefix of its own and a user manager to start services, the
+/// Daemon hands its Extensions the prefix that starts one.
 #[cfg(target_os = "linux")]
 #[test]
-fn an_extension_gets_the_scope_prefix_when_there_is_a_user_manager() {
+fn an_extension_gets_the_service_prefix_when_there_is_a_user_manager() {
     let root = Daemon::home();
     fs::create_dir(root.path().join("runtime/systemd")).unwrap();
     let _manager = std::os::unix::net::UnixListener::bind(root.path().join("runtime/systemd/private")).unwrap();
     install(&root, "bookmarks", "", &[item("fir", "Fir")]);
     let mut command = Command::new(env!("CARGO_BIN_EXE_kotodamad"));
     // A prefix the user set in the shell running the tests would replace the
-    // scope prefix.
+    // service prefix.
     with_home(&mut command, root.path()).env_remove(LAUNCH_PREFIX);
     let daemon = Daemon {
         child: command.spawn().unwrap(),
@@ -861,14 +864,20 @@ fn an_extension_gets_the_scope_prefix_when_there_is_a_user_manager() {
     let mut ui = daemon.connect();
     ui.wait_for_titles("fir", &["Fir"]);
 
-    let pid = fs::read_to_string(daemon.extension_dir("bookmarks").join("pid")).unwrap();
+    let vars = extension_environ(&daemon, "bookmarks");
+    assert!(vars.contains(&format!("{LAUNCH_PREFIX}={SERVICE_PREFIX}")), "{vars:?}");
+    assert!(vars.contains(&format!("{LAUNCH_AS_SERVICE}=1")), "{vars:?}");
+}
+
+/// The environment the running Extension `name` started with.
+#[cfg(target_os = "linux")]
+fn extension_environ(daemon: &Daemon, name: &str) -> Vec<String> {
+    let pid = fs::read_to_string(daemon.extension_dir(name).join("pid")).unwrap();
     let environ = fs::read(format!("/proc/{}/environ", pid.trim())).unwrap();
-    let vars: Vec<String> = environ
+    environ
         .split(|&byte| byte == 0)
         .map(|var| String::from_utf8_lossy(var).into_owned())
-        .collect();
-    assert!(vars.contains(&format!("{LAUNCH_PREFIX}={SCOPE_PREFIX}")), "{vars:?}");
-    assert!(vars.contains(&format!("{LAUNCH_SCOPED}=1")), "{vars:?}");
+        .collect()
 }
 
 /// systemd holds the socket while the Daemon is stopped, so a `kotodama toggle`
@@ -901,6 +910,31 @@ fn under_socket_activation_the_daemon_serves_the_socket_it_is_handed_and_the_nex
     };
     ui.wait_for_titles("kotodama", &["Kotodama"]);
     assert!(socket.exists(), "the Daemon left systemd's socket in place");
+}
+
+/// A program that does socket activation itself would take the variables for
+/// its own and treat whatever its descriptor 3 is as a socket.
+#[cfg(target_os = "linux")]
+#[test]
+fn under_socket_activation_an_extension_inherits_no_listen_variable() {
+    // Regression: #269.
+    let root = Daemon::home();
+    install(&root, "bookmarks", "", &[item("kotodama", "Kotodama")]);
+    let socket = root.path().join("runtime/kotodama.sock");
+    let listener = std::os::unix::net::UnixListener::bind(&socket).unwrap();
+    let daemon = Daemon {
+        child: spawn_activated(root.path(), &listener),
+        root,
+    };
+
+    let mut ui = daemon.connect();
+    ui.wait_for_titles("kotodama", &["Kotodama"]);
+
+    let leaked: Vec<String> = extension_environ(&daemon, "bookmarks")
+        .into_iter()
+        .filter(|var| var.starts_with("LISTEN_"))
+        .collect();
+    assert!(leaked.is_empty(), "the Extension inherited {leaked:?}");
 }
 
 // Peers on other protocol versions. Protocol 1.0 is the first released

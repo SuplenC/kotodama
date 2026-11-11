@@ -56,7 +56,7 @@ pub const DEFAULT_WITHDRAW_WITHIN: Duration = Duration::from_secs(5);
 
 /// The longest `withdraw_within` the config may set, in seconds. The Daemon
 /// withdraws a pick only for a minute after the run, and the app's time
-/// starts once it has its scope, so this leaves room for a slow start.
+/// starts once it has been executed, so this leaves room for a slow start.
 const MAX_WITHDRAW_WITHIN: f64 = 30.0;
 
 /// The settings the config table sets.

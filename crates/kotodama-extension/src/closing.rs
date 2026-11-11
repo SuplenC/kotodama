@@ -4,12 +4,14 @@
 //! # Owns
 //!
 //! Finding a copy of the program that ran before the launch, and waiting
-//! for everything the launch started to end.
+//! for everything a launch started as a child to end.
 //!
 //! # Not here
 //!
-//! Starting the program (`crate::launch`), its scope (`crate::scope`).
+//! Starting the program (`crate::launch`); when a service ends, which its
+//! manager says (`crate::service`).
 
+#[cfg(target_os = "linux")]
 use std::path::Path;
 use std::thread;
 use std::time::Duration;
@@ -18,10 +20,10 @@ use std::time::Instant;
 /// How often a launch is looked at again while what it started runs.
 const POLL: Duration = Duration::from_millis(100);
 
-/// Whether everything the launch started ended by `deadline`: its scope's
-/// cgroup when it has one, else the process group the launched process
-/// `group` leads. Call it once that process has been waited for.
-pub(crate) fn ended_by(cgroup: Option<&Path>, group: u32, deadline: Instant) -> bool {
+/// Whether everything a launch started as a child ended by `deadline`: the
+/// process group the launched process `group` leads. Call it once that
+/// process has been waited for.
+pub(crate) fn group_ended_by(group: u32, deadline: Instant) -> bool {
     loop {
         // Before looking, so what ended only after the deadline doesn't
         // count.
@@ -29,11 +31,7 @@ pub(crate) fn ended_by(cgroup: Option<&Path>, group: u32, deadline: Instant) -> 
         if now > deadline {
             return false;
         }
-        let ended = match cgroup {
-            Some(cgroup) => crate::scope::is_empty(cgroup),
-            None => group_ended(group),
-        };
-        if ended {
+        if group_ended(group) {
             return true;
         }
         thread::sleep(POLL.min(deadline - now));

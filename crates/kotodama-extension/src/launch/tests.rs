@@ -1,10 +1,17 @@
 use super::*;
 
+/// The lines `output` passes on.
+fn lines(output: &[u8]) -> Vec<String> {
+    let mut lines = Vec::new();
+    each_line(output, |line| lines.push(line));
+    lines
+}
+
 #[test]
-fn the_last_line_that_isnt_blank_is_kept_and_cut() {
-    assert_eq!(last_line_of(&b"one\ntwo\n\n  \n"[..]), Some("two".into()));
-    assert_eq!(last_line_of(&b"no end"[..]), Some("no end".into()));
-    assert_eq!(last_line_of(&b""[..]), None);
+fn each_line_that_isnt_blank_is_passed_on_trimmed_and_cut() {
+    assert_eq!(lines(b"one\n two \n\n  \n"), ["one", "two"]);
+    assert_eq!(lines(b"no end"), ["no end"]);
+    assert!(lines(b"").is_empty());
     let long = "x".repeat(10_000);
-    assert_eq!(last_line_of(long.as_bytes()).map(|line| line.len()), Some(LAST_LINE));
+    assert_eq!(lines(long.as_bytes())[0].len(), LAST_LINE);
 }

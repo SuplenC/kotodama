@@ -8,7 +8,8 @@ After=kotodamad.socket
 
 [Service]
 ExecStart=@bindir@/kotodamad
-# Every program the Daemon or an Extension starts for the user gets a scope of
-# its own from the user manager, so stopping or restarting the Daemon doesn't
-# kill the user's apps. Setting KOTODAMA_LAUNCH_PREFIX here replaces that.
+# Every program the Daemon or an Extension starts for the user is a service of
+# its own that the user manager starts, so it inherits nothing of this one and
+# stopping or restarting the Daemon doesn't kill the user's apps. Setting
+# KOTODAMA_LAUNCH_PREFIX here replaces that.
 Restart=on-failure

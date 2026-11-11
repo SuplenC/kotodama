@@ -16,7 +16,7 @@ The shared protocol. Maintained by hand: fix stale lines when you find them, and
 - `wire.rs`: `WireFormat` (postcard, protobuf, MessagePack, JSON) `encode`/`decode`; `encode_for` (for a peer on an older minor version).
 - `protobuf.rs`: the protobuf Wire format straight from the serde types (`protobuf/ser.rs`, `protobuf/de.rs`); the mapping is in its module docs.
 - `channel.rs`: `Channel::handshake` (a peer's side), `Channel::accept` (the Daemon's), `send` (for the peer's version), `reads` (whether the peer's version reads a message), `recv`, `split`; `ChannelReader::has_buffered` (what came with the last message).
-- `launch.rs:launch_command`: detached program start, `KOTODAMA_LAUNCH_PREFIX`; `launch_prefix` (none when `KOTODAMA_LAUNCH_SCOPED` marks it as `SCOPE_PREFIX`, which only makes a scope).
+- `launch.rs:launch_command`: detached program start, `KOTODAMA_LAUNCH_PREFIX`; `launch_prefix` (none when `KOTODAMA_LAUNCH_AS_SERVICE` marks it as `SERVICE_PREFIX`, which only starts a service).
 - `../benches/batch.rs`: encoding and decoding 10k Indexed items in each Wire format.
 - `../benches/formats.rs`: the Daemon's real messages in every Wire format and in prost, müsli `wire` and bilrost (`tests/support/mirror.rs`: their copies of the types; `tests/support/messages.rs`: the messages; both shared with `tests/protobuf.rs`).
 - `../kotodama.proto`: the protobuf schema for other languages, written by `tests/layout.rs`.
