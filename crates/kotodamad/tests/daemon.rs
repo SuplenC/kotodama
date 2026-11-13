@@ -2278,6 +2278,43 @@ fn an_alias_puts_its_result_first_and_follows_config_reloads() {
 }
 
 #[test]
+fn an_alias_is_named_with_spaces_for_its_hyphens_or_run_together() {
+    let mut h = Harness::with_config(
+        vec![plain("apps")],
+        config("[aliases]\nmy-web = { extension = \"apps\", item = \"firefox\" }"),
+    );
+    let apps = h.up(0);
+    h.add(&apps, launcher_apps());
+    let ui = h.front_end();
+
+    assert_eq!(first(&mut h, &ui, "my web"), "Firefox");
+    assert_eq!(first(&mut h, &ui, "MyWeb"), "Firefox");
+}
+
+#[test]
+fn a_quicklink_is_named_with_spaces_or_a_typo_and_opens_for_what_follows() {
+    let mut h = Harness::with_config(
+        vec![],
+        config(
+            "[quicklinks.wiki-en]\ntitle = \"Search Wikipedia\"\n\
+             url = \"https://en.wikipedia.org/w/index.php?search={query}\"\nopener = [\"open\"]",
+        ),
+    );
+    let ui = h.front_end();
+
+    for query in ["wiki en cats", "Wiki-En cats", "wkii-en cats"] {
+        assert_eq!(first(&mut h, &ui, query), "Search Wikipedia for “cats”", "{query}");
+        run(&mut h, &ui, "kotodama", "quicklink:wiki-en", "kotodama", "open");
+    }
+
+    let opened = vec![
+        "open".to_owned(),
+        "https://en.wikipedia.org/w/index.php?search=cats".into(),
+    ];
+    assert_eq!(*h.outputs.1.borrow(), [opened.clone(), opened.clone(), opened]);
+}
+
+#[test]
 fn an_alias_for_an_action_makes_it_primary() {
     let mut h = Harness::with_config(
         vec![plain("apps")],

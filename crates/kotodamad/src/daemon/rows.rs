@@ -32,11 +32,13 @@ use super::Session;
 use super::Source;
 use super::after_keyword;
 use super::named_only;
+use super::typos_for;
 use crate::arguments;
 use crate::history::IDENTITIES;
 use crate::history::Store;
 use crate::index::ItemRef;
 use crate::keywords::Alias;
+use crate::naming::Typos;
 use crate::rank;
 use crate::rank::Text;
 use crate::verbs::Verb;
@@ -227,7 +229,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
                 Some(OwnAction::Quicklink(quicklink)) => {
                     let quicklink = &self.keywords.quicklinks[quicklink];
                     if quicklink.takes_query()
-                        && let Some(query) = after_keyword(&session.query, &quicklink.keyword)
+                        && let Some(query) = after_keyword(&session.query, &quicklink.keyword, typos_for(&item))
                         && !query.is_empty()
                     {
                         item.title = format!("{} for “{query}”", item.title);
@@ -399,7 +401,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             }
             let typed = typed.get_or_insert_with(|| {
                 keyword
-                    .and_then(|keyword| after_keyword(session.searched(), &keyword.to_lowercase()))
+                    .and_then(|keyword| after_keyword(session.searched(), keyword, Typos::Forgiven))
                     .unwrap_or_default()
             });
             let mut given = BTreeMap::new();

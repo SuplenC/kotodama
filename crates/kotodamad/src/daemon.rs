@@ -98,6 +98,8 @@ use crate::kind_order::KindPlaces;
 use crate::most_used::Ahead;
 use crate::most_used::Picked;
 use crate::most_used::Versions;
+use crate::naming;
+use crate::naming::Typos;
 use crate::narrowing::Narrowing;
 use crate::open_view::Opening;
 use crate::paths::Overrides;
@@ -1187,15 +1189,21 @@ fn alias_id(keyword: &str) -> String {
     format!("alias:{keyword}")
 }
 
-/// What was typed after `keyword`, if the query starts with it. `keyword` is
-/// lowercase.
-fn after_keyword<'q>(query: &'q str, keyword: &str) -> Option<&'q str> {
-    let query = query.trim_start();
-    let (word, rest) = query.split_once(char::is_whitespace).unwrap_or((query, ""));
-    word.chars()
-        .flat_map(char::to_lowercase)
-        .eq(keyword.chars())
-        .then(|| rest.trim())
+/// What was typed after `keyword`, if the query's first words name it, as
+/// `naming::named` tells.
+fn after_keyword<'q>(query: &'q str, keyword: &str, typos: Typos) -> Option<&'q str> {
+    naming::named(query, keyword, typos, &mut Vec::new()).map(|(rest, _)| rest)
+}
+
+/// Whether the query may name `item`'s keyword with typos: only when it
+/// takes Arguments, so the words after a keyword typed with typos are its
+/// Argument rather than more of the search.
+fn typos_for(item: &Item) -> Typos {
+    if item.actions.iter().any(|action| !action.arguments.is_empty()) {
+        Typos::Forgiven
+    } else {
+        Typos::Refused
+    }
 }
 
 /// Reads `session.query`: the app it is in, if the user entered one and it

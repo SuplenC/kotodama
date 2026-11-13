@@ -34,6 +34,7 @@ use nucleo_matcher::Utf32Str;
 use nucleo_matcher::Utf32String;
 use nucleo_matcher::pattern::Pattern;
 
+use crate::naming;
 use crate::payload::Place;
 use crate::payload::Shelf;
 use crate::payload::encode;
@@ -182,7 +183,7 @@ pub enum Edit {
 struct Held {
     id: Arc<str>,
     identity: Option<Arc<str>>,
-    /// In lowercase.
+    /// As `naming::squash` makes it.
     keyword: Option<Arc<str>>,
     /// Its Actions, as indexes into [`Segment::offered`].
     actions: Box<[u32]>,
@@ -228,8 +229,11 @@ pub struct Segment {
     /// a new Item in its row would take its place on screen.
     freed: Vec<Row>,
     ids: HashMap<Arc<str>, Row>,
-    /// The rows whose Item has a keyword, by it in lowercase.
+    /// The rows whose Item has a keyword, by it as `naming::squash` makes it.
     keywords: HashMap<Arc<str>, Vec<Row>>,
+    /// Bytes in the longest keyword `keywords` has held, so a query's words
+    /// longer than that aren't looked up.
+    longest_keyword: usize,
     /// The rows whose Item has an Identity, by it.
     identities: HashMap<Arc<str>, Vec<Row>>,
     /// The name of each kind of Item the Segment has held.
@@ -491,10 +495,11 @@ impl Segment {
         self.every_letter[at] = folded.every_letter;
         self.initials[at] = folded.initials;
 
-        let keyword = item
-            .keyword
-            .as_ref()
-            .map(|keyword| list(&mut self.keywords, &keyword.to_lowercase(), row));
+        let keyword = item.keyword.as_deref().map(|keyword| {
+            let squashed = naming::squash(keyword);
+            self.longest_keyword = self.longest_keyword.max(squashed.len());
+            list(&mut self.keywords, &squashed, row)
+        });
         let identity = item
             .identity
             .as_deref()
@@ -527,7 +532,10 @@ impl Segment {
         let weak_at = folded.weak_at.unwrap_or(folded.words.len() as u32);
         self.kinds[keys.kind as usize] == item.kind.name()
             && held.identity.as_deref() == item.identity.as_deref()
-            && held.keyword.as_deref() == item.keyword.as_ref().map(|keyword| keyword.to_lowercase()).as_deref()
+            && match (held.keyword.as_deref(), item.keyword.as_deref()) {
+                (Some(held), Some(keyword)) => naming::is_squashed(keyword, held),
+                (held, keyword) => held.is_none() && keyword.is_none(),
+            }
             && keys.keyword == folded.keyword
             && keys.letters == folded.letters
             && keys.subtitle_initials == folded.subtitle_initials
@@ -973,9 +981,26 @@ impl Segment {
         self.ids.get(id).copied()
     }
 
-    /// The rows whose Item's keyword is `keyword`, given in lowercase.
+    /// The rows whose Item's keyword is `keyword`, given as
+    /// `naming::squash` makes it.
     pub fn keyed(&self, keyword: &str) -> &[Row] {
+        if keyword.len() > self.longest_keyword {
+            return &[];
+        }
         self.keywords.get(keyword).map_or(&[], Vec::as_slice)
+    }
+
+    /// Bytes in the longest keyword the Segment has held.
+    pub fn longest_keyword(&self) -> usize {
+        self.longest_keyword
+    }
+
+    /// Every keyword, as `naming::squash` makes it, with the rows whose Item
+    /// has it.
+    pub fn keywords(&self) -> impl Iterator<Item = (&str, &[Row])> {
+        self.keywords
+            .iter()
+            .map(|(keyword, rows)| (&**keyword, rows.as_slice()))
     }
 
     /// The rows of every Item with a keyword.

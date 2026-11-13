@@ -78,7 +78,7 @@ impl Tier {
 pub const LETTERS_PER_TYPO: usize = 4;
 
 /// How many typos a word of `len` letters may have.
-fn typos(len: usize) -> usize {
+pub(crate) fn typos(len: usize) -> usize {
     len / LETTERS_PER_TYPO
 }
 
@@ -1248,7 +1248,13 @@ fn word_in<C: Char>(chars: &[C], starts: &[u32], word: &[char], whole: bool) -> 
 /// alignment distance): all of them with `whole`, else those of the start
 /// nearest `word`, the longest of equally near ones. `None` if none is near
 /// enough. `distances` holds the table, a row per letter of `word`.
-fn within(word: &[char], text: &[char], typos: usize, whole: bool, distances: &mut Vec<usize>) -> Option<usize> {
+pub(crate) fn within(
+    word: &[char],
+    text: &[char],
+    typos: usize,
+    whole: bool,
+    distances: &mut Vec<usize>,
+) -> Option<usize> {
     // A longer start has more letters than typos to spare, and a shorter text
     // too few.
     let n = text.len().min(word.len() + typos);

@@ -36,6 +36,7 @@ use crate::conflict::Holder;
 use crate::daemon::ExtensionId;
 use crate::index::SIDES;
 use crate::keywords::Keywords;
+use crate::naming;
 use crate::points::Boost;
 use crate::problem::Report;
 
@@ -346,7 +347,9 @@ impl Apps {
     }
 
     /// The app whose word `query` starts with, by its place here, and where
-    /// the rest of the query starts: the word in any case, then whitespace.
+    /// the rest of the query starts: the word as `naming` names a keyword
+    /// exactly, in any case and with or without its separators, then
+    /// whitespace.
     /// The word alone, with nothing after it, searches as any word does.
     pub fn scope_of(&self, query: &str) -> Option<(usize, usize)> {
         if self.apps.is_empty() {
@@ -354,14 +357,20 @@ impl Apps {
         }
         let trimmed = query.trim_start();
         let start = query.len() - trimmed.len();
-        let end = trimmed.find(char::is_whitespace)?;
-        let word = &trimmed[..end];
-        let n = self
-            .apps
-            .iter()
-            .position(|app| word.chars().flat_map(char::to_lowercase).eq(app.word.chars()))?;
-        let space = trimmed[end..].chars().next().map_or(0, char::len_utf8);
-        Some((n, start + end + space))
+        let mut scope = None;
+        naming::leads(trimmed, usize::MAX, |lead, typed, _| {
+            // The word takes the query into its app once whitespace follows it.
+            let Some(space) = trimmed[typed.len()..].chars().next() else {
+                return true;
+            };
+            scope = self
+                .apps
+                .iter()
+                .position(|app| naming::is_squashed(&app.word, lead))
+                .map(|n| (n, start + typed.len() + space.len_utf8()));
+            scope.is_some()
+        });
+        scope
     }
 }
 

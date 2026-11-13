@@ -52,6 +52,7 @@ use super::Update;
 use super::action_titled;
 use super::after_keyword;
 use super::alias_id;
+use super::typos_for;
 use crate::arguments;
 use crate::history::Change;
 use crate::history::IDENTITIES;
@@ -59,6 +60,7 @@ use crate::history::ResultKey;
 use crate::history::Store;
 use crate::index::ItemRef;
 use crate::index::Slot;
+use crate::naming::Typos;
 use crate::pick;
 use crate::pick::Pick;
 use crate::problem;
@@ -286,7 +288,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
         if found_searched
             && missing == Missing::AskInForm
             && let Some(keyword) = &item.keyword
-            && let Some(typed) = after_keyword(session.searched(), &keyword.to_lowercase())
+            && let Some(typed) = after_keyword(session.searched(), keyword, Typos::Forgiven)
         {
             arguments::fill(&wanted.arguments, typed, &mut arguments);
         }
@@ -378,7 +380,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
                 let quicklink = &self.keywords.quicklinks[quicklink];
                 let query = match arguments.get("query") {
                     Some(query) => query.as_str(),
-                    None => after_keyword(&session.query, &quicklink.keyword).unwrap_or(""),
+                    None => after_keyword(&session.query, &quicklink.keyword, typos_for(item)).unwrap_or(""),
                 };
                 self.desktop.launch(quicklink.command(query));
                 session.send(ToFrontEnd::Close);

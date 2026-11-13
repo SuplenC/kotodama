@@ -50,6 +50,24 @@ fn a_query_is_in_an_app_once_whitespace_follows_its_word() {
 }
 
 #[test]
+fn an_apps_word_is_named_with_spaces_for_its_hyphens_or_run_together() {
+    let apps = apps(
+        &["name = \"clip\"\ncommand = [\"x\"]\nword = \"clip-history\""],
+        &Table::new(),
+    );
+
+    assert_eq!(apps.scope_of("clip-history fire"), Some((0, 13)));
+    assert_eq!(apps.scope_of("Clip History fire"), Some((0, 13)));
+    assert_eq!(apps.scope_of("cliphistory fire"), Some((0, 12)));
+    assert_eq!(apps.scope_of("clip history"), None, "nothing after the word yet");
+    assert_eq!(
+        apps.scope_of("clip histroy fire"),
+        None,
+        "an app's word is never named with typos"
+    );
+}
+
+#[test]
 fn every_extension_has_an_app_named_by_its_name_unless_its_manifest_chooses_a_word() {
     assert_eq!(words(&emoji()), ["apps", "emo"]);
 }

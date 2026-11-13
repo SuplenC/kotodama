@@ -69,6 +69,119 @@ fn an_items_keyword_takes_the_rest_of_the_query_as_its_arguments() {
     assert_eq!(arguments_run(&tools), [strings(&[("version", "1.23")])]);
 }
 
+/// The Item `new-counter` names, titled "New counter", whose primary Action
+/// takes an optional name.
+fn new_counter() -> Item {
+    keyed("new-counter", "New counter", vec![argument("name", true)])
+}
+
+/// An Item titled `title` that the keyword `id` names, whose primary Action
+/// takes `arguments`.
+fn keyed(id: &str, title: &str, arguments: Vec<Argument>) -> Item {
+    let mut item = item(
+        id,
+        title,
+        ItemKind::Url {
+            url: "https://example.com".into(),
+        },
+    );
+    item.keyword = Some(id.into());
+    item.actions[0].arguments = arguments;
+    item
+}
+
+/// The titles `query` lists on a desk with only `items`, and the Arguments
+/// its first Result's primary Action runs with.
+fn listed_and_run(items: Vec<Item>, query: &str) -> (Vec<String>, Vec<BTreeMap<String, String>>) {
+    let mut h = Harness::new(vec![plain("tools")]);
+    let tools = h.up(0);
+    h.add(&tools, items);
+    let ui = h.front_end();
+    tools.drain();
+
+    let rows = h.query(&ui, query);
+    let listed: Vec<String> = titles(&rows).into_iter().map(str::to_owned).collect();
+    if let Some(first) = rows.first() {
+        let (id, action) = (first.item.id.clone(), first.item.actions[0].id.clone());
+        run(&mut h, &ui, "tools", &id, "tools", &action);
+    }
+    (listed, arguments_run(&tools))
+}
+
+// Regression: #271.
+#[test]
+fn a_keyword_written_with_spaces_any_case_or_run_together_takes_the_rest_as_its_arguments() {
+    for query in [
+        "new-counter diciamo",
+        "new counter diciamo",
+        "New Counter diciamo",
+        "new_counter diciamo",
+        "newcounter diciamo",
+    ] {
+        let (listed, run) = listed_and_run(vec![new_counter()], query);
+
+        assert_eq!(listed, ["New counter"], "{query}");
+        assert_eq!(run, [strings(&[("name", "diciamo")])], "{query}");
+    }
+}
+
+// Regression: #271.
+#[test]
+fn a_keyword_with_a_typo_takes_the_rest_as_its_arguments() {
+    for query in ["new-coutner diciamo", "new coutner diciamo"] {
+        let (listed, run) = listed_and_run(vec![new_counter()], query);
+
+        assert_eq!(listed, ["New counter"], "{query}");
+        assert_eq!(run, [strings(&[("name", "diciamo")])], "{query}");
+    }
+}
+
+#[test]
+fn a_keyword_cut_short_names_nothing() {
+    for query in ["new co diciamo", "new diciamo"] {
+        let (listed, _) = listed_and_run(vec![new_counter()], query);
+
+        assert_eq!(listed, Vec::<String>::new(), "{query}");
+    }
+}
+
+#[test]
+fn the_argument_may_repeat_a_word_of_the_keyword() {
+    let (_, run) = listed_and_run(vec![new_counter()], "new counter counter");
+
+    assert_eq!(run, [strings(&[("name", "counter")])]);
+}
+
+#[test]
+fn the_argument_keeps_the_case_it_was_typed_in() {
+    let (_, run) = listed_and_run(vec![new_counter()], "New Counter Diciamo Tutto");
+
+    assert_eq!(run, [strings(&[("name", "Diciamo Tutto")])]);
+}
+
+#[test]
+fn a_typo_in_the_keyword_of_an_item_without_arguments_names_nothing() {
+    let dark = keyed("dark-mode", "Toggle dark mode", Vec::new());
+
+    let (listed, _) = listed_and_run(vec![dark], "dark-mdoe now");
+
+    assert_eq!(listed, Vec::<String>::new());
+}
+
+#[test]
+fn an_exact_keyword_ranks_above_one_with_a_typo() {
+    let minutes = || vec![argument("minutes", false)];
+    let items = vec![
+        keyed("lock-on", "Lock on", minutes()),
+        keyed("lock-in", "Lock in", minutes()),
+    ];
+
+    let (listed, run) = listed_and_run(items, "lock in 10m");
+
+    assert_eq!(listed, ["Lock in", "Lock on"]);
+    assert_eq!(run, [strings(&[("minutes", "10m")])]);
+}
+
 #[test]
 fn a_file_argument_reaches_the_action_as_an_absolute_path() {
     let mut h = Harness::new(vec![plain("tools")]);
