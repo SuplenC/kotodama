@@ -985,24 +985,31 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
         (!held).then_some(slot)
     }
 
-    /// What the query typed for `item`'s Arguments: what follows the first
-    /// of its names the query names, else, if it takes Arguments, what
-    /// follows its title when that names it.
+    /// What the query typed for `item`'s Arguments: what follows the name
+    /// the query names, or, if it takes Arguments, its title when that
+    /// names it, whichever of the two covers more of the query.
     pub(super) fn typed_for<'q>(&self, session: &'q Session, item: &Item) -> Option<&'q str> {
         let typed = session.searched();
         if typed.trim().is_empty() {
             return None;
         }
-        if let Some((rest, _)) = naming::named(typed, &item.names, typos_for(item), &mut Vec::new()) {
-            return Some(rest);
-        }
+        let by_name = naming::named(typed, &item.names, typos_for(item), &mut Vec::new()).map(|(rest, _)| rest);
         if !naming::takes_arguments(item) {
-            return None;
+            return by_name;
         }
-        let (title, rest) = naming::after_title(typed, &item.title)?;
-        self.titled_alone(session, &naming::title_key(&item.title), title)
-            .is_some()
-            .then_some(rest)
+        let by_title = naming::after_title(typed, &item.title)
+            .filter(|&(title, _)| {
+                self.titled_alone(session, &naming::title_key(&item.title), title)
+                    .is_some()
+            })
+            .map(|(_, rest)| rest);
+        // A name may be the start of the title, as `keep-awake` is of "Keep
+        // awake for": the title typed whole is not an Argument. Both rests
+        // end the query, so the shorter one follows more of it.
+        match (by_name, by_title) {
+            (Some(name), Some(title)) => Some(if title.len() < name.len() { title } else { name }),
+            (name, title) => name.or(title),
+        }
     }
 
     /// The Alias the session's query names, typed alone or before an
