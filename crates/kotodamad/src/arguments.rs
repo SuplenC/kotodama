@@ -1,9 +1,9 @@
-//! Arguments: what is typed after an Item's keyword, as `1.23` in `go 1.23`,
+//! Arguments: what is typed after one of an Item's names or its title, as `1.23` in `go 1.23`,
 //! goes to the Action that runs.
 //!
 //! # Owns
 //!
-//! - [`fill`]: the Arguments an Action takes, filled from what follows its keyword.
+//! - [`fill`]: the Arguments an Action takes, filled from what follows its name.
 //! - [`missing`], [`form`] and [`submitted`]: the form that asks for the rest, and its answers.
 //! - [`invalid`]: a number Argument that isn't one; [`written_numbers`]: one that is, written out
 //!   the one way.
@@ -12,7 +12,7 @@
 //!
 //! # Not here
 //!
-//! - Matching the keyword: `keywords.rs`, and the search in `daemon/search.rs`.
+//! - Matching the name: `naming.rs`, and the search in `daemon/search.rs`.
 //! - Running the Action: `daemon/picks.rs`.
 //! - Checking a submitted form, the argument form too: `validation.rs`.
 

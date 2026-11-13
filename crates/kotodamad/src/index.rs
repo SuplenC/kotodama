@@ -511,6 +511,28 @@ impl Index {
             .unwrap_or_default()
     }
 
+    /// The Items within `reach` that take Arguments and whose title is
+    /// `key`, given as `naming::title_key` makes it.
+    pub fn titled<'a>(&'a self, key: &'a str, reach: Reach) -> impl Iterator<Item = Slot> + 'a {
+        self.segments
+            .iter()
+            .enumerate()
+            .filter(move |&(n, _)| reach.reads(n, &self.searched))
+            .flat_map(move |(n, segment)| Self::slots(n, segment.titled(key)))
+    }
+
+    /// Bytes in the longest title of the Items within `reach` that take
+    /// Arguments, or more.
+    pub fn longest_title(&self, reach: Reach) -> usize {
+        self.segments
+            .iter()
+            .enumerate()
+            .filter(|&(n, _)| reach.reads(n, &self.searched))
+            .map(|(_, segment)| segment.longest_title())
+            .max()
+            .unwrap_or_default()
+    }
+
     /// Every keyword of the Items within `reach`, as `naming::squash` makes
     /// it, with the Items that have it.
     pub fn keywords(&self, reach: Reach) -> impl Iterator<Item = (&str, impl Iterator<Item = Slot> + '_)> {
@@ -648,7 +670,7 @@ impl Index {
         }
     }
 
-    /// Every Item with a keyword, in slot order.
+    /// Every Item a keyword or its title names, in slot order.
     pub fn keyed_all(&self) -> Vec<Slot> {
         let mut keyed: Vec<Slot> = self
             .segments

@@ -280,7 +280,7 @@ message Item {
   string title = 8;
   optional string subtitle = 9;
   optional string icon = 10;
-  optional string keyword = 11;
+  repeated string names = 11;
   repeated string keywords = 12;
   repeated Action actions = 13;
   bool hidden = 14;

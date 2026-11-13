@@ -367,7 +367,7 @@ fn an_installed_app_beats_an_item_about_it_that_lists_its_name_as_a_keyword() {
 #[test]
 fn an_items_own_keyword_still_ranks_as_an_exact_match() {
     let mut remove = about("Remove Google Chrome", &[]);
-    remove.keyword = Some("chrome".into());
+    remove.names = vec!["chrome".into()];
     let mut w = World::with(vec![app("Google Chrome"), remove], "");
     assert_eq!(rows(&mut w, "chrome"), ["Remove Google Chrome", "Google Chrome"]);
 }
@@ -554,7 +554,7 @@ fn a_trailing_space_asks_for_a_whole_word() {
 #[test]
 fn an_items_keyword_puts_it_first_with_the_rest_as_its_argument() {
     let mut go = app("Go: use a version");
-    go.keyword = Some("go".into());
+    go.names = vec!["go".into()];
     go.actions[0].arguments = vec![Argument::new("version")];
     let mut w = World::with(vec![app("Gnome Online"), go], "");
     assert_eq!(w.first("go 1.23"), "Go: use a version");

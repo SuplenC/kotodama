@@ -544,7 +544,7 @@ fn item(kind: ItemKind) -> Item {
         title: "Title".into(),
         subtitle: Some("Subtitle".into()),
         icon: Some("icon".into()),
-        keyword: Some("go".into()),
+        names: vec!["go".into()],
         keywords: vec!["browser".into()],
         actions: vec![action()],
         hidden: true,

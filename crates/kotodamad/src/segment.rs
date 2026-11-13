@@ -8,7 +8,7 @@
 //! own, so a change to one Extension's Items copies only its Segment.
 //!
 //! Of the rest of an Item, a Segment keeps in memory only what ranking reads:
-//! its id, Identity, keyword and Actions. The whole Item waits on a
+//! its id, Identity, names and Actions. The whole Item waits on a
 //! [`Shelf`], off the heap, until a Result shows it. A placeholder, an Item
 //! that yields, is kept whole besides, as it leaves its row while it stands
 //! aside and takes one again when it comes back.
@@ -103,8 +103,8 @@ struct Keys {
     letters: Letters,
     /// The Item's kind, as an index into [`Segment::kinds`].
     kind: u16,
-    /// Whether `words` starts with the Item's own keyword.
-    keyword: bool,
+    /// How many of the Item's names `words` starts with.
+    names: u8,
     /// Whether the row holds an Item: a search reads it here, beside the
     /// rest, rather than in the Segment's `held`.
     filled: bool,
@@ -183,8 +183,9 @@ pub enum Edit {
 struct Held {
     id: Arc<str>,
     identity: Option<Arc<str>>,
-    /// As `naming::squash` makes it.
-    keyword: Option<Arc<str>>,
+    /// Its names as `naming::squash` makes them, then, for an Item that
+    /// takes Arguments, its title as `naming::title_key` makes it.
+    names: Box<[Arc<str>]>,
     /// Its Actions, as indexes into [`Segment::offered`].
     actions: Box<[u32]>,
     /// Where the whole Item is on the Segment's Shelf.
@@ -229,11 +230,16 @@ pub struct Segment {
     /// a new Item in its row would take its place on screen.
     freed: Vec<Row>,
     ids: HashMap<Arc<str>, Row>,
-    /// The rows whose Item has a keyword, by it as `naming::squash` makes it.
+    /// The rows whose Item has names, by each as `naming::squash` makes it.
     keywords: HashMap<Arc<str>, Vec<Row>>,
     /// Bytes in the longest keyword `keywords` has held, so a query's words
     /// longer than that aren't looked up.
     longest_keyword: usize,
+    /// The rows whose Item takes Arguments, by its title as
+    /// `naming::title_key` makes it.
+    titles: HashMap<Arc<str>, Vec<Row>>,
+    /// Bytes in the longest title `titles` has held.
+    longest_title: usize,
     /// The rows whose Item has an Identity, by it.
     identities: HashMap<Arc<str>, Vec<Row>>,
     /// The name of each kind of Item the Segment has held.
@@ -484,7 +490,7 @@ impl Segment {
             starts,
             title_starts: folded.title_starts.len() as u32,
             words_starts,
-            keyword: folded.keyword,
+            names: folded.names,
             subtitle_initials: folded.subtitle_initials,
             letters: folded.letters,
             kind,
@@ -495,11 +501,7 @@ impl Segment {
         self.every_letter[at] = folded.every_letter;
         self.initials[at] = folded.initials;
 
-        let keyword = item.keyword.as_deref().map(|keyword| {
-            let squashed = naming::squash(keyword);
-            self.longest_keyword = self.longest_keyword.max(squashed.len());
-            list(&mut self.keywords, &squashed, row)
-        });
+        let names = self.list_names(item, row);
         let identity = item
             .identity
             .as_deref()
@@ -514,15 +516,31 @@ impl Segment {
         self.held[at] = Some(Held {
             id,
             identity,
-            keyword,
+            names,
             actions,
             place,
         });
     }
 
+    /// Lists `row` under each of `item`'s names, and under its title if it
+    /// takes Arguments, and returns them as [`Held::names`] keeps them.
+    fn list_names(&mut self, item: &Item, row: Row) -> Box<[Arc<str>]> {
+        let (names, title) = names_of(item);
+        let mut listed = Vec::with_capacity(names.len() + usize::from(title.is_some()));
+        for name in names {
+            self.longest_keyword = self.longest_keyword.max(name.len());
+            listed.push(list(&mut self.keywords, &name, row));
+        }
+        if let Some(title) = title {
+            self.longest_title = self.longest_title.max(title.len());
+            listed.push(list(&mut self.titles, &title, row));
+        }
+        listed.into_boxed_slice()
+    }
+
     /// Whether `item`, sent again for `row`, is searched by the same keys:
-    /// the same kind, Identity, keyword and folded texts. Only its Actions,
-    /// its icon or its kind's field may differ.
+    /// the same kind, Identity, names, folded texts, and whether it takes
+    /// Arguments. Only its Actions, its icon or its kind's field may differ.
     fn same_keys(&self, row: Row, item: &Item, folded: &Folded) -> bool {
         let Some(held) = self.held(row) else {
             return false;
@@ -532,11 +550,8 @@ impl Segment {
         let weak_at = folded.weak_at.unwrap_or(folded.words.len() as u32);
         self.kinds[keys.kind as usize] == item.kind.name()
             && held.identity.as_deref() == item.identity.as_deref()
-            && match (held.keyword.as_deref(), item.keyword.as_deref()) {
-                (Some(held), Some(keyword)) => naming::is_squashed(keyword, held),
-                (held, keyword) => held.is_none() && keyword.is_none(),
-            }
-            && keys.keyword == folded.keyword
+            && same_names(&held.names, item)
+            && keys.names == folded.names
             && keys.letters == folded.letters
             && keys.subtitle_initials == folded.subtitle_initials
             && self.every_letter[row as usize] == folded.every_letter
@@ -645,8 +660,11 @@ impl Segment {
         let Some(held) = self.held.get_mut(row as usize).and_then(Option::take) else {
             return;
         };
-        if let Some(keyword) = &held.keyword {
-            unlist(&mut self.keywords, keyword, row);
+        // A title may squash as one of the names does, so each is taken off
+        // both tables.
+        for name in &held.names {
+            unlist(&mut self.keywords, name, row);
+            unlist(&mut self.titles, name, row);
         }
         if let Some(identity) = &held.identity {
             unlist(&mut self.identities, identity, row);
@@ -828,7 +846,7 @@ impl Segment {
                 starts: &self.starts[words..end],
             },
             weak_at,
-            keyword: keys.keyword,
+            names: keys.names,
             subtitle: self.text(keys.subtitle),
             initials: self.initials[row as usize],
             subtitle_initials: keys.subtitle_initials,
@@ -981,7 +999,7 @@ impl Segment {
         self.ids.get(id).copied()
     }
 
-    /// The rows whose Item's keyword is `keyword`, given as
+    /// The rows whose Item has the name `keyword`, given as
     /// `naming::squash` makes it.
     pub fn keyed(&self, keyword: &str) -> &[Row] {
         if keyword.len() > self.longest_keyword {
@@ -1003,9 +1021,24 @@ impl Segment {
             .map(|(keyword, rows)| (&**keyword, rows.as_slice()))
     }
 
-    /// The rows of every Item with a keyword.
+    /// The rows whose Item takes Arguments and whose title is `key`, given
+    /// as `naming::title_key` makes it.
+    pub fn titled(&self, key: &str) -> &[Row] {
+        if key.len() > self.longest_title {
+            return &[];
+        }
+        self.titles.get(key).map_or(&[], Vec::as_slice)
+    }
+
+    /// Bytes in the longest title the Segment has held for an Item that
+    /// takes Arguments.
+    pub fn longest_title(&self) -> usize {
+        self.longest_title
+    }
+
+    /// The rows of every Item a keyword or its title names.
     pub fn keyed_rows(&self) -> impl Iterator<Item = &Row> {
-        self.keywords.values().flatten()
+        self.keywords.values().chain(self.titles.values()).flatten()
     }
 
     /// The rows whose Item's Identity is `identity`.
@@ -1060,6 +1093,31 @@ fn list(lists: &mut HashMap<Arc<str>, Vec<Row>>, name: &str, row: Row) -> Arc<st
     let name: Arc<str> = name.into();
     lists.insert(Arc::clone(&name), vec![row]);
     name
+}
+
+/// `item`'s names as `naming::squash` makes them, without the empty ones or
+/// a second of one, and its title as `naming::title_key` makes it if it
+/// takes Arguments and has letters or digits.
+fn names_of(item: &Item) -> (Vec<String>, Option<String>) {
+    let mut names: Vec<String> = Vec::with_capacity(item.names.len());
+    for name in &item.names {
+        let squashed = naming::squash(name);
+        if !squashed.is_empty() && !names.contains(&squashed) {
+            names.push(squashed);
+        }
+    }
+    let title = naming::takes_arguments(item)
+        .then(|| naming::title_key(&item.title))
+        .filter(|title| !title.is_empty());
+    (names, title)
+}
+
+/// Whether `held`, as [`Held::names`] keeps them, are `item`'s.
+fn same_names(held: &[Arc<str>], item: &Item) -> bool {
+    let (names, title) = names_of(item);
+    held.iter()
+        .map(|name| &**name)
+        .eq(names.iter().map(String::as_str).chain(title.as_deref()))
 }
 
 /// Takes `row` off the list kept under `name`, and the list off `lists` once

@@ -33,7 +33,7 @@ pub fn item(n: usize) -> Item {
         title: format!("Example App {n}"),
         subtitle: Some("A typical application with a one-line description".into()),
         icon: Some(format!("org.example.App{n}")),
-        keyword: None,
+        names: Vec::new(),
         keywords: vec!["example".into(), "utility".into(), format!("app{n}")],
         actions: vec![
             Action::new("open", "Open"),

@@ -132,7 +132,7 @@ impl Quicklink {
             title: self.title.clone(),
             subtitle: Some(subtitle),
             icon: self.icon.clone(),
-            keyword: Some(self.keyword.clone()),
+            names: vec![self.keyword.clone()],
             identity: None,
             keywords: Vec::new(),
             hidden: false,

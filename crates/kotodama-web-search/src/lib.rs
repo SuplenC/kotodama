@@ -247,7 +247,7 @@ fn item(id: String, title: String, url: String) -> Item {
         title,
         subtitle: Some(url),
         icon: Some(ICON.into()),
-        keyword: None,
+        names: Vec::new(),
         keywords: Vec::new(),
         actions: vec![Action::new(OPEN, "Open")],
         hidden: false,

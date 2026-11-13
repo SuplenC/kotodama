@@ -274,7 +274,7 @@ fn an_item_with_a_keyword_is_read_before_the_keyword_is_typed() {
     let (mut h, indexed) = indexing(vec![plain("apps")]);
     let apps = h.up(0);
     let mut firefox = app("Firefox");
-    firefox.keyword = Some("ff".into());
+    firefox.names = vec!["ff".into()];
     h.add(&apps, vec![firefox, app("Mail")]);
     next_version(&mut h, &indexed);
     let firefox = ("apps".to_owned(), "firefox".to_owned());
@@ -552,7 +552,10 @@ fn random_item(random: &mut Random) -> Item {
     );
     item.identity = (random.below(4) == 0).then(|| format!("thing:{}", random.below(4)));
     item.subtitle = (random.below(2) == 0).then(|| words(random, 3));
-    item.keyword = (random.below(6) == 0).then(|| random.pick(WORDS).to_lowercase());
+    item.names = (random.below(6) == 0)
+        .then(|| random.pick(WORDS).to_lowercase())
+        .into_iter()
+        .collect();
     item.keywords = (0..random.below(2)).map(|_| words(random, 2)).collect();
     item.hidden = random.below(12) == 0;
     item.app_only = random.below(5) == 0;

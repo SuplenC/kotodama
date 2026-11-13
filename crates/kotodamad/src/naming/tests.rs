@@ -1,14 +1,14 @@
 use super::*;
 
 fn exact(query: &str, keyword: &str) -> Option<String> {
-    named(query, keyword, Typos::Refused, &mut Vec::new()).map(|(rest, naming)| {
+    named(query, &[keyword], Typos::Refused, &mut Vec::new()).map(|(rest, naming)| {
         assert_eq!(naming, Naming::Exact);
         rest.to_owned()
     })
 }
 
 fn forgiven(query: &str, keyword: &str) -> Option<(String, Naming)> {
-    named(query, keyword, Typos::Forgiven, &mut Vec::new()).map(|(rest, naming)| (rest.to_owned(), naming))
+    named(query, &[keyword], Typos::Forgiven, &mut Vec::new()).map(|(rest, naming)| (rest.to_owned(), naming))
 }
 
 #[test]
@@ -116,4 +116,63 @@ fn leads_stop_past_the_longest_keyword() {
             ("newcounter".to_owned(), "new counter".to_owned(), "diciamo".to_owned()),
         ]
     );
+}
+
+#[test]
+fn any_of_the_names_is_named() {
+    let names = ["timer", "pomodoro", "count-down"];
+    for query in ["timer 25m", "pomodoro 25m", "count down 25m"] {
+        assert_eq!(
+            named(query, &names, Typos::Refused, &mut Vec::new()),
+            Some(("25m", Naming::Exact)),
+            "{query}"
+        );
+    }
+    assert_eq!(named("stopwatch 25m", &names, Typos::Refused, &mut Vec::new()), None);
+    assert_eq!(named::<&str>("timer", &[], Typos::Forgiven, &mut Vec::new()), None);
+}
+
+#[test]
+fn a_name_typed_exactly_wins_over_an_earlier_one_with_a_typo() {
+    // "timre" is "timer" with two letters swapped, and exactly "timre".
+    assert_eq!(
+        named("timre 5", &["timer", "timre"], Typos::Forgiven, &mut Vec::new()),
+        Some(("5", Naming::Exact))
+    );
+    assert_eq!(
+        named("pomodro 5", &["timer", "pomodoro"], Typos::Forgiven, &mut Vec::new()),
+        Some(("5", Naming::Typo))
+    );
+}
+
+#[test]
+fn a_title_is_its_letters_and_digits_folded() {
+    assert_eq!(title_key("Lock in…"), "lockin");
+    assert_eq!(title_key("Keyboard: set layouts"), "keyboardsetlayouts");
+    assert_eq!(title_key("Wi-Fi 6 → on"), "wifi6on");
+}
+
+#[test]
+fn the_title_typed_without_its_punctuation_takes_the_rest_as_its_argument() {
+    assert_eq!(
+        after_title("lock in 10m", "Lock in…").map(|(_, rest)| rest),
+        Some("10m")
+    );
+    assert_eq!(
+        after_title("Keyboard set layouts us", "Keyboard: set layouts").map(|(_, rest)| rest),
+        Some("us")
+    );
+    assert_eq!(
+        after_title("keyboard: set layouts us", "Keyboard: set layouts").map(|(_, rest)| rest),
+        Some("us")
+    );
+    assert_eq!(after_title("lock in", "Lock in…").map(|(_, rest)| rest), Some(""));
+}
+
+#[test]
+fn a_title_is_named_whole_and_without_typos() {
+    assert_eq!(after_title("lock 10m", "Lock in…").map(|(_, rest)| rest), None);
+    assert_eq!(after_title("lock on 10m", "Lock in…").map(|(_, rest)| rest), None);
+    assert_eq!(after_title("make lock in 10m", "Lock in…").map(|(_, rest)| rest), None);
+    assert_eq!(after_title("… x", "…").map(|(_, rest)| rest), None);
 }

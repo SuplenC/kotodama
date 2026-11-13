@@ -91,7 +91,7 @@ fn item(id: &str, kind: &str, title: &str, action: Action) -> Item {
         title: title.into(),
         subtitle: None,
         icon: None,
-        keyword: None,
+        names: Vec::new(),
         keywords: Vec::new(),
         actions: vec![action],
         hidden: false,

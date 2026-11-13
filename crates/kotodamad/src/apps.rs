@@ -100,7 +100,7 @@ impl App {
                 None => format!("Search {}", self.title),
             }),
             icon: self.icon.clone(),
-            keyword: Some(self.word.clone()),
+            names: vec![self.word.clone()],
             identity: None,
             keywords: vec![self.word.clone()],
             hidden: false,

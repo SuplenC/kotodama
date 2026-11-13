@@ -234,7 +234,7 @@ fn the_subject_is_highlighted_as_it_would_be_typed_alone() {
 fn an_items_keyword_after_the_verb_names_it() {
     let mut desk = Desk::new();
     let mut gimp = identified("Gimp");
-    gimp.keyword = Some("zz".into());
+    gimp.names = vec!["zz".into()];
     desk.h.add(&desk.apps, vec![gimp]);
     desk.target(&["gimp", "google-chrome"]);
 

@@ -133,7 +133,7 @@ impl Power {
             title: self.title().to_owned(),
             subtitle: Some(self.subtitle().to_owned()),
             icon: Some(self.icon().to_owned()),
-            keyword: None,
+            names: Vec::new(),
             keywords: self.keywords().iter().map(|&keyword| keyword.to_owned()).collect(),
             hidden: false,
             app_only: false,

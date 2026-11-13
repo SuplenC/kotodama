@@ -167,7 +167,7 @@ impl Settings {
             title,
             subtitle: app.generic_name.clone().or_else(|| app.comment.clone()),
             icon: app.icon.clone(),
-            keyword: None,
+            names: Vec::new(),
             keywords,
             hidden: false,
             app_only: false,

@@ -56,8 +56,8 @@ pub mod prost {
         pub subtitle: Option<String>,
         #[prost(string, optional, tag = "10")]
         pub icon: Option<String>,
-        #[prost(string, optional, tag = "11")]
-        pub keyword: Option<String>,
+        #[prost(string, repeated, tag = "11")]
+        pub names: Vec<String>,
         #[prost(string, repeated, tag = "12")]
         pub keywords: Vec<String>,
         #[prost(message, repeated, tag = "13")]
@@ -207,7 +207,7 @@ pub mod prost {
             title: item.title.clone(),
             subtitle: item.subtitle.clone(),
             icon: item.icon.clone(),
-            keyword: item.keyword.clone(),
+            names: item.names.clone(),
             keywords: item.keywords.clone(),
             actions: item.actions.iter().map(action).collect(),
             hidden: item.hidden,
@@ -329,7 +329,7 @@ pub mod musli {
         pub title: String,
         pub subtitle: Option<String>,
         pub icon: Option<String>,
-        pub keyword: Option<String>,
+        pub names: Vec<String>,
         pub keywords: Vec<String>,
         pub actions: Vec<Action>,
         pub hidden: bool,
@@ -418,7 +418,7 @@ pub mod musli {
             title: mirror.title,
             subtitle: mirror.subtitle,
             icon: mirror.icon,
-            keyword: mirror.keyword,
+            names: mirror.names,
             keywords: mirror.keywords,
             actions: item.actions.iter().map(action).collect(),
             hidden: mirror.hidden,
@@ -518,7 +518,7 @@ pub mod bilrost {
         pub title: String,
         pub subtitle: Option<String>,
         pub icon: Option<String>,
-        pub keyword: Option<String>,
+        pub names: Vec<String>,
         pub keywords: Vec<String>,
         pub actions: Vec<Action>,
         pub hidden: bool,
@@ -646,7 +646,7 @@ pub mod bilrost {
             title: mirror.title,
             subtitle: mirror.subtitle,
             icon: mirror.icon,
-            keyword: mirror.keyword,
+            names: mirror.names,
             keywords: mirror.keywords,
             actions: item.actions.iter().map(action).collect(),
             hidden: mirror.hidden,

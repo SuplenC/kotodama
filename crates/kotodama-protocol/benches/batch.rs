@@ -26,7 +26,7 @@ fn batch() -> FromExtension {
             title: format!("Example App {n}"),
             subtitle: Some("A typical application with a one-line description".into()),
             icon: Some(format!("org.example.App{n}")),
-            keyword: None,
+            names: Vec::new(),
             identity: None,
             keywords: vec!["example".into(), "utility".into(), format!("app{n}")],
             hidden: false,

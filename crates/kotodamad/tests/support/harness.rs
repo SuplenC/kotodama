@@ -150,7 +150,7 @@ pub fn item(id: &str, title: &str, kind: ItemKind) -> Item {
         title: title.into(),
         subtitle: None,
         icon: None,
-        keyword: None,
+        names: Vec::new(),
         identity: None,
         keywords: vec![],
         hidden: false,

@@ -1,6 +1,6 @@
 # 34. An Item's search words match as a word start, and only its own keyword as exact
 
-Status: accepted (2026-10-28); amends ADR 0021 and ADR 0032
+Status: accepted (2026-10-28); amends ADR 0021 and ADR 0032; amended by ADR 0042 (every one of an Item's names matches as exact)
 
 ADR 0021 ranked an exact keyword as exact, behind an exact title on a tie, and ADR 0032 counts it in the exact band. That held for both of an Item's keywords: `keyword`, the one word typed before its Arguments (`go` in `go 1.23`), and `keywords`, the search words an Extension lists so the Item is found by more than its title. Typing `chrome` with Google Chrome installed listed KubaOS's "Remove Google Chrome" and "Install Google Chrome" above the app: their `keywords` held `chrome`, an exact match, while the app's title "Google Chrome" only has a word starting with the query, a band lower. Whether an installed app ranks above the Items about it depended on how each Extension wrote its keywords.
 

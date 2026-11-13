@@ -237,7 +237,7 @@ fn item(id: &str, title: &str) -> Item {
         title: title.into(),
         subtitle: None,
         icon: None,
-        keyword: None,
+        names: Vec::new(),
         identity: None,
         keywords: vec![],
         hidden: false,

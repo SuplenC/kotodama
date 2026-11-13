@@ -1,6 +1,6 @@
 # 28. One keyword table with a fixed precedence
 
-Status: accepted (2026-10-21)
+Status: accepted (2026-10-21); amended by ADR 0042 (an Item's names each take a key, and the title of an Item that takes Arguments comes last, naming it only when nothing holds its words)
 
 Three things claim a word typed first in the search: an Alias (ADR 0012), a Quicklink, and an app's word (ADR 0027). Before this, each was handled on its own. Two apps asking for one word were settled by the order Extensions were found in, which follows the directory listing. An app whose word and name were both taken had no app, so its app-only Items could not be reached. A Quicklink `calc` and the Calculator's word `calc` both matched as keywords, and nothing said which one the user meant. None of these conflicts was reported.
 

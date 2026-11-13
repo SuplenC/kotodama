@@ -50,6 +50,7 @@ use crate::history::Store;
 use crate::history::query_key;
 use crate::index::Reach;
 use crate::index::SIDES;
+use crate::index::Slot;
 use crate::keywords::Alias;
 use crate::most_used::Counts;
 use crate::naming;
@@ -765,10 +766,11 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
     }
 
     /// Ranks what the query names. An Alias, typed alone or before an
-    /// Argument, goes first. A Quicklink's keyword or an Item's own keyword
+    /// Argument, goes first. A Quicklink's keyword or one of an Item's names
     /// counts as an exact match, which a Learned choice can beat. An app's
     /// word counts as a word start, so an application named like the app
-    /// ranks above its entry Item. In an app, only its Extension's Items'
+    /// ranks above its entry Item, and so does the title of an Item that
+    /// takes Arguments, typed before one. In an app, only its Extension's Items'
     /// keywords count, typed first past its word. With a verb, an Alias
     /// before or after it names its Item too, if the Item offers the verb:
     /// the Alias picks the Item and the verb its Action. Returns the Action
@@ -821,6 +823,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             false
         });
         self.add_keyed_with_typos(session, typed, first_named, &mut named, &mut distances);
+        self.add_titled(session, typed, &mut named);
         if session.verb.is_some() {
             self.add_keyed_subject(session, &mut named);
         }
@@ -870,10 +873,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
     /// a Quicklink, with typos too, and an app's entry Item.
     fn add_own_named(&self, typed: &str, named: &mut Vec<Keyword>, distances: &mut Vec<usize>) {
         for (n, own) in self.own.iter().enumerate() {
-            let Some(keyword) = own.item.keyword.as_deref() else {
-                continue;
-            };
-            let Some((_, naming)) = naming::named(typed, keyword, typos_for(&own.item), distances) else {
+            let Some((_, naming)) = naming::named(typed, &own.item.names, typos_for(&own.item), distances) else {
                 continue;
             };
             named.push(Keyword {
@@ -931,6 +931,78 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
                 });
             }
         }
+    }
+
+    /// Adds to `named` the Item within reach that takes Arguments whose
+    /// title `typed` names, with an Argument after it, as a word start. Two
+    /// Items with that title name neither, and nor does a title whose words
+    /// a keyword holds. An Item `named` lists already isn't added again.
+    fn add_titled(&self, session: &Session, typed: &str, named: &mut Vec<Keyword>) {
+        let longest = self.index.longest_title(session.reach);
+        if longest == 0 {
+            return;
+        }
+        naming::title_leads(typed, longest, |lead, title, rest| {
+            if rest.is_empty() {
+                return false;
+            }
+            let Some(slot) = self.titled_alone(session, lead, title) else {
+                return false;
+            };
+            let source = Source::Indexed(slot);
+            if !named.iter().any(|named| named.source == source) {
+                named.push(Keyword {
+                    source,
+                    alias: false,
+                    frecency: None,
+                    tier: Tier::WordStart,
+                });
+            }
+            true
+        });
+    }
+
+    /// The one Item within reach that takes Arguments whose title is `key`,
+    /// as `naming::title_key` makes it, typed as `title`: none when two
+    /// Items have it, or a keyword holds the words typed.
+    fn titled_alone(&self, session: &Session, key: &str, title: &str) -> Option<Slot> {
+        let mut titled = self.index.titled(key, session.reach);
+        let (Some(slot), None) = (titled.next(), titled.next()) else {
+            return None;
+        };
+        let squashed = naming::squash(title);
+        let held = self.index.keyed(&squashed, session.reach).next().is_some()
+            || session.reach == Reach::Root
+                && (self
+                    .keywords
+                    .aliases
+                    .keys()
+                    .any(|alias| naming::is_squashed(alias, &squashed))
+                    || self
+                        .own
+                        .iter()
+                        .any(|own| own.item.names.iter().any(|name| naming::is_squashed(name, &squashed))));
+        (!held).then_some(slot)
+    }
+
+    /// What the query typed for `item`'s Arguments: what follows the first
+    /// of its names the query names, else, if it takes Arguments, what
+    /// follows its title when that names it.
+    pub(super) fn typed_for<'q>(&self, session: &'q Session, item: &Item) -> Option<&'q str> {
+        let typed = session.searched();
+        if typed.trim().is_empty() {
+            return None;
+        }
+        if let Some((rest, _)) = naming::named(typed, &item.names, typos_for(item), &mut Vec::new()) {
+            return Some(rest);
+        }
+        if !naming::takes_arguments(item) {
+            return None;
+        }
+        let (title, rest) = naming::after_title(typed, &item.title)?;
+        self.titled_alone(session, &naming::title_key(&item.title), title)
+            .is_some()
+            .then_some(rest)
     }
 
     /// The Alias the session's query names, typed alone or before an

@@ -189,7 +189,9 @@ Indexes Items. An Item whose id was sent before replaces the old one, which is h
         "title": "Title",
         "subtitle": "Subtitle",
         "icon": "icon",
-        "keyword": "go",
+        "names": [
+          "go"
+        ],
         "keywords": [
           "browser"
         ],
@@ -264,7 +266,9 @@ Results for Live query `live_query`, in as many batches as you like; `done` says
           "title": "Title",
           "subtitle": "Subtitle",
           "icon": "icon",
-          "keyword": "go",
+          "names": [
+            "go"
+          ],
           "keywords": [
             "browser"
           ],
@@ -586,7 +590,9 @@ An application, by its desktop file id.
   "title": "Title",
   "subtitle": "Subtitle",
   "icon": "icon",
-  "keyword": "go",
+  "names": [
+    "go"
+  ],
   "keywords": [
     "browser"
   ],
@@ -638,7 +644,9 @@ A file, by its absolute path.
   "title": "Title",
   "subtitle": "Subtitle",
   "icon": "icon",
-  "keyword": "go",
+  "names": [
+    "go"
+  ],
   "keywords": [
     "browser"
   ],
@@ -690,7 +698,9 @@ A folder, by its absolute path.
   "title": "Title",
   "subtitle": "Subtitle",
   "icon": "icon",
-  "keyword": "go",
+  "names": [
+    "go"
+  ],
   "keywords": [
     "browser"
   ],
@@ -742,7 +752,9 @@ A project's folder, by its absolute path.
   "title": "Title",
   "subtitle": "Subtitle",
   "icon": "icon",
-  "keyword": "go",
+  "names": [
+    "go"
+  ],
   "keywords": [
     "browser"
   ],
@@ -794,7 +806,9 @@ An open window, by the compositor's address for it.
   "title": "Title",
   "subtitle": "Subtitle",
   "icon": "icon",
-  "keyword": "go",
+  "names": [
+    "go"
+  ],
   "keywords": [
     "browser"
   ],
@@ -846,7 +860,9 @@ A web address.
   "title": "Title",
   "subtitle": "Subtitle",
   "icon": "icon",
-  "keyword": "go",
+  "names": [
+    "go"
+  ],
   "keywords": [
     "browser"
   ],
@@ -898,7 +914,9 @@ Any other kind belongs to one Extension and is named `<extension>.<kind>`, witho
   "title": "Title",
   "subtitle": "Subtitle",
   "icon": "icon",
-  "keyword": "go",
+  "names": [
+    "go"
+  ],
   "keywords": [
     "browser"
   ],
@@ -957,7 +975,9 @@ Items to pick from, whose Actions run like a Result's. Typing filters them in th
         "title": "Title",
         "subtitle": "Subtitle",
         "icon": "icon",
-        "keyword": "go",
+        "names": [
+          "go"
+        ],
         "keywords": [
           "browser"
         ],
@@ -1487,7 +1507,9 @@ The whole ranked list for the query, best first, and the app it is in. A Result'
           "title": "Title",
           "subtitle": "Subtitle",
           "icon": "icon",
-          "keyword": "go",
+          "names": [
+            "go"
+          ],
           "keywords": [
             "browser"
           ],

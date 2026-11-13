@@ -60,7 +60,6 @@ use crate::history::ResultKey;
 use crate::history::Store;
 use crate::index::ItemRef;
 use crate::index::Slot;
-use crate::naming::Typos;
 use crate::pick;
 use crate::pick::Pick;
 use crate::problem;
@@ -283,12 +282,12 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
         }
         .ok_or_else(|| format!("`{}` has no Action `{}`", item.title, action.id))?;
 
-        // Arguments are typed in the search, after the Item's keyword. A
-        // submitted form held them already, and what it left out stays out.
+        // Arguments are typed in the search, after one of the Item's names
+        // or its title. A submitted form held them already, and what it left
+        // out stays out.
         if found_searched
             && missing == Missing::AskInForm
-            && let Some(keyword) = &item.keyword
-            && let Some(typed) = after_keyword(session.searched(), keyword, Typos::Forgiven)
+            && let Some(typed) = self.typed_for(session, &item)
         {
             arguments::fill(&wanted.arguments, typed, &mut arguments);
         }

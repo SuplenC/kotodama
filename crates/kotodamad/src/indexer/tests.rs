@@ -20,7 +20,7 @@ fn item(id: &str) -> Item {
         title: id.into(),
         subtitle: None,
         icon: None,
-        keyword: None,
+        names: Vec::new(),
         keywords: vec![],
         hidden: false,
         app_only: false,
@@ -136,7 +136,7 @@ fn slot(row: Row) -> Slot {
 #[test]
 fn items_named_by_a_keyword_or_an_alias_are_read_with_their_version_once() {
     let mut keyed = item("b");
-    keyed.keyword = Some("bb".into());
+    keyed.names = vec!["bb".into()];
     let sent = sent(vec![
         Job::Pin(vec![(ExtensionId(0), "c".into())]),
         edit(0, 1, Edit::Add(vec![item("a"), keyed, item("c")])),
