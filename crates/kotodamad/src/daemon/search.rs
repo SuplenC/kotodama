@@ -42,6 +42,7 @@ use super::Update;
 use super::alias_id;
 use super::key_candidates;
 use super::take_answers;
+use super::typos_for;
 use crate::clock::When;
 use crate::history;
 use crate::history::IDENTITIES;
@@ -51,6 +52,9 @@ use crate::index::Reach;
 use crate::index::SIDES;
 use crate::keywords::Alias;
 use crate::most_used::Counts;
+use crate::naming;
+use crate::naming::Naming;
+use crate::naming::Typos;
 use crate::rank;
 use crate::rank::Haystack;
 use crate::rank::Matched;
@@ -801,30 +805,24 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             }
             session.via_alias = Some((source, keyword.clone()));
         }
-        if root
-            && let Some(n) = self
-                .own
-                .iter()
-                .position(|own| own.item.keyword.as_deref() == Some(first))
-        {
-            named.push(Keyword {
-                source: Source::Own(n as u32),
-                alias: false,
-                frecency: None,
-                tier: self.own[n].tier_cap(),
-            });
+        let typed = session.searched();
+        let mut distances = Vec::new();
+        if root {
+            self.add_own_named(typed, &mut named, &mut distances);
         }
-        for slot in self.index.keyed(first, session.reach) {
-            named.push(Keyword {
+        let first_named = named.len();
+        naming::leads(typed, self.index.longest_keyword(session.reach), |lead, _, _| {
+            named.extend(self.index.keyed(lead, session.reach).map(|slot| Keyword {
                 source: Source::Indexed(slot),
                 alias: false,
                 frecency: None,
                 tier: Tier::Exact,
-            });
-        }
+            }));
+            false
+        });
+        self.add_keyed_with_typos(session, typed, first_named, &mut named, &mut distances);
         if session.verb.is_some() {
-            let first = first.to_owned();
-            self.add_keyed_subject(session, &first, &mut named);
+            self.add_keyed_subject(session, &mut named);
         }
         for Keyword {
             source,
@@ -868,6 +866,73 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
         primary
     }
 
+    /// Adds to `named` the Daemon's own Results whose keyword `typed` names:
+    /// a Quicklink, with typos too, and an app's entry Item.
+    fn add_own_named(&self, typed: &str, named: &mut Vec<Keyword>, distances: &mut Vec<usize>) {
+        for (n, own) in self.own.iter().enumerate() {
+            let Some(keyword) = own.item.keyword.as_deref() else {
+                continue;
+            };
+            let Some((_, naming)) = naming::named(typed, keyword, typos_for(&own.item), distances) else {
+                continue;
+            };
+            named.push(Keyword {
+                source: Source::Own(n as u32),
+                alias: false,
+                frecency: None,
+                tier: match naming {
+                    Naming::Exact => own.tier_cap(),
+                    Naming::Typo => Tier::NearMiss,
+                },
+            });
+        }
+    }
+
+    /// Adds to `named`, past `first_named`, the Items within reach that take
+    /// Arguments whose keyword `typed` names with typos, with an Argument
+    /// after it. One `named` lists from `first_named` on already, by its
+    /// keyword exactly, isn't added again.
+    fn add_keyed_with_typos(
+        &self,
+        session: &Session,
+        typed: &str,
+        first_named: usize,
+        named: &mut Vec<Keyword>,
+        distances: &mut Vec<usize>,
+    ) {
+        // A query without an Argument finds a keyword with typos as a Near
+        // miss, so only one with words past the first is looked at here.
+        let typed = typed.trim();
+        if !typed.contains(char::is_whitespace) {
+            return;
+        }
+        let Some(initial) = typed.chars().next().map(rank::fold) else {
+            return;
+        };
+        let exact = named.len();
+        for (keyword, slots) in self.index.keywords(session.reach) {
+            if !keyword.starts_with(initial) || naming::nearly(typed, keyword, distances).is_none_or(str::is_empty) {
+                continue;
+            }
+            for slot in slots {
+                let source = Source::Indexed(slot);
+                if named[first_named..exact].iter().any(|named| named.source == source)
+                    || !self
+                        .item(session, source)
+                        .is_some_and(|(_, item)| typos_for(&item) == Typos::Forgiven)
+                {
+                    continue;
+                }
+                named.push(Keyword {
+                    source,
+                    alias: false,
+                    frecency: None,
+                    tier: Tier::NearMiss,
+                });
+            }
+        }
+    }
+
     /// The Alias the session's query names, typed alone or before an
     /// Argument as its `first` word, or else as the subject of its verb, and
     /// whether it is the subject.
@@ -879,23 +944,39 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
         {
             return Some((named, false));
         }
+        let mut squashed = None;
+        naming::leads(session.searched(), usize::MAX, |lead, _, _| {
+            squashed = aliases.iter().find(|(keyword, _)| naming::is_squashed(keyword, lead));
+            squashed.is_some()
+        });
+        if let Some(named) = squashed {
+            return Some((named, false));
+        }
         let subject = query_key(&session.verb.as_ref()?.subject);
         Some((aliases.get_key_value(subject.as_str())?, true))
     }
 
-    /// Adds to `named` the Items the first word of the session's verb's
-    /// subject names by their keyword, as it would typed alone, among those
-    /// that offer the verb, unless that word is `first`, the query's, which
-    /// named them already.
-    fn add_keyed_subject(&self, session: &mut Session, first: &str, named: &mut Vec<Keyword>) {
-        let Some(subject) = session.verb.as_ref().map(|verb| query_key(&verb.subject)) else {
+    /// Adds to `named` the Items the first words of the session's verb's
+    /// subject name by their keyword exactly, as they would typed alone,
+    /// among those that offer the verb, unless the query named them already.
+    fn add_keyed_subject(&self, session: &mut Session, named: &mut Vec<Keyword>) {
+        let Some(verb) = session.verb.as_ref() else {
             return;
         };
-        let Some(subject_first) = subject.split(' ').next().filter(|&word| word != first) else {
-            return;
-        };
-        for slot in self.index.keyed(subject_first, session.reach) {
+        let mut slots = Vec::new();
+        naming::leads(
+            &verb.subject,
+            self.index.longest_keyword(session.reach),
+            |lead, _, _| {
+                slots.extend(self.index.keyed(lead, session.reach));
+                false
+            },
+        );
+        for slot in slots {
             let source = Source::Indexed(slot);
+            if named.iter().any(|named| named.source == source) {
+                continue;
+            }
             match session.by_verb.binary_search(&source) {
                 Ok(_) => {}
                 Err(at) if self.verb_choice(session, source).is_some() => session.by_verb.insert(at, source),

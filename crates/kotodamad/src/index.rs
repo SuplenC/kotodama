@@ -490,14 +490,39 @@ impl Index {
         })
     }
 
-    /// The Items within `reach` whose keyword is `keyword`, given in
-    /// lowercase.
+    /// The Items within `reach` whose keyword is `keyword`, given as
+    /// `naming::squash` makes it.
     pub fn keyed<'a>(&'a self, keyword: &'a str, reach: Reach) -> impl Iterator<Item = Slot> + 'a {
         self.segments
             .iter()
             .enumerate()
             .filter(move |&(n, _)| reach.reads(n, &self.searched))
             .flat_map(move |(n, segment)| Self::slots(n, segment.keyed(keyword)))
+    }
+
+    /// Bytes in the longest keyword of the Items within `reach`, or more.
+    pub fn longest_keyword(&self, reach: Reach) -> usize {
+        self.segments
+            .iter()
+            .enumerate()
+            .filter(|&(n, _)| reach.reads(n, &self.searched))
+            .map(|(_, segment)| segment.longest_keyword())
+            .max()
+            .unwrap_or_default()
+    }
+
+    /// Every keyword of the Items within `reach`, as `naming::squash` makes
+    /// it, with the Items that have it.
+    pub fn keywords(&self, reach: Reach) -> impl Iterator<Item = (&str, impl Iterator<Item = Slot> + '_)> {
+        self.segments
+            .iter()
+            .enumerate()
+            .filter(move |&(n, _)| reach.reads(n, &self.searched))
+            .flat_map(|(n, segment)| {
+                segment
+                    .keywords()
+                    .map(move |(keyword, rows)| (keyword, Self::slots(n, rows)))
+            })
     }
 
     /// The Items, of any Extension, whose Identity is `identity`.

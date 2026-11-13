@@ -27,6 +27,7 @@ use super::after_keyword;
 use crate::arguments;
 use crate::history::Store;
 use crate::index::ItemRef;
+use crate::naming::Typos;
 use crate::open_view::Opening;
 use crate::open_view::ViewName;
 
@@ -168,6 +169,6 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
     /// What the session's query has after the `n`th app's word, if it starts
     /// with it: what entering the app keeps typed.
     pub(super) fn after_word<'q>(&self, session: &'q Session, n: usize) -> Option<&'q str> {
-        after_keyword(&session.query, &self.apps.get(n)?.word)
+        after_keyword(&session.query, &self.apps.get(n)?.word, Typos::Refused)
     }
 }
