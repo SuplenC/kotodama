@@ -58,7 +58,7 @@ fn item(n: u32) -> Item {
         title: format!("Entry number {n} with some words"),
         subtitle: Some(format!("https://example.com/{n}")),
         icon: Some("text-x-generic".into()),
-        keyword: None,
+        names: Vec::new(),
         keywords: Vec::new(),
         hidden: false,
         app_only: false,

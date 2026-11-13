@@ -14,7 +14,7 @@ fn note(actions: Vec<Action>) -> Item {
         title: "Note".into(),
         subtitle: None,
         icon: None,
-        keyword: None,
+        names: Vec::new(),
         identity: None,
         keywords: Vec::new(),
         hidden: false,

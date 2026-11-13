@@ -131,7 +131,7 @@ impl Answer {
                 title: self.value.clone(),
                 subtitle: Some(self.expression.clone()),
                 icon: Some("accessories-calculator".into()),
-                keyword: None,
+                names: Vec::new(),
                 keywords: vec![],
                 hidden: false,
                 app_only: false,

@@ -100,6 +100,7 @@ use crate::most_used::Picked;
 use crate::most_used::Versions;
 use crate::naming;
 use crate::naming::Typos;
+use crate::naming::typos_for;
 use crate::narrowing::Narrowing;
 use crate::open_view::Opening;
 use crate::paths::Overrides;
@@ -1064,7 +1065,7 @@ fn clear_history() -> Item {
         title: "Clear history".into(),
         subtitle: Some("Forget what was picked, for Frecency and Learned choices".into()),
         icon: None,
-        keyword: None,
+        names: Vec::new(),
         identity: None,
         keywords: Vec::new(),
         hidden: false,
@@ -1083,7 +1084,7 @@ fn undo_item(title: &str) -> Item {
         title: title.into(),
         subtitle: Some("Put back what the History forgot".into()),
         icon: None,
-        keyword: None,
+        names: Vec::new(),
         identity: None,
         keywords: Vec::new(),
         hidden: false,
@@ -1102,7 +1103,7 @@ fn named_only(id: &str) -> Item {
         title: id.to_owned(),
         subtitle: None,
         icon: None,
-        keyword: None,
+        names: Vec::new(),
         identity: None,
         keywords: Vec::new(),
         hidden: false,
@@ -1192,18 +1193,7 @@ fn alias_id(keyword: &str) -> String {
 /// What was typed after `keyword`, if the query's first words name it, as
 /// `naming::named` tells.
 fn after_keyword<'q>(query: &'q str, keyword: &str, typos: Typos) -> Option<&'q str> {
-    naming::named(query, keyword, typos, &mut Vec::new()).map(|(rest, _)| rest)
-}
-
-/// Whether the query may name `item`'s keyword with typos: only when it
-/// takes Arguments, so the words after a keyword typed with typos are its
-/// Argument rather than more of the search.
-fn typos_for(item: &Item) -> Typos {
-    if item.actions.iter().any(|action| !action.arguments.is_empty()) {
-        Typos::Forgiven
-    } else {
-        Typos::Refused
-    }
+    naming::named(query, &[keyword], typos, &mut Vec::new()).map(|(rest, _)| rest)
 }
 
 /// Reads `session.query`: the app it is in, if the user entered one and it

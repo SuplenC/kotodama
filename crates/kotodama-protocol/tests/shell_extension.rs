@@ -278,9 +278,9 @@ fn follow(extension: &mut Extension, id: &str, title: &str) -> Vec<(JobState, Op
 }
 
 #[test]
-fn the_shell_examples_timer_takes_its_seconds_as_a_required_argument_after_its_keyword() {
+fn the_shell_examples_timer_takes_its_seconds_as_a_required_argument_after_its_names() {
     let (_extension, timer) = timer();
-    assert_eq!(timer.keyword.as_deref(), Some("timer"));
+    assert_eq!(timer.names, ["timer", "countdown"]);
     let start = &timer.actions[0];
     assert_eq!(start.id, "start");
     assert_eq!(start.arguments.len(), 1);

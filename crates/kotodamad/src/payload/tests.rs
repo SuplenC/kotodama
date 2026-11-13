@@ -13,7 +13,7 @@ fn item(id: &str) -> Item {
         title: format!("Title of {id}"),
         subtitle: Some("A subtitle".into()),
         icon: Some("web-browser".into()),
-        keyword: None,
+        names: Vec::new(),
         keywords: vec!["more".into()],
         hidden: false,
         app_only: false,

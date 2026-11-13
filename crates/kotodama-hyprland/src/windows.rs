@@ -185,7 +185,7 @@ fn item(address: &str, window: &Window) -> Item {
         subtitle: Some(format!("{} · workspace {}", window.class, window.workspace)),
         // An app's class is most often its desktop id, so its icon's name.
         icon: (!window.class.is_empty()).then(|| window.class.clone()),
-        keyword: None,
+        names: Vec::new(),
         keywords: vec![window.class.clone()],
         hidden: false,
         app_only: false,

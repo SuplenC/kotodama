@@ -38,7 +38,6 @@ use crate::history::IDENTITIES;
 use crate::history::Store;
 use crate::index::ItemRef;
 use crate::keywords::Alias;
-use crate::naming::Typos;
 use crate::rank;
 use crate::rank::Text;
 use crate::verbs::Verb;
@@ -255,8 +254,7 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
             ),
             None => (OWN.to_owned(), Vec::new()),
         };
-        let offered = contributed.iter_mut().map(|offered| &mut offered.action);
-        Self::mark_forms(session, item.keyword.as_deref(), item.actions.iter_mut().chain(offered));
+        self.mark_item_forms(session, &mut item, &mut contributed);
         self.offer_forgetting(&extension, &mut item, &mut contributed);
         let chosen = session
             .verb
@@ -338,6 +336,25 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
     /// offered on the kind before those targeted at the Identity. When a
     /// shortcut clashes, the owner's binding in `own` wins, then the earlier
     /// Extension's.
+    /// Marks the Actions of `item`, its own and `contributed`, that would ask
+    /// for their Arguments in a form, as [`Daemon::mark_forms`] does, with
+    /// what the query typed for them.
+    fn mark_item_forms(&self, session: &Session, item: &mut Item, contributed: &mut [OfferedAction]) {
+        // Most rows have no Action that could ask for a form, so what was
+        // typed for their Arguments isn't worked out.
+        let mut checked = item
+            .actions
+            .iter()
+            .chain(contributed.iter().map(|offered| &offered.action));
+        let typed = if checked.any(may_ask) {
+            self.typed_for(session, item).unwrap_or_default()
+        } else {
+            ""
+        };
+        let offered = contributed.iter_mut().map(|offered| &mut offered.action);
+        Self::mark_forms(typed, item.actions.iter_mut().chain(offered));
+    }
+
     pub(super) fn contributed_for(
         &self,
         owner: ExtensionId,
@@ -382,28 +399,13 @@ impl<L: Launcher, D: Desktop, S: Store> Daemon<L, D, S> {
 
     /// Reports [`ActionRole::Form`] for each of `actions` that would ask for
     /// its Arguments in a form if it ran: a required one is left
-    /// unfilled by what follows the Item's `keyword` in the query. A
+    /// unfilled by `typed`, what the query typed for the Item's Arguments. A
     /// destructive Action stays destructive.
-    pub(super) fn mark_forms<'a>(
-        session: &Session,
-        keyword: Option<&str>,
-        actions: impl IntoIterator<Item = &'a mut Action>,
-    ) {
-        let mut typed = None;
+    pub(super) fn mark_forms<'a>(typed: &str, actions: impl IntoIterator<Item = &'a mut Action>) {
         for action in actions {
-            if action.role != ActionRole::Normal
-                || action
-                    .arguments
-                    .iter()
-                    .all(|argument| argument.optional && argument.kind != ArgumentKind::Number)
-            {
+            if !may_ask(action) {
                 continue;
             }
-            let typed = typed.get_or_insert_with(|| {
-                keyword
-                    .and_then(|keyword| after_keyword(session.searched(), keyword, Typos::Forgiven))
-                    .unwrap_or_default()
-            });
             let mut given = BTreeMap::new();
             arguments::fill(&action.arguments, typed, &mut given);
             if arguments::missing(&action.arguments, &given).is_some()
@@ -474,4 +476,14 @@ fn verb_choice(verb: &Verb, owner: &str, own: &[Action], contributed: &[OfferedA
 /// owns: the Action Enter runs anyway.
 fn is_first(chosen: &ActionRef, owner: &str, own: &[Action]) -> bool {
     chosen.extension == owner && own.first().is_some_and(|first| first.id == chosen.id)
+}
+
+/// Whether `action` may ask for its Arguments in a form: it is a normal
+/// one, and one of them is required or a number, which may be typed wrong.
+fn may_ask(action: &Action) -> bool {
+    action.role == ActionRole::Normal
+        && action
+            .arguments
+            .iter()
+            .any(|argument| !argument.optional || argument.kind == ArgumentKind::Number)
 }

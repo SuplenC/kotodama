@@ -116,8 +116,12 @@ _Avoid_: Snackbar, notification, popup
 A screen pushed on top of the search, such as a list, a form, a detail pane or a progress display; Esc pops it once the text is cleared. Typing into a list filters it.
 _Avoid_: Page, panel, mode, screen
 
+**Name**:
+What an Item is called when it is typed before its Arguments, such as `go` in `go 1.23`: an Item may have several, each named whole, in any case and with or without the separators between its words. An Item that takes Arguments is also named by its title, typed exactly but for case and punctuation, unless another Item has the same title or a keyword holds those words. Unlike its search keywords, a name typed alone ranks the Item as an exact match.
+_Avoid_: Keyword (an Item's own), trigger, command word
+
 **Argument**:
-A value typed inline after an Item's keyword, such as `1.23` in `go 1.23`, passed to its Action.
+A value typed inline after one of an Item's Names or its title, such as `1.23` in `go 1.23`, passed to its Action.
 _Avoid_: Parameter, input
 
 **Job**:

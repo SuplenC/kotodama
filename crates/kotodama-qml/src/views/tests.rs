@@ -80,7 +80,7 @@ fn item(id: &str, kind: ItemKind) -> Item {
         title: id.into(),
         subtitle: None,
         icon: None,
-        keyword: None,
+        names: Vec::new(),
         keywords: Vec::new(),
         hidden: false,
         app_only: false,

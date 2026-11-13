@@ -94,7 +94,10 @@ fn item(random: &mut Random) -> Item {
         title: words(random, 3),
         subtitle: (random.below(2) == 0).then(|| words(random, 4)),
         icon: None,
-        keyword: (random.below(5) == 0).then(|| random.pick(WORDS).to_lowercase()),
+        names: (random.below(5) == 0)
+            .then(|| random.pick(WORDS).to_lowercase())
+            .into_iter()
+            .collect(),
         keywords: (0..random.below(3)).map(|_| words(random, 2)).collect(),
         hidden: random.below(10) == 0,
         app_only: random.below(4) == 0,
@@ -301,7 +304,7 @@ fn of_a(id: &str, yields: bool) -> Item {
         title: "Thing".into(),
         subtitle: None,
         icon: None,
-        keyword: None,
+        names: Vec::new(),
         keywords: Vec::new(),
         hidden: false,
         app_only: false,

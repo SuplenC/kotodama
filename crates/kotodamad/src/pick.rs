@@ -40,7 +40,7 @@ pub fn view(id: String, title: &str, offering: Vec<Item>) -> View {
     let items = offering
         .into_iter()
         .map(|item| Item {
-            keyword: None,
+            names: Vec::new(),
             hidden: false,
             app_only: false,
             actions: vec![Action::new(PICK, title)],

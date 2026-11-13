@@ -147,7 +147,7 @@ fn item(number: u64, window: &Window) -> Item {
         subtitle: (!window.app_id.is_empty()).then(|| window.app_id.clone()),
         // An app id is most often the app's desktop id, so its icon's name.
         icon: (!window.app_id.is_empty()).then(|| window.app_id.clone()),
-        keyword: None,
+        names: Vec::new(),
         keywords: vec![window.app_id.clone()],
         hidden: false,
         app_only: false,

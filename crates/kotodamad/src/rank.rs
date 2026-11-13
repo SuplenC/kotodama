@@ -49,11 +49,11 @@ pub enum Tier {
     /// The query is the first letters of consecutive words, as `vsc` is of
     /// Visual Studio Code. Ranks as a word start, ahead of one on a tie.
     Initials,
-    /// The Item's own keyword, the one typed before its Arguments, is the
-    /// query. Ranks as exact, behind an exact title on a tie. One of its
-    /// other keywords being the query is only a [`Tier::WordStart`], so an
-    /// Item that lists an app's name among them ties with the app rather
-    /// than passing it.
+    /// One of the Item's names, typed before its Arguments, is the query.
+    /// Ranks as exact, behind an exact title on a tie. One of its search
+    /// keywords being the query is only a [`Tier::WordStart`], so an Item
+    /// that lists an app's name among them ties with the app rather than
+    /// passing it.
     Keyword,
     /// The whole title is the query, past any symbols that lead it, as
     /// `fire` is of `🔥 Fire`.
@@ -329,15 +329,15 @@ impl Text<'_> {
 #[derive(Clone, Copy, Debug)]
 pub struct Texts<'a> {
     pub title: Text<'a>,
-    /// The keyword and keywords, joined by [`SEPARATOR`], then the weak
+    /// The names and keywords, joined by [`SEPARATOR`], then the weak
     /// keywords after [`WEAK`], joined the same way; empty if there are none.
     /// Its word starts are only the keywords'.
     pub words: Text<'a>,
     /// Where in `words` the weak keywords' [`WEAK`] is, or its length if it
     /// has none.
     pub weak_at: u32,
-    /// Whether `words` starts with the Item's own keyword.
-    pub keyword: bool,
+    /// How many of the Item's names `words` starts with.
+    pub names: u8,
     /// Empty if there is none. Searched so seldom that where its words start
     /// isn't kept.
     pub subtitle: Utf32Str<'a>,
@@ -352,7 +352,7 @@ pub struct Texts<'a> {
 }
 
 impl<'a> Texts<'a> {
-    /// The keyword and keywords of `words`, without the weak keywords.
+    /// The names and keywords of `words`, without the weak keywords.
     pub(crate) fn keywords(&self) -> Text<'a> {
         Text {
             chars: self.words.chars.slice(..self.weak_at as usize),
@@ -379,8 +379,8 @@ pub struct Folded {
     pub words_starts: Vec<u32>,
     /// Where in `words` its weak keywords begin, at [`WEAK`], if it has any.
     pub weak_at: Option<u32>,
-    /// Whether `words` starts with the Item's own keyword.
-    pub keyword: bool,
+    /// How many of the Item's names `words` starts with.
+    pub names: u8,
     pub initials: Letters,
     pub subtitle_initials: Letters,
     pub letters: Letters,
@@ -391,7 +391,18 @@ pub struct Folded {
 impl Folded {
     pub fn new(item: &Item) -> Self {
         let mut words = String::new();
-        for word in item.keyword.iter().chain(&item.keywords) {
+        // An empty name would add no part to `words`, and leave the next one
+        // in its place.
+        let given = item.names.iter().filter(|name| !name.is_empty());
+        let mut count = 0_u8;
+        for name in given.clone().take(usize::from(u8::MAX)) {
+            if !words.is_empty() {
+                words.push(SEPARATOR);
+            }
+            words.push_str(name);
+            count += 1;
+        }
+        for word in given.skip(usize::from(u8::MAX)).chain(&item.keywords) {
             if !words.is_empty() {
                 words.push(SEPARATOR);
             }
@@ -458,9 +469,7 @@ impl Folded {
             title_starts,
             words_starts,
             weak_at,
-            // An empty keyword adds no part to `words`, which would leave the
-            // first of the other keywords in its place.
-            keyword: item.keyword.as_deref().is_some_and(|keyword| !keyword.is_empty()),
+            names: count,
             initials,
             subtitle_initials,
             letters,
@@ -482,8 +491,8 @@ pub struct Haystack {
     title_starts: usize,
     /// As [`Texts::weak_at`].
     weak_at: u32,
-    /// Whether `words` starts with the Item's own keyword.
-    keyword: bool,
+    /// How many of the Item's names `words` starts with.
+    names: u8,
     initials: Letters,
     subtitle_initials: Letters,
     letters: Letters,
@@ -731,7 +740,7 @@ impl Haystack {
             mut title_starts,
             words_starts,
             weak_at,
-            keyword,
+            names,
             initials,
             subtitle_initials,
             letters,
@@ -747,7 +756,7 @@ impl Haystack {
             starts: title_starts,
             title_starts: len,
             weak_at,
-            keyword,
+            names,
             initials,
             subtitle_initials,
             letters,
@@ -769,7 +778,7 @@ impl Haystack {
             starts,
             title_starts,
             weak_at: 0,
-            keyword: false,
+            names: 0,
             initials,
             subtitle_initials: Letters::NONE,
             letters,
@@ -789,7 +798,7 @@ impl Haystack {
                 starts: words,
             },
             weak_at: self.weak_at,
-            keyword: self.keyword,
+            names: self.names,
             subtitle: self.subtitle.slice(..),
             initials: self.initials,
             subtitle_initials: self.subtitle_initials,
@@ -989,7 +998,7 @@ impl Tiers {
     }
 
     /// How well an Item matches: the best of its title and its keywords, where
-    /// its own keyword exactly is [`Tier::Keyword`] and another keyword
+    /// one of its names exactly is [`Tier::Keyword`] and another keyword
     /// exactly [`Tier::WordStart`], then of its weak keywords, where the
     /// query inside one is [`Tier::WeakKeyword`] at best, or failing those,
     /// its subtitle.
@@ -1005,7 +1014,7 @@ impl Tiers {
         if matched.words && best < Some(Tier::Exact) && !texts.words.is_empty() {
             let keywords = texts.keywords();
             let words = Self::text(keywords, query).map(|tier| match tier {
-                Tier::Exact if texts.keyword && is_exact(first_part(keywords.chars), &query.whole) => Tier::Keyword,
+                Tier::Exact if is_exact(first_parts(keywords.chars, texts.names), &query.whole) => Tier::Keyword,
                 Tier::Exact => Tier::WordStart,
                 tier => tier,
             });
@@ -1152,10 +1161,18 @@ fn is_exact(chars: Utf32Str, whole: &[char]) -> bool {
     })
 }
 
-/// A folded text up to its first [`SEPARATOR`]: of an Item's keywords, the
-/// first.
-fn first_part(chars: Utf32Str<'_>) -> Utf32Str<'_> {
-    let end = with_chars!(chars, |chars| chars.iter().position(|c| c.char() == SEPARATOR));
+/// A folded text up to its `n`th [`SEPARATOR`]: of an Item's names and
+/// keywords, its `n` names. Empty for none.
+fn first_parts(chars: Utf32Str<'_>, n: u8) -> Utf32Str<'_> {
+    if n == 0 {
+        return chars.slice(..0);
+    }
+    let end = with_chars!(chars, |chars| chars
+        .iter()
+        .enumerate()
+        .filter(|(_, c)| c.char() == SEPARATOR)
+        .nth(usize::from(n) - 1)
+        .map(|(at, _)| at));
     chars.slice(..end.unwrap_or(chars.len()))
 }
 

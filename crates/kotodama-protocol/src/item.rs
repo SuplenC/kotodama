@@ -43,8 +43,10 @@ pub struct Item {
     pub subtitle: Option<String>,
     /// A freedesktop icon name or an absolute path.
     pub icon: Option<String>,
-    /// Typed before an Item's Arguments, as `go` in `go 1.23`.
-    pub keyword: Option<String>,
+    /// What the Item is called when it is typed before its Arguments, as
+    /// `go` in `go 1.23`: each names it, and what follows is its Arguments.
+    /// Typed alone, one ranks the Item as an exact match.
+    pub names: Vec<String>,
     /// More words the Item is found by, besides its title.
     pub keywords: Vec<String>,
     /// The Item's own Actions. The first is the primary one, which Enter runs, so
@@ -503,7 +505,7 @@ impl<'de> serde::de::Visitor<'de> for RoleVisitor {
     }
 }
 
-/// A value the user types inline after the Item's keyword. One that is required
+/// A value the user types inline after one of the Item's names. One that is required
 /// but not typed opens a form.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Argument {
@@ -705,7 +707,7 @@ struct ItemWire<'a> {
     title: &'a str,
     subtitle: Option<&'a str>,
     icon: Option<&'a str>,
-    keyword: Option<&'a str>,
+    names: &'a [String],
     keywords: &'a [String],
     actions: &'a [Action],
     hidden: bool,
@@ -735,7 +737,7 @@ pub(crate) struct ItemOwned {
     #[serde(default)]
     icon: Option<String>,
     #[serde(default)]
-    keyword: Option<String>,
+    names: Vec<String>,
     #[serde(default)]
     keywords: Vec<String>,
     actions: Vec<Action>,
@@ -763,7 +765,7 @@ impl Serialize for Item {
             title: &self.title,
             subtitle: self.subtitle.as_deref(),
             icon: self.icon.as_deref(),
-            keyword: self.keyword.as_deref(),
+            names: &self.names,
             keywords: &self.keywords,
             actions: &self.actions,
             hidden: self.hidden,
@@ -809,7 +811,7 @@ impl ItemOwned {
             title: self.title,
             subtitle: self.subtitle,
             icon: self.icon,
-            keyword: self.keyword,
+            names: self.names,
             keywords: self.keywords,
             actions: self.actions,
             hidden: self.hidden,

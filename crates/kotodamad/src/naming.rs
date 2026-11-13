@@ -9,17 +9,25 @@
 //! The whole keyword must be typed: a word cut short starts the Argument
 //! instead, so the Argument can be anything, a word of the keyword included.
 //!
+//! The title of an Item that takes Arguments names it too, typed exactly,
+//! and only by its letters and digits: the `…` of `Lock in…` or the `:` of
+//! `Keyboard: set layouts` is never typed.
+//!
 //! # Owns
 //!
 //! - [`squash`] and [`is_squashed`]: a keyword as it is looked up.
-//! - [`leads`]: the query's first words, squashed, each with what follows them.
-//! - [`named`]: whether a query names one keyword, and its Argument.
+//! - [`title_key`]: a title as it is looked up.
+//! - [`leads`] and [`title_leads`]: the query's first words, squashed, each with what follows them.
+//! - [`named`]: whether a query names one of an Item's names, and its Argument.
+//! - [`takes_arguments`]: whether an Item is named with typos, and by its title.
 //!
 //! # Not here
 //!
 //! - Which keywords a query names, and how they rank: `daemon/search.rs`, `Daemon::add_named`.
 //! - Filling the Arguments from what follows: `arguments.rs`.
 //! - Typo distance: `rank.rs`.
+
+use kotodama_protocol::Item;
 
 use crate::rank;
 
@@ -44,16 +52,49 @@ fn separates(c: char) -> bool {
     c.is_whitespace() || c == '-' || c == '_'
 }
 
+/// Whether `c` counts in a keyword: all but the separators.
+fn in_keyword(c: char) -> bool {
+    !separates(c)
+}
+
+/// Whether `c` counts in a title: its letters and digits alone.
+fn in_title(c: char) -> bool {
+    c.is_alphanumeric()
+}
+
 /// The letters of `keyword` as it is looked up: folded, without the
 /// separators that part its words.
 pub fn squash(keyword: &str) -> String {
     let mut squashed = String::with_capacity(keyword.len());
-    push_squashed(&mut squashed, keyword);
+    push_kept(&mut squashed, keyword, in_keyword);
     squashed
 }
 
-fn push_squashed(squashed: &mut String, text: &str) {
-    squashed.extend(text.chars().filter(|&c| !separates(c)).map(rank::fold));
+/// The letters and digits of `title`, folded, as a title is looked up.
+pub fn title_key(title: &str) -> String {
+    let mut key = String::with_capacity(title.len());
+    push_kept(&mut key, title, in_title);
+    key
+}
+
+fn push_kept(squashed: &mut String, text: &str, keep: fn(char) -> bool) {
+    squashed.extend(text.chars().filter(|&c| keep(c)).map(rank::fold));
+}
+
+/// Whether `item` takes Arguments: one of its own Actions has some. Only
+/// then are the words after its name its Argument rather than more of the
+/// search, so only then is it named with typos, or by its title.
+pub fn takes_arguments(item: &Item) -> bool {
+    item.actions.iter().any(|action| !action.arguments.is_empty())
+}
+
+/// [`Typos::Forgiven`] for an Item that [`takes_arguments`].
+pub fn typos_for(item: &Item) -> Typos {
+    if takes_arguments(item) {
+        Typos::Forgiven
+    } else {
+        Typos::Refused
+    }
 }
 
 /// Whether `keyword`, squashed, is `squashed`, without allocating.
@@ -69,14 +110,28 @@ pub fn is_squashed(keyword: &str, squashed: &str) -> bool {
 /// squashed, as typed, and with what follows them, without the whitespace
 /// that leads it. Stops once they are more than `longest` bytes squashed, or
 /// `each` returns `true`.
-pub fn leads<'q>(query: &'q str, longest: usize, mut each: impl FnMut(&str, &'q str, &'q str) -> bool) {
+pub fn leads<'q>(query: &'q str, longest: usize, each: impl FnMut(&str, &'q str, &'q str) -> bool) {
+    leads_keeping(query, longest, in_keyword, each);
+}
+
+/// As [`leads`], with the words squashed as [`title_key`] squashes a title.
+pub fn title_leads<'q>(query: &'q str, longest: usize, each: impl FnMut(&str, &'q str, &'q str) -> bool) {
+    leads_keeping(query, longest, in_title, each);
+}
+
+fn leads_keeping<'q>(
+    query: &'q str,
+    longest: usize,
+    keep: fn(char) -> bool,
+    mut each: impl FnMut(&str, &'q str, &'q str) -> bool,
+) {
     let query = query.trim_start();
     let mut squashed = String::new();
     let mut end = 0;
     while !query[end..].trim_start().is_empty() {
         let rest = query[end..].trim_start();
         let word_end = rest.find(char::is_whitespace).unwrap_or(rest.len());
-        push_squashed(&mut squashed, &rest[..word_end]);
+        push_kept(&mut squashed, &rest[..word_end], keep);
         end = query.len() - rest.len() + word_end;
         if squashed.len() > longest {
             return;
@@ -96,14 +151,20 @@ fn typos_in(typed: &str) -> usize {
         .sum()
 }
 
-/// What follows `keyword` in `query`, if its first words name it, and how.
-/// The keyword typed exactly wins over one with typos. `distances` is the
-/// scratch the typo distance works in.
-pub fn named<'q>(query: &'q str, keyword: &str, typos: Typos, distances: &mut Vec<usize>) -> Option<(&'q str, Naming)> {
-    let squashed = squash(keyword);
+/// What follows one of `names` in `query`, if its first words name it, and
+/// how. A name typed exactly wins over one with typos, whichever comes
+/// first in `names`. `distances` is the scratch the typo distance works in.
+pub fn named<'q, N: AsRef<str>>(
+    query: &'q str,
+    names: &[N],
+    typos: Typos,
+    distances: &mut Vec<usize>,
+) -> Option<(&'q str, Naming)> {
+    let squashed: Vec<String> = names.iter().map(|name| squash(name.as_ref())).collect();
+    let longest = squashed.iter().map(String::len).max()?;
     let mut exact = None;
-    leads(query, squashed.len(), |lead, _, rest| {
-        if lead == squashed {
+    leads(query, longest, |lead, _, rest| {
+        if squashed.iter().any(|name| name == lead) {
             exact = Some(rest);
         }
         exact.is_some()
@@ -112,9 +173,26 @@ pub fn named<'q>(query: &'q str, keyword: &str, typos: Typos, distances: &mut Ve
         return Some((rest.trim_end(), Naming::Exact));
     }
     match typos {
-        Typos::Forgiven => nearly(query, &squashed, distances).map(|rest| (rest, Naming::Typo)),
+        Typos::Forgiven => squashed
+            .iter()
+            .find_map(|name| nearly(query, name, distances))
+            .map(|rest| (rest, Naming::Typo)),
         Typos::Refused => None,
     }
+}
+
+/// The words of `query` that are `title`, as typed, and what follows them,
+/// if its first words are the title's letters and digits exactly.
+pub fn after_title<'q>(query: &'q str, title: &str) -> Option<(&'q str, &'q str)> {
+    let key = title_key(title);
+    let mut after = None;
+    title_leads(query, key.len(), |lead, typed, rest| {
+        if lead == key {
+            after = Some((typed, rest.trim_end()));
+        }
+        after.is_some()
+    });
+    after
 }
 
 /// What follows the fewest of the query's first words that name the keyword

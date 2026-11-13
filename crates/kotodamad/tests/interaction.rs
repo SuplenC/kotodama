@@ -1,5 +1,5 @@
 //! Raycast-style interaction as the Daemon sees it: Arguments typed after an
-//! Item's keyword, the form that asks for the ones left out, the Views
+//! Item's name or title, the form that asks for the ones left out, the Views
 //! Extensions push, and the jobs they report.
 
 #[path = "support/harness.rs"]
@@ -33,7 +33,7 @@ fn go(arguments: Vec<Argument>) -> Item {
             url: "https://go.dev".into(),
         },
     );
-    item.keyword = Some("go".into());
+    item.names = vec!["go".into()];
     item.actions[0].arguments = arguments;
     item
 }
@@ -85,7 +85,7 @@ fn keyed(id: &str, title: &str, arguments: Vec<Argument>) -> Item {
             url: "https://example.com".into(),
         },
     );
-    item.keyword = Some(id.into());
+    item.names = vec![id.into()];
     item.actions[0].arguments = arguments;
     item
 }
@@ -180,6 +180,113 @@ fn an_exact_keyword_ranks_above_one_with_a_typo() {
 
     assert_eq!(listed, ["Lock in", "Lock on"]);
     assert_eq!(run, [strings(&[("minutes", "10m")])]);
+}
+
+/// An Item titled `title`, named by `names` alone, whose primary Action
+/// takes a required duration.
+fn timer(id: &str, title: &str, names: &[&str]) -> Item {
+    let mut item = keyed(id, title, vec![argument("duration", false)]);
+    item.names = names.iter().map(|&name| name.to_owned()).collect();
+    item
+}
+
+#[test]
+fn any_of_an_items_names_takes_the_rest_as_its_arguments() {
+    for query in ["timer 25m", "pomodoro 25m", "clock timer 25m", "Countdwon 25m"] {
+        let timer = timer(
+            "timer",
+            "Start timer",
+            &["timer", "pomodoro", "clock-timer", "countdown"],
+        );
+
+        let (listed, run) = listed_and_run(vec![timer], query);
+
+        assert_eq!(listed, ["Start timer"], "{query}");
+        assert_eq!(run, [strings(&[("duration", "25m")])], "{query}");
+    }
+}
+
+#[test]
+fn the_title_of_an_item_that_takes_arguments_takes_the_rest_as_its_arguments() {
+    for (title, query) in [
+        ("Start timer", "start timer 25m"),
+        ("Start timer", "Start-Timer 25m"),
+        ("Lock in…", "lock in 25m"),
+        ("Keyboard: set layouts", "keyboard set layouts 25m"),
+        ("Keyboard: set layouts", "keyboard: set layouts 25m"),
+    ] {
+        let (listed, run) = listed_and_run(vec![timer("timer", title, &[])], query);
+
+        assert_eq!(listed, [title], "{query}");
+        assert_eq!(run, [strings(&[("duration", "25m")])], "{query}");
+    }
+}
+
+#[test]
+fn a_row_named_by_its_title_with_its_arguments_asks_for_no_form() {
+    let mut h = Harness::new(vec![plain("tools")]);
+    let tools = h.up(0);
+    h.add(&tools, vec![timer("timer", "Start timer", &[])]);
+    let ui = h.front_end();
+
+    let rows = h.query(&ui, "start timer 25m");
+    assert_eq!(rows[0].item.actions[0].role, ActionRole::Normal);
+    let rows = h.query(&ui, "start timer");
+    assert_eq!(rows[0].item.actions[0].role, ActionRole::Form);
+}
+
+#[test]
+fn a_title_with_a_typo_or_cut_short_names_nothing() {
+    for query in ["strat timer 25m", "start tim 25m", "start 25m"] {
+        let (listed, _) = listed_and_run(vec![timer("timer", "Start timer", &[])], query);
+
+        assert_eq!(listed, Vec::<String>::new(), "{query}");
+    }
+}
+
+#[test]
+fn the_title_of_an_item_without_arguments_names_nothing() {
+    let dark = keyed("dark", "Toggle dark mode", Vec::new());
+
+    let (listed, _) = listed_and_run(
+        vec![Item {
+            names: Vec::new(),
+            ..dark
+        }],
+        "toggle dark mode now",
+    );
+
+    assert_eq!(listed, Vec::<String>::new());
+}
+
+#[test]
+fn two_items_with_one_title_are_named_by_neither() {
+    let items = vec![timer("a", "Start timer", &[]), timer("b", "Start timer", &[])];
+
+    let (listed, run) = listed_and_run(items, "start timer 25m");
+
+    assert_eq!(listed, Vec::<String>::new());
+    assert_eq!(run, Vec::<BTreeMap<String, String>>::new());
+}
+
+#[test]
+fn a_name_holding_a_titles_words_names_its_own_item_alone() {
+    let items = vec![timer("a", "Lock in", &[]), timer("b", "Focus", &["lock-in"])];
+
+    let (listed, run) = listed_and_run(items, "lock in 25m");
+
+    assert_eq!(listed, ["Focus"]);
+    assert_eq!(run, [strings(&[("duration", "25m")])]);
+}
+
+#[test]
+fn an_item_named_by_a_name_ranks_above_one_named_by_its_title() {
+    let items = vec![timer("a", "Start timer", &[]), timer("b", "Stopwatch", &["start"])];
+
+    let (listed, run) = listed_and_run(items, "start timer 25m");
+
+    assert_eq!(listed, ["Stopwatch", "Start timer"]);
+    assert_eq!(run, [strings(&[("duration", "timer 25m")])]);
 }
 
 #[test]

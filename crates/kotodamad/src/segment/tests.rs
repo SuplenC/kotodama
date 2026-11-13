@@ -13,7 +13,7 @@ fn item(id: &str, title: &str, actions: &[&str]) -> Item {
         title: title.into(),
         subtitle: Some("A subtitle long enough to fill the Shelf".into()),
         icon: None,
-        keyword: None,
+        names: Vec::new(),
         keywords: vec![],
         hidden: false,
         app_only: false,
@@ -150,7 +150,7 @@ fn an_item_resent_with_anything_searched_changed_changes_the_keys() {
             ..wifi()
         },
         Item {
-            keyword: Some("wifi".into()),
+            names: vec!["wifi".into()],
             ..wifi()
         },
         Item {
@@ -176,6 +176,33 @@ fn an_item_resent_with_anything_searched_changed_changes_the_keys() {
         assert!(segment.keys_changed(), "{resent:?}");
         assert_eq!(read(&segment, "a").unwrap(), resent);
     }
+}
+
+#[test]
+fn an_item_is_looked_up_by_each_name_and_by_its_title_while_it_takes_arguments() {
+    let plain = || Item {
+        names: vec!["Lock-In".into(), "focus".into(), "lockin".into()],
+        ..item("a", "Lock in…", &["start"])
+    };
+    let mut taking = plain();
+    taking.actions[0].arguments = vec![kotodama_protocol::Argument::new("minutes")];
+    let mut segment = Segment::default();
+
+    segment.edit(Edit::Add(vec![plain()]));
+    assert_eq!(segment.keyed("lockin"), [0]);
+    assert_eq!(segment.keyed("focus"), [0]);
+    assert_eq!(segment.titled("lockin"), [] as [Row; 0]);
+
+    segment.edit(Edit::Add(vec![taking]));
+    assert_eq!(segment.keyed("lockin"), [0]);
+    assert_eq!(segment.titled("lockin"), [0]);
+
+    segment.edit(Edit::Add(vec![plain()]));
+    assert_eq!(segment.titled("lockin"), [] as [Row; 0]);
+
+    segment.edit(Edit::Remove(vec!["a".into()]));
+    assert_eq!(segment.keyed("lockin"), [] as [Row; 0]);
+    assert_eq!(segment.keyed("focus"), [] as [Row; 0]);
 }
 
 #[test]

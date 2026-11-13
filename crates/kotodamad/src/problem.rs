@@ -141,7 +141,7 @@ pub fn item(count: usize) -> Item {
         title,
         subtitle: Some("What went wrong in the config and the Extensions".into()),
         icon: Some("dialog-warning".into()),
-        keyword: None,
+        names: Vec::new(),
         identity: None,
         keywords: vec!["problems".into(), "check".into()],
         hidden: false,

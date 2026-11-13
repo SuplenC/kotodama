@@ -111,17 +111,17 @@ fn neither_case_nor_accents_matter() {
     assert_eq!(fold_text("ŻÓŁW"), "zolw");
 }
 
-/// How well `query` matches an Item titled `Untitled` with `keyword` and
+/// How well `query` matches an Item titled `Untitled` with `names` and
 /// `keywords`.
-fn keyword_tier(keyword: Option<&str>, keywords: &[&str], query: &str) -> Option<Tier> {
-    weak_tier(keyword, keywords, &[], query)
+fn keyword_tier(names: &[&str], keywords: &[&str], query: &str) -> Option<Tier> {
+    weak_tier(names, keywords, &[], query)
 }
 
-/// How well `query` matches an Item titled `Untitled` with `keyword`,
+/// How well `query` matches an Item titled `Untitled` with `names`,
 /// `keywords` and `weak_keywords`.
-fn weak_tier(keyword: Option<&str>, keywords: &[&str], weak_keywords: &[&str], query: &str) -> Option<Tier> {
+fn weak_tier(names: &[&str], keywords: &[&str], weak_keywords: &[&str], query: &str) -> Option<Tier> {
     let item = Item {
-        keyword: keyword.map(str::to_owned),
+        names: names.iter().map(|&name| name.to_owned()).collect(),
         keywords: keywords.iter().map(|&word| word.to_owned()).collect(),
         weak_keywords: weak_keywords.iter().map(|&word| word.to_owned()).collect(),
         ..untitled()
@@ -138,7 +138,7 @@ fn untitled() -> Item {
         title: "Untitled".into(),
         subtitle: None,
         icon: None,
-        keyword: None,
+        names: Vec::new(),
         identity: None,
         keywords: vec![],
         hidden: false,
@@ -151,51 +151,59 @@ fn untitled() -> Item {
 
 #[test]
 fn only_the_items_own_keyword_matches_as_exactly_as_a_title() {
-    assert_eq!(keyword_tier(Some("go"), &["golang"], "go"), Some(Tier::Keyword));
-    assert_eq!(keyword_tier(Some("g"), &[], "g"), Some(Tier::Keyword));
-    assert_eq!(keyword_tier(Some("go"), &["golang"], "golang"), Some(Tier::WordStart));
-    assert_eq!(keyword_tier(None, &["chrome"], "chrome"), Some(Tier::WordStart));
-    assert_eq!(keyword_tier(None, &["c"], "c"), Some(Tier::WordStart));
+    assert_eq!(keyword_tier(&["go"], &["golang"], "go"), Some(Tier::Keyword));
+    assert_eq!(keyword_tier(&["g"], &[], "g"), Some(Tier::Keyword));
+    assert_eq!(keyword_tier(&["go"], &["golang"], "golang"), Some(Tier::WordStart));
+    assert_eq!(keyword_tier(&[], &["chrome"], "chrome"), Some(Tier::WordStart));
+    assert_eq!(keyword_tier(&[], &["c"], "c"), Some(Tier::WordStart));
     assert_eq!(
-        keyword_tier(None, &["google", "chrome"], "chrome"),
+        keyword_tier(&[], &["google", "chrome"], "chrome"),
         Some(Tier::WordStart)
     );
-    assert_eq!(keyword_tier(Some(""), &["chrome"], "chrome"), Some(Tier::WordStart));
+    assert_eq!(keyword_tier(&[""], &["chrome"], "chrome"), Some(Tier::WordStart));
+}
+
+#[test]
+fn every_name_of_an_item_matches_as_exactly_as_a_title() {
+    let names = ["timer", "", "pomodoro"];
+    assert_eq!(keyword_tier(&names, &["clock"], "timer"), Some(Tier::Keyword));
+    assert_eq!(keyword_tier(&names, &["clock"], "pomodoro"), Some(Tier::Keyword));
+    assert_eq!(keyword_tier(&names, &["clock"], "clock"), Some(Tier::WordStart));
 }
 
 #[test]
 fn a_weak_keyword_matches_as_the_query_inside_a_word_at_best() {
     let id = ["chrome-abcdef-Default"];
     assert_eq!(
-        weak_tier(None, &[], &id, "chrome-abcdef-default"),
+        weak_tier(&[], &[], &id, "chrome-abcdef-default"),
         Some(Tier::WeakKeyword)
     );
-    assert_eq!(weak_tier(None, &[], &id, "chrome"), Some(Tier::WeakKeyword));
-    assert_eq!(weak_tier(None, &[], &id, "abcdef"), Some(Tier::WeakKeyword));
+    assert_eq!(weak_tier(&[], &[], &id, "chrome"), Some(Tier::WeakKeyword));
+    assert_eq!(weak_tier(&[], &[], &id, "abcdef"), Some(Tier::WeakKeyword));
     assert_eq!(
-        weak_tier(None, &[], &id, "crmdflt"),
+        weak_tier(&[], &[], &id, "crmdflt"),
         None,
         "letters scattered across an id find nothing"
     );
     assert_eq!(
-        weak_tier(None, &[], &id, "c"),
+        weak_tier(&[], &[], &id, "c"),
         None,
         "one letter matches only at a word start"
     );
-    assert_eq!(weak_tier(None, &[], &["x"], "x"), None);
-    assert_eq!(weak_tier(None, &[], &["one", "two"], "two"), Some(Tier::WeakKeyword));
-    assert_eq!(weak_tier(None, &[], &[""], "untitled"), Some(Tier::Exact));
+    assert_eq!(weak_tier(&[], &[], &["x"], "x"), None);
+    assert_eq!(weak_tier(&[], &[], &["one", "two"], "two"), Some(Tier::WeakKeyword));
+    assert_eq!(weak_tier(&[], &[], &[""], "untitled"), Some(Tier::Exact));
 }
 
 #[test]
 fn a_query_may_match_a_keyword_with_one_word_and_a_weak_keyword_with_another() {
     let nautilus = ["org.gnome.Nautilus"];
     assert_eq!(
-        weak_tier(None, &["File Manager"], &nautilus, "file nautilus"),
+        weak_tier(&[], &["File Manager"], &nautilus, "file nautilus"),
         Some(Tier::WeakKeyword)
     );
     assert_eq!(
-        weak_tier(None, &["File Manager"], &nautilus, "file nautilus gedit"),
+        weak_tier(&[], &["File Manager"], &nautilus, "file nautilus gedit"),
         None
     );
 }
@@ -224,12 +232,9 @@ fn keywords_keep_their_word_starts_where_nucleo_holds_them_beside_weak_keywords_
 #[test]
 fn a_weak_keyword_leaves_the_other_keywords_and_the_title_as_they_match() {
     let id = ["chrome-abcdef-Default"];
-    assert_eq!(weak_tier(Some("go"), &[], &id, "go"), Some(Tier::Keyword));
-    assert_eq!(weak_tier(None, &["chrome"], &id, "chrome"), Some(Tier::WordStart));
-    assert_eq!(
-        weak_tier(Some("go"), &["browser"], &id, "browser"),
-        Some(Tier::WordStart)
-    );
-    assert_eq!(weak_tier(None, &["web"], &id, "eb"), Some(Tier::Inside));
-    assert_eq!(weak_tier(None, &[], &id, "untitled"), Some(Tier::Exact));
+    assert_eq!(weak_tier(&["go"], &[], &id, "go"), Some(Tier::Keyword));
+    assert_eq!(weak_tier(&[], &["chrome"], &id, "chrome"), Some(Tier::WordStart));
+    assert_eq!(weak_tier(&["go"], &["browser"], &id, "browser"), Some(Tier::WordStart));
+    assert_eq!(weak_tier(&[], &["web"], &id, "eb"), Some(Tier::Inside));
+    assert_eq!(weak_tier(&[], &[], &id, "untitled"), Some(Tier::Exact));
 }

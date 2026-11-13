@@ -212,7 +212,7 @@ fn a_targeted_action_isnt_offered_on_the_contributing_extensions_own_items() {
 
 fn with_version(title: &str) -> Item {
     let mut item = identified(title);
-    item.keyword = Some("go".into());
+    item.names = vec!["go".into()];
     item.actions = vec![
         Action::new("install", "Install").arguments(vec![Argument::new("version")]),
         Action::new("purge", "Purge")

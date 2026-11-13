@@ -164,7 +164,7 @@ impl Character {
             title,
             subtitle: None,
             icon: None,
-            keyword: None,
+            names: Vec::new(),
             keywords: self.keywords().map(str::to_owned).collect(),
             actions,
             hidden: false,

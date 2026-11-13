@@ -38,7 +38,7 @@ timer='{
     "kind": "shell-example.timer",
     "title": "Timer",
     "subtitle": "Counts down, then notifies",
-    "keyword": "timer",
+    "names": ["timer", "countdown"],
     "actions": [
         {"id": "start", "title": "Start timer",
          "arguments": [{"name": "seconds", "placeholder": "Seconds"}]},
