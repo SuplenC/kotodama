@@ -222,6 +222,47 @@ fn the_title_of_an_item_that_takes_arguments_takes_the_rest_as_its_arguments() {
     }
 }
 
+// Regression: #276.
+#[test]
+fn a_name_that_starts_the_title_leaves_the_rest_of_the_title_out_of_the_argument() {
+    for (name, title, query, argument) in [
+        (
+            "import-vpn",
+            "Import VPN config",
+            "import vpn config ~/w.conf",
+            "~/w.conf",
+        ),
+        ("low-battery", "Low battery: drop at", "low battery drop at 15", "15"),
+        (
+            "measure-power",
+            "Measure power draw for",
+            "measure power draw for 60",
+            "60",
+        ),
+        ("open-folder", "Open folder in yazi", "open folder in yazi ~/x", "~/x"),
+        ("keep-awake", "Keep awake for…", "keep awake for 1h", "1h"),
+    ] {
+        let (listed, run) = listed_and_run(vec![timer("a", title, &[name])], query);
+
+        assert_eq!(listed, [title], "{query}");
+        assert_eq!(run, [strings(&[("duration", argument)])], "{query}");
+    }
+}
+
+#[test]
+fn a_name_that_covers_more_than_the_title_takes_what_follows_it() {
+    let (_, run) = listed_and_run(vec![timer("a", "Keep awake", &["keep-awake-for"])], "keep awake for 1h");
+
+    assert_eq!(run, [strings(&[("duration", "1h")])]);
+}
+
+#[test]
+fn the_name_alone_still_takes_what_follows_it() {
+    let (_, run) = listed_and_run(vec![timer("a", "Keep awake for…", &["keep-awake"])], "keep awake 1h");
+
+    assert_eq!(run, [strings(&[("duration", "1h")])]);
+}
+
 #[test]
 fn a_row_named_by_its_title_with_its_arguments_asks_for_no_form() {
     let mut h = Harness::new(vec![plain("tools")]);

@@ -40,14 +40,15 @@ The row you see becomes the command you type: `start timer 25m`, `lock in 10m`, 
   - A keyword clash is different: someone chose each keyword to be typed, so a clash there is the Extension's mistake.
 - **It needs an Argument after it in the search.** A title typed alone is already an exact title match.
 - **It ranks as a word start** (`Tier::WordStart`), a band below a name or an exact title. When the query names one Item by a name and another by its title, the name comes first.
-- An Item a name already names isn't named again by its title.
+- An Item a name already names isn't ranked again by its title. Its Argument still follows whichever of the two covers more of the query: with the name `keep-awake`, `keep awake for 1h` typed for the title "Keep awake for" passes on `1h`, not `for 1h`.
 
 The Segment keeps a second table, from title key to rows, for the Items that take Arguments. `Index::titled` looks it up. The Items in it are kept resident with those named by a keyword, so typing a title never waits for a read. A row's names and its title key share one boxed slice in `Held`, the size the old `Option<Arc<str>>` was, so a row costs no more memory.
 
 What the query typed for an Item's Arguments is worked out in one place, `Daemon::typed_for`:
 
-- first what follows one of its names;
-- else, if it takes Arguments and its title names it under the rules above, what follows the title.
+- what follows one of its names;
+- if it takes Arguments and its title names it under the rules above, what follows the title;
+- when both do, what follows the longer of the two, so a name that starts the title never takes the rest of the title as its Argument.
 
 The search, the rows' form roles (`mark_forms`) and the Arguments Enter runs with (`run_action`) all read it, so they always agree.
 
